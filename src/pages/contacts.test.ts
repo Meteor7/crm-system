@@ -129,6 +129,81 @@ describe('Contacts pages', () => {
     expect(editable.text()).not.toContain('合并会迁移业务关联并归档重复记录')
   })
 
+  it('renders Contacts from another public Account as genuinely read-only', async () => {
+    const source = createMockApi({ latency: 0, role: 'Manager' })
+    const sales = createMockApi({ latency: 0, role: 'Sales', userId: 'readonly.sales@example.invalid' })
+    const accountResponse = await source.listAccounts({ page: 1, pageSize: 100 })
+    const sourceContactResponse = await source.getContact('CON-001')
+    const account360Response = await source.getAccount360(sourceContactResponse.data.contact.accountId)
+    const contactListResponse = await source.listContacts({ accountId: sourceContactResponse.data.contact.accountId, page: 1, pageSize: 100 })
+    const fileListResponse = await source.listContactFiles('CON-001', { page: 1, pageSize: 200 })
+    const account = {
+      ...account360Response.data.account,
+      owner: 'account.owner@example.invalid',
+      visibility: 'Public' as const,
+    }
+    const { siteId: _siteId, siteName: _siteName, ...contactWithoutSite } = sourceContactResponse.data.contact
+    const contact = {
+      ...contactWithoutSite,
+      accountId: account.id,
+      accountName: account.name,
+      accountShortName: account.shortName,
+    }
+    const readonlyApi: CrmApi = {
+      ...sales,
+      listAccounts: async () => ({
+        ...accountResponse,
+        data: { items: [account] },
+        meta: { ...accountResponse.meta, requestId: accountResponse.meta?.requestId ?? 'req_readonly_accounts', total: 1 },
+      }),
+      listContacts: async () => ({
+        ...contactListResponse,
+        data: { items: [contact] },
+        meta: { ...contactListResponse.meta, requestId: contactListResponse.meta?.requestId ?? 'req_readonly_contacts', total: 1 },
+      }),
+      getContact: async () => ({
+        ...sourceContactResponse,
+        data: { ...sourceContactResponse.data, contact },
+      }),
+      getAccount360: async () => ({
+        ...account360Response,
+        data: { ...account360Response.data, account, sites: [], contacts: [contact] },
+      }),
+      listContactFiles: async () => ({
+        ...fileListResponse,
+        data: { items: [] },
+        meta: { ...fileListResponse.meta, requestId: fileListResponse.meta?.requestId ?? 'req_readonly_files', total: 0 },
+      }),
+    }
+    const pinia = createPinia()
+    useAppStore(pinia).bootstrap = (await sales.getBootstrap()).data
+    const router = createAppRouter()
+    await router.push('/contacts')
+    const listView = mount(ContactsPage, {
+      props: { apiClient: readonlyApi },
+      global: { plugins: [pinia, router] },
+    })
+    await flushPromises()
+
+    expect(listView.text()).toContain('仅客户负责人可见')
+    expect(listView.find('[data-testid="edit-contact"]').exists()).toBe(false)
+    expect(listView.find('[data-testid="new-contact"]').exists()).toBe(false)
+    listView.unmount()
+
+    await router.push(`/contacts/${contact.id}`)
+    const detailView = mount(ContactDetailPage, {
+      props: { apiClient: readonlyApi },
+      global: { plugins: [pinia, router] },
+    })
+    await flushPromises()
+
+    expect(detailView.text()).toContain('仅客户负责人可见')
+    expect(detailView.find('[data-testid="edit-contact"]').exists()).toBe(false)
+    expect(detailView.find('[data-testid="new-opportunity"]').exists()).toBe(false)
+    expect(detailView.find('[data-testid="record-visit"]').exists()).toBe(false)
+    expect(detailView.find('[data-testid="contact-file-dropzone"]').exists()).toBe(false)
+  })
+
   it('uploads and removes a file from the Contact Files card', async () => {
     const { api, pinia, router } = await pageContext()
     await router.push('/contacts/CON-001')

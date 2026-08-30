@@ -266,6 +266,36 @@ class TestInstalledToolApi(FrappeTestCase):
             self.assertEqual(frappe.db.get_value("CRM Booking", rollback_booking["id"], "status"), "Confirmed")
             self.assertFalse(frappe.db.get_value("CRM Booking", rollback_booking["id"], "installed_tool"))
 
+    def test_public_child_sales_owner_gets_redacted_site_but_engineer_keeps_assignment_access(self):
+        account, site, _, booking = self._booking(self.sales, "PublicRestrictedSite")
+        converted = convert_booking_to_installed_tool(
+            booking["id"], self._input(site, f"PUBLIC-{frappe.generate_hash(length=8)}"), booking["modified"],
+        )
+        tool_id = converted["installedTool"]["id"]
+        frappe.db.set_value(
+            "Customer", account["id"], "custom_crm_visibility", "Public", update_modified=False,
+        )
+        frappe.db.set_value(
+            "CRM Installed Tool", tool_id, "sales_owner", self.other_sales, update_modified=False,
+        )
+
+        frappe.set_user(self.other_sales)
+        detail = get_installed_tool(tool_id)
+        self.assertEqual((detail["siteId"], detail["site"], detail["location"]), ("", "", ""))
+        self.assertFalse(
+            frappe.has_permission("CRM Installed Tool", "read", doc=tool_id, user=self.other_sales),
+        )
+        self.assertEqual(
+            frappe.get_list("CRM Installed Tool", filters={"name": tool_id}, pluck="name"),
+            [],
+        )
+        listed = list_installed_tools({"accountId": account["id"], "page": 1, "pageSize": 20})[0]
+        self.assertEqual([(row["id"], row["siteId"], row["site"]) for row in listed], [(tool_id, "", "")])
+
+        frappe.set_user(self.engineer)
+        engineer_detail = get_installed_tool(tool_id)
+        self.assertEqual((engineer_detail["siteId"], engineer_detail["site"]), (site["id"], site["name"]))
+
     def test_conversion_validates_status_site_engineer_and_generates_unique_serial(self):
         _, site, _, pending = self._booking(self.sales, "Pending", status="Pending")
         with self.assertRaises(CrmApiException) as not_confirmed:

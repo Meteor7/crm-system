@@ -16,6 +16,7 @@ from frappe.utils.file_manager import save_file
 
 from rayher_crm.api.v1.errors import CrmApiException
 from rayher_crm.permissions.roles import resolve_crm_role
+from rayher_crm.permissions.scope import has_crm_permission
 from rayher_crm.services.common import normalize_pagination, paginate_items, required_text, to_iso_timestamp
 from rayher_crm.services.concurrency import lock_document
 from rayher_crm.services.file_security import (
@@ -31,6 +32,7 @@ from rayher_crm.services.file_security import (
     validate_and_scan,
 )
 from rayher_crm.services.notifications import active_crm_users, create_notification
+from rayher_crm.services.sites import can_read_site_data
 
 ALLOWED_MIME_TYPES = {PDF_MIME, PNG_MIME, JPEG_MIME, DOCX_MIME, XLSX_MIME, PPTX_MIME}
 OFFICE_MIME_TYPES = {DOCX_MIME, XLSX_MIME, PPTX_MIME}
@@ -112,20 +114,12 @@ def _require_manager() -> None:
         raise frappe.PermissionError("CRM Manager role is required.")
 
 
-def _visible(doc) -> bool:
-    role = resolve_crm_role()
-    if role == "Manager":
-        return True
-    owner = doc.sales_owner if role == "Sales" else doc.engineer_owner
-    return owner == frappe.session.user
-
-
 def _require_rfq(name: Any):
     normalized = required_text({"id": name}, "id")
     if not frappe.db.exists("CRM RFQ", normalized):
         raise CrmApiException("NOT_FOUND", "RFQ was not found.")
     doc = frappe.get_doc("CRM RFQ", normalized)
-    if not _visible(doc):
+    if not frappe.has_permission("CRM RFQ", "read", doc=doc, user=frappe.session.user):
         raise CrmApiException("SCOPE_DENIED", "RFQ is outside the current user scope.")
     return doc
 
@@ -136,13 +130,14 @@ def _display_name(user_id: str) -> str:
 
 def _opportunity_summary(opportunity_id: str) -> dict[str, Any]:
     opportunity = frappe.get_doc("CRM Opportunity", opportunity_id)
+    can_read_site = can_read_site_data(opportunity.account)
     return {
         "id": opportunity.name,
         "title": opportunity.title,
         "accountId": opportunity.account,
         "account": frappe.db.get_value("Customer", opportunity.account, "customer_name") or opportunity.account,
-        "siteId": opportunity.site,
-        "site": frappe.db.get_value("Address", opportunity.site, "address_title") or opportunity.site,
+        "siteId": opportunity.site if can_read_site else "",
+        "site": (frappe.db.get_value("Address", opportunity.site, "address_title") or opportunity.site) if can_read_site else "",
         "stage": opportunity.stage,
         "owner": opportunity.opportunity_owner,
         "toolType": opportunity.tool_type,
@@ -227,7 +222,7 @@ def list_rfqs(query: Mapping[str, Any]) -> tuple[list[dict[str, Any]], int, int,
     opportunity_id = str(query.get("opportunityId") or "").strip()
     if opportunity_id:
         filters["opportunity"] = opportunity_id
-    names = frappe.get_all("CRM RFQ", filters=filters, pluck="name", order_by="modified desc", limit_page_length=1000)
+    names = frappe.get_list("CRM RFQ", filters=filters, pluck="name", order_by="modified desc", limit_page_length=1000)
     rows = [_serialize_summary(frappe.get_doc("CRM RFQ", name)) for name in names]
     search = str(query.get("search") or "").strip().lower()
     owner = str(query.get("owner") or "").strip()
@@ -343,7 +338,7 @@ def create_rfq(payload: Mapping[str, Any], part: Mapping[str, Any], scanner: Mal
     if not frappe.db.exists("CRM Opportunity", opportunity_id):
         raise CrmApiException("NOT_FOUND", "Opportunity was not found.")
     opportunity = frappe.get_doc("CRM Opportunity", opportunity_id)
-    if not frappe.has_permission("CRM Opportunity", "read", doc=opportunity, user=frappe.session.user):
+    if not has_crm_permission(opportunity, user=frappe.session.user, permission_type="read"):
         raise CrmApiException("SCOPE_DENIED", "Opportunity is outside the current user scope.")
     if opportunity.stage != "设备规格确认":
         raise CrmApiException("INVALID_TRANSITION", "RFQ can only be created when the Opportunity is in 设备规格确认.")

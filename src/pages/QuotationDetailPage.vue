@@ -29,7 +29,8 @@ const linkOpen = ref(false); const linkBusy = ref(false); const linkError = ref(
 let ready = false; let previewSequence = 0; let saveTimer: ReturnType<typeof setTimeout>|undefined; let revision = 0; let savedRevision = 0; let savePromise: Promise<boolean>|undefined
 const quotationId = computed(() => String(route.params.quotationId || ''))
 const selectedIsLatest = computed(() => detail.value?.version.id === detail.value?.quotation.currentVersionId)
-const editable = computed(() => Boolean(app.can('quotation:write') && selectedIsLatest.value && detail.value?.version.status === 'Draft' && detail.value?.version.approvalStatus !== 'Pending'))
+const canMutateQuotation = computed(() => Boolean(app.can('quotation:write') && !detail.value?.version.addressRestricted))
+const editable = computed(() => Boolean(canMutateQuotation.value && selectedIsLatest.value && detail.value?.version.status === 'Draft' && detail.value?.version.approvalStatus !== 'Pending'))
 const isSales = computed(() => app.bootstrap?.user.role === 'Sales')
 const approvalPending = computed(() => selectedIsLatest.value && detail.value?.version.approvalStatus === 'Pending')
 const selectedApprovals = computed(() => detail.value?.approvals.filter((item) => item.versionId === detail.value?.version.id) ?? [])
@@ -169,14 +170,14 @@ onBeforeUnmount(()=>{ready=false;previewSequence+=1;window.removeEventListener('
       <template #default>
         <button class="secondary-button" type="button" @click="router.push('/quotations')"><ArrowLeft :size="14" />返回列表</button>
         <button v-if="detail.version.pdfAvailable" class="secondary-button" data-testid="download-quotation-pdf" type="button" @click="download(detail.version.id)"><Download :size="14" />下载 PDF</button>
-        <button v-if="selectedIsLatest && !detail.quotation.opportunityId && app.can('quotation:write')" class="secondary-button" data-testid="link-quotation-opportunity" type="button" :disabled="busy || linkBusy" @click="openOpportunityLink"><Link2 :size="14" />关联 Opportunity</button>
+        <button v-if="selectedIsLatest && !detail.quotation.opportunityId && canMutateQuotation" class="secondary-button" data-testid="link-quotation-opportunity" type="button" :disabled="busy || linkBusy" @click="openOpportunityLink"><Link2 :size="14" />关联 Opportunity</button>
         <button v-if="editable" class="danger-button" type="button" :disabled="busy" @click="discard"><Trash2 :size="14" />放弃草稿</button>
         <button v-if="editable && isSales && app.can('quotation:submit')" class="primary-button" data-testid="submit-quotation-approval" type="button" :disabled="busy" @click="submitApproval"><Send :size="14" />提交 Manager 审批</button>
         <button v-if="editable && !isSales && app.can('quotation:publish')" class="primary-button" data-testid="publish-quotation" type="button" :disabled="busy" @click="publish"><Send :size="14" />直接发布正式版本</button>
         <button v-if="approvalPending && app.can('quotation:approve')" class="primary-button" data-testid="approve-quotation" type="button" :disabled="busy" @click="openApproval('Approved')"><ShieldCheck :size="14" />批准并发布</button>
         <button v-if="approvalPending && app.can('quotation:approve')" class="danger-button" data-testid="reject-quotation" type="button" :disabled="busy" @click="openApproval('Rejected')"><ShieldX :size="14" />驳回</button>
-        <button v-if="selectedIsLatest && detail.version.status!=='Draft' && app.can('quotation:write')" class="primary-button" type="button" @click="createVersion"><FilePlus2 :size="14" />创建新版本</button>
-        <button v-if="selectedIsLatest && ['Published','Expired'].includes(detail.version.status) && app.can('quotation:write')" class="secondary-button" type="button" @click="decisionOpen=true"><CheckCircle2 :size="14" />记录客户结果</button>
+        <button v-if="selectedIsLatest && detail.version.status!=='Draft' && canMutateQuotation" class="primary-button" type="button" @click="createVersion"><FilePlus2 :size="14" />创建新版本</button>
+        <button v-if="selectedIsLatest && ['Published','Expired'].includes(detail.version.status) && canMutateQuotation" class="secondary-button" type="button" @click="decisionOpen=true"><CheckCircle2 :size="14" />记录客户结果</button>
       </template>
     </PageHeader>
     <DataState v-if="loading" type="loading" />
@@ -198,6 +199,7 @@ onBeforeUnmount(()=>{ready=false;previewSequence+=1;window.removeEventListener('
       </div>
       <p v-else-if="!selectedIsLatest" class="history-notice">当前正在查看历史版本，仅可查看和下载。</p>
       <p v-else-if="approvalPending" class="approval-notice">当前版本正在等待 Manager 审批，审批完成前不可修改或发布。</p>
+      <p v-else-if="detail.version.addressRestricted" class="history-notice" data-testid="quotation-address-restricted">客户地址仅 Account 负责人或 Manager 可见；当前报价为只读。</p>
       <p v-else-if="detail.version.approvalStatus==='Rejected'" class="rejection-notice">Manager 已驳回：{{ latestApproval?.comment || '未填写原因' }}。修改后可重新提交审批。</p>
       <p v-if="saveError && saveState!=='error'" class="form-error">{{ saveError }}</p>
       <div class="detail-grid">

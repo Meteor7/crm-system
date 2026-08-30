@@ -53,9 +53,19 @@ const approvalTones: Record<QuotationApprovalStatus, Tone> = {
   'Not Submitted': 'neutral', Pending: 'warning', Approved: 'positive', Rejected: 'danger', 'Not Required': 'neutral',
 }
 const quotedOpportunityIds = ref(new Set<string>())
-const availableOpportunities = computed(() => opportunities.value.filter((item) => !quotedOpportunityIds.value.has(item.id)))
+const writableAccounts = computed(() => {
+  const user = app.bootstrap?.user
+  if (user?.role === 'Manager') return accounts.value
+  return user?.role === 'Sales' ? accounts.value.filter((account) => account.owner === user.id) : []
+})
+const writableAccountIds = computed(() => new Set(writableAccounts.value.map((account) => account.id)))
+const availableOpportunities = computed(() => opportunities.value.filter((item) =>
+  !item.siteRestricted && writableAccountIds.value.has(item.accountId) && !quotedOpportunityIds.value.has(item.id),
+))
 const totalPages = computed(() => Math.max(1, Math.ceil(total.value / pageSize.value)))
-const canCreate = computed(() => createSource.value === 'Opportunity' ? Boolean(selectedOpportunityId.value) : Boolean(selectedAccountId.value))
+const canCreate = computed(() => createSource.value === 'Opportunity'
+  ? availableOpportunities.value.some((item) => item.id === selectedOpportunityId.value)
+  : writableAccountIds.value.has(selectedAccountId.value))
 
 async function load() {
   const sequence = ++loadSequence
@@ -268,7 +278,7 @@ onMounted(async () => {
         <label><span>Quotation Type</span><select v-model="createType" data-testid="quotation-type" aria-label="报价类型"><option>Device</option><option>Service</option></select></label>
         <label><span>Source</span><select v-model="createSource" data-testid="quotation-source" aria-label="报价来源"><option>Opportunity</option><option>Others</option></select></label>
         <label v-if="createSource === 'Opportunity'"><span>Opportunity</span><select v-model="selectedOpportunityId" aria-label="选择 Opportunity" required><option value="">请选择 Opportunity</option><option v-for="item in availableOpportunities" :key="item.id" :value="item.id">{{ item.title }} · {{ opportunityAccount(item) }}</option></select></label>
-        <label v-else><span>Account</span><select v-model="selectedAccountId" data-testid="quotation-account" aria-label="选择 Account" required><option value="">请选择 Account</option><option v-for="item in accounts" :key="item.id" :value="item.id">{{ item.name }}</option></select></label>
+        <label v-else><span>Account</span><select v-model="selectedAccountId" data-testid="quotation-account" aria-label="选择 Account" required><option value="">请选择 Account</option><option v-for="item in writableAccounts" :key="item.id" :value="item.id">{{ item.name }}</option></select></label>
       </div>
     </ModalShell>
   </div>

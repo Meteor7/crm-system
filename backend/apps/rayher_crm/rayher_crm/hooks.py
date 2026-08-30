@@ -39,11 +39,11 @@ permission_query_conditions = {
 
 has_permission = {
     "Customer": "rayher_crm.permissions.scope.has_crm_permission",
-    "Contact": "rayher_crm.permissions.scope.has_crm_permission",
+    "Contact": "rayher_crm.permissions.scope.has_site_bearing_permission",
     "Lead": "rayher_crm.permissions.scope.has_crm_permission",
-    "CRM Opportunity": "rayher_crm.permissions.scope.has_crm_permission",
+    "CRM Opportunity": "rayher_crm.permissions.scope.has_site_bearing_permission",
     "CRM Booking": "rayher_crm.permissions.scope.has_crm_permission",
-    "CRM Installed Tool": "rayher_crm.permissions.scope.has_crm_permission",
+    "CRM Installed Tool": "rayher_crm.permissions.scope.has_site_bearing_permission",
     "CRM Demo Request": "rayher_crm.permissions.scope.has_crm_permission",
     "CRM Evaluation": "rayher_crm.permissions.scope.has_crm_permission",
     "CRM Contact File": "rayher_crm.permissions.scope.has_crm_permission",
@@ -51,7 +51,7 @@ has_permission = {
     "CRM Notification Event": "rayher_crm.permissions.scope.has_crm_permission",
     "CRM Visit": "rayher_crm.permissions.scope.has_crm_permission",
     "CRM Quotation": "rayher_crm.permissions.scope.has_crm_permission",
-    "CRM Quotation Version": "rayher_crm.permissions.scope.has_crm_permission",
+    "CRM Quotation Version": "rayher_crm.permissions.scope.has_quotation_version_permission",
     "CRM Quotation Approval": "rayher_crm.permissions.scope.has_crm_permission",
     "CRM RFQ": "rayher_crm.permissions.scope.has_crm_permission",
     "CRM RFQ Version": "rayher_crm.permissions.scope.has_crm_permission",

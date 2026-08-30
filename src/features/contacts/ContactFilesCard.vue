@@ -174,13 +174,13 @@ onMounted(loadFiles)
 
 <template>
   <SectionCard :title="`文件 (${files.length})`" eyebrow="FILES">
-    <input ref="input" class="file-input" type="file" multiple :accept="ACCEPT" @change="onInputChange">
+    <input v-if="canWrite" ref="input" class="file-input" type="file" multiple :accept="ACCEPT" @change="onInputChange">
     <div
+      v-if="canWrite"
       class="upload-zone"
-      :class="{ dragging, disabled: !canWrite }"
-      :tabindex="canWrite ? 0 : -1"
+      :class="{ dragging }"
+      tabindex="0"
       role="button"
-      :aria-disabled="!canWrite"
       data-testid="contact-file-dropzone"
       @click="openPicker"
       @keydown.enter.prevent="openPicker"
@@ -191,12 +191,12 @@ onMounted(loadFiles)
       @drop.prevent="onDrop"
     >
       <span class="upload-icon"><UploadCloud :size="19" /></span>
-      <button class="upload-button" type="button" :disabled="!canWrite || uploading" data-testid="upload-contact-files" @click.stop="openPicker">
+      <button class="upload-button" type="button" :disabled="uploading" data-testid="upload-contact-files" @click.stop="openPicker">
         <LoaderCircle v-if="uploading" class="spin" :size="14" />
         <UploadCloud v-else :size="14" />
         {{ uploading ? '正在上传…' : '上传文件' }}
       </button>
-      <small>{{ canWrite ? '或拖放文件到此处 · 单个最大 100 MiB' : '当前角色仅可查看和下载文件' }}</small>
+      <small>或拖放文件到此处 · 单个最大 100 MiB</small>
     </div>
 
     <p v-if="error" class="file-error" role="alert">{{ error }}</p>

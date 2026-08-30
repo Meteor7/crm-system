@@ -17,7 +17,7 @@ from rayher_crm.services.contacts import (
     update_contact,
     contacts_for_account,
 )
-from rayher_crm.services.sites import create_site
+from rayher_crm.services.sites import _require_site, create_site, sites_for_account
 from rayher_crm.services.visits import create_visit
 
 
@@ -192,7 +192,13 @@ class TestAccountContactApi(FrappeTestCase):
     def test_sales_can_read_public_accounts_but_only_owner_can_write(self):
         frappe.set_user(self.other_sales)
         foreign = create_account(self._account_input("Foreign Account"))
-        foreign_contact = create_contact(self._contact_input(foreign["id"], "Foreign Contact"))
+        foreign_site = create_site(foreign["id"], self._site_input("Foreign Account Site"))
+        foreign_contact = create_contact(self._contact_input(
+            foreign["id"], "Foreign Contact", siteId=foreign_site["id"],
+        ))
+        owner_contact = get_contact(foreign_contact["id"])["contact"]
+        self.assertEqual(owner_contact["siteId"], foreign_site["id"])
+        self.assertEqual(owner_contact["siteName"], "Foreign Account Site")
 
         frappe.set_user(self.sales)
         with self.assertRaises(CrmApiException) as assignment:
@@ -210,7 +216,28 @@ class TestAccountContactApi(FrappeTestCase):
         frappe.set_user(self.sales)
         detail = get_account_360(foreign["id"])
         self.assertEqual(detail["account"]["id"], foreign["id"])
-        self.assertEqual(get_contact(foreign_contact["id"])["contact"]["id"], foreign_contact["id"])
+        self.assertEqual(detail["sites"], [])
+        for site_reader in (
+            lambda: sites_for_account(foreign["id"]),
+            lambda: _require_site(foreign_site["id"], foreign["id"]),
+        ):
+            with self.assertRaises(CrmApiException) as site_denied:
+                site_reader()
+            self.assertEqual(site_denied.exception.code, "SCOPE_DENIED")
+        public_contact = get_contact(foreign_contact["id"])["contact"]
+        self.assertEqual(public_contact["id"], foreign_contact["id"])
+        self.assertNotIn("siteId", public_contact)
+        self.assertNotIn("siteName", public_contact)
+        self.assertFalse(
+            frappe.has_permission("Contact", "read", doc=foreign_contact["id"], user=self.sales),
+        )
+        self.assertEqual(
+            frappe.get_list("Contact", filters={"name": foreign_contact["id"]}, pluck="name"),
+            [],
+        )
+        with self.assertRaises(CrmApiException) as site_filter:
+            list_contacts({"siteId": foreign_site["id"], "page": 1, "pageSize": 20})
+        self.assertEqual(site_filter.exception.code, "SCOPE_DENIED")
         with self.assertRaises(CrmApiException) as account_write:
             update_account(foreign["id"], self._account_input("Sales Updated Foreign"), foreign["modified"])
         self.assertEqual(account_write.exception.code, "SCOPE_DENIED")

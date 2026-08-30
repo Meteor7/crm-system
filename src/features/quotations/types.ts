@@ -91,6 +91,7 @@ export interface QuotationVersionDto extends QuotationDraftInput {
   opportunityId: string
   accountId: string
   owner: string
+  addressRestricted?: boolean
   customerName: string
   attentionName: string
   attentionTitle: string

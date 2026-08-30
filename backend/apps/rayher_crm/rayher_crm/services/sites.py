@@ -34,13 +34,42 @@ def serialize_site(doc) -> dict[str, Any]:
     }
 
 
+def can_read_site_data(account_id: str, user: str | None = None) -> bool:
+    """Return whether the user may read Site/Address data for an Account.
+
+    Public Account visibility only shares the Account and Contacts with another
+    Sales user. Engineers retain their existing assigned-work access model.
+    Callers that expose a child business record must use this narrower check
+    before serializing Site identifiers, names, locations, or addresses.
+    """
+
+    resolved_user = user or getattr(frappe.session, "user", None)
+    if not resolved_user or resolved_user == "Guest":
+        return False
+    try:
+        role = resolve_crm_role(resolved_user)
+    except frappe.PermissionError:
+        return False
+    if role in {"Manager", "Engineer"}:
+        return True
+    if role != "Sales":
+        return False
+    return frappe.db.get_value("Customer", account_id, "custom_crm_owner") == resolved_user
+
+
+def _assert_site_read_scope(account_id: str) -> None:
+    _require_account(account_id)
+    if not can_read_site_data(account_id):
+        raise CrmApiException("SCOPE_DENIED", "Only the Account owner or a Manager may view sites.")
+
+
 def _require_site(name: str, account_id: str | None = None):
     if not frappe.db.exists("Address", name):
         raise CrmApiException("SITE_NOT_FOUND", "Site was not found.")
     linked_account = _site_account(name)
     if not linked_account or (account_id and linked_account != account_id):
         raise CrmApiException("SITE_ACCOUNT_MISMATCH", "The Site belongs to another Account.")
-    _require_account(linked_account)
+    _assert_site_read_scope(linked_account)
     return frappe.get_doc("Address", name)
 
 
@@ -50,7 +79,7 @@ def _assert_site_write_scope(account_id: str) -> None:
         raise CrmApiException("SCOPE_DENIED", "Only the Account owner or a Manager may edit sites.")
 
 def sites_for_account(account_id: str) -> list[dict[str, Any]]:
-    _require_account(account_id)
+    _assert_site_read_scope(account_id)
     names = frappe.db.sql(
         """SELECT `address`.`name`
         FROM `tabAddress` AS `address`

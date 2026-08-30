@@ -213,6 +213,45 @@ class TestRfqApi(FrappeTestCase):
         self.assertEqual(created["salesOwner"], self.sales)
         self.assertEqual(created["currentVersion"]["uploadedBy"], self.manager)
 
+    def test_private_parent_blocks_assigned_sales_from_rfq_list_detail_and_files(self):
+        opportunity = self._opportunity()
+        frappe.db.set_value("CRM Opportunity", opportunity["id"], {
+            "stage": "设备规格确认",
+            "probability": 75,
+            "opportunity_owner": self.other_sales,
+        })
+        frappe.set_user(self.manager)
+        created = create_rfq(
+            {"opportunityId": opportunity["id"], "engineerId": self.engineer},
+            pdf_part("private-parent.pdf"),
+            CleanScanner(),
+        )
+
+        frappe.set_user(self.other_sales)
+        self.assertEqual(list_rfqs({"page": 1, "pageSize": 20})[0], [])
+        for reader in (get_rfq, preview_rfq_file, download_rfq_file):
+            with self.subTest(reader=reader.__name__), self.assertRaises(CrmApiException) as denied:
+                reader(created["id"])
+            self.assertEqual(denied.exception.code, "SCOPE_DENIED")
+
+        frappe.db.set_value(
+            "Customer", opportunity["accountId"], "custom_crm_visibility", "Public", update_modified=False,
+        )
+        rows = list_rfqs({"page": 1, "pageSize": 20})[0]
+        self.assertEqual([row["id"] for row in rows], [created["id"]])
+        self.assertEqual((rows[0]["opportunity"]["siteId"], rows[0]["opportunity"]["site"]), ("", ""))
+        self.assertEqual(get_rfq(created["id"])["opportunity"]["siteId"], "")
+        self.assertEqual(preview_rfq_file(created["id"])["mime_type"], "application/pdf")
+        self.assertEqual(download_rfq_file(created["id"])["file_name"], "private-parent.pdf")
+
+        frappe.db.set_value(
+            "Customer", opportunity["accountId"], "custom_crm_visibility", "Private", update_modified=False,
+        )
+        self.assertEqual(list_rfqs({"page": 1, "pageSize": 20})[0], [])
+        with self.assertRaises(CrmApiException) as revoked:
+            get_rfq(created["id"])
+        self.assertEqual(revoked.exception.code, "SCOPE_DENIED")
+
     def test_failed_preview_generation_rolls_back_create(self):
         opportunity = self._opportunity()
         before = frappe.db.count("CRM RFQ")

@@ -26,6 +26,7 @@ class TestQuotationApi(FrappeTestCase):
         self.original_user = frappe.session.user
         frappe.set_user("Administrator")
         self.sales = self._user("crm-quotation-sales@example.invalid", "CRM Sales")
+        self.other_sales = self._user("crm-quotation-other-sales@example.invalid", "CRM Sales")
         self.manager = self._user("crm-quotation-manager@example.invalid", "CRM Manager")
 
     def tearDown(self):
@@ -104,6 +105,74 @@ class TestQuotationApi(FrappeTestCase):
 
         self.assertIn(created["quotation"]["id"], {row["id"] for row in account["quotations"]})
         self.assertTrue(all(row["accountId"] == opportunity["accountId"] for row in account["quotations"]))
+
+    def test_public_non_owner_sales_gets_redacted_address_and_cannot_download_full_pdf(self):
+        saved, _ = self._ready_quotation()
+        published = self._publish(saved["quotation"]["id"], saved["version"]["modified"])
+        quotation_id = published["quotation"]["id"]
+        version_id = published["version"]["id"]
+        account_id = published["quotation"]["accountId"]
+        frappe.db.set_value("Customer", account_id, "custom_crm_visibility", "Public", update_modified=False)
+        frappe.db.set_value("CRM Quotation", quotation_id, "quotation_owner", self.other_sales, update_modified=False)
+        frappe.db.set_value("CRM Quotation Version", version_id, "quotation_owner", self.other_sales, update_modified=False)
+
+        frappe.set_user(self.other_sales)
+        detail = get_quotation(quotation_id)
+        self.assertEqual((detail["version"]["addressId"], detail["version"]["addressText"], detail["version"]["addressRestricted"]), ("", "", True))
+        self.assertFalse(detail["version"]["pdfAvailable"])
+        context = _pdf_context(
+            frappe.get_doc("CRM Quotation", quotation_id),
+            frappe.get_doc("CRM Quotation Version", version_id),
+        )
+        self.assertEqual((context["addressId"], context["addressText"]), ("", ""))
+        version = frappe.get_doc("CRM Quotation Version", version_id)
+        self.assertFalse(version.has_permission("read", user=self.other_sales))
+        self.assertEqual(
+            frappe.get_list(
+                "CRM Quotation Version",
+                filters={"name": version_id},
+                pluck="name",
+            ),
+            [],
+        )
+        file_id = frappe.db.get_value("File", {"file_url": version.pdf_file}, "name")
+        self.assertTrue(file_id)
+        self.assertFalse(frappe.get_doc("File", file_id).is_downloadable())
+        with self.assertRaises(CrmApiException) as denied:
+            get_pdf_file(quotation_id)
+        self.assertEqual(denied.exception.code, "SCOPE_DENIED")
+        with self.assertRaises(CrmApiException) as write_denied:
+            create_version(quotation_id)
+        self.assertEqual(write_denied.exception.code, "SCOPE_DENIED")
+
+    def test_public_non_owner_sales_cannot_create_unusable_quotation_drafts(self):
+        opportunity = self._opportunity()
+        account_id = opportunity["accountId"]
+        frappe.db.set_value(
+            "Customer",
+            account_id,
+            "custom_crm_visibility",
+            "Public",
+            update_modified=False,
+        )
+        frappe.db.set_value(
+            "CRM Opportunity",
+            opportunity["id"],
+            "opportunity_owner",
+            self.other_sales,
+            update_modified=False,
+        )
+
+        frappe.set_user(self.other_sales)
+        before = frappe.db.count("CRM Quotation", {"account": account_id})
+        for payload in (
+            {"opportunityId": opportunity["id"]},
+            {"accountId": account_id, "quotationType": "Service"},
+        ):
+            with self.subTest(payload=payload), self.assertRaises(CrmApiException) as denied:
+                create_quotation(payload)
+            self.assertEqual(denied.exception.code, "SCOPE_DENIED")
+        self.assertEqual(frappe.db.count("CRM Quotation", {"account": account_id}), before)
 
     def test_sales_submission_requires_manager_approval_and_preserves_retries(self):
         saved, payload = self._ready_quotation()

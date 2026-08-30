@@ -9,7 +9,7 @@ import frappe
 
 from rayher_crm.api.v1.errors import CrmApiException
 from rayher_crm.permissions.roles import assert_capability, resolve_crm_role
-from rayher_crm.permissions.scope import conditions_for_doctype
+from rayher_crm.permissions.scope import conditions_for_doctype, has_crm_permission
 from rayher_crm.services.accounts import _require_account
 from rayher_crm.services.common import (
     delete_manager_scoped_document,
@@ -22,7 +22,7 @@ from rayher_crm.services.common import (
     validate_choice,
 )
 from rayher_crm.services.concurrency import lock_document
-from rayher_crm.services.sites import _require_site
+from rayher_crm.services.sites import _require_site, can_read_site_data
 from rayher_crm.services.contacts import _contact_account
 from rayher_crm.services.money import MoneyValidationError, as_decimal, decimal_string
 from rayher_crm.services.notifications import create_notification
@@ -223,6 +223,7 @@ def _actions_for_opportunity(opportunity_id: str) -> list[dict[str, Any]]:
 
 def serialize_opportunity(doc) -> dict[str, Any]:
     role = resolve_crm_role()
+    can_read_site = can_read_site_data(doc.account)
     exact_amounts = frappe.db.sql(
         "SELECT CAST(`amount` AS CHAR) AS `amount`, CAST(`original_amount` AS CHAR) AS `original_amount` "
         "FROM `tabCRM Opportunity` WHERE `name` = %s",
@@ -232,10 +233,11 @@ def serialize_opportunity(doc) -> dict[str, Any]:
     result = {
         "id": doc.name,
         "accountId": doc.account,
-        "siteId": doc.site,
+        "siteId": doc.site if can_read_site else "",
+        "siteRestricted": not can_read_site,
         "title": doc.title,
         "account": frappe.db.get_value("Customer", doc.account, "customer_name") or doc.account,
-        "site": frappe.db.get_value("Address", doc.site, "address_title") or doc.site,
+        "site": (frappe.db.get_value("Address", doc.site, "address_title") or doc.site) if can_read_site else "",
         "owner": doc.opportunity_owner,
         "stage": doc.stage,
         "forecast": doc.forecast,
@@ -273,7 +275,7 @@ def _require_opportunity(name: str):
     if not frappe.db.exists("CRM Opportunity", name):
         raise CrmApiException("OPPORTUNITY_NOT_FOUND", "Opportunity was not found.")
     doc = frappe.get_doc("CRM Opportunity", name)
-    if not frappe.has_permission("CRM Opportunity", "read", doc=doc, user=frappe.session.user):
+    if not has_crm_permission(doc, user=frappe.session.user, permission_type="read"):
         raise CrmApiException("SCOPE_DENIED", "The Opportunity is outside the current user scope.")
     return doc
 
@@ -293,8 +295,18 @@ def list_strategy_opportunities(query: dict[str, Any] | None = None):
     search = str(query.get("search") or "").strip()
     if search:
         pattern = f"%{search}%"
-        where_parts.append("(`name` LIKE %s OR `title` LIKE %s OR `account` LIKE %s OR `site` LIKE %s)")
-        values.extend([pattern, pattern, pattern, pattern])
+        if resolve_crm_role() == "Sales":
+            where_parts.append(
+                "(`name` LIKE %s OR `title` LIKE %s OR `account` LIKE %s OR "
+                "(`site` LIKE %s AND EXISTS ("
+                "SELECT 1 FROM `tabCustomer` AS `crm_site_search_customer` "
+                "WHERE `crm_site_search_customer`.`name` = `tabCRM Opportunity`.`account` "
+                "AND `crm_site_search_customer`.`custom_crm_owner` = %s)))"
+            )
+            values.extend([pattern, pattern, pattern, pattern, frappe.session.user])
+        else:
+            where_parts.append("(`name` LIKE %s OR `title` LIKE %s OR `account` LIKE %s OR `site` LIKE %s)")
+            values.extend([pattern, pattern, pattern, pattern])
     for input_name, column in (("status", "stage"), ("forecast", "forecast"), ("owner", "opportunity_owner"), ("accountId", "account")):
         value = str(query.get(input_name) or "").strip()
         if value and value != "All":
@@ -383,7 +395,7 @@ def update_strategy_opportunity(name: str, payload: dict[str, Any], expected_mod
     assert_capability("deal:write")
     _require_opportunity(name)
     doc = lock_document("CRM Opportunity", name, expected_modified, "NOT_FOUND")
-    if not frappe.has_permission("CRM Opportunity", "read", doc=doc, user=frappe.session.user):
+    if not has_crm_permission(doc, user=frappe.session.user, permission_type="read"):
         raise CrmApiException("SCOPE_DENIED", "The Opportunity is outside the current user scope.")
 
     merged = _current_input(doc)
@@ -447,7 +459,7 @@ def rollback_opportunity_stage(
     rollback_reason = required_text({"reason": reason}, "reason")
     _require_opportunity(name)
     doc = lock_document("CRM Opportunity", name, expected_modified, "NOT_FOUND")
-    if not frappe.has_permission("CRM Opportunity", "read", doc=doc, user=frappe.session.user):
+    if not has_crm_permission(doc, user=frappe.session.user, permission_type="read"):
         raise CrmApiException("SCOPE_DENIED", "The Opportunity is outside the current user scope.")
     if target in {"Won", "Lost"} or OPPORTUNITY_STAGES.index(target) >= OPPORTUNITY_STAGES.index(doc.stage):
         raise CrmApiException(
@@ -622,7 +634,7 @@ def _validate_action(payload: dict[str, Any], opportunity) -> dict[str, Any]:
     if not due:
         raise CrmApiException("VALIDATION_ERROR", "due is required.", field_errors={"due": "Required"})
     action_owner = resolve_write_owner(payload.get("owner"))
-    if not frappe.has_permission("CRM Opportunity", "read", doc=opportunity, user=action_owner):
+    if not has_crm_permission(opportunity, user=action_owner, permission_type="read"):
         raise CrmApiException(
             "INVALID_OWNER", "Action owner must have access to this Opportunity.",
         )

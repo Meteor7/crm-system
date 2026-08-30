@@ -60,8 +60,10 @@ const bookingContactId = ref('')
 const contactAccountId = ref('')
 const contactContext = ref<'stakeholder' | 'booking'>('stakeholder')
 const canWrite = computed(() => app.can('deal:write'))
+const canMutateOpportunity = computed(() => canWrite.value && !selected.value?.siteRestricted)
 const canDelete = computed(() => app.bootstrap?.user.role === 'Manager')
-const canMarkLost = computed(() => canWrite.value && Boolean(selected.value) && !['Won', 'Lost'].includes(selected.value?.stage ?? ''))
+const canMarkLost = computed(() => canMutateOpportunity.value && Boolean(selected.value) && !['Won', 'Lost'].includes(selected.value?.stage ?? ''))
+const siteDisplay = computed(() => selected.value?.siteRestricted ? '仅客户负责人可见' : (selected.value?.site || '未指定'))
 const lostHistory = computed(() => selected.value?.history.find((item) => item.field === 'stage' && item.to === 'Lost'))
 async function deleteOpportunity() {
   if (!selected.value || deleting.value || !window.confirm(`确认删除 Opportunity ${selected.value.title}？`)) return
@@ -91,7 +93,7 @@ const nextStage = computed(() => {
   if (!selected.value || selected.value.stage === 'Lost' || currentStageIndex.value < 0) return ''
   return OPPORTUNITY_STAGES[currentStageIndex.value + 1] ?? ''
 })
-const canAdvanceManually = computed(() => canWrite.value
+const canAdvanceManually = computed(() => canMutateOpportunity.value
   && Boolean(nextStage.value)
   && ['预算审批', '采购流程'].includes(selected.value?.stage ?? ''))
 const rollbackTargets = computed(() => OPPORTUNITY_STAGES
@@ -401,17 +403,17 @@ onMounted(async () => {
         <RouterLink class="back-opportunities detail-back-button" data-testid="back-opportunities" :to="{ name: 'opportunities' }"><ArrowLeft :size="15" />返回 Opportunities</RouterLink>
         <div class="record-identity">
           <span><Target :size="22" /></span>
-          <div><small>Opportunity · {{ selected.id }}</small><h1>{{ selected.title }}</h1><p>{{ selected.account }} · {{ selected.site }}</p></div>
+          <div><small>Opportunity · {{ selected.id }}</small><h1>{{ selected.title }}</h1><p>{{ selected.account }} · {{ siteDisplay }}</p></div>
         </div>
         <div class="record-actions">
           <RouterLink v-if="quotationId" class="secondary-button" data-testid="opportunity-quotation-link" :to="{ name: 'quotation-detail', params: { quotationId } }"><FileText :size="14" />查看 Quotation</RouterLink>
-          <RouterLink v-else-if="app.can('quotation:write') && selected.stage === '报价'" class="secondary-button" data-testid="create-quotation-from-opportunity" :to="{ name: 'quotations', query: { opportunityId: selected.id } }"><FileText :size="14" />新建 Quotation</RouterLink>
+          <RouterLink v-else-if="app.can('quotation:write') && canMutateOpportunity && selected.stage === '报价'" class="secondary-button" data-testid="create-quotation-from-opportunity" :to="{ name: 'quotations', query: { opportunityId: selected.id } }"><FileText :size="14" />新建 Quotation</RouterLink>
           <RouterLink v-if="rfqId" class="secondary-button" data-testid="opportunity-rfq-link" :to="{ name: 'rfq-detail', params: { rfqId } }"><FileText :size="14" />RFQ · {{ rfqStatus }}</RouterLink>
           <RouterLink v-else-if="app.can('rfq:view') && selected.stage === '设备规格确认'" class="secondary-button" data-testid="opportunity-rfq-center-link" :to="{ name: 'rfqs', query: { opportunityId: selected.id } }"><FileText :size="14" />RFQ 未创建</RouterLink>
           <RouterLink v-if="existingBooking" class="secondary-button" data-testid="opportunity-booking-link" :to="{ name: 'booking' }"><PackageCheck :size="14" />Booking · {{ existingBooking.id }}</RouterLink>
-          <button v-else-if="canWrite && selected.stage === 'Won'" class="primary-button" type="button" data-testid="create-booking-from-opportunity" @click="openBooking"><PackageCheck :size="14" />生成 Booking</button>
+          <button v-else-if="canMutateOpportunity && selected.stage === 'Won'" class="primary-button" type="button" data-testid="create-booking-from-opportunity" @click="openBooking"><PackageCheck :size="14" />生成 Booking</button>
           <button v-if="canWrite" class="secondary-button" type="button" data-testid="new-opportunity-action" @click="openAction()"><Plus :size="14" />新增 Action</button>
-          <button v-if="canWrite" class="primary-button" type="button" data-testid="edit-opportunity" @click="opportunityModal = true"><Pencil :size="14" />编辑</button>
+          <button v-if="canMutateOpportunity" class="primary-button" type="button" data-testid="edit-opportunity" @click="opportunityModal = true"><Pencil :size="14" />编辑</button>
           <button v-if="canMarkLost" class="secondary-button lost-action-button" type="button" data-testid="mark-opportunity-lost" @click="openLostModal">标记为 Lost</button>
           <button v-if="canDelete" class="secondary-button" type="button" data-delete-opportunity :disabled="deleting" @click="deleteOpportunity">删除</button>
         </div>
@@ -461,7 +463,7 @@ onMounted(async () => {
             <dl class="field-list">
               <div><dt>Opportunity Name</dt><dd>{{ selected.title }}</dd></div>
               <div><dt>Account Name</dt><dd>{{ selected.account }}</dd></div>
-              <div><dt>Site</dt><dd>{{ selected.site }}</dd></div>
+              <div><dt>Site</dt><dd>{{ siteDisplay }}</dd></div>
               <div><dt>Close Date</dt><dd>{{ formatDisplayDate(selected.poDate) }}</dd></div>
               <div><dt>Amount</dt><dd>{{ formatMoney(selected.amount, selected.currency) }}</dd></div>
               <div><dt>Opportunity Owner</dt><dd>{{ personnelDisplayName(selected.owner) }}</dd></div>
@@ -548,7 +550,7 @@ onMounted(async () => {
         </aside>
       </main>
 
-      <OpportunityEditorModal v-if="opportunityModal" :opportunity="selected" :accounts="accounts" :sites-by-account="sitesByAccount" :default-owner="app.bootstrap?.user.id ?? ''" :busy="busy" :error="modalError" @close="opportunityModal = false" @submit="saveOpportunity" />
+      <OpportunityEditorModal v-if="opportunityModal && canMutateOpportunity" :opportunity="selected" :accounts="accounts" :sites-by-account="sitesByAccount" :default-owner="app.bootstrap?.user.id ?? ''" :busy="busy" :error="modalError" @close="opportunityModal = false" @submit="saveOpportunity" />
       <StakeholderEditorModal v-if="stakeholderModal" :stakeholder="editingStakeholder" :contacts="contacts" :account-id="selected.accountId" :selected-contact-id="selectedContactId" :busy="busy" :error="modalError" @close="stakeholderModal = false" @create-contact="openContact" @submit="saveStakeholder" />
       <ContactModal v-if="contactModal" :accounts="accounts" :sites="contactSites" :contacts="contacts" :fixed-account-id="contactAccountId" :busy="busy" :error="modalError" @close="contactModal = false" @submit="saveContact" />
       <ActionEditorModal v-if="actionModal" :action="editingAction" :default-owner="app.bootstrap?.user.id ?? ''" :busy="busy" :error="modalError" @close="actionModal = false" @submit="saveAction" />

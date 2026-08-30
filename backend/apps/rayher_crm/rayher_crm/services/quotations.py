@@ -15,13 +15,14 @@ from frappe.utils import add_months, getdate, now_datetime, today
 
 from rayher_crm.api.v1.errors import CrmApiException
 from rayher_crm.permissions.roles import assert_capability, resolve_crm_role
-from rayher_crm.permissions.scope import conditions_for_doctype
+from rayher_crm.permissions.scope import conditions_for_doctype, has_crm_permission
 from rayher_crm.services.common import normalize_pagination, required_text, to_iso_timestamp
 from rayher_crm.services.concurrency import lock_document
 from rayher_crm.services.contacts import _contact_account
 from rayher_crm.services.money import decimal_string
 from rayher_crm.services.notifications import create_notification
 from rayher_crm.services.quotation_rules import QuotationRuleError, calculate_totals, validate_payment_terms
+from rayher_crm.services.sites import can_read_site_data
 
 PUBLISHABLE_OPPORTUNITY_STAGES = {"报价", "采购流程"}
 DECISION_STATUSES = {"Accepted", "Rejected"}
@@ -173,6 +174,11 @@ def _require_quotation(name: str):
     return doc
 
 
+def _assert_quotation_address_scope(account_id: str, message: str) -> None:
+    if not can_read_site_data(account_id):
+        raise CrmApiException("SCOPE_DENIED", message)
+
+
 def _lock_quotation(name: str):
     rows = frappe.db.sql(
         "SELECT `name` FROM `tabCRM Quotation` WHERE `name` = %s FOR UPDATE",
@@ -180,7 +186,12 @@ def _lock_quotation(name: str):
     )
     if not rows:
         raise CrmApiException("QUOTATION_NOT_FOUND", "Quotation was not found.")
-    return _require_quotation(name)
+    doc = _require_quotation(name)
+    _assert_quotation_address_scope(
+        doc.account,
+        "Only the Account owner or a Manager may modify quotations containing Site/Address data.",
+    )
+    return doc
 
 
 def _require_version(master, version_id: str | None, *, fallback: str | None = None):
@@ -196,7 +207,7 @@ def _require_opportunity(name: str):
     if not frappe.db.exists("CRM Opportunity", name):
         raise CrmApiException("OPPORTUNITY_NOT_FOUND", "Opportunity was not found.")
     doc = frappe.get_doc("CRM Opportunity", name)
-    if not frappe.has_permission("CRM Opportunity", "read", doc=doc, user=frappe.session.user):
+    if not has_crm_permission(doc, user=frappe.session.user, permission_type="read"):
         raise CrmApiException("SCOPE_DENIED", "The Opportunity is outside the current user scope.")
     return doc
 
@@ -211,6 +222,10 @@ def _validate_contact(contact_id: str, account: str) -> None:
 
 
 def _validate_address(address_id: str, account: str) -> None:
+    _assert_quotation_address_scope(
+        account,
+        "Only the Account owner or a Manager may use quotation addresses.",
+    )
     if not address_id or not frappe.db.exists("Address", address_id):
         raise CrmApiException("ADDRESS_NOT_FOUND", "Quotation address was not found.")
     if not frappe.db.exists("Dynamic Link", {"parent": address_id, "parenttype": "Address", "link_doctype": "Customer", "link_name": account}):
@@ -361,19 +376,20 @@ def _serialized_validity_months(doc) -> int:
 
 
 def _serialize_version(doc) -> dict[str, Any]:
+    can_read_address = can_read_site_data(doc.account)
     return {
         "id": doc.name, "version": int(doc.version_no or 0), "quotationType": doc.quotation_type or "Device", "status": doc.status, "modified": to_iso_timestamp(doc.modified),
         "approvalStatus": doc.approval_status or "Not Submitted", "currentApprovalId": doc.current_approval or "",
         "refNo": doc.ref_no, "opportunityId": doc.opportunity or "", "accountId": doc.account, "owner": doc.quotation_owner,
-        "primaryContactId": doc.primary_contact or "", "addressId": doc.address or "", "customerName": doc.customer_name_snapshot or "",
-        "attentionName": doc.attention_name_snapshot or "", "attentionTitle": doc.attention_title_snapshot or "", "attentionPhone": doc.attention_phone_snapshot or "", "addressText": doc.address_snapshot or "",
+        "primaryContactId": doc.primary_contact or "", "addressId": (doc.address or "") if can_read_address else "", "addressRestricted": not can_read_address, "customerName": doc.customer_name_snapshot or "",
+        "attentionName": doc.attention_name_snapshot or "", "attentionTitle": doc.attention_title_snapshot or "", "attentionPhone": doc.attention_phone_snapshot or "", "addressText": (doc.address_snapshot or "") if can_read_address else "",
         "quoteDate": str(doc.quote_date or ""), "validityMonths": _serialized_validity_months(doc), "validUntil": str(doc.valid_until or ""), "currency": "CNY",
         "items": [_serialize_item(row) for row in doc.items], "subtotal": _db_decimal(doc.subtotal), "discountType": doc.discount_type,
         "discountValue": _db_decimal(doc.discount_value), "discountAmount": _db_decimal(doc.discount_amount), "total": _db_decimal(doc.total),
         "paymentTerms": [{"percentage": _db_decimal(row.percentage), "triggerCondition": row.trigger_condition, "description": row.description or ""} for row in doc.payment_terms],
         "incoterm": doc.incoterm or "", "deliveryMonths": int(doc.delivery_months or 0), "deliveryStart": doc.delivery_start or "", "warrantyMonths": int(doc.warranty_months or 0), "warrantyStart": doc.warranty_start or "",
         "installation": doc.installation or "", "training": doc.training or "", "documentation": doc.documentation or "", "packing": doc.packing or "",
-        "feedbackDate": str(doc.feedback_date or ""), "feedbackNote": doc.feedback_note or "", "pdfAvailable": bool(doc.pdf_file), "publishedAt": to_iso_timestamp(doc.published_at) if doc.published_at else "",
+        "feedbackDate": str(doc.feedback_date or ""), "feedbackNote": doc.feedback_note or "", "pdfAvailable": bool(doc.pdf_file) and can_read_address, "publishedAt": to_iso_timestamp(doc.published_at) if doc.published_at else "",
     }
 
 
@@ -475,6 +491,10 @@ def create_quotation(payload: dict[str, Any]) -> dict[str, Any]:
     account_doc = frappe.get_doc("Customer", account)
     if not frappe.has_permission("Customer", "read", doc=account_doc, user=frappe.session.user):
         raise CrmApiException("SCOPE_DENIED", "The account is outside the current user scope.")
+    _assert_quotation_address_scope(
+        account,
+        "Only the Account owner or a Manager may create quotations containing Site/Address data.",
+    )
     initial = dict(payload)
     initial_quote_date = _text(initial, "quoteDate", today())
     initial["quoteDate"] = initial_quote_date
@@ -563,9 +583,25 @@ def save_draft(name: str, payload: dict[str, Any], expected_modified: str | None
 
 
 def _version_payload(version) -> dict[str, Any]:
-    data = _serialize_version(version)
-    keys = ("primaryContactId", "addressId", "quoteDate", "validityMonths", "items", "discountType", "discountValue", "paymentTerms", "deliveryMonths", "warrantyMonths")
-    return {key: data[key] for key in keys}
+    return {
+        "primaryContactId": version.primary_contact or "",
+        "addressId": version.address or "",
+        "quoteDate": str(version.quote_date or ""),
+        "validityMonths": _serialized_validity_months(version),
+        "items": [_serialize_item(row) for row in version.items],
+        "discountType": version.discount_type,
+        "discountValue": _db_decimal(version.discount_value),
+        "paymentTerms": [
+            {
+                "percentage": _db_decimal(row.percentage),
+                "triggerCondition": row.trigger_condition,
+                "description": row.description or "",
+            }
+            for row in version.payment_terms
+        ],
+        "deliveryMonths": int(version.delivery_months or 0),
+        "warrantyMonths": int(version.warranty_months or 0),
+    }
 
 
 def create_version(name: str) -> dict[str, Any]:
@@ -979,6 +1015,10 @@ def get_preview_pdf(name: str, version_id: str | None = None) -> tuple[str, byte
 def get_pdf_file(name: str, version_id: str | None = None) -> tuple[str, bytes]:
     assert_capability("quotation:view")
     master = _require_quotation(name)
+    _assert_quotation_address_scope(
+        master.account,
+        "Only the Account owner or a Manager may download quotation PDFs containing an address.",
+    )
     if not version_id and not master.current_published_version:
         raise CrmApiException("QUOTATION_PDF_NOT_FOUND", "Published quotation PDF was not found.")
     version = _require_version(master, version_id, fallback=master.current_published_version)

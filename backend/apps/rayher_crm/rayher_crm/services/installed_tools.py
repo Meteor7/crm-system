@@ -11,12 +11,12 @@ import frappe
 
 from rayher_crm.api.v1.errors import CrmApiException
 from rayher_crm.permissions.roles import assert_capability, resolve_crm_role
-from rayher_crm.permissions.scope import conditions_for_doctype
+from rayher_crm.permissions.scope import conditions_for_doctype, has_crm_permission
 from rayher_crm.services.bookings import _require_booking, serialize_booking
 from rayher_crm.services.common import normalize_pagination, required_text, to_iso_timestamp
 from rayher_crm.services.concurrency import lock_document
 from rayher_crm.services.notifications import create_notification
-from rayher_crm.services.sites import _require_site, _site_account
+from rayher_crm.services.sites import _require_site, _site_account, can_read_site_data
 
 
 def _engineer_owner(value: Any) -> str:
@@ -137,15 +137,16 @@ def _completed_milestones(doc, completed_at: str) -> list[dict[str, str]]:
     return result
 
 def serialize_installed_tool(doc) -> dict[str, Any]:
+    can_read_site = can_read_site_data(doc.account)
     return {
         "id": doc.name,
         "accountId": doc.account,
-        "siteId": doc.site,
+        "siteId": doc.site if can_read_site else "",
         "serial": doc.serial,
         "model": doc.model,
         "account": frappe.db.get_value("Customer", doc.account, "customer_name") or doc.account,
-        "site": frappe.db.get_value("Address", doc.site, "address_title") or doc.site,
-        "location": doc.location,
+        "site": (frappe.db.get_value("Address", doc.site, "address_title") or doc.site) if can_read_site else "",
+        "location": doc.location if can_read_site else "",
         "status": doc.status,
         "lifecycleStage": doc.lifecycle_stage,
         "software": doc.software,
@@ -288,7 +289,7 @@ def _require_installed_tool(name: str):
     if not frappe.db.exists("CRM Installed Tool", name):
         raise CrmApiException("INSTALLED_TOOL_NOT_FOUND", "Installed Tool was not found.")
     doc = frappe.get_doc("CRM Installed Tool", name)
-    if not frappe.has_permission("CRM Installed Tool", "read", doc=doc, user=frappe.session.user):
+    if not has_crm_permission(doc, user=frappe.session.user, permission_type="read"):
         code = "INSTALLED_TOOL_SCOPE_DENIED" if resolve_crm_role() == "Engineer" else "SCOPE_DENIED"
         raise CrmApiException(code, "The Installed Tool is outside the current user scope.")
     return doc
@@ -451,7 +452,7 @@ def transition_installed_tool(
     evidence = _evidence_list(payload.get("evidence"))
 
     doc = lock_document("CRM Installed Tool", name, expected_modified, "NOT_FOUND")
-    if not frappe.has_permission("CRM Installed Tool", "read", doc=doc, user=frappe.session.user):
+    if not has_crm_permission(doc, user=frappe.session.user, permission_type="read"):
         raise CrmApiException("INSTALLED_TOOL_SCOPE_DENIED", "The Installed Tool is outside the current user scope.")
     _assert_installed_tool_operator(doc)
     if doc.lifecycle_stage not in LIFECYCLE_STAGES or _is_lifecycle_completed(doc):
@@ -521,7 +522,7 @@ def _locked_operable_tool(name: str, expected_modified: Any):
     current = _require_installed_tool(name)
     _assert_installed_tool_operator(current)
     doc = lock_document("CRM Installed Tool", name, expected_modified, "NOT_FOUND")
-    if not frappe.has_permission("CRM Installed Tool", "read", doc=doc, user=frappe.session.user):
+    if not has_crm_permission(doc, user=frappe.session.user, permission_type="read"):
         raise CrmApiException("INSTALLED_TOOL_SCOPE_DENIED", "The Installed Tool is outside the current user scope.")
     _assert_installed_tool_operator(doc)
     return doc
@@ -705,7 +706,7 @@ def update_installed_tool(name: str, payload: dict[str, Any], expected_modified:
     current = _require_installed_tool(name)
     _assert_installed_tool_operator(current)
     doc = lock_document("CRM Installed Tool", name, expected_modified, "NOT_FOUND")
-    if not frappe.has_permission("CRM Installed Tool", "read", doc=doc, user=frappe.session.user):
+    if not has_crm_permission(doc, user=frappe.session.user, permission_type="read"):
         raise CrmApiException("INSTALLED_TOOL_SCOPE_DENIED", "The Installed Tool is outside the current user scope.")
     _assert_installed_tool_operator(doc)
     previous_engineer = doc.engineer_owner

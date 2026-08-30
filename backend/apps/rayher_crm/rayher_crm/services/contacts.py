@@ -9,7 +9,7 @@ import frappe
 
 from rayher_crm.api.v1.errors import CrmApiException
 from rayher_crm.permissions.roles import assert_capability, capabilities_for_user, resolve_crm_role
-from rayher_crm.permissions.scope import conditions_for_doctype
+from rayher_crm.permissions.scope import conditions_for_doctype, has_crm_permission
 from rayher_crm.services.accounts import _require_account
 from rayher_crm.services.common import (
     ensure_server_generated_id,
@@ -45,20 +45,27 @@ def _require_contact(name: str):
     if not frappe.db.exists("Contact", name):
         raise CrmApiException("CONTACT_NOT_FOUND", "Contact was not found.")
     doc = frappe.get_doc("Contact", name)
-    if not frappe.has_permission("Contact", "read", doc=doc, user=frappe.session.user):
+    if not has_crm_permission(doc, user=frappe.session.user, permission_type="read"):
         raise CrmApiException("SCOPE_DENIED", "The contact is outside the current user scope.")
     return doc
 
 
 def serialize_contact(doc) -> dict[str, Any]:
+    from rayher_crm.services.sites import can_read_site_data
+
     account_id = _contact_account(doc.name)
     account = frappe.db.get_value(
         "Customer",
         account_id,
-        ["customer_name", "custom_crm_short_name"],
+        ["customer_name", "custom_crm_short_name", "custom_crm_owner"],
         as_dict=True,
     ) if account_id else None
-    site_name = frappe.db.get_value("Address", doc.custom_crm_site, "address_title") if doc.custom_crm_site else None
+    can_read_site = can_read_site_data(account_id) if account_id else False
+    site_name = (
+        frappe.db.get_value("Address", doc.custom_crm_site, "address_title")
+        if doc.custom_crm_site and can_read_site
+        else None
+    )
     display_name = " ".join(part for part in (doc.first_name, doc.last_name) if part).strip() or doc.name
     modified = to_iso_timestamp(doc.modified)
     result = {
@@ -79,7 +86,7 @@ def serialize_contact(doc) -> dict[str, Any]:
         "accountShortName": (account.custom_crm_short_name or account.customer_name) if account else "",
         "opportunityRoles": [],
     }
-    if doc.custom_crm_site:
+    if doc.custom_crm_site and can_read_site:
         result["siteId"] = doc.custom_crm_site
     if site_name:
         result["siteName"] = site_name
@@ -187,6 +194,11 @@ def list_contacts(query: dict[str, Any]) -> tuple[list[dict[str, Any]], int, int
         values.append(account_id)
     site_id = str(query.get("siteId") or "").strip()
     if site_id and site_id != "All":
+        from rayher_crm.services.sites import _site_account, can_read_site_data
+
+        site_account = _site_account(site_id)
+        if not site_account or not can_read_site_data(site_account):
+            raise CrmApiException("SCOPE_DENIED", "The Site filter is outside the current user scope.")
         where.append("`tabContact`.`custom_crm_site` = %s")
         values.append(site_id)
     owner = str(query.get("owner") or "").strip()
@@ -247,7 +259,7 @@ def update_contact(name: str, payload: dict[str, Any], expected_modified: Any) -
     _require_contact(name)
     values = _validated_contact(payload, name)
     doc = lock_document("Contact", name, expected_modified, "NOT_FOUND")
-    if not frappe.has_permission("Contact", "read", doc=doc, user=frappe.session.user):
+    if not has_crm_permission(doc, user=frappe.session.user, permission_type="read"):
         raise CrmApiException("SCOPE_DENIED", "The contact is outside the current user scope.")
     previous_owner = doc.custom_crm_owner
     savepoint = f"crm_contact_update_{frappe.generate_hash(length=8)}"
@@ -272,9 +284,16 @@ def get_contact(name: str) -> dict[str, Any]:
     assert_capability("contact:view")
     doc = _require_contact(name)
     reports_to = serialize_contact(_require_contact(doc.custom_crm_reports_to)) if doc.custom_crm_reports_to else None
+    direct_report_names = frappe.db.sql(
+        "SELECT `name` FROM `tabContact` "
+        "WHERE `custom_crm_reports_to` = %s "
+        f"AND ({conditions_for_doctype('Contact')})",
+        (name,),
+        as_dict=True,
+    )
     direct_reports = [
         serialize_contact(frappe.get_doc("Contact", item.name))
-        for item in frappe.get_list("Contact", filters={"custom_crm_reports_to": name}, fields=["name"])
+        for item in direct_report_names
     ]
     capabilities = capabilities_for_user()
     opportunities: list[dict[str, Any]] = []

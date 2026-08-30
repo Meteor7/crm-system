@@ -289,6 +289,24 @@ describe('QuotationDetailPage', () => {
     expect(wrapper.get('[aria-label="设备名称"]').attributes('disabled')).toBeDefined()
   })
 
+  it('renders an address-restricted quotation as read-only', async () => {
+    const { client, save } = api()
+    const restricted = structuredClone(detail)
+    restricted.quotation.opportunityId = ''
+    restricted.version.addressRestricted = true
+    restricted.versions = [restricted.version]
+    vi.mocked(client.getQuotation).mockResolvedValue({ data: restricted, warnings: [] })
+
+    const wrapper = await mountPage(client)
+
+    expect(wrapper.attributes('data-editable')).toBe('false')
+    expect(wrapper.get('[data-testid="quotation-address-restricted"]').text()).toContain('当前报价为只读')
+    expect(wrapper.get('[aria-label="设备名称"]').attributes('disabled')).toBeDefined()
+    expect(wrapper.find('[data-testid="submit-quotation-approval"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="link-quotation-opportunity"]').exists()).toBe(false)
+    expect(save).not.toHaveBeenCalled()
+  })
+
   it('shows Manager approval actions and requires a rejection reason', async () => {
     const { client } = api()
     const pending = structuredClone(detail)

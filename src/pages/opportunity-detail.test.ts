@@ -129,6 +129,30 @@ describe('Opportunity detail', () => {
     expect(wrapper.get('[data-testid="back-opportunities"]').attributes('href')).toContain('/opportunities')
   })
 
+  it('keeps Site-restricted Opportunities readable without exposing invalid main-record actions', async () => {
+    const { api, pinia, router } = await context('OPP-001', false, 'Sales')
+    const getStrategyOpportunity = api.getStrategyOpportunity.bind(api)
+    api.getStrategyOpportunity = async (id) => {
+      const result = await getStrategyOpportunity(id)
+      return {
+        ...result,
+        data: { ...result.data, siteId: '', site: '', siteRestricted: true, stage: '报价' },
+      }
+    }
+
+    const wrapper = mount(OpportunityDetailPage, {
+      props: { apiClient: api },
+      global: { plugins: [pinia, router] },
+    })
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('仅客户负责人可见')
+    expect(wrapper.find('[data-testid="edit-opportunity"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="mark-opportunity-lost"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="advance-opportunity-stage"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="new-opportunity-action"]').exists()).toBe(true)
+  })
+
   it('preserves the existing strategy capabilities in the recomposed detail', async () => {
     const { api, pinia, router } = await context('OPP-003')
     const wrapper = mount(OpportunityDetailPage, {

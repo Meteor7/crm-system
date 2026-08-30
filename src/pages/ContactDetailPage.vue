@@ -37,17 +37,25 @@ const busy = ref(false)
 const actionError = ref('')
 const referencesReady = ref(false)
 const referencesError = ref('')
-const canWrite = computed(() => app.can('contact:write'))
-const canDeleteContactFiles = computed(() => {
+const currentAccount = computed(() => accounts.value.find((account) => account.id === detail.value?.contact.accountId))
+const canWrite = computed(() => {
   const user = app.bootstrap?.user
-  if (!user || !detail.value) return false
+  if (!user || !detail.value || !app.can('contact:write')) return false
   if (user.role === 'Manager') return true
-  return user.role === 'Sales'
-    && accounts.value.find((account) => account.id === detail.value?.contact.accountId)?.owner === user.id
+  return user.role === 'Sales' && currentAccount.value?.owner === user.id
+})
+const canDeleteContactFiles = computed(() => canWrite.value)
+const siteRestricted = computed(() => {
+  const user = app.bootstrap?.user
+  return user?.role === 'Sales' && Boolean(currentAccount.value) && currentAccount.value?.owner !== user.id
+})
+const siteDisplay = computed(() => {
+  if (siteRestricted.value) return '仅客户负责人可见'
+  return detail.value?.contact.siteName || detail.value?.contact.siteId || '未指定'
 })
 const canMerge = computed(() => app.can('contact:merge'))
-const canCreateOpportunity = computed(() => app.can('deal:write'))
-const canCreateVisit = computed(() => app.can('visit:create') && app.can('visit:write'))
+const canCreateOpportunity = computed(() => canWrite.value && app.can('deal:write'))
+const canCreateVisit = computed(() => canWrite.value && app.can('visit:create') && app.can('visit:write'))
 const isActive = computed(() => detail.value?.contact.status === 'Active')
 const canDelete = computed(() => app.can('contact:delete'))
 const statusTone = computed<Tone>(() => detail.value?.contact.status === 'Active' ? 'positive' : detail.value?.contact.status === 'Left Company' ? 'warning' : 'neutral')
@@ -202,7 +210,7 @@ onMounted(async () => {
         <SectionCard title="资料与组织关系" eyebrow="CONTACT PROFILE">
           <dl class="profile-list">
             <div><dt>客户</dt><dd><RouterLink :to="{ name: 'account-detail', params: { accountId: detail.contact.accountId } }">{{ detail.contact.accountName }}</RouterLink></dd></div>
-            <div><dt>厂区</dt><dd><RouterLink v-if="detail.contact.siteId" :to="{ name: 'account-detail', params: { accountId: detail.contact.accountId } }">{{ detail.contact.siteName || detail.contact.siteId }}</RouterLink><span v-else>未指定</span></dd></div>
+            <div><dt>厂区</dt><dd><RouterLink v-if="detail.contact.siteId && !siteRestricted" :to="{ name: 'account-detail', params: { accountId: detail.contact.accountId } }">{{ siteDisplay }}</RouterLink><span v-else>{{ siteDisplay }}</span></dd></div>
             <div><dt>职位 / 部门</dt><dd>{{ detail.contact.title }} / {{ detail.contact.department }}</dd></div>
             <div><dt>电话</dt><dd><a v-if="detail.contact.phone" :href="`tel:${detail.contact.phone}`"><Phone :size="13" />{{ detail.contact.phone }}</a><span v-else>—</span></dd></div>
             <div><dt>邮箱</dt><dd><a v-if="detail.contact.email" :href="`mailto:${detail.contact.email}`"><Mail :size="13" />{{ detail.contact.email }}</a><span v-else>—</span></dd></div>

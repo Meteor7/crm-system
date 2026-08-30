@@ -48,10 +48,34 @@ const busy = ref(false)
 const modalError = ref('')
 const canWrite = computed(() => app.can('contact:write'))
 const canDelete = computed(() => app.can('contact:delete'))
+const writableAccounts = computed(() => {
+  const user = app.bootstrap?.user
+  if (!user || !canWrite.value) return []
+  if (user.role === 'Manager') return accounts.value
+  return user.role === 'Sales' ? accounts.value.filter((account) => account.owner === user.id) : []
+})
+const writableAccountIds = computed(() => new Set(writableAccounts.value.map((account) => account.id)))
+const writableSites = computed(() => sites.value.filter((site) => writableAccountIds.value.has(site.accountId)))
+const canCreate = computed(() => writableAccounts.value.length > 0)
+const showActions = computed(() => rows.value.some((contact) => canEditContact(contact)))
 const visibleSites = computed(() => sites.value.filter((item) => accountId.value === 'All' || item.accountId === accountId.value))
 const owners = computed(() => [...new Set([...accounts.value.map((item) => item.owner), ...allContacts.value.map((item) => item.owner)])].sort())
 const statusTone = (status: ContactStatus): Tone => status === 'Active' ? 'positive' : status === 'Left Company' ? 'warning' : 'neutral'
 let sequence = 0
+
+function canEditContact(contact: ContactSummaryDto) {
+  const user = app.bootstrap?.user
+  if (!user || !canWrite.value) return false
+  if (user.role === 'Manager') return true
+  return user.role === 'Sales' && writableAccountIds.value.has(contact.accountId)
+}
+
+function siteLabel(contact: ContactSummaryDto) {
+  const user = app.bootstrap?.user
+  const account = accounts.value.find((item) => item.id === contact.accountId)
+  if (user?.role === 'Sales' && account && account.owner !== user.id) return '仅客户负责人可见'
+  return contact.siteName || '未指定厂区'
+}
 
 async function loadReferences() {
   accounts.value = await readAllPages((page, pageSize) => props.apiClient.listAccounts({ page, pageSize }))
@@ -120,6 +144,7 @@ function openCreate() {
   modalOpen.value = true
 }
 function openEdit(contact: ContactSummaryDto) {
+  if (!canEditContact(contact)) return
   editing.value = contact
   modalError.value = ''
   modalOpen.value = true
@@ -206,7 +231,7 @@ onBeforeUnmount(() => {
 <template>
   <div class="contacts-page">
     <PageHeader eyebrow="CONTACT MASTER" title="联系人主档" description="统一维护客户联系人、组织关系和联系信息；购买角色与影响力保留在具体 Opportunity 关联中。">
-      <button v-if="canWrite" class="primary-button" type="button" data-testid="new-contact" @click="openCreate"><Plus :size="15" />新增联系人</button>
+      <button v-if="canCreate" class="primary-button" type="button" data-testid="new-contact" @click="openCreate"><Plus :size="15" />新增联系人</button>
     </PageHeader>
 
     <FilterBar :result-label="`${total} 位联系人`" @reset="resetFilters">
@@ -224,15 +249,15 @@ onBeforeUnmount(() => {
       <DataState v-else-if="!rows.length" type="empty" title="没有匹配的联系人" message="调整搜索或筛选条件后重试。" />
       <div v-else class="table-scroll">
         <table class="crm-table contacts-table is-responsive">
-          <thead><tr><th>联系人</th><th>客户 / 厂区</th><th>职位 / 部门</th><th>电话</th><th>邮箱</th><th>负责人</th><th>状态</th><th>更新日期</th><th v-if="canWrite">操作</th></tr></thead>
+          <thead><tr><th>联系人</th><th>客户 / 厂区</th><th>职位 / 部门</th><th>电话</th><th>邮箱</th><th>负责人</th><th>状态</th><th>更新日期</th><th v-if="showActions">操作</th></tr></thead>
           <tbody>
             <tr v-for="contact in rows" :key="contact.id">
               <td data-label="联系人"><button class="contact-link record-name-link" type="button" :data-contact-id="contact.id" @click="openDetail(contact)"><span><UserRound :size="14" /></span><strong>{{ contact.name }}</strong><StatusBadge v-if="contact.dataQuality === 'Needs Review'" data-testid="needs-review" label="Needs Review" tone="warning" /></button></td>
-              <td data-label="客户 / 厂区"><strong>{{ contact.accountShortName }}</strong><small>{{ contact.siteName || '未指定厂区' }}</small></td>
+              <td data-label="客户 / 厂区"><strong>{{ contact.accountShortName }}</strong><small>{{ siteLabel(contact) }}</small></td>
               <td data-label="职位 / 部门"><strong>{{ contact.title }}</strong><small>{{ contact.department }}</small></td>
               <td data-label="电话">{{ contact.phone || '—' }}</td><td data-label="邮箱">{{ contact.email || '—' }}</td><td data-label="负责人">{{ personnelDisplayName(contact.owner) }}</td>
               <td data-label="状态"><StatusBadge :label="contact.status" :tone="statusTone(contact.status)" /></td><td data-label="更新日期">{{ formatDisplayDate(contact.updatedAt) }}</td>
-              <td v-if="canWrite" data-label="操作"><button class="edit-button" type="button" data-testid="edit-contact" @click="openEdit(contact)"><Edit3 :size="13" />编辑</button></td>
+              <td v-if="showActions" data-label="操作"><button v-if="canEditContact(contact)" class="edit-button" type="button" data-testid="edit-contact" @click="openEdit(contact)"><Edit3 :size="13" />编辑</button></td>
             </tr>
           </tbody>
         </table>
@@ -240,7 +265,7 @@ onBeforeUnmount(() => {
       <PaginationControls v-if="!denied && !error && total > pageSize" :page="page" :page-size="pageSize" :total="total" @change="goPage" @page-size-change="changePageSize" />
     </section>
 
-    <ContactModal v-if="modalOpen" :contact="editing" :accounts="accounts" :sites="sites" :contacts="allContacts" :busy="busy" :error="modalError" :can-delete="Boolean(editing && canDelete)" @close="modalOpen = false" @submit="saveContact" @delete="requestDeleteFromEdit" />
+    <ContactModal v-if="modalOpen" :contact="editing" :accounts="writableAccounts" :sites="writableSites" :contacts="allContacts" :busy="busy" :error="modalError" :can-delete="Boolean(editing && canDelete)" @close="modalOpen = false" @submit="saveContact" @delete="requestDeleteFromEdit" />
     <ModalShell v-if="deleteOpen && deleteTarget" title="永久删除联系人" eyebrow="HARD DELETE" :busy="busy" @close="deleteOpen = false" @submit="deleteContact">
       <p class="delete-note">此操作不可恢复。“{{ deleteTarget.name }}”会从本地数据中物理删除；Opportunity 中对应关键人关联会移除，Booking 与 Demo Request 会优先改绑到同客户的现有联系人。</p>
       <p v-if="modalError" class="form-error">{{ modalError }}</p>

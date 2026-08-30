@@ -21,12 +21,21 @@ class TestQuotationPermissionContract(unittest.TestCase):
     def test_scope_and_hooks_cover_master_and_version(self):
         scope = (ROOT / "permissions" / "scope.py").read_text(encoding="utf-8")
         hooks = (ROOT / "hooks.py").read_text(encoding="utf-8")
+        service = (ROOT / "services" / "quotations.py").read_text(encoding="utf-8")
         for doctype in ("CRM Quotation", "CRM Quotation Version", "CRM Quotation Approval"):
             self.assertIn(f'"{doctype}"', scope)
             self.assertIn(f'"{doctype}"', hooks)
         self.assertIn("quotation_owner", scope)
         self.assertIn("quotation_query", scope)
         self.assertIn("quotation_version_query", scope)
+        self.assertIn("_sales_account_owner_condition", scope)
+        self.assertIn("has_quotation_version_permission", scope)
+        self.assertIn(
+            '"CRM Quotation Version": "rayher_crm.permissions.scope.has_quotation_version_permission"',
+            hooks,
+        )
+        version_payload = service.split("def _version_payload", 1)[1].split("def create_version", 1)[0]
+        self.assertNotIn("_serialize_version", version_payload)
 
 
 if __name__ == "__main__":

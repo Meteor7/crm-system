@@ -14,10 +14,10 @@ function quotationApi(): CrmApi {
     listQuotations: vi.fn(async () => ({ data: { items: [{ id: 'CRM-QTN-00001', refNo: 'PK20260810-A1', quotationType: 'Device', opportunityId: 'OPP-001', opportunityTitle: 'AOI Project', accountId: 'ACC-001', accountName: 'Planck Fab', owner: 'sales@example.com', status: 'Draft', approvalStatus: 'Not Submitted', latestVersion: 1, currentVersionId: 'CRM-QTV-00001', currentPublishedVersionId: '', modified: '2026-08-10T10:00:00+08:00' }] }, meta: { requestId: 'q', total: 1 }, warnings: [] })),
     createQuotation: vi.fn(async () => ({ data: { quotation: { id: 'CRM-QTN-00002' } }, warnings: [] })),
     listStrategyOpportunities: vi.fn(async () => ({ data: { items: [
-      { id: 'OPP-001', title: 'AOI Project', account: 'Planck Fab' },
-      { id: 'OPP-002', title: 'Metrology Project', account: 'Second Fab' },
+      { id: 'OPP-001', title: 'AOI Project', accountId: 'ACC-001', account: 'Planck Fab' },
+      { id: 'OPP-002', title: 'Metrology Project', accountId: 'ACC-001', account: 'Second Fab' },
     ] }, warnings: [] })),
-    listAccounts: vi.fn(async () => ({ data: { items: [{ id: 'ACC-001', name: 'Planck Fab' }] }, meta: { requestId: 'a', total: 1 }, warnings: [] })),
+    listAccounts: vi.fn(async () => ({ data: { items: [{ id: 'ACC-001', name: 'Planck Fab', owner: 'sales@example.com' }] }, meta: { requestId: 'a', total: 1 }, warnings: [] })),
   } as unknown as CrmApi
 }
 
@@ -57,7 +57,7 @@ describe('QuotationsPage', () => {
 
   it('removes search and manual ref number and offers only unquoted opportunities', async () => {
     const api = quotationApi();
-    vi.mocked(api.listStrategyOpportunities).mockImplementation(async (query) => ({ data: { items: query?.page === 2 ? [{ id: 'OPP-002', title: 'Metrology Project', account: 'Second Fab' }] : [{ id: 'OPP-001', title: 'AOI Project', account: 'Planck Fab' }] } as never, meta: { requestId: 'o', total: 2 }, warnings: [] }))
+    vi.mocked(api.listStrategyOpportunities).mockImplementation(async (query) => ({ data: { items: query?.page === 2 ? [{ id: 'OPP-002', title: 'Metrology Project', accountId: 'ACC-001', account: 'Second Fab' }] : [{ id: 'OPP-001', title: 'AOI Project', accountId: 'ACC-001', account: 'Planck Fab' }] } as never, meta: { requestId: 'o', total: 2 }, warnings: [] }))
     const pinia = createPinia(); useAppStore(pinia).bootstrap = (await api.getBootstrap()).data
     const router = createAppRouter(); await router.push('/quotations'); await router.isReady()
     const wrapper = mount(QuotationsPage, { props: { apiClient: api }, global: { plugins: [pinia, router] } })
@@ -76,6 +76,28 @@ describe('QuotationsPage', () => {
     await wrapper.get('[data-modal-submit]').trigger('submit')
     await flushPromises()
     expect(api.createQuotation).toHaveBeenCalledWith({ opportunityId: 'OPP-002' })
+  })
+
+  it('excludes Site-restricted public Accounts and Opportunities from quotation creation', async () => {
+    const api = quotationApi()
+    vi.mocked(api.listStrategyOpportunities).mockResolvedValue({
+      data: { items: [{ id: 'OPP-RESTRICTED', title: 'Restricted', accountId: 'ACC-PUBLIC', account: 'Public Fab', siteRestricted: true }] } as never,
+      meta: { requestId: 'o', total: 1 }, warnings: [],
+    })
+    vi.mocked(api.listAccounts).mockResolvedValue({
+      data: { items: [{ id: 'ACC-PUBLIC', name: 'Public Fab', owner: 'other.sales@example.com' }] } as never,
+      meta: { requestId: 'a', total: 1 }, warnings: [],
+    })
+    const pinia = createPinia(); useAppStore(pinia).bootstrap = (await api.getBootstrap()).data
+    const router = createAppRouter(); await router.push('/quotations'); await router.isReady()
+    const wrapper = mount(QuotationsPage, { props: { apiClient: api }, global: { plugins: [pinia, router] } })
+    await flushPromises()
+
+    await wrapper.get('[data-testid="new-quotation"]').trigger('click'); await flushPromises()
+    expect(wrapper.findAll('select[required] option').map((node) => node.attributes('value'))).toEqual([''])
+    await wrapper.get('[data-testid="quotation-source"]').setValue('Others')
+    expect(wrapper.findAll('[data-testid="quotation-account"] option').map((node) => node.attributes('value'))).toEqual([''])
+    expect(wrapper.get('[data-modal-submit]').attributes('disabled')).toBeDefined()
   })
 
   it('navigates quotation result pages instead of truncating the first page', async () => {

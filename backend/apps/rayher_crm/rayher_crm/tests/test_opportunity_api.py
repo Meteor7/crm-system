@@ -159,6 +159,36 @@ class TestOpportunityApi(FrappeTestCase):
         frappe.set_user(self.engineer)
         self.assertEqual({row["id"] for row in list_strategy_opportunities()}, {owned["id"]})
 
+    def test_public_child_owner_cannot_read_the_account_site(self):
+        account, site = self._account_site(self.sales, "PublicRestrictedSite")
+        opportunity = create_strategy_opportunity(self._input(account, site, self.sales))
+        frappe.db.set_value(
+            "Customer", account["id"], "custom_crm_visibility", "Public", update_modified=False,
+        )
+        frappe.db.set_value(
+            "CRM Opportunity", opportunity["id"], "opportunity_owner", self.other_sales, update_modified=False,
+        )
+
+        frappe.set_user(self.other_sales)
+        detail = get_strategy_opportunity(opportunity["id"])
+        self.assertEqual((detail["siteId"], detail["site"], detail["siteRestricted"]), ("", "", True))
+        self.assertFalse(
+            frappe.has_permission("CRM Opportunity", "read", doc=opportunity["id"], user=self.other_sales),
+        )
+        self.assertEqual(
+            frappe.get_list("CRM Opportunity", filters={"name": opportunity["id"]}, pluck="name"),
+            [],
+        )
+        listed = list_strategy_opportunities({"accountId": account["id"], "page": 1, "pageSize": 20})[0]
+        self.assertEqual([(row["id"], row["siteId"], row["site"]) for row in listed], [(opportunity["id"], "", "")])
+        hidden_site_search = list_strategy_opportunities({
+            "search": site["id"], "page": 1, "pageSize": 20,
+        })[0]
+        self.assertNotIn(opportunity["id"], {row["id"] for row in hidden_site_search})
+        with self.assertRaises(CrmApiException) as site_write:
+            update_strategy_opportunity(opportunity["id"], {"title": "Cannot retain a hidden Site"}, detail["modified"])
+        self.assertEqual(site_write.exception.code, "SCOPE_DENIED")
+
     def test_probability_is_derived_from_stage_and_purchase_intent(self):
         cases = [
             ("需求发现", 50, 29), ("Wafer Demo确认", 80, 65),

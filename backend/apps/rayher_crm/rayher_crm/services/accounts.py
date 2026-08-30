@@ -342,7 +342,7 @@ def get_account_360(name: str) -> dict[str, Any]:
     from rayher_crm.services.opportunities import list_strategy_opportunities
     from rayher_crm.services.pipeline import actions_for_account, list_pipeline
     from rayher_crm.services.quotations import quotations_for_account
-    from rayher_crm.services.sites import sites_for_account
+    from rayher_crm.services.sites import can_read_site_data, sites_for_account
     from rayher_crm.services.visits import list_visits
 
     pipeline = list_pipeline({"accountId": name})
@@ -354,7 +354,7 @@ def get_account_360(name: str) -> dict[str, Any]:
         item["date"] for item in visits if item["status"] in {"Visited", "Minutes Submitted", "Manager Reviewed"}
     )
     capabilities = capabilities_for_user()
-    can_read_business_data = resolve_crm_role() != "Sales" or doc.custom_crm_owner == frappe.session.user
+    can_read_business_data = can_read_site_data(name)
 
     return {
         "account": serialize_account(doc),

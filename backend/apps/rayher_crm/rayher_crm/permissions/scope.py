@@ -173,6 +173,97 @@ def _customer_condition(table: str, role: str, escaped_user: str) -> str:
     return "1=0"
 
 
+def _sales_parent_account_condition(
+    account_expression: str,
+    escaped_user: str,
+    *,
+    allow_unlinked: bool = False,
+) -> str:
+    """Keep child ownership from widening access to another Sales user's Private Account."""
+
+    customer_table = "`crm_parent_customer`"
+    customer_scope = _customer_condition(customer_table, "Sales", escaped_user)
+    linked_scope = (
+        "EXISTS (SELECT 1 FROM `tabCustomer` AS `crm_parent_customer` "
+        f"WHERE `crm_parent_customer`.`name` = {account_expression} "
+        f"AND ({customer_scope}))"
+    )
+    if allow_unlinked:
+        return f"(COALESCE({account_expression}, '') = '' OR {linked_scope})"
+    return linked_scope
+
+
+def _sales_account_owner_condition(account_expression: str, escaped_user: str) -> str:
+    """Restrict raw Site/Address-bearing records to the Account owner."""
+
+    return (
+        "EXISTS (SELECT 1 FROM `tabCustomer` AS `crm_owned_customer` "
+        f"WHERE `crm_owned_customer`.`name` = {account_expression} "
+        f"AND `crm_owned_customer`.`custom_crm_owner` = {escaped_user})"
+    )
+
+
+def _sales_linked_account_owner_condition(
+    parent_expression: str,
+    parenttype: str,
+    escaped_user: str,
+) -> str:
+    """Require a standard Contact-like document to link to an owned Account."""
+
+    return (
+        "EXISTS (SELECT 1 FROM `tabDynamic Link` AS `crm_owned_link` "
+        "INNER JOIN `tabCustomer` AS `crm_owned_customer` "
+        "ON `crm_owned_customer`.`name` = `crm_owned_link`.`link_name` "
+        f"WHERE `crm_owned_link`.`parent` = {parent_expression} "
+        f"AND `crm_owned_link`.`parenttype` = {frappe.db.escape(parenttype)} "
+        "AND `crm_owned_link`.`parentfield` = 'links' "
+        "AND `crm_owned_link`.`link_doctype` = 'Customer' "
+        f"AND `crm_owned_customer`.`custom_crm_owner` = {escaped_user})"
+    )
+
+
+def _raw_site_data_query(doctype: str, user: str | None = None) -> str:
+    """Hide unredacted standard DocType rows from non-Account-owner Sales.
+
+    Custom CRM services deliberately use ``conditions_for_doctype`` and return
+    redacted DTOs. Standard Frappe resource APIs return the raw document, so a
+    narrower query is required for records that carry Site/Address fields.
+    """
+
+    condition = conditions_for_doctype(doctype, user)
+    resolved_user = user or getattr(frappe.session, "user", None)
+    if _role_for_query(resolved_user) != "Sales":
+        return condition
+    escaped_user = frappe.db.escape(resolved_user)
+    if doctype == "Contact":
+        account_owner_scope = _sales_linked_account_owner_condition(
+            "`tabContact`.`name`",
+            "Contact",
+            escaped_user,
+        )
+    else:
+        account_owner_scope = _sales_account_owner_condition(
+            f"`tab{doctype}`.`account`",
+            escaped_user,
+        )
+    return f"({condition}) AND ({account_owner_scope})"
+
+
+def _sales_child_condition(
+    owner_condition: str,
+    account_expression: str,
+    escaped_user: str,
+    *,
+    allow_unlinked: bool = False,
+) -> str:
+    parent_scope = _sales_parent_account_condition(
+        account_expression,
+        escaped_user,
+        allow_unlinked=allow_unlinked,
+    )
+    return f"({owner_condition}) AND ({parent_scope})"
+
+
 def conditions_for_doctype(doctype: str, user: str | None = None) -> str:
     if doctype not in SCOPED_DOCTYPES:
         raise ValueError(f"Unsupported scoped DocType: {doctype}")
@@ -193,7 +284,12 @@ def conditions_for_doctype(doctype: str, user: str | None = None) -> str:
         if role == "Manager":
             role_scope = submitted
         elif role == "Sales":
-            role_scope = f"`crm_request`.`sales_owner` = {escaped_user}"
+            role_scope = _sales_child_condition(
+                f"`crm_request`.`sales_owner` = {escaped_user}",
+                "`crm_request`.`account`",
+                escaped_user,
+                allow_unlinked=True,
+            )
         else:
             role_scope = f"`crm_request`.`engineer_owner` = {escaped_user} AND {submitted}"
         return (
@@ -209,17 +305,26 @@ def conditions_for_doctype(doctype: str, user: str | None = None) -> str:
             return "1=0"
         escaped_user = frappe.db.escape(resolved_user)
         if doctype == "CRM Quotation":
-            return f"`tabCRM Quotation`.`quotation_owner` = {escaped_user}"
+            return _sales_child_condition(
+                f"`tabCRM Quotation`.`quotation_owner` = {escaped_user}",
+                "`tabCRM Quotation`.`account`",
+                escaped_user,
+            )
+        quotation_scope = _sales_child_condition(
+            f"`crm_quotation`.`quotation_owner` = {escaped_user}",
+            "`crm_quotation`.`account`",
+            escaped_user,
+        )
         if doctype == "CRM Quotation Approval":
             return (
                 "EXISTS (SELECT 1 FROM `tabCRM Quotation` AS `crm_quotation` "
                 "WHERE `crm_quotation`.`name` = `tabCRM Quotation Approval`.`quotation` "
-                f"AND `crm_quotation`.`quotation_owner` = {escaped_user})"
+                f"AND ({quotation_scope}))"
             )
         return (
             "EXISTS (SELECT 1 FROM `tabCRM Quotation` AS `crm_quotation` "
             "WHERE `crm_quotation`.`name` = `tabCRM Quotation Version`.`quotation` "
-            f"AND `crm_quotation`.`quotation_owner` = {escaped_user})"
+            f"AND ({quotation_scope}))"
         )
     if doctype in {"CRM RFQ", "CRM RFQ Version"}:
         escaped_user = frappe.db.escape(resolved_user)
@@ -227,11 +332,25 @@ def conditions_for_doctype(doctype: str, user: str | None = None) -> str:
             return "1=1"
         owner_field = "sales_owner" if role == "Sales" else "engineer_owner"
         if doctype == "CRM RFQ":
-            return f"`tabCRM RFQ`.`{owner_field}` = {escaped_user}"
+            owner_scope = f"`tabCRM RFQ`.`{owner_field}` = {escaped_user}"
+            if role == "Sales":
+                return _sales_child_condition(
+                    owner_scope,
+                    "`tabCRM RFQ`.`account`",
+                    escaped_user,
+                )
+            return owner_scope
+        owner_scope = f"`crm_rfq`.`{owner_field}` = {escaped_user}"
+        if role == "Sales":
+            owner_scope = _sales_child_condition(
+                owner_scope,
+                "`crm_rfq`.`account`",
+                escaped_user,
+            )
         return (
             "EXISTS (SELECT 1 FROM `tabCRM RFQ` AS `crm_rfq` "
             "WHERE `crm_rfq`.`name` = `tabCRM RFQ Version`.`rfq` "
-            f"AND `crm_rfq`.`{owner_field}` = {escaped_user})"
+            f"AND ({owner_scope}))"
         )
     if role == "Manager":
         return "1=1"
@@ -251,7 +370,12 @@ def conditions_for_doctype(doctype: str, user: str | None = None) -> str:
         return account_condition
     if doctype == "Lead":
         if role == "Sales":
-            return f"`tabLead`.`lead_owner` = {escaped_user}"
+            return _sales_child_condition(
+                f"`tabLead`.`lead_owner` = {escaped_user}",
+                "`tabLead`.`custom_crm_converted_account`",
+                escaped_user,
+                allow_unlinked=True,
+            )
         return (
             "EXISTS (SELECT 1 FROM `tabCRM Account Engineer Assignment` AS `crm_assignment` "
             "WHERE `crm_assignment`.`customer` = `tabLead`.`custom_crm_converted_account` "
@@ -260,7 +384,11 @@ def conditions_for_doctype(doctype: str, user: str | None = None) -> str:
         )
     if doctype == "CRM Booking":
         if role == "Sales":
-            return f"`tabCRM Booking`.`booking_owner` = {escaped_user}"
+            return _sales_child_condition(
+                f"`tabCRM Booking`.`booking_owner` = {escaped_user}",
+                "`tabCRM Booking`.`account`",
+                escaped_user,
+            )
         return (
             "EXISTS (SELECT 1 FROM `tabCRM Account Engineer Assignment` AS `crm_assignment` "
             "WHERE `crm_assignment`.`customer` = `tabCRM Booking`.`account` "
@@ -269,24 +397,47 @@ def conditions_for_doctype(doctype: str, user: str | None = None) -> str:
         )
     if doctype == "CRM Installed Tool":
         if role == "Sales":
-            return f"`tabCRM Installed Tool`.`sales_owner` = {escaped_user}"
+            return _sales_child_condition(
+                f"`tabCRM Installed Tool`.`sales_owner` = {escaped_user}",
+                "`tabCRM Installed Tool`.`account`",
+                escaped_user,
+            )
         return f"`tabCRM Installed Tool`.`engineer_owner` = {escaped_user}"
     if doctype == "CRM Demo Request":
         owner_field = "sales_owner" if role == "Sales" else "engineer_owner"
-        return f"`tabCRM Demo Request`.`{owner_field}` = {escaped_user}"
+        owner_scope = f"`tabCRM Demo Request`.`{owner_field}` = {escaped_user}"
+        if role == "Sales":
+            return _sales_child_condition(
+                owner_scope,
+                "`tabCRM Demo Request`.`account`",
+                escaped_user,
+                allow_unlinked=True,
+            )
+        return owner_scope
     if doctype == "CRM Evaluation":
         if role == "Engineer":
             return f"`tabCRM Evaluation`.`evaluation_owner` = {escaped_user}"
+        request_scope = _sales_child_condition(
+            f"`crm_demo_request`.`sales_owner` = {escaped_user}",
+            "`crm_demo_request`.`account`",
+            escaped_user,
+            allow_unlinked=True,
+        )
         return (
             "EXISTS (SELECT 1 FROM `tabCRM Demo Request` AS `crm_demo_request` "
             "WHERE `crm_demo_request`.`name` = `tabCRM Evaluation`.`demo_request` "
-            f"AND `crm_demo_request`.`sales_owner` = {escaped_user})"
+            f"AND ({request_scope}))"
         )
     if doctype == "CRM Visit":
         if role == "Sales":
-            return (
+            owner_scope = (
                 f"(`tabCRM Visit`.`visit_owner` = {escaped_user} "
                 f"OR `tabCRM Visit`.`action_owner` = {escaped_user})"
+            )
+            return _sales_child_condition(
+                owner_scope,
+                "`tabCRM Visit`.`account`",
+                escaped_user,
             )
         return "1=0"
     if doctype == "CRM Contact File":
@@ -302,7 +453,11 @@ def conditions_for_doctype(doctype: str, user: str | None = None) -> str:
             f"WHERE {live_scope}`crm_customer`.`name` = {table}.`account` AND ({customer_scope}))"
         )
     if role == "Sales":
-        return f"`tabCRM Opportunity`.`opportunity_owner` = {escaped_user}"
+        return _sales_child_condition(
+            f"`tabCRM Opportunity`.`opportunity_owner` = {escaped_user}",
+            "`tabCRM Opportunity`.`account`",
+            escaped_user,
+        )
     return (
         "EXISTS (SELECT 1 FROM `tabCRM Account Engineer Assignment` AS `crm_assignment` "
         "WHERE `crm_assignment`.`customer` = `tabCRM Opportunity`.`account` "
@@ -316,7 +471,7 @@ def customer_query(user: str | None = None) -> str:
 
 
 def contact_query(user: str | None = None) -> str:
-    return conditions_for_doctype("Contact", user)
+    return _raw_site_data_query("Contact", user)
 
 
 def lead_query(user: str | None = None) -> str:
@@ -324,7 +479,7 @@ def lead_query(user: str | None = None) -> str:
 
 
 def opportunity_query(user: str | None = None) -> str:
-    return conditions_for_doctype("CRM Opportunity", user)
+    return _raw_site_data_query("CRM Opportunity", user)
 
 
 def booking_query(user: str | None = None) -> str:
@@ -332,7 +487,7 @@ def booking_query(user: str | None = None) -> str:
 
 
 def installed_tool_query(user: str | None = None) -> str:
-    return conditions_for_doctype("CRM Installed Tool", user)
+    return _raw_site_data_query("CRM Installed Tool", user)
 
 
 def demo_request_query(user: str | None = None) -> str:
@@ -364,7 +519,7 @@ def quotation_query(user: str | None = None) -> str:
 
 
 def quotation_version_query(user: str | None = None) -> str:
-    return conditions_for_doctype("CRM Quotation Version", user)
+    return _raw_site_data_query("CRM Quotation Version", user)
 
 
 def quotation_approval_query(user: str | None = None) -> str:
@@ -400,3 +555,66 @@ def has_crm_permission(doc, user: str | None = None, permission_type: str | None
         (doc.name,),
     )
     return bool(rows)
+
+
+def has_site_bearing_permission(
+    doc,
+    user: str | None = None,
+    permission_type: str | None = None,
+    ptype: str | None = None,
+    debug: bool = False,
+) -> bool:
+    """Deny raw DocType/File access when Site/Address data must be redacted.
+
+    CRM services may still return a redacted business record to its child-record
+    owner. Standard DocType APIs operate on unredacted documents, so Sales users
+    must also own the linked Account.
+    """
+
+    del debug
+    resolved_user = user or getattr(frappe.session, "user", None)
+    normalized_permission = permission_type or ptype
+    if not has_crm_permission(
+        doc,
+        user=resolved_user,
+        permission_type=normalized_permission,
+    ):
+        return False
+    if _role_for_query(resolved_user) != "Sales":
+        return True
+    if doc.doctype == "Contact":
+        rows = frappe.db.sql(
+            "SELECT 1 FROM `tabDynamic Link` AS `crm_owned_link` "
+            "INNER JOIN `tabCustomer` AS `crm_owned_customer` "
+            "ON `crm_owned_customer`.`name` = `crm_owned_link`.`link_name` "
+            "WHERE `crm_owned_link`.`parent` = %s "
+            "AND `crm_owned_link`.`parenttype` = 'Contact' "
+            "AND `crm_owned_link`.`parentfield` = 'links' "
+            "AND `crm_owned_link`.`link_doctype` = 'Customer' "
+            "AND `crm_owned_customer`.`custom_crm_owner` = %s LIMIT 1",
+            (doc.name, resolved_user),
+        )
+        return bool(rows)
+    account_id = frappe.db.get_value(doc.doctype, doc.name, "account")
+    return bool(
+        account_id
+        and frappe.db.get_value("Customer", account_id, "custom_crm_owner") == resolved_user
+    )
+
+
+def has_quotation_version_permission(
+    doc,
+    user: str | None = None,
+    permission_type: str | None = None,
+    ptype: str | None = None,
+    debug: bool = False,
+) -> bool:
+    """Backward-compatible named hook for quotation Version/File checks."""
+
+    return has_site_bearing_permission(
+        doc,
+        user=user,
+        permission_type=permission_type,
+        ptype=ptype,
+        debug=debug,
+    )

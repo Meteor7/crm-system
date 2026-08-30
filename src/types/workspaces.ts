@@ -82,6 +82,7 @@ export interface StrategyOpportunityDto {
   sourceLeadId?: string
   accountId: string
   siteId: string
+  siteRestricted?: boolean
   title: string
   account: string
   site: string

@@ -3,7 +3,7 @@ from __future__ import annotations
 import frappe
 from frappe.tests.utils import FrappeTestCase
 
-from rayher_crm.permissions.scope import conditions_for_doctype, install_crm_doc_permissions
+from rayher_crm.permissions.scope import conditions_for_doctype, has_crm_permission, install_crm_doc_permissions
 from rayher_crm.services.sites import create_site
 
 
@@ -225,18 +225,21 @@ class TestCrmScope(FrappeTestCase):
         self.assertIn(self.owned_opportunity, self._visible_names("CRM Opportunity", self.engineer))
         self.assertNotIn(self.foreign_opportunity, self._visible_names("CRM Opportunity", self.engineer))
 
-    def test_sales_can_open_contact_explicitly_reassigned_from_foreign_account(self):
+    def test_public_contact_service_scope_survives_raw_site_data_guard(self):
         reassigned_contact = self._create_contact(
             "Reassigned Foreign Contact", self.foreign_customer, self.sales,
         )
 
-        self.assertIn(reassigned_contact, self._visible_names("Contact", self.sales))
-        self.assertTrue(frappe.has_permission("Contact", "read", doc=reassigned_contact, user=self.sales))
+        frappe.set_user(self.sales)
+        doc = frappe.get_doc("Contact", reassigned_contact)
+        self.assertTrue(has_crm_permission(doc, user=self.sales, permission_type="read"))
+        self.assertNotIn(reassigned_contact, self._visible_names("Contact", self.sales))
+        self.assertFalse(frappe.has_permission("Contact", "read", doc=doc, user=self.sales))
 
-    def test_list_and_detail_permissions_use_the_same_scope(self):
+    def test_standard_list_and_detail_permissions_use_the_same_raw_scope(self):
         for doctype, owned_name, foreign_name, shared in (
             ("Customer", self.owned_customer, self.foreign_customer, True),
-            ("Contact", self.owned_contact, self.foreign_contact, True),
+            ("Contact", self.owned_contact, self.foreign_contact, False),
             ("Lead", self.owned_lead, self.foreign_lead, False),
             ("CRM Opportunity", self.owned_opportunity, self.foreign_opportunity, False),
             ("CRM Booking", self.owned_booking, self.foreign_booking, False),
@@ -256,6 +259,73 @@ class TestCrmScope(FrappeTestCase):
         foreign.custom_crm_owner = self.sales
         self.assertTrue(frappe.has_permission("Customer", "read", doc=foreign, user=self.sales))
 
+    def test_private_parent_cannot_be_bypassed_by_sales_child_ownership(self):
+        frappe.set_user("Administrator")
+        private_customer = self._create_customer("Scope Private Parent", self.other_sales)
+        frappe.db.set_value(
+            "Customer", private_customer, "custom_crm_visibility", "Private", update_modified=False,
+        )
+        private_contact = self._create_contact("Private Parent Contact", private_customer, self.other_sales)
+        private_lead = self._create_lead("Private Parent Lead", self.sales, private_customer)
+        private_site = create_site(private_customer, self._site_input("Private Parent Site"))["id"]
+        private_opportunity = self._create_opportunity(
+            "Private Parent Opportunity", private_customer, private_site, private_lead, self.sales,
+        )
+        private_booking = self._create_booking(
+            private_customer, private_contact, private_opportunity, self.sales,
+        )
+        private_tool = self._create_installed_tool(
+            private_customer,
+            private_site,
+            private_booking,
+            private_opportunity,
+            self.sales,
+            self.other_engineer,
+            f"SCOPE-PRIVATE-{frappe.generate_hash(length=10)}",
+        )
+        private_demo = self._create_demo_request(
+            private_customer,
+            private_contact,
+            private_opportunity,
+            self.sales,
+            self.other_engineer,
+        )
+        private_evaluation = self._create_evaluation(
+            private_customer, private_demo, self.other_engineer,
+        )
+
+        private_records = (
+            ("Contact", private_contact),
+            ("Lead", private_lead),
+            ("CRM Opportunity", private_opportunity),
+            ("CRM Booking", private_booking),
+            ("CRM Installed Tool", private_tool),
+            ("CRM Demo Request", private_demo),
+            ("CRM Evaluation", private_evaluation),
+        )
+        for doctype, name in private_records:
+            self.assertNotIn(name, self._visible_names(doctype, self.sales), doctype)
+            self.assertFalse(frappe.has_permission(doctype, "read", doc=name, user=self.sales), doctype)
+
+        frappe.set_user("Administrator")
+        frappe.db.set_value(
+            "Customer", private_customer, "custom_crm_visibility", "Public", update_modified=False,
+        )
+        raw_site_bearing_doctypes = {"Contact", "CRM Opportunity", "CRM Installed Tool"}
+        for doctype, name in private_records:
+            doc = frappe.get_doc(doctype, name)
+            self.assertTrue(
+                has_crm_permission(doc, user=self.sales, permission_type="read"),
+                f"{doctype} custom service scope",
+            )
+            raw_visible = doctype not in raw_site_bearing_doctypes
+            self.assertEqual(name in self._visible_names(doctype, self.sales), raw_visible, doctype)
+            self.assertEqual(
+                frappe.has_permission(doctype, "read", doc=doc, user=self.sales),
+                raw_visible,
+                doctype,
+            )
+
     def test_opportunity_scope_condition_is_sql_backed_for_all_roles(self):
         self.assertEqual(conditions_for_doctype("CRM Opportunity", self.manager), "1=1")
         self.assertIn(
@@ -266,19 +336,19 @@ class TestCrmScope(FrappeTestCase):
             "CRM Account Engineer Assignment",
             conditions_for_doctype("CRM Opportunity", self.engineer),
         )
-        self.assertNotIn("custom_crm_visibility", conditions_for_doctype("CRM Opportunity", self.sales))
+        self.assertIn("custom_crm_visibility", conditions_for_doctype("CRM Opportunity", self.sales))
 
     def test_booking_and_installed_tool_scope_is_sql_backed_for_all_roles(self):
         self.assertEqual(conditions_for_doctype("CRM Booking", self.manager), "1=1")
         self.assertIn("`tabCRM Booking`.`booking_owner`", conditions_for_doctype("CRM Booking", self.sales))
-        self.assertNotIn("custom_crm_visibility", conditions_for_doctype("CRM Booking", self.sales))
+        self.assertIn("custom_crm_visibility", conditions_for_doctype("CRM Booking", self.sales))
         self.assertIn("CRM Account Engineer Assignment", conditions_for_doctype("CRM Booking", self.engineer))
         self.assertIn(self.owned_booking, self._visible_names("CRM Booking", self.engineer))
         self.assertNotIn(self.foreign_booking, self._visible_names("CRM Booking", self.engineer))
 
         self.assertEqual(conditions_for_doctype("CRM Installed Tool", self.manager), "1=1")
         self.assertIn("`tabCRM Installed Tool`.`sales_owner`", conditions_for_doctype("CRM Installed Tool", self.sales))
-        self.assertNotIn("custom_crm_visibility", conditions_for_doctype("CRM Installed Tool", self.sales))
+        self.assertIn("custom_crm_visibility", conditions_for_doctype("CRM Installed Tool", self.sales))
         self.assertNotIn("custom_crm_visibility", conditions_for_doctype("CRM Contact File", self.sales))
         self.assertIn("`tabCRM Installed Tool`.`engineer_owner`", conditions_for_doctype("CRM Installed Tool", self.engineer))
         self.assertIn(self.owned_tool, self._visible_names("CRM Installed Tool", self.engineer))
@@ -287,6 +357,7 @@ class TestCrmScope(FrappeTestCase):
     def test_demo_request_scope_is_owner_backed_for_sales_and_engineer(self):
         self.assertEqual(conditions_for_doctype("CRM Demo Request", self.manager), "1=1")
         self.assertIn("`tabCRM Demo Request`.`sales_owner`", conditions_for_doctype("CRM Demo Request", self.sales))
+        self.assertIn("custom_crm_visibility", conditions_for_doctype("CRM Demo Request", self.sales))
         self.assertIn(
             "`tabCRM Demo Request`.`engineer_owner`",
             conditions_for_doctype("CRM Demo Request", self.engineer),
@@ -299,6 +370,7 @@ class TestCrmScope(FrappeTestCase):
     def test_evaluation_scope_inherits_sales_request_and_uses_engineer_owner(self):
         self.assertEqual(conditions_for_doctype("CRM Evaluation", self.manager), "1=1")
         self.assertIn("`crm_demo_request`.`sales_owner`", conditions_for_doctype("CRM Evaluation", self.sales))
+        self.assertIn("custom_crm_visibility", conditions_for_doctype("CRM Evaluation", self.sales))
         self.assertIn("`tabCRM Evaluation`.`evaluation_owner`", conditions_for_doctype("CRM Evaluation", self.engineer))
         self.assertIn(self.owned_evaluation, self._visible_names("CRM Evaluation", self.sales))
         self.assertNotIn(self.foreign_evaluation, self._visible_names("CRM Evaluation", self.sales))
@@ -311,6 +383,26 @@ class TestCrmScope(FrappeTestCase):
         self.assertFalse(frappe.has_permission(
             "CRM Evaluation", "read", doc=self.foreign_evaluation, user=self.engineer,
         ))
+
+    def test_all_sales_child_scopes_include_the_private_parent_guard(self):
+        for doctype in (
+            "Lead",
+            "CRM Opportunity",
+            "CRM Booking",
+            "CRM Installed Tool",
+            "CRM Demo Request",
+            "CRM Evaluation",
+            "CRM Demo Artifact",
+            "CRM Visit",
+            "CRM Quotation",
+            "CRM Quotation Version",
+            "CRM Quotation Approval",
+            "CRM RFQ",
+            "CRM RFQ Version",
+        ):
+            condition = conditions_for_doctype(doctype, self.sales)
+            self.assertIn("tabCustomer", condition, doctype)
+            self.assertIn("custom_crm_visibility", condition, doctype)
 
     def test_standard_doctypes_have_explicit_crm_role_permissions(self):
         for doctype in (
