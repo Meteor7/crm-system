@@ -1,0 +1,20 @@
+{
+  "actions": [], "autoname": "format:CRM-QTN-{#####}", "creation": "2026-08-10 00:00:00.000000", "doctype": "DocType", "engine": "InnoDB",
+  "field_order": ["ref_no", "quotation_type", "opportunity", "account", "quotation_owner", "status", "latest_version_no", "current_version", "current_published_version"],
+  "fields": [
+    {"fieldname": "ref_no", "fieldtype": "Data", "label": "Ref No.", "reqd": 1, "unique": 1, "in_list_view": 1},
+    {"default": "Device", "fieldname": "quotation_type", "fieldtype": "Select", "label": "Quotation Type", "options": "Device\nService", "reqd": 1, "in_list_view": 1},
+    {"fieldname": "opportunity", "fieldtype": "Link", "label": "Opportunity", "options": "CRM Opportunity", "unique": 1, "in_list_view": 1},
+    {"fieldname": "account", "fieldtype": "Link", "label": "Customer", "options": "Customer", "reqd": 1},
+    {"fieldname": "quotation_owner", "fieldtype": "Link", "label": "Owner", "options": "User", "reqd": 1},
+    {"default": "Draft", "fieldname": "status", "fieldtype": "Select", "label": "Status", "options": "Draft\nPublished\nAccepted\nRejected\nExpired", "reqd": 1, "in_list_view": 1},
+    {"default": "1", "fieldname": "latest_version_no", "fieldtype": "Int", "label": "Latest Version", "read_only": 1},
+    {"fieldname": "current_version", "fieldtype": "Link", "label": "Current Version", "options": "CRM Quotation Version", "read_only": 1},
+    {"fieldname": "current_published_version", "fieldtype": "Link", "label": "Current Published Version", "options": "CRM Quotation Version", "read_only": 1}
+  ],
+  "index_web_pages_for_search": 0, "modified": "2026-08-10 00:00:00.000000", "modified_by": "Administrator", "module": "Rayher CRM", "name": "CRM Quotation", "naming_rule": "Expression", "owner": "Administrator",
+  "permissions": [
+    {"create": 1, "delete": 1, "read": 1, "role": "CRM Manager", "write": 1},
+    {"create": 1, "read": 1, "role": "CRM Sales", "write": 1}
+  ], "sort_field": "modified", "sort_order": "DESC", "states": []
+}

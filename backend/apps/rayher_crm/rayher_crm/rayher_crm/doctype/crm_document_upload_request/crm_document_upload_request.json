@@ -1,0 +1,31 @@
+{
+  "actions": [], "autoname": "format:DOCUP-{#####}", "creation": "2026-08-12 00:00:00.000000",
+  "doctype": "DocType", "engine": "InnoDB",
+  "field_order": ["title", "category", "document_type", "product", "version", "revision", "confidentiality", "access_mode", "review_date", "applicable_tool", "private_file", "file_name", "mime_type", "size_bytes", "content_hash", "status", "submitted_by", "decided_by", "decided_at", "decision_reason", "published_document"],
+  "fields": [
+    {"fieldname":"title","fieldtype":"Data","label":"Title","reqd":1,"in_list_view":1},
+    {"fieldname":"category","fieldtype":"Select","label":"Category","options":"Technical\nCommercial","reqd":1},
+    {"fieldname":"document_type","fieldtype":"Data","label":"Document Type","reqd":1},
+    {"fieldname":"product","fieldtype":"Data","label":"Product","reqd":1},
+    {"fieldname":"version","fieldtype":"Data","label":"Version","reqd":1},
+    {"fieldname":"revision","fieldtype":"Data","label":"Revision","reqd":1},
+    {"fieldname":"confidentiality","fieldtype":"Select","label":"Confidentiality","options":"Internal\nConfidential\nRestricted","reqd":1},
+    {"fieldname":"access_mode","fieldtype":"Select","label":"Access Mode","options":"Direct\nRequest","reqd":1},
+    {"fieldname":"review_date","fieldtype":"Date","label":"Review Date","reqd":1},
+    {"fieldname":"applicable_tool","fieldtype":"Data","label":"Applicable Tool"},
+    {"fieldname":"private_file","fieldtype":"Link","label":"Private File","options":"File","read_only":1},
+    {"fieldname":"file_name","fieldtype":"Data","label":"File Name","reqd":1,"read_only":1},
+    {"fieldname":"mime_type","fieldtype":"Data","label":"MIME Type","reqd":1,"read_only":1},
+    {"fieldname":"size_bytes","fieldtype":"Int","label":"Size Bytes","reqd":1,"read_only":1},
+    {"fieldname":"content_hash","fieldtype":"Data","label":"SHA-256","reqd":1,"read_only":1},
+    {"fieldname":"status","fieldtype":"Select","label":"Status","options":"Pending\nPublished\nRejected","reqd":1,"in_list_view":1},
+    {"fieldname":"submitted_by","fieldtype":"Link","label":"Submitted By","options":"User","reqd":1,"read_only":1},
+    {"fieldname":"decided_by","fieldtype":"Link","label":"Decided By","options":"User","read_only":1},
+    {"fieldname":"decided_at","fieldtype":"Datetime","label":"Decided At","read_only":1},
+    {"fieldname":"decision_reason","fieldtype":"Small Text","label":"Decision Reason","read_only":1},
+    {"fieldname":"published_document","fieldtype":"Link","label":"Published Document","options":"CRM Controlled Document","read_only":1}
+  ],
+  "index_web_pages_for_search": 0, "modified": "2026-08-12 00:00:00.000000", "modified_by": "Administrator",
+  "module": "Rayher CRM", "name": "CRM Document Upload Request", "naming_rule": "Expression", "owner": "Administrator",
+  "permissions": [{"read":1,"create":1,"write":1,"role":"CRM Manager"}], "sort_field":"creation", "sort_order":"DESC", "states":[]
+}

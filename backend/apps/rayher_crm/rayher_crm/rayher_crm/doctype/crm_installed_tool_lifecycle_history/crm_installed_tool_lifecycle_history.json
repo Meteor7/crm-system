@@ -1,0 +1,117 @@
+{
+    "actions":  [
+
+                ],
+    "autoname":  "hash",
+    "creation":  "2026-08-12 00:00:00.000000",
+    "doctype":  "DocType",
+    "engine":  "InnoDB",
+    "field_order":  [
+                        "installed_tool",
+                        "at",
+                        "actor",
+                        "from_stage",
+                        "to_stage",
+                        "completed_at",
+                        "result",
+                        "open_issues",
+                        "customer_signoff",
+                        "comment",
+                        "evidence"
+                    ],
+    "fields":  [
+                   {
+                       "fieldname":  "installed_tool",
+                       "fieldtype":  "Link",
+                       "label":  "Installed Tool",
+                       "options":  "CRM Installed Tool",
+                       "reqd":  1
+                   },
+                   {
+                       "fieldname":  "at",
+                       "fieldtype":  "Datetime",
+                       "label":  "At",
+                       "reqd":  1
+                   },
+                   {
+                       "fieldname":  "actor",
+                       "fieldtype":  "Link",
+                       "label":  "Actor",
+                       "options":  "User",
+                       "reqd":  1
+                   },
+                   {
+                       "fieldname":  "from_stage",
+                       "fieldtype":  "Data",
+                       "label":  "From Stage",
+                       "reqd":  1
+                   },
+                   {
+                       "fieldname":  "to_stage",
+                       "fieldtype":  "Data",
+                       "label":  "To Stage",
+                       "reqd":  1
+                   },
+                   {
+                       "fieldname":  "completed_at",
+                       "fieldtype":  "Date",
+                       "label":  "Completed At",
+                       "reqd":  1
+                   },
+                   {
+                       "fieldname":  "result",
+                       "fieldtype":  "Small Text",
+                       "label":  "Result",
+                       "reqd":  1
+                   },
+                   {
+                       "fieldname":  "open_issues",
+                       "fieldtype":  "Small Text",
+                       "label":  "Open Issues",
+                       "reqd":  1
+                   },
+                   {
+                       "fieldname":  "customer_signoff",
+                       "fieldtype":  "Small Text",
+                       "label":  "Customer Sign-off",
+                       "reqd":  1
+                   },
+                   {
+                       "fieldname":  "comment",
+                       "fieldtype":  "Small Text",
+                       "label":  "Comment",
+                       "reqd":  1
+                   },
+                   {
+                       "fieldname":  "evidence",
+                       "fieldtype":  "JSON",
+                       "label":  "Evidence"
+                   }
+               ],
+    "index_web_pages_for_search":  0,
+    "modified":  "2026-08-12 00:00:00.000000",
+    "modified_by":  "Administrator",
+    "module":  "Rayher CRM",
+    "name":  "CRM Installed Tool Lifecycle History",
+    "naming_rule":  "Random",
+    "owner":  "Administrator",
+    "permissions":  [
+                        {
+                            "read":  1,
+                            "role":  "CRM Manager"
+                        },
+                        {
+                            "read":  1,
+                            "role":  "CRM Sales"
+                        },
+                        {
+                            "read":  1,
+                            "role":  "CRM Engineer"
+                        }
+                    ],
+    "sort_field":  "at",
+    "sort_order":  "DESC",
+    "states":  [
+
+               ]
+}

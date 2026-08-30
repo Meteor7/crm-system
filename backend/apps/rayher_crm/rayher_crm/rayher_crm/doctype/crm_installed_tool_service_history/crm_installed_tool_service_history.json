@@ -1,0 +1,143 @@
+{
+    "actions":  [
+
+                ],
+    "autoname":  "hash",
+    "creation":  "2026-08-12 00:00:00.000000",
+    "doctype":  "DocType",
+    "engine":  "InnoDB",
+    "field_order":  [
+                        "installed_tool",
+                        "at",
+                        "actor",
+                        "service_date",
+                        "service_type",
+                        "result",
+                        "open_issues",
+                        "next_action",
+                        "action_owner",
+                        "due",
+                        "comment",
+                        "warranty_start",
+                        "warranty_end",
+                        "service_contract",
+                        "pm_cycle"
+                    ],
+    "fields":  [
+                   {
+                       "fieldname":  "installed_tool",
+                       "fieldtype":  "Link",
+                       "label":  "Installed Tool",
+                       "options":  "CRM Installed Tool",
+                       "reqd":  1
+                   },
+                   {
+                       "fieldname":  "at",
+                       "fieldtype":  "Datetime",
+                       "label":  "At",
+                       "reqd":  1
+                   },
+                   {
+                       "fieldname":  "actor",
+                       "fieldtype":  "Link",
+                       "label":  "Actor",
+                       "options":  "User",
+                       "reqd":  1
+                   },
+                   {
+                       "fieldname":  "service_date",
+                       "fieldtype":  "Date",
+                       "label":  "Service Date",
+                       "reqd":  1
+                   },
+                   {
+                       "fieldname":  "service_type",
+                       "fieldtype":  "Select",
+                       "label":  "Service Type",
+                       "options":  "Warranty Activation\nPreventive Maintenance\nCorrective Service\nRemote Support\nInstallation Support\nContract Change",
+                       "reqd":  1
+                   },
+                   {
+                       "fieldname":  "result",
+                       "fieldtype":  "Small Text",
+                       "label":  "Result",
+                       "reqd":  1
+                   },
+                   {
+                       "fieldname":  "open_issues",
+                       "fieldtype":  "Small Text",
+                       "label":  "Open Issues",
+                       "reqd":  1
+                   },
+                   {
+                       "fieldname":  "next_action",
+                       "fieldtype":  "Small Text",
+                       "label":  "Next Action",
+                       "reqd":  0
+                   },
+                   {
+                       "fieldname":  "action_owner",
+                       "fieldtype":  "Link",
+                       "label":  "Action Owner",
+                       "options":  "User",
+                       "reqd":  0
+                   },
+                   {
+                       "fieldname":  "due",
+                       "fieldtype":  "Date",
+                       "label":  "Due",
+                       "reqd":  0
+                   },
+                   {
+                       "fieldname":  "comment",
+                       "fieldtype":  "Small Text",
+                       "label":  "Comment"
+                   },
+                   {
+                       "fieldname":  "warranty_start",
+                       "fieldtype":  "Date",
+                       "label":  "Warranty Start"
+                   },
+                   {
+                       "fieldname":  "warranty_end",
+                       "fieldtype":  "Date",
+                       "label":  "Warranty End"
+                   },
+                   {
+                       "fieldname":  "service_contract",
+                       "fieldtype":  "Data",
+                       "label":  "Service Contract"
+                   },
+                   {
+                       "fieldname":  "pm_cycle",
+                       "fieldtype":  "Data",
+                       "label":  "PM Cycle"
+                   }
+               ],
+    "index_web_pages_for_search":  0,
+    "modified":  "2026-08-12 00:00:00.000000",
+    "modified_by":  "Administrator",
+    "module":  "Rayher CRM",
+    "name":  "CRM Installed Tool Service History",
+    "naming_rule":  "Random",
+    "owner":  "Administrator",
+    "permissions":  [
+                        {
+                            "read":  1,
+                            "role":  "CRM Manager"
+                        },
+                        {
+                            "read":  1,
+                            "role":  "CRM Sales"
+                        },
+                        {
+                            "read":  1,
+                            "role":  "CRM Engineer"
+                        }
+                    ],
+    "sort_field":  "at",
+    "sort_order":  "DESC",
+    "states":  [
+
+               ]
+}

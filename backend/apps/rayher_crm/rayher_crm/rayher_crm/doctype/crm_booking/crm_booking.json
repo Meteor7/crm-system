@@ -1,0 +1,29 @@
+{
+  "actions": [], "autoname": "format:CRM-BKG-{#####}", "creation": "2026-08-04 00:00:00.000000", "doctype": "DocType", "engine": "InnoDB",
+  "field_order": ["account", "primary_contact", "booking_type", "equipment", "quantity", "ddl", "amount", "currency", "status", "booking_date", "booking_owner", "source", "source_opportunity", "live_source_opportunity", "installed_tool", "installed_tool_converted_at", "note"],
+  "fields": [
+    {"fieldname": "account", "fieldtype": "Link", "label": "Account", "options": "Customer", "reqd": 1},
+    {"fieldname": "primary_contact", "fieldtype": "Link", "label": "Primary Contact", "options": "Contact", "reqd": 1},
+    {"default": "Equipment", "fieldname": "booking_type", "fieldtype": "Select", "label": "Booking Type", "options": "Equipment\u000aService", "reqd": 1},
+    {"fieldname": "equipment", "fieldtype": "Data", "label": "Equipment", "reqd": 1},
+    {"fieldname": "quantity", "fieldtype": "Int", "label": "Quantity", "reqd": 1},
+    {"fieldname": "ddl", "fieldtype": "Date", "label": "DDL", "reqd": 1},
+    {"fieldname": "amount", "fieldtype": "Currency", "label": "Amount", "options": "currency", "reqd": 1},
+    {"default": "CNY", "fieldname": "currency", "fieldtype": "Link", "label": "Currency", "options": "Currency", "reqd": 1},
+    {"fieldname": "status", "fieldtype": "Select", "label": "Status", "options": "Confirmed\nPending\nCompleted\nCancelled", "reqd": 1},
+    {"fieldname": "booking_date", "fieldtype": "Date", "label": "Booking Date", "reqd": 1},
+    {"fieldname": "booking_owner", "fieldtype": "Link", "label": "Owner", "options": "User", "reqd": 1},
+    {"fieldname": "source", "fieldtype": "Select", "label": "Source", "options": "Opportunity\nUpsell", "reqd": 1},
+    {"fieldname": "source_opportunity", "fieldtype": "Link", "label": "Source Opportunity", "options": "CRM Opportunity"},
+    {"fieldname": "live_source_opportunity", "fieldtype": "Data", "hidden": 1, "label": "Live Source Opportunity", "read_only": 1, "unique": 1},
+    {"fieldname": "installed_tool", "fieldtype": "Link", "label": "Installed Tool", "options": "CRM Installed Tool", "read_only": 1},
+    {"fieldname": "installed_tool_converted_at", "fieldtype": "Datetime", "label": "Installed Tool Converted At", "read_only": 1},
+    {"fieldname": "note", "fieldtype": "Small Text", "label": "Note"}
+  ],
+  "index_web_pages_for_search": 0, "modified": "2026-08-04 00:00:00.000000", "modified_by": "Administrator", "module": "Rayher CRM", "name": "CRM Booking", "naming_rule": "Expression", "owner": "Administrator",
+  "permissions": [
+    {"create": 1, "delete": 1, "read": 1, "role": "CRM Manager", "write": 1},
+    {"create": 1, "read": 1, "role": "CRM Sales", "write": 1},
+    {"read": 1, "role": "CRM Engineer"}
+  ], "sort_field": "modified", "sort_order": "DESC", "states": []
+}

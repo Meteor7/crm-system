@@ -1,0 +1,321 @@
+from __future__ import annotations
+
+import frappe
+from frappe.tests.utils import FrappeTestCase
+
+from rayher_crm.permissions.scope import conditions_for_doctype, install_crm_doc_permissions
+from rayher_crm.services.sites import create_site
+
+
+class TestCrmScope(FrappeTestCase):
+    def setUp(self):
+        super().setUp()
+        self.original_user = frappe.session.user
+        frappe.set_user("Administrator")
+        install_crm_doc_permissions()
+        frappe.clear_cache()
+
+        self.manager = self._create_user("crm-scope-manager@example.invalid", "CRM Manager")
+        self.sales = self._create_user("crm-scope-sales@example.invalid", "CRM Sales")
+        self.other_sales = self._create_user("crm-scope-other-sales@example.invalid", "CRM Sales")
+        self.engineer = self._create_user("crm-scope-engineer@example.invalid", "CRM Engineer")
+        self.other_engineer = self._create_user("crm-scope-other-engineer@example.invalid", "CRM Engineer")
+
+        self.owned_customer = self._create_customer("Scope Owned Customer", self.sales)
+        self.foreign_customer = self._create_customer("Scope Foreign Customer", self.other_sales)
+        frappe.db.set_value(
+            "Customer", self.foreign_customer, "custom_crm_visibility", "Public", update_modified=False,
+        )
+        frappe.get_doc(
+            {
+                "doctype": "CRM Account Engineer Assignment",
+                "customer": self.owned_customer,
+                "engineer": self.engineer,
+                "enabled": 1,
+            }
+        ).insert(ignore_permissions=True)
+
+        self.owned_contact = self._create_contact("Owned Contact", self.owned_customer, self.sales)
+        self.foreign_contact = self._create_contact("Foreign Contact", self.foreign_customer, self.other_sales)
+        self.owned_lead = self._create_lead("Owned Lead", self.sales, self.owned_customer)
+        self.foreign_lead = self._create_lead("Foreign Lead", self.other_sales, self.foreign_customer)
+        self.owned_site = create_site(self.owned_customer, self._site_input("Owned Scope Site"))["id"]
+        self.foreign_site = create_site(self.foreign_customer, self._site_input("Foreign Scope Site"))["id"]
+        self.owned_opportunity = self._create_opportunity(
+            "Owned Opportunity", self.owned_customer, self.owned_site, self.owned_lead, self.sales
+        )
+        self.foreign_opportunity = self._create_opportunity(
+            "Foreign Opportunity", self.foreign_customer, self.foreign_site, self.foreign_lead, self.other_sales
+        )
+        self.owned_booking = self._create_booking(
+            self.owned_customer, self.owned_contact, self.owned_opportunity, self.sales
+        )
+        self.foreign_booking = self._create_booking(
+            self.foreign_customer, self.foreign_contact, self.foreign_opportunity, self.other_sales
+        )
+        self.owned_tool = self._create_installed_tool(
+            self.owned_customer, self.owned_site, self.owned_booking, self.owned_opportunity,
+            self.sales, self.engineer, f"SCOPE-OWNED-{frappe.generate_hash(length=10)}",
+        )
+        self.foreign_tool = self._create_installed_tool(
+            self.foreign_customer, self.foreign_site, self.foreign_booking, self.foreign_opportunity,
+            self.other_sales, self.other_engineer, f"SCOPE-FOREIGN-{frappe.generate_hash(length=10)}",
+        )
+        self.owned_demo_request = self._create_demo_request(
+            self.owned_customer, self.owned_contact, self.owned_opportunity, self.sales, self.engineer,
+        )
+        self.foreign_demo_request = self._create_demo_request(
+            self.foreign_customer, self.foreign_contact, self.foreign_opportunity,
+            self.other_sales, self.other_engineer,
+        )
+        self.owned_evaluation = self._create_evaluation(
+            self.owned_customer, self.owned_demo_request, self.engineer,
+        )
+        self.foreign_evaluation = self._create_evaluation(
+            self.foreign_customer, self.foreign_demo_request, self.other_engineer,
+        )
+
+    def tearDown(self):
+        frappe.set_user(self.original_user)
+        super().tearDown()
+
+    def _create_user(self, email: str, role: str) -> str:
+        if frappe.db.exists("User", email):
+            return email
+        return frappe.get_doc(
+            {
+                "doctype": "User",
+                "email": email,
+                "first_name": email.split("@", 1)[0],
+                "enabled": 1,
+                "send_welcome_email": 0,
+                "roles": [{"role": role}],
+            }
+        ).insert(ignore_permissions=True).name
+
+    def _create_customer(self, customer_name: str, owner: str) -> str:
+        return frappe.get_doc(
+            {
+                "doctype": "Customer",
+                "customer_name": customer_name,
+                "customer_type": "Company",
+                "customer_group": "CRM Customers",
+                "territory": "CRM Territory",
+                "custom_crm_owner": owner,
+            }
+        ).insert(ignore_permissions=True).name
+
+    def _create_contact(self, first_name: str, customer: str, owner: str) -> str:
+        contact = frappe.get_doc(
+            {
+                "doctype": "Contact",
+                "first_name": first_name,
+                "custom_crm_owner": owner,
+                "custom_crm_relationship": "Developing",
+                "custom_crm_status": "Active",
+                "custom_crm_data_quality": "Needs Review",
+            }
+        )
+        contact.append("links", {"link_doctype": "Customer", "link_name": customer})
+        return contact.insert(ignore_permissions=True).name
+
+    def _create_lead(self, first_name: str, owner: str, customer: str) -> str:
+        return frappe.get_doc(
+            {
+                "doctype": "Lead",
+                "first_name": first_name,
+                "company_name": f"{first_name} Company",
+                "status": "Lead",
+                "lead_owner": owner,
+                "custom_crm_source": "Website",
+                "custom_crm_status": "New",
+                "custom_crm_converted_account": customer,
+            }
+        ).insert(ignore_permissions=True).name
+
+    def _site_input(self, name: str) -> dict:
+        return {"name": name, "city": "Shanghai", "type": "Fab", "process": "Frontend", "status": "量产"}
+
+    def _create_opportunity(self, title: str, customer: str, site: str, lead: str, owner: str) -> str:
+        return frappe.get_doc(
+            {
+                "doctype": "CRM Opportunity",
+                "account": customer,
+                "site": site,
+                "source_lead": lead,
+                "title": title,
+                "amount": 1000,
+                "original_amount": 1000,
+                "currency": "CNY",
+                "po_date": "2026-12-31",
+                "opportunity_owner": owner,
+                "tool_type": "Inspection",
+                "stage": "需求发现",
+                "forecast": "Pipeline",
+                "probability": 20,
+                "score": 20,
+                "sale_type": "New Equipment",
+                "sub_region": "East China",
+            }
+        ).insert(ignore_permissions=True).name
+
+    def _create_booking(self, customer: str, contact: str, opportunity: str, owner: str) -> str:
+        return frappe.get_doc({
+            "doctype": "CRM Booking", "account": customer, "primary_contact": contact,
+            "equipment": "Inspection", "quantity": 1, "ddl": "2026-12-31", "amount": 1000,
+            "currency": "CNY", "status": "Confirmed", "booking_date": "2026-08-04",
+            "booking_owner": owner, "source": "Opportunity", "source_opportunity": opportunity,
+        }).insert(ignore_permissions=True).name
+
+    def _create_installed_tool(
+        self, customer: str, site: str, booking: str, opportunity: str,
+        sales_owner: str, engineer_owner: str, serial: str,
+    ) -> str:
+        tool = frappe.get_doc({
+            "doctype": "CRM Installed Tool", "account": customer, "site": site,
+            "serial": serial, "model": "Model X", "location": "Fab", "status": "Delivery Preparation",
+            "software": "Pending", "firmware": "Pending", "warranty_end": "2027-12-31", "completeness": 55,
+            "source_booking": booking, "source_opportunity": opportunity, "sales_owner": sales_owner,
+            "engineer_owner": engineer_owner, "ownership_type": "Customer Owned",
+        }).insert(ignore_permissions=True)
+        frappe.db.set_value("CRM Booking", booking, "installed_tool", tool.name, update_modified=False)
+        return tool.name
+
+    def _create_demo_request(
+        self, customer: str, contact: str, opportunity: str, sales_owner: str, engineer_owner: str,
+    ) -> str:
+        return frappe.get_doc({
+            "doctype": "CRM Demo Request", "account": customer, "primary_contact": contact,
+            "opportunity": opportunity, "sales_owner": sales_owner, "created_by_user": sales_owner,
+            "title": "Scope Demo Request", "objective": "Validate row scope",
+            "requested_equipment": "Inspection", "sample_type": "Wafer", "sample_quantity": 1,
+            "target_date": "2026-12-31", "customer_expected_date": "2026-12-31",
+            "priority": "Medium", "acceptance_criteria": "Scope is enforced", "status": "Draft",
+            "engineer_owner": engineer_owner, "form_data": {},
+        }).insert(ignore_permissions=True).name
+
+    def _create_evaluation(self, customer: str, demo_request: str, owner: str) -> str:
+        return frappe.get_doc({
+            "doctype": "CRM Evaluation", "account": customer, "demo_request": demo_request,
+            "title": "Scope Evaluation", "status": "Requested", "evaluation_owner": owner,
+            "planned_end": "2026-12-31", "acceptance": "Pending", "report_status": "Not Ready",
+        }).insert(ignore_permissions=True).name
+
+    def _visible_names(self, doctype: str, user: str) -> set[str]:
+        frappe.set_user(user)
+        return set(frappe.get_list(doctype, pluck="name"))
+
+    def test_manager_and_sales_see_owned_and_public_customers(self):
+        manager_names = self._visible_names("Customer", self.manager)
+        self.assertIn(self.owned_customer, manager_names)
+        self.assertIn(self.foreign_customer, manager_names)
+
+        sales_names = self._visible_names("Customer", self.sales)
+        self.assertIn(self.owned_customer, sales_names)
+        self.assertIn(self.foreign_customer, sales_names)
+        self.assertIn("custom_crm_visibility", conditions_for_doctype("Customer", self.sales))
+
+    def test_engineer_assignment_controls_customer_contact_and_converted_lead_lists(self):
+        self.assertIn(self.owned_customer, self._visible_names("Customer", self.engineer))
+        self.assertNotIn(self.foreign_customer, self._visible_names("Customer", self.engineer))
+        self.assertIn(self.owned_contact, self._visible_names("Contact", self.engineer))
+        self.assertNotIn(self.foreign_contact, self._visible_names("Contact", self.engineer))
+        self.assertIn(self.owned_lead, self._visible_names("Lead", self.engineer))
+        self.assertNotIn(self.foreign_lead, self._visible_names("Lead", self.engineer))
+        self.assertIn(self.owned_opportunity, self._visible_names("CRM Opportunity", self.engineer))
+        self.assertNotIn(self.foreign_opportunity, self._visible_names("CRM Opportunity", self.engineer))
+
+    def test_sales_can_open_contact_explicitly_reassigned_from_foreign_account(self):
+        reassigned_contact = self._create_contact(
+            "Reassigned Foreign Contact", self.foreign_customer, self.sales,
+        )
+
+        self.assertIn(reassigned_contact, self._visible_names("Contact", self.sales))
+        self.assertTrue(frappe.has_permission("Contact", "read", doc=reassigned_contact, user=self.sales))
+
+    def test_list_and_detail_permissions_use_the_same_scope(self):
+        for doctype, owned_name, foreign_name, shared in (
+            ("Customer", self.owned_customer, self.foreign_customer, True),
+            ("Contact", self.owned_contact, self.foreign_contact, True),
+            ("Lead", self.owned_lead, self.foreign_lead, False),
+            ("CRM Opportunity", self.owned_opportunity, self.foreign_opportunity, False),
+            ("CRM Booking", self.owned_booking, self.foreign_booking, False),
+            ("CRM Installed Tool", self.owned_tool, self.foreign_tool, False),
+        ):
+            visible = self._visible_names(doctype, self.sales)
+            self.assertIn(owned_name, visible)
+            self.assertEqual(foreign_name in visible, shared)
+            self.assertTrue(frappe.has_permission(doctype, "read", doc=owned_name, user=self.sales))
+            self.assertEqual(frappe.has_permission(doctype, "read", doc=foreign_name, user=self.sales), shared)
+
+    def test_guest_is_denied_while_sales_customer_scope_stays_shared(self):
+        self.assertEqual(conditions_for_doctype("Customer", "Guest"), "1=0")
+        self.assertIn(self.foreign_customer, self._visible_names("Customer", self.sales))
+
+        foreign = frappe.get_doc("Customer", self.foreign_customer)
+        foreign.custom_crm_owner = self.sales
+        self.assertTrue(frappe.has_permission("Customer", "read", doc=foreign, user=self.sales))
+
+    def test_opportunity_scope_condition_is_sql_backed_for_all_roles(self):
+        self.assertEqual(conditions_for_doctype("CRM Opportunity", self.manager), "1=1")
+        self.assertIn(
+            "`tabCRM Opportunity`.`opportunity_owner`",
+            conditions_for_doctype("CRM Opportunity", self.sales),
+        )
+        self.assertIn(
+            "CRM Account Engineer Assignment",
+            conditions_for_doctype("CRM Opportunity", self.engineer),
+        )
+        self.assertNotIn("custom_crm_visibility", conditions_for_doctype("CRM Opportunity", self.sales))
+
+    def test_booking_and_installed_tool_scope_is_sql_backed_for_all_roles(self):
+        self.assertEqual(conditions_for_doctype("CRM Booking", self.manager), "1=1")
+        self.assertIn("`tabCRM Booking`.`booking_owner`", conditions_for_doctype("CRM Booking", self.sales))
+        self.assertNotIn("custom_crm_visibility", conditions_for_doctype("CRM Booking", self.sales))
+        self.assertIn("CRM Account Engineer Assignment", conditions_for_doctype("CRM Booking", self.engineer))
+        self.assertIn(self.owned_booking, self._visible_names("CRM Booking", self.engineer))
+        self.assertNotIn(self.foreign_booking, self._visible_names("CRM Booking", self.engineer))
+
+        self.assertEqual(conditions_for_doctype("CRM Installed Tool", self.manager), "1=1")
+        self.assertIn("`tabCRM Installed Tool`.`sales_owner`", conditions_for_doctype("CRM Installed Tool", self.sales))
+        self.assertNotIn("custom_crm_visibility", conditions_for_doctype("CRM Installed Tool", self.sales))
+        self.assertNotIn("custom_crm_visibility", conditions_for_doctype("CRM Contact File", self.sales))
+        self.assertIn("`tabCRM Installed Tool`.`engineer_owner`", conditions_for_doctype("CRM Installed Tool", self.engineer))
+        self.assertIn(self.owned_tool, self._visible_names("CRM Installed Tool", self.engineer))
+        self.assertNotIn(self.foreign_tool, self._visible_names("CRM Installed Tool", self.engineer))
+
+    def test_demo_request_scope_is_owner_backed_for_sales_and_engineer(self):
+        self.assertEqual(conditions_for_doctype("CRM Demo Request", self.manager), "1=1")
+        self.assertIn("`tabCRM Demo Request`.`sales_owner`", conditions_for_doctype("CRM Demo Request", self.sales))
+        self.assertIn(
+            "`tabCRM Demo Request`.`engineer_owner`",
+            conditions_for_doctype("CRM Demo Request", self.engineer),
+        )
+        self.assertIn(self.owned_demo_request, self._visible_names("CRM Demo Request", self.sales))
+        self.assertNotIn(self.foreign_demo_request, self._visible_names("CRM Demo Request", self.sales))
+        self.assertIn(self.owned_demo_request, self._visible_names("CRM Demo Request", self.engineer))
+        self.assertNotIn(self.foreign_demo_request, self._visible_names("CRM Demo Request", self.engineer))
+
+    def test_evaluation_scope_inherits_sales_request_and_uses_engineer_owner(self):
+        self.assertEqual(conditions_for_doctype("CRM Evaluation", self.manager), "1=1")
+        self.assertIn("`crm_demo_request`.`sales_owner`", conditions_for_doctype("CRM Evaluation", self.sales))
+        self.assertIn("`tabCRM Evaluation`.`evaluation_owner`", conditions_for_doctype("CRM Evaluation", self.engineer))
+        self.assertIn(self.owned_evaluation, self._visible_names("CRM Evaluation", self.sales))
+        self.assertNotIn(self.foreign_evaluation, self._visible_names("CRM Evaluation", self.sales))
+        self.assertIn(self.owned_evaluation, self._visible_names("CRM Evaluation", self.engineer))
+        self.assertNotIn(self.foreign_evaluation, self._visible_names("CRM Evaluation", self.engineer))
+
+        self.assertTrue(frappe.has_permission(
+            "CRM Evaluation", "read", doc=self.owned_evaluation, user=self.engineer,
+        ))
+        self.assertFalse(frappe.has_permission(
+            "CRM Evaluation", "read", doc=self.foreign_evaluation, user=self.engineer,
+        ))
+
+    def test_standard_doctypes_have_explicit_crm_role_permissions(self):
+        for doctype in (
+            "Customer", "Contact", "Lead", "CRM Opportunity", "CRM Booking", "CRM Installed Tool",
+            "CRM Demo Request", "CRM Evaluation",
+        ):
+            roles = {row.role for row in frappe.get_meta(doctype).permissions}
+            self.assertTrue({"CRM Manager", "CRM Sales", "CRM Engineer"}.issubset(roles), doctype)

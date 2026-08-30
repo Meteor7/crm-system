@@ -1,0 +1,362 @@
+name: ${COMPOSE_PROJECT_NAME:-rayher-crm-stage1-local}
+
+x-frappe-image: &frappe-image
+  image: ${CRM_IMAGE:-rayher-crm-stage1:v15-local}
+  build:
+    context: .
+    dockerfile_inline: |
+      ARG FRAPPE_BASE_IMAGE=frappe/erpnext:v15@sha256:2c43d95df3761e0be8230390cd75b96a83c715efd883c0d8f29a65498db49e04
+      FROM $${FRAPPE_BASE_IMAGE}
+      USER root
+      RUN apt-get update && apt-get install -y --no-install-recommends fonts-noto-cjk libreoffice-writer libreoffice-calc libreoffice-impress && rm -rf /var/lib/apt/lists/*
+      WORKDIR /home/frappe/frappe-bench
+      COPY --chown=frappe:frappe build/rayher_crm.zip /tmp/rayher_crm.zip
+      USER frappe
+      RUN mkdir -p ./apps/rayher_crm && python -c "import zipfile; zipfile.ZipFile('/tmp/rayher_crm.zip').extractall('./apps/rayher_crm')" && rm /tmp/rayher_crm.zip && ./env/bin/pip install --no-cache-dir --editable ./apps/rayher_crm
+    args:
+      FRAPPE_BASE_IMAGE: ${FRAPPE_BASE_IMAGE:-frappe/erpnext:v15@sha256:2c43d95df3761e0be8230390cd75b96a83c715efd883c0d8f29a65498db49e04}
+
+x-frappe-volumes: &frappe-volumes
+  - sites:/home/frappe/frappe-bench/sites
+  - logs:/home/frappe/frappe-bench/logs
+
+x-frappe-service: &frappe-service
+  <<: *frappe-image
+  restart: unless-stopped
+  networks:
+    - crm-backend
+  volumes: *frappe-volumes
+  depends_on:
+    migrate:
+      condition: service_completed_successfully
+
+services:
+  secrets-init:
+    image: ${REDIS_IMAGE:-redis:6.2-alpine@sha256:ec5e187c913d422cdf60f4216a5fdfb95246792c6de6fe21ff5bed75cbfc8c23}
+    pull_policy: missing
+    restart: "no"
+    entrypoint:
+      - /bin/sh
+      - -c
+    command:
+      - |
+        set -eu
+        umask 077
+        if [ ! -s /run/crm-local-secrets/db_root_password ]; then
+          head -c 48 /dev/urandom | base64 > /run/crm-local-secrets/db_root_password.tmp
+          mv /run/crm-local-secrets/db_root_password.tmp /run/crm-local-secrets/db_root_password
+        fi
+        if [ ! -s /run/crm-local-secrets/admin_password ]; then
+          head -c 48 /dev/urandom | base64 > /run/crm-local-secrets/admin_password.tmp
+          mv /run/crm-local-secrets/admin_password.tmp /run/crm-local-secrets/admin_password
+        fi
+        chmod 0444 /run/crm-local-secrets/db_root_password /run/crm-local-secrets/admin_password
+    volumes:
+      - local-secrets:/run/crm-local-secrets
+    networks:
+      - crm-backend
+
+  db:
+    image: ${MARIADB_IMAGE:-mariadb:10.6@sha256:4066a44f4a0143c310fbe6972c254bbbb7a844a2be1418831a987fdbbc8ff8bd}
+    pull_policy: missing
+    restart: unless-stopped
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+      - --skip-character-set-client-handshake
+    environment:
+      MARIADB_ROOT_PASSWORD_FILE: /run/crm-local-secrets/db_root_password
+      MARIADB_AUTO_UPGRADE: "1"
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      start_period: 10s
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    depends_on:
+      secrets-init:
+        condition: service_completed_successfully
+    volumes:
+      - db-data:/var/lib/mysql
+      - local-secrets:/run/crm-local-secrets:ro
+    networks:
+      - crm-backend
+
+  redis-cache:
+    image: ${REDIS_IMAGE:-redis:6.2-alpine@sha256:ec5e187c913d422cdf60f4216a5fdfb95246792c6de6fe21ff5bed75cbfc8c23}
+    pull_policy: missing
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    volumes:
+      - redis-cache-data:/data
+    networks:
+      - crm-backend
+
+  redis-queue:
+    image: ${REDIS_IMAGE:-redis:6.2-alpine@sha256:ec5e187c913d422cdf60f4216a5fdfb95246792c6de6fe21ff5bed75cbfc8c23}
+    pull_policy: missing
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    volumes:
+      - redis-queue-data:/data
+    networks:
+      - crm-backend
+
+  clamav:
+    image: ${CLAMAV_IMAGE:-clamav/clamav:1.4.5@sha256:8f98c34d605b96fd1c2715bef37768a8748b83d9e6f9e7647d8bf2b7b0bbe4ce}
+    pull_policy: missing
+    restart: unless-stopped
+    volumes:
+      - clamav-data:/var/lib/clamav
+    networks:
+      - crm-backend
+
+  configurator:
+    <<: *frappe-image
+    restart: "no"
+    entrypoint:
+      - bash
+      - -c
+    command:
+      - >
+        ls -1 apps > sites/apps.txt;
+        bench set-config -g db_host $$DB_HOST;
+        bench set-config -gp db_port $$DB_PORT;
+        bench set-config -g redis_cache "redis://$$REDIS_CACHE";
+        bench set-config -g redis_queue "redis://$$REDIS_QUEUE";
+        bench set-config -g redis_socketio "redis://$$REDIS_QUEUE";
+        bench set-config -gp socketio_port $$SOCKETIO_PORT;
+    environment:
+      DB_HOST: db
+      DB_PORT: "3306"
+      REDIS_CACHE: redis-cache:6379
+      REDIS_QUEUE: redis-queue:6379
+      SOCKETIO_PORT: "9000"
+    depends_on:
+      db:
+        condition: service_healthy
+      redis-cache:
+        condition: service_healthy
+      redis-queue:
+        condition: service_healthy
+    volumes: *frappe-volumes
+    networks:
+      - crm-backend
+
+  create-site:
+    <<: *frappe-image
+    restart: "no"
+    entrypoint:
+      - bash
+      - -c
+    command:
+      - |
+        set -euo pipefail
+        if [ -f "sites/$${SITE_NAME}/site_config.json" ]; then
+          echo "CRM site already exists; keeping existing database and site files."
+        else
+          db_root_password="$$(cat /run/crm-local-secrets/db_root_password)"
+          admin_password=__import__("os").environ["DEMO_BOOTSTRAP_PASSWORD"]
+          bench new-site "$${SITE_NAME}" \
+            --mariadb-user-host-login-scope='%' \
+            --db-root-username=root \
+            --db-root-password="$${db_root_password}" \
+            --admin-password="$${admin_password}" \
+            --install-app erpnext \
+            --set-default
+        fi
+        bench use "$${SITE_NAME}"
+    environment:
+      SITE_NAME: ${SITE_NAME:-rayher-crm.localhost}
+    depends_on:
+      secrets-init:
+        condition: service_completed_successfully
+      configurator:
+        condition: service_completed_successfully
+    volumes:
+      - sites:/home/frappe/frappe-bench/sites
+      - logs:/home/frappe/frappe-bench/logs
+      - local-secrets:/run/crm-local-secrets:ro
+    networks:
+      - crm-backend
+
+  install-app:
+    <<: *frappe-image
+    restart: "no"
+    entrypoint:
+      - bash
+      - -c
+    command:
+      - |
+        set -euo pipefail
+        bench --site "$${SITE_NAME}" set-config max_file_size 104857600 --parse
+        if bench --site "$${SITE_NAME}" list-apps | awk '{print $$1}' | grep -qx rayher_crm; then
+          echo "rayher_crm is already installed; keeping the existing site installation."
+        else
+          bench --site "$${SITE_NAME}" install-app rayher_crm
+        fi
+    environment:
+      SITE_NAME: ${SITE_NAME:-rayher-crm.localhost}
+    depends_on:
+      create-site:
+        condition: service_completed_successfully
+    volumes: *frappe-volumes
+    networks:
+      - crm-backend
+
+  migrate:
+    <<: *frappe-image
+    restart: "no"
+    entrypoint:
+      - bash
+      - -c
+    command:
+      - |
+        set -euo pipefail
+        case "$${ALLOW_TESTS}" in
+          true|1) allow_tests_value=True ;;
+          false|0) allow_tests_value=False ;;
+          *) echo "ALLOW_TESTS must be true, false, 1, or 0." >&2; exit 1 ;;
+        esac
+        case "$${CRM_TEST_SITE}" in
+          true|1) crm_test_site_value=True ;;
+          false|0) crm_test_site_value=False ;;
+          *) echo "CRM_TEST_SITE must be true, false, 1, or 0." >&2; exit 1 ;;
+        esac
+        if [ "$${allow_tests_value}" = True ] && { [ "$${crm_test_site_value}" != True ] || [[ "$${SITE_NAME}" != *.test ]]; }; then
+          echo "ALLOW_TESTS=true requires CRM_TEST_SITE=true and a dedicated *.test site." >&2
+          exit 1
+        fi
+        bench --site "$${SITE_NAME}" set-config allow_tests "$${allow_tests_value}" --parse
+        bench --site "$${SITE_NAME}" set-config crm_test_site "$${crm_test_site_value}" --parse
+        bench --site "$${SITE_NAME}" set-config max_file_size 104857600 --parse
+        bench --site "$${SITE_NAME}" migrate
+    environment:
+      SITE_NAME: ${SITE_NAME:-rayher-crm.localhost}
+      ALLOW_TESTS: ${ALLOW_TESTS:-false}
+      CRM_TEST_SITE: ${CRM_TEST_SITE:-false}
+    depends_on:
+      install-app:
+        condition: service_completed_successfully
+    volumes: *frappe-volumes
+    networks:
+      - crm-backend
+
+  backend:
+    <<: *frappe-service
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      clamav:
+        condition: service_healthy
+    environment:
+      GUNICORN_THREADS: "4"
+      GUNICORN_WORKERS: "2"
+      GUNICORN_TIMEOUT: "120"
+      SITE_NAME: ${SITE_NAME:-rayher-crm.localhost}
+      CRM_CLAMD_HOST: clamav
+      CRM_CLAMD_PORT: "3310"
+    healthcheck:
+      test: ["CMD-SHELL", "curl --fail --silent --header \"Host: $${SITE_NAME}\" http://127.0.0.1:8000/api/method/ping >/dev/null || exit 1"]
+      start_period: 20s
+      interval: 10s
+      timeout: 5s
+      retries: 20
+
+  frontend:
+    <<: *frappe-image
+    restart: unless-stopped
+    command:
+      - bash
+      - -c
+      - |
+        set -euo pipefail
+        bench build --app rayher_crm
+        cp /templates/nginx/frappe.conf.template /tmp/frappe.conf.template
+        sed -i "0,/proxy_set_header Origin .*/s#proxy_set_header Origin .*;#proxy_set_header Origin $${REALTIME_AUTH_ORIGIN};#" /tmp/frappe.conf.template
+        sed -i "0,/proxy_set_header Host .*/s#proxy_set_header Host .*;#proxy_set_header Host $${REALTIME_AUTH_HOST};#" /tmp/frappe.conf.template
+        envsubst '$${BACKEND} $${SOCKETIO} $${UPSTREAM_REAL_IP_ADDRESS} $${UPSTREAM_REAL_IP_HEADER} $${UPSTREAM_REAL_IP_RECURSIVE} $${FRAPPE_SITE_NAME_HEADER} $${REALTIME_AUTH_ORIGIN} $${REALTIME_AUTH_HOST} $${PROXY_READ_TIMEOUT} $${CLIENT_MAX_BODY_SIZE}' < /tmp/frappe.conf.template > /etc/nginx/conf.d/frappe.conf
+        exec nginx -g 'daemon off;'
+    environment:
+      BACKEND: backend:8000
+      SOCKETIO: websocket:9000
+      FRAPPE_SITE_NAME_HEADER: ${SITE_NAME:-rayher-crm.localhost}
+      REALTIME_AUTH_ORIGIN: http://frontend:8080
+      REALTIME_AUTH_HOST: frontend:8080
+      UPSTREAM_REAL_IP_ADDRESS: 127.0.0.1
+      UPSTREAM_REAL_IP_HEADER: X-Forwarded-For
+      UPSTREAM_REAL_IP_RECURSIVE: "off"
+      PROXY_READ_TIMEOUT: "120"
+      CLIENT_MAX_BODY_SIZE: 210m
+    depends_on:
+      backend:
+        condition: service_healthy
+      websocket:
+        condition: service_started
+    healthcheck:
+      test: ["CMD-SHELL", "curl --fail --silent http://127.0.0.1:8080/api/method/ping >/dev/null || exit 1"]
+      start_period: 10s
+      interval: 10s
+      timeout: 5s
+      retries: 20
+    ports:
+      - "${HTTP_BIND_ADDRESS:-127.0.0.1}:${HTTP_PORT:-2224}:8080"
+    volumes: *frappe-volumes
+    networks:
+      - crm-backend
+
+  websocket:
+    <<: *frappe-service
+    command: ["node", "/home/frappe/frappe-bench/apps/frappe/socketio.js"]
+    environment:
+      FRAPPE_REDIS_CACHE: redis://redis-cache:6379
+      FRAPPE_REDIS_QUEUE: redis://redis-queue:6379
+
+  scheduler:
+    <<: *frappe-service
+    command: ["bench", "schedule"]
+
+  queue-short:
+    <<: *frappe-service
+    command: ["bench", "worker", "--queue", "short,default"]
+    environment:
+      FRAPPE_REDIS_CACHE: redis://redis-cache:6379
+      FRAPPE_REDIS_QUEUE: redis://redis-queue:6379
+
+  queue-long:
+    <<: *frappe-service
+    command: ["bench", "worker", "--queue", "long,default,short"]
+    environment:
+      FRAPPE_REDIS_CACHE: redis://redis-cache:6379
+      FRAPPE_REDIS_QUEUE: redis://redis-queue:6379
+
+volumes:
+  db-data:
+    name: ${COMPOSE_PROJECT_NAME:-rayher-crm-stage1-local}_db-data
+  redis-cache-data:
+    name: ${COMPOSE_PROJECT_NAME:-rayher-crm-stage1-local}_redis-cache-data
+  redis-queue-data:
+    name: ${COMPOSE_PROJECT_NAME:-rayher-crm-stage1-local}_redis-queue-data
+  sites:
+    name: ${COMPOSE_PROJECT_NAME:-rayher-crm-stage1-local}_sites
+  logs:
+    name: ${COMPOSE_PROJECT_NAME:-rayher-crm-stage1-local}_logs
+  local-secrets:
+    name: ${COMPOSE_PROJECT_NAME:-rayher-crm-stage1-local}_local-secrets
+  clamav-data:
+    name: ${COMPOSE_PROJECT_NAME:-rayher-crm-stage1-local}_clamav-data
+
+networks:
+  crm-backend:
+    name: ${COMPOSE_PROJECT_NAME:-rayher-crm-stage1-local}_network
+    driver: bridge

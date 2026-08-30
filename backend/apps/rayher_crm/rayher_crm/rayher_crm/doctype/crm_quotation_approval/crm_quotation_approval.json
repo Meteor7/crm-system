@@ -1,0 +1,33 @@
+{
+  "actions": [],
+  "autoname": "format:CRM-QTA-{#####}",
+  "creation": "2026-08-17 00:00:00.000000",
+  "doctype": "DocType",
+  "engine": "InnoDB",
+  "field_order": ["quotation", "quotation_version", "attempt_no", "status", "submitted_by", "submitted_at", "decided_by", "decided_at", "decision_comment"],
+  "fields": [
+    {"fieldname": "quotation", "fieldtype": "Link", "label": "Quotation", "options": "CRM Quotation", "reqd": 1, "read_only": 1, "in_list_view": 1},
+    {"fieldname": "quotation_version", "fieldtype": "Link", "label": "Quotation Version", "options": "CRM Quotation Version", "reqd": 1, "read_only": 1, "in_list_view": 1},
+    {"fieldname": "attempt_no", "fieldtype": "Int", "label": "Attempt", "reqd": 1, "read_only": 1},
+    {"default": "Pending", "fieldname": "status", "fieldtype": "Select", "label": "Status", "options": "Pending\nApproved\nRejected", "reqd": 1, "read_only": 1, "in_list_view": 1},
+    {"fieldname": "submitted_by", "fieldtype": "Link", "label": "Submitted By", "options": "User", "reqd": 1, "read_only": 1},
+    {"fieldname": "submitted_at", "fieldtype": "Datetime", "label": "Submitted At", "reqd": 1, "read_only": 1},
+    {"fieldname": "decided_by", "fieldtype": "Link", "label": "Decided By", "options": "User", "read_only": 1},
+    {"fieldname": "decided_at", "fieldtype": "Datetime", "label": "Decided At", "read_only": 1},
+    {"fieldname": "decision_comment", "fieldtype": "Small Text", "label": "Decision Comment", "read_only": 1}
+  ],
+  "index_web_pages_for_search": 0,
+  "modified": "2026-08-17 00:00:00.000000",
+  "modified_by": "Administrator",
+  "module": "Rayher CRM",
+  "name": "CRM Quotation Approval",
+  "naming_rule": "Expression",
+  "owner": "Administrator",
+  "permissions": [
+    {"read": 1, "role": "CRM Manager"},
+    {"read": 1, "role": "CRM Sales"}
+  ],
+  "sort_field": "submitted_at",
+  "sort_order": "DESC",
+  "states": []
+}

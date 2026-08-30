@@ -1,0 +1,37 @@
+{
+  "name": "semiconductor-crm-mvp",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite --mode frappe --host 127.0.0.1",
+    "dev:lan": "vite --mode frappe --host 0.0.0.0 --port 4173",
+    "build": "vue-tsc --noEmit && vite build --mode frappe",
+    "build:frappe": "vue-tsc --noEmit && vite build --mode frappe --outDir backend/apps/rayher_crm/rayher_crm/public/crm --emptyOutDir",
+    "preview": "vite preview --host 127.0.0.1",
+    "preview:lan": "vite preview --host 0.0.0.0 --port 4173",
+    "typecheck": "vue-tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "@lucide/vue": "1.24.0",
+    "echarts": "6.1.0",
+    "element-plus": "2.14.3",
+    "pinia": "4.0.2",
+    "vue": "3.5.40",
+    "vue-router": "5.2.0"
+  },
+  "devDependencies": {
+    "@types/node": "24.13.3",
+    "@vitejs/plugin-vue": "6.0.8",
+    "@vue/compiler-sfc": "3.5.40",
+    "@vue/test-utils": "2.4.11",
+    "jsdom": "29.1.1",
+    "typescript": "5.9.3",
+    "vite": "8.1.5",
+    "vitest": "4.1.10",
+    "vue-tsc": "3.3.7"
+  },
+  "packageManager": "pnpm@11.9.0"
+}

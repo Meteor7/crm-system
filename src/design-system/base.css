@@ -1,0 +1,276 @@
+.semicrm-app,
+.semicrm-app *,
+.semicrm-app *::before,
+.semicrm-app *::after {
+  box-sizing: border-box;
+}
+
+.semicrm-app button,
+.semicrm-app input,
+.semicrm-app select,
+.semicrm-app textarea {
+  font: inherit;
+}
+
+.semicrm-app {
+  min-height: 100dvh;
+  color: var(--crm-text);
+  background: var(--crm-surface);
+  font-family: var(--crm-font-sans);
+  font-size: 14px;
+  -webkit-font-smoothing: antialiased;
+}
+
+.semicrm-app :focus-visible {
+  outline: 3px solid rgba(254, 153, 0, 0.32);
+  outline-offset: 2px;
+}
+
+.semicrm-app__boot {
+  display: grid;
+  min-height: 100vh;
+  place-items: center;
+  color: var(--crm-text-muted);
+}
+
+.semicrm-app .tabular {
+  font-variant-numeric: tabular-nums;
+}
+
+.semicrm-app .primary-button,
+.semicrm-app .secondary-button,
+.semicrm-app .danger-button {
+  display: inline-flex;
+  min-height: 36px;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  padding: 0 13px;
+  border-radius: 9px;
+  font-size: 10px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.semicrm-app .primary-button {
+  color: var(--crm-brand-ink);
+  background: var(--crm-teal);
+  border: 1px solid var(--crm-teal);
+  box-shadow: 0 5px 14px rgba(254, 153, 0, 0.2);
+  transition: transform .18s ease, background-color .18s ease, box-shadow .18s ease;
+}
+
+.semicrm-app .primary-button:not(:disabled):hover {
+  background: #F3A51F;
+  border-color: #F3A51F;
+  box-shadow: 0 7px 18px rgba(254, 153, 0, 0.28);
+  transform: translateY(-1px);
+}
+
+.semicrm-app .primary-button:disabled,
+.semicrm-app .secondary-button:disabled,
+.semicrm-app .danger-button:disabled {
+  color: #819092;
+  background: #e8eeed;
+  border-color: #d9e3e1;
+  cursor: not-allowed;
+}
+
+.semicrm-app .secondary-button {
+  color: var(--crm-text);
+  background: #fff;
+  border: 1px solid var(--crm-line);
+  transition: border-color .18s ease, background-color .18s ease;
+}
+
+.semicrm-app .secondary-button:not(:disabled):hover {
+  background: #FFFBF5;
+  border-color: #F3C173;
+}
+
+.semicrm-app .danger-button {
+  color: var(--crm-danger);
+  background: #fff;
+  border: 1px solid #E5B8B8;
+  transition: color .18s ease, border-color .18s ease, background-color .18s ease;
+}
+
+.semicrm-app .danger-button:not(:disabled):hover {
+  color: #A93333;
+  background: var(--crm-danger-soft);
+  border-color: #CF8585;
+}
+
+.semicrm-app a.detail-back-button {
+  display: inline-flex;
+  width: max-content;
+  min-height: 38px;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 0 14px;
+  color: var(--crm-brand-ink);
+  background: var(--crm-brand);
+  border: 1px solid var(--crm-brand);
+  border-radius: 9px;
+  box-shadow: 0 5px 14px rgba(254, 153, 0, 0.22);
+  font-size: 11px;
+  font-weight: 800;
+  text-decoration: none;
+  white-space: nowrap;
+  transition: background-color .18s ease, box-shadow .18s ease, transform .18s ease;
+}
+
+.semicrm-app a.detail-back-button:hover {
+  background: #F3A51F;
+  border-color: #F3A51F;
+  box-shadow: 0 7px 18px rgba(254, 153, 0, 0.3);
+  transform: translateY(-1px);
+}
+
+.semicrm-app a.detail-back-button:active {
+  transform: translateY(0);
+}
+
+.semicrm-app a.detail-back-button svg {
+  width: 16px;
+  height: 16px;
+  stroke-width: 2.4;
+}
+
+.semicrm-app :is(a.record-link, .record-name-link strong) {
+  color: var(--crm-link);
+  text-decoration: none;
+  transition: color .18s ease;
+}
+
+.semicrm-app a.record-link strong {
+  color: inherit;
+}
+
+.semicrm-app :is(a.record-link, .record-name-link):hover strong,
+.semicrm-app :is(a.record-link, .record-name-link):focus-visible strong,
+.semicrm-app a.record-link:hover,
+.semicrm-app a.record-link:focus-visible {
+  color: var(--crm-link-hover);
+  text-decoration: none;
+}
+
+.semicrm-app .crm-table a:not(.primary-button):not(.secondary-button) {
+  color: var(--crm-link);
+  text-decoration: none;
+}
+
+.semicrm-app .crm-table a:not(.primary-button):not(.secondary-button):hover,
+.semicrm-app .crm-table a:not(.primary-button):not(.secondary-button):focus-visible {
+  color: var(--crm-link-hover);
+  text-decoration: none;
+}
+
+.semicrm-app .filter-control {
+  height: 34px;
+  padding: 0 28px 0 10px;
+  color: var(--crm-text);
+  background: var(--crm-surface);
+  border: 1px solid var(--crm-line);
+  border-radius: 8px;
+  font-size: 10px;
+}
+
+.semicrm-app .crm-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.semicrm-app .crm-table th {
+  height: 42px;
+  padding: 0 15px;
+  color: #7B7F86;
+  background: #FAF8F5;
+  border-bottom: 1px solid var(--crm-line);
+  font-size: 8px;
+  font-weight: 800;
+  letter-spacing: .05em;
+  text-align: left;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.semicrm-app .crm-table td {
+  height: 66px;
+  padding: 10px 15px;
+  color: var(--crm-text);
+  border-bottom: 1px solid var(--crm-line);
+  font-size: 10px;
+  vertical-align: middle;
+}
+
+.semicrm-app .crm-table tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+@media (max-width: 839px) {
+  .semicrm-app .crm-table.is-responsive {
+    min-width: 0;
+    border-collapse: separate;
+  }
+
+  .semicrm-app .crm-table.is-responsive thead {
+    display: none;
+  }
+
+  .semicrm-app .crm-table.is-responsive tbody {
+    display: grid;
+    gap: 10px;
+    padding: 10px;
+  }
+
+  .semicrm-app .crm-table.is-responsive tr {
+    display: grid;
+    overflow: hidden;
+    background: #fff;
+    border: 1px solid var(--crm-line);
+    border-radius: 11px;
+  }
+
+  .semicrm-app .crm-table.is-responsive td,
+  .semicrm-app .crm-table.is-responsive td:first-child {
+    position: static;
+    z-index: auto;
+    display: grid;
+    min-width: 0;
+    height: auto;
+    min-height: 43px;
+    grid-template-columns: 104px minmax(0, 1fr);
+    align-items: center;
+    gap: 10px;
+    padding: 9px 12px;
+    background: #fff;
+  }
+
+  .semicrm-app .crm-table.is-responsive td::before {
+    content: attr(data-label);
+    grid-column: 1;
+    grid-row: 1;
+    color: #7B7F86;
+    font-size: 8px;
+    font-weight: 800;
+    letter-spacing: .04em;
+    text-transform: uppercase;
+  }
+
+  .semicrm-app .crm-table.is-responsive td > * {
+    grid-column: 2;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .semicrm-app *,
+  .semicrm-app *::before,
+  .semicrm-app *::after {
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+  }
+}

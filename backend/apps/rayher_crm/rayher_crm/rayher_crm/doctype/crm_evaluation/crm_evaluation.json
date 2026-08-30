@@ -1,0 +1,29 @@
+{
+  "actions":[],"autoname":"format:CRM-EVAL-{#####}","creation":"2026-08-04 00:00:00.000000","doctype":"DocType","engine":"InnoDB",
+  "field_order":["account","requirement_id","demo_request","title","status","evaluation_owner","planned_end","test_run_deadline","wafer_preparation_status","wafer_preparation_completed_by","wafer_preparation_completed_at","test_preparation_status","test_preparation_completed_by","test_preparation_completed_at","acceptance","report_status","report_artifact_id","internal_report_artifact_id","external_report_artifact_id","report_version","criteria"],
+  "fields":[
+    {"fieldname":"account","fieldtype":"Link","label":"Account","options":"Customer"},
+    {"fieldname":"requirement_id","fieldtype":"Data","label":"Requirement ID"},
+    {"fieldname":"demo_request","fieldtype":"Link","label":"Demo Request","options":"CRM Demo Request","reqd":1,"unique":1},
+    {"fieldname":"title","fieldtype":"Data","label":"Title","reqd":1},
+    {"fieldname":"status","fieldtype":"Select","label":"Status","options":"Requested\nScope Confirmed\nSample Received\nScheduled\nTesting\nAnalysis\nInternal Review\nCustomer Review\nAccepted\nRejected","reqd":1},
+    {"fieldname":"evaluation_owner","fieldtype":"Link","label":"Owner","options":"User","reqd":1},
+    {"fieldname":"planned_end","fieldtype":"Date","label":"Planned End","reqd":1},
+    {"fieldname":"test_run_deadline","fieldtype":"Date","label":"Test Run Deadline"},
+    {"fieldname":"wafer_preparation_status","fieldtype":"Select","label":"Wafer Preparation Status","options":"Pending\nCompleted"},
+    {"fieldname":"wafer_preparation_completed_by","fieldtype":"Link","label":"Wafer Preparation Completed By","options":"User","read_only":1},
+    {"fieldname":"wafer_preparation_completed_at","fieldtype":"Datetime","label":"Wafer Preparation Completed At","read_only":1},
+    {"fieldname":"test_preparation_status","fieldtype":"Select","label":"Test Preparation Status","options":"Pending\nCompleted"},
+    {"fieldname":"test_preparation_completed_by","fieldtype":"Link","label":"Test Preparation Completed By","options":"User","read_only":1},
+    {"fieldname":"test_preparation_completed_at","fieldtype":"Datetime","label":"Test Preparation Completed At","read_only":1},
+    {"fieldname":"acceptance","fieldtype":"Select","label":"Acceptance","options":"Pending\nAccepted\nRejected","reqd":1},
+    {"fieldname":"report_status","fieldtype":"Select","label":"Report Status","options":"Not Ready\nReady","reqd":1},
+    {"fieldname":"report_artifact_id","fieldtype":"Data","label":"Report Artifact ID","read_only":1},
+    {"fieldname":"internal_report_artifact_id","fieldtype":"Data","label":"Internal Report Artifact ID","read_only":1},
+    {"fieldname":"external_report_artifact_id","fieldtype":"Data","label":"External Report Artifact ID","read_only":1},
+    {"default":"0","fieldname":"report_version","fieldtype":"Int","label":"Report Version","read_only":1},
+    {"fieldname":"criteria","fieldtype":"Small Text","label":"Criteria"}
+  ],
+  "index_web_pages_for_search":0,"modified":"2026-08-04 00:00:00.000000","modified_by":"Administrator","module":"Rayher CRM","name":"CRM Evaluation","naming_rule":"Expression","owner":"Administrator",
+  "permissions":[{"create":1,"delete":1,"read":1,"role":"CRM Manager","write":1},{"read":1,"role":"CRM Sales"},{"read":1,"role":"CRM Engineer","write":1}],"sort_field":"modified","sort_order":"DESC","states":[]
+}

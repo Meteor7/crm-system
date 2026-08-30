@@ -1,0 +1,19 @@
+{
+  "actions": [], "autoname": "format:CRM-NOT-{#####}", "creation": "2026-08-04 00:00:00.000000", "doctype": "DocType", "engine": "InnoDB",
+  "field_order": ["actor", "category", "recipient_user", "title", "message", "route", "created_at", "read_at", "source_doctype", "source_name", "dedupe_key"],
+  "fields": [
+    {"fieldname": "actor", "fieldtype": "Link", "label": "Actor", "options": "User", "reqd": 1},
+    {"fieldname": "category", "fieldtype": "Select", "label": "Category", "options": "Account\nContact\nRequirement\nLead\nOpportunity\nAction\nVisit\nBooking\nDemo\nEvaluation\nInstalledTool\nQuotation\nRFQ\nDocument", "reqd": 1},
+    {"fieldname": "recipient_user", "fieldtype": "Link", "label": "Recipient User", "options": "User", "reqd": 1},
+    {"fieldname": "title", "fieldtype": "Data", "label": "Title", "reqd": 1},
+    {"fieldname": "message", "fieldtype": "Small Text", "label": "Message", "reqd": 1},
+    {"fieldname": "route", "fieldtype": "Data", "label": "Route", "reqd": 1},
+    {"fieldname": "created_at", "fieldtype": "Datetime", "label": "Created At", "reqd": 1},
+    {"fieldname": "read_at", "fieldtype": "Datetime", "label": "Read At"},
+    {"fieldname": "source_doctype", "fieldtype": "Link", "label": "Source DocType", "options": "DocType"},
+    {"fieldname": "source_name", "fieldtype": "Dynamic Link", "label": "Source Name", "options": "source_doctype"},
+    {"fieldname": "dedupe_key", "fieldtype": "Data", "label": "Dedupe Key", "unique": 1}
+  ],
+  "index_web_pages_for_search": 0, "modified": "2026-08-04 00:00:00.000000", "modified_by": "Administrator", "module": "Rayher CRM", "name": "CRM Notification Event", "naming_rule": "Expression", "owner": "Administrator",
+  "permissions": [{"read": 1, "role": "CRM Manager"}, {"read": 1, "role": "CRM Sales"}, {"read": 1, "role": "CRM Engineer"}], "sort_field": "created_at", "sort_order": "DESC", "states": []
+}

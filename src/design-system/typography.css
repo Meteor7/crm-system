@@ -1,0 +1,52 @@
+.route-content.standard-typography {
+  --crm-type-caption: 10px;
+  --crm-type-secondary: 11px;
+  --crm-type-body: 12px;
+  --crm-type-emphasis: 13px;
+  --crm-type-section: 16px;
+  font-size: var(--crm-type-body);
+}
+
+.route-content.standard-typography :is(button, input, select, textarea, output),
+.route-content.standard-typography :is(p, li, td, dd) {
+  font-size: var(--crm-type-body) !important;
+}
+
+.route-content.standard-typography :is(label, dt, small),
+.route-content.standard-typography [class*="-description"],
+.route-content.standard-typography [class*="-hint"],
+.route-content.standard-typography [class*="-note"] {
+  font-size: var(--crm-type-secondary) !important;
+}
+
+.route-content.standard-typography :is(th, .eyebrow, .page-eyebrow, .workspace-badge, .status-badge),
+.route-content.standard-typography [class*="-eyebrow"],
+.route-content.standard-typography [class*="-caption"],
+.route-content.standard-typography [class*="-meta"] {
+  font-size: var(--crm-type-caption) !important;
+}
+
+.route-content.standard-typography :is(h2, .workspace-panel > header h2, .profile-section > header strong, .project-section > header strong) {
+  font-size: var(--crm-type-section) !important;
+}
+
+.route-content.standard-typography :is(h3, article strong, td strong, .account-copy strong, .workspace-select-card strong) {
+  font-size: var(--crm-type-emphasis) !important;
+}
+
+.route-content.standard-typography .page-header p,
+.route-content.standard-typography .page-title-row p {
+  font-size: var(--crm-type-emphasis) !important;
+}
+
+.route-content.standard-typography :is(.metric-heading, .workspace-panel > header span, .stage-rail li) {
+  font-size: var(--crm-type-caption) !important;
+}
+
+.route-content.standard-typography :is(.crm-table td, .catalog-table td, .contract-table td, .detail-body dd, .access-state span) {
+  font-size: var(--crm-type-body) !important;
+}
+
+.route-content.standard-typography .dashboard-readable-type .page-header p {
+  font-size: 14px !important;
+}

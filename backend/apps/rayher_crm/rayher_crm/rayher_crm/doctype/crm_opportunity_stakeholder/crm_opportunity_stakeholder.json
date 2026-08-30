@@ -1,0 +1,22 @@
+{
+  "actions": [], "autoname": "hash", "creation": "2026-08-04 00:00:00.000000", "doctype": "DocType", "engine": "InnoDB",
+  "field_order": ["opportunity", "contact", "role", "influence", "stance", "coverage", "is_coach", "win_result", "opportunity_notes", "archived"],
+  "fields": [
+    {"fieldname": "opportunity", "fieldtype": "Link", "label": "Opportunity", "options": "CRM Opportunity", "reqd": 1},
+    {"fieldname": "contact", "fieldtype": "Link", "label": "Contact", "options": "Contact", "reqd": 1},
+    {"fieldname": "role", "fieldtype": "Select", "label": "Role", "options": "Decision Maker\nEconomic Buyer\nTechnical Buyer\nUser Buyer\nCoach\nProcurement\nInfluencer\nChampion\nTechnical Champion\nPrimary Contact", "reqd": 1},
+    {"fieldname": "influence", "fieldtype": "Select", "label": "Influence", "options": "High\nMedium\nLow", "reqd": 1},
+    {"fieldname": "stance", "fieldtype": "Select", "label": "Stance", "options": "Support\nNeutral\nAgainst", "reqd": 1},
+    {"fieldname": "coverage", "fieldtype": "Data", "label": "Coverage", "reqd": 1},
+    {"default": "0", "fieldname": "is_coach", "fieldtype": "Check", "label": "Is Coach"},
+    {"fieldname": "win_result", "fieldtype": "Small Text", "label": "Win Result"},
+    {"fieldname": "opportunity_notes", "fieldtype": "Small Text", "label": "Opportunity Notes"},
+    {"default": "0", "fieldname": "archived", "fieldtype": "Check", "label": "Archived", "read_only": 1}
+  ],
+  "index_web_pages_for_search": 0, "modified": "2026-08-04 00:00:00.000000", "modified_by": "Administrator", "module": "Rayher CRM", "name": "CRM Opportunity Stakeholder", "naming_rule": "Random", "owner": "Administrator",
+  "permissions": [
+    {"create": 1, "delete": 1, "read": 1, "role": "CRM Manager", "write": 1},
+    {"create": 1, "read": 1, "role": "CRM Sales", "write": 1},
+    {"read": 1, "role": "CRM Engineer"}
+  ], "sort_field": "modified", "sort_order": "DESC", "states": []
+}

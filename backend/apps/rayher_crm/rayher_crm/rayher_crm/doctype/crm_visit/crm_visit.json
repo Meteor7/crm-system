@@ -1,0 +1,44 @@
+{
+  "actions": [],
+  "autoname": "format:CRM-VIS-{#####}",
+  "creation": "2026-08-04 00:00:00.000000",
+  "doctype": "DocType",
+  "engine": "InnoDB",
+  "field_order": [
+    "account", "primary_contact", "opportunity", "visit_owner", "subject",
+    "visit_date", "visit_type", "status", "objective", "outcome",
+    "next_action", "action_owner", "due", "action_done", "created_by_user"
+  ],
+  "fields": [
+    {"fieldname": "account", "fieldtype": "Link", "label": "Account", "options": "Customer", "reqd": 1},
+    {"fieldname": "primary_contact", "fieldtype": "Link", "label": "Primary Contact", "options": "Contact"},
+    {"fieldname": "opportunity", "fieldtype": "Link", "label": "Opportunity", "options": "CRM Opportunity"},
+    {"fieldname": "visit_owner", "fieldtype": "Link", "label": "Visit Owner", "options": "User", "reqd": 1},
+    {"fieldname": "subject", "fieldtype": "Data", "label": "Subject", "reqd": 1},
+    {"fieldname": "visit_date", "fieldtype": "Date", "label": "Visit Date", "reqd": 1},
+    {"fieldname": "visit_type", "fieldtype": "Select", "label": "Visit Type", "options": "On-site\nVideo\nPhone", "reqd": 1},
+    {"default": "Planned", "fieldname": "status", "fieldtype": "Select", "label": "Status", "options": "Planned\nVisited\nMinutes Submitted\nManager Reviewed", "reqd": 1},
+    {"fieldname": "objective", "fieldtype": "Small Text", "label": "Objective", "reqd": 1},
+    {"fieldname": "outcome", "fieldtype": "Small Text", "label": "Outcome"},
+    {"fieldname": "next_action", "fieldtype": "Data", "label": "Next Action"},
+    {"fieldname": "action_owner", "fieldtype": "Link", "label": "Action Owner", "options": "User"},
+    {"fieldname": "due", "fieldtype": "Date", "label": "Due"},
+    {"default": "0", "fieldname": "action_done", "fieldtype": "Check", "label": "Action Done"},
+    {"fieldname": "created_by_user", "fieldtype": "Link", "label": "Created By", "options": "User", "read_only": 1, "reqd": 1}
+  ],
+  "index_web_pages_for_search": 0,
+  "modified": "2026-08-04 00:00:00.000000",
+  "modified_by": "Administrator",
+  "module": "Rayher CRM",
+  "name": "CRM Visit",
+  "naming_rule": "Expression",
+  "owner": "Administrator",
+  "permissions": [
+    {"create": 1, "delete": 1, "read": 1, "role": "CRM Manager", "write": 1},
+    {"create": 1, "read": 1, "role": "CRM Sales", "write": 1},
+    {"read": 1, "role": "CRM Engineer"}
+  ],
+  "sort_field": "modified",
+  "sort_order": "DESC",
+  "states": []
+}

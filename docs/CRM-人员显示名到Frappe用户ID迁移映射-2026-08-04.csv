@@ -1,0 +1,16 @@
+legacy_value,user_id,employee_id,role,disposition,note
+演示员工24,person029@crm.example.invalid,CRM-EMP-001,Manager,active,canonical display name
+Demo Staff 04,person029@crm.example.invalid,CRM-EMP-001,Manager,alias,legacy test or demo alias
+Boss,person029@crm.example.invalid,CRM-EMP-001,Manager,alias,legacy test alias
+Demo Staff 03,person029@crm.example.invalid,CRM-EMP-001,Manager,alias,legacy report alias
+演示经理01,person073@crm.example.invalid,CRM-EMP-002,Manager,active,canonical display name
+Demo Staff 09,person073@crm.example.invalid,CRM-EMP-002,Manager,alias,legacy English alias
+Demo Staff 06,person015@crm.example.invalid,CRM-EMP-003,Manager,active,canonical display name
+Demo Staff 01,person002@crm.example.invalid,CRM-EMP-004,Sales,active,canonical display name
+Demo Staff 02,person005@crm.example.invalid,CRM-EMP-005,Sales,active,canonical display name
+演示员工14,person077@crm.example.invalid,CRM-EMP-006,Engineer,active,internal employee only; customer contact uses Contact ID
+演示员工15,person053@crm.example.invalid,CRM-EMP-007,Engineer,active,canonical display name
+Demo Staff 08,person034@crm.example.invalid,CRM-EMP-008,Sales,migrate_only,seed history user; not a Demo switch identity
+Demo Staff 07,person025@crm.example.invalid,CRM-EMP-009,Sales,migrate_only,seed action owner; not a Demo switch identity
+Demo Staff 05,person012@crm.example.invalid,CRM-EMP-010,Engineer,migrate_only,seed engineer; not a Demo switch identity
+演示员工23,person028@crm.example.invalid,CRM-EMP-011,Engineer,migrate_only,seed FAE; not a Demo switch identity

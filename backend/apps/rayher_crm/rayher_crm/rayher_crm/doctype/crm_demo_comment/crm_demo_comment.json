@@ -1,0 +1,16 @@
+{
+  "actions":[],"autoname":"hash","creation":"2026-08-04 00:00:00.000000","doctype":"DocType","engine":"InnoDB",
+  "field_order":["demo_request","author","role","body","mentioned_people","mentioned_person","mentioned_person_label","at"],
+  "fields":[
+    {"fieldname":"demo_request","fieldtype":"Link","label":"Demo Request","options":"CRM Demo Request","reqd":1},
+    {"fieldname":"author","fieldtype":"Link","label":"Author","options":"User","reqd":1},
+    {"fieldname":"role","fieldtype":"Data","label":"Role","reqd":1},
+    {"fieldname":"body","fieldtype":"Small Text","label":"Body","reqd":1},
+    {"fieldname":"mentioned_people","fieldtype":"JSON","label":"Mentioned People"},
+    {"fieldname":"mentioned_person","fieldtype":"Link","label":"Mentioned Person","options":"User"},
+    {"fieldname":"mentioned_person_label","fieldtype":"Data","label":"Mentioned Person Label"},
+    {"fieldname":"at","fieldtype":"Datetime","label":"At","reqd":1}
+  ],
+  "index_web_pages_for_search":0,"modified":"2026-08-04 00:00:00.000000","modified_by":"Administrator","module":"Rayher CRM","name":"CRM Demo Comment","naming_rule":"Random","owner":"Administrator",
+  "permissions":[{"read":1,"role":"CRM Manager"},{"read":1,"role":"CRM Sales"},{"read":1,"role":"CRM Engineer"}],"sort_field":"at","sort_order":"DESC","states":[]
+}

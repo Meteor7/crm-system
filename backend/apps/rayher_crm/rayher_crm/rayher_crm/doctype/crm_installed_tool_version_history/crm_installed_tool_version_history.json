@@ -1,0 +1,103 @@
+{
+    "actions":  [
+
+                ],
+    "autoname":  "hash",
+    "creation":  "2026-08-12 00:00:00.000000",
+    "doctype":  "DocType",
+    "engine":  "InnoDB",
+    "field_order":  [
+                        "installed_tool",
+                        "at",
+                        "actor",
+                        "change_date",
+                        "change_type",
+                        "from_value",
+                        "to_value",
+                        "reason",
+                        "comment"
+                    ],
+    "fields":  [
+                   {
+                       "fieldname":  "installed_tool",
+                       "fieldtype":  "Link",
+                       "label":  "Installed Tool",
+                       "options":  "CRM Installed Tool",
+                       "reqd":  1
+                   },
+                   {
+                       "fieldname":  "at",
+                       "fieldtype":  "Datetime",
+                       "label":  "At",
+                       "reqd":  1
+                   },
+                   {
+                       "fieldname":  "actor",
+                       "fieldtype":  "Link",
+                       "label":  "Actor",
+                       "options":  "User",
+                       "reqd":  1
+                   },
+                   {
+                       "fieldname":  "change_date",
+                       "fieldtype":  "Date",
+                       "label":  "Change Date",
+                       "reqd":  1
+                   },
+                   {
+                       "fieldname":  "change_type",
+                       "fieldtype":  "Select",
+                       "label":  "Change Type",
+                       "options":  "Software\nFirmware\nOperating System\nConfiguration\nEngineer Assignment",
+                       "reqd":  1
+                   },
+                   {
+                       "fieldname":  "from_value",
+                       "fieldtype":  "Small Text",
+                       "label":  "From Value"
+                   },
+                   {
+                       "fieldname":  "to_value",
+                       "fieldtype":  "Small Text",
+                       "label":  "To Value",
+                       "reqd":  1
+                   },
+                   {
+                       "fieldname":  "reason",
+                       "fieldtype":  "Small Text",
+                       "label":  "Reason",
+                       "reqd":  1
+                   },
+                   {
+                       "fieldname":  "comment",
+                       "fieldtype":  "Small Text",
+                       "label":  "Comment"
+                   }
+               ],
+    "index_web_pages_for_search":  0,
+    "modified":  "2026-08-12 00:00:00.000000",
+    "modified_by":  "Administrator",
+    "module":  "Rayher CRM",
+    "name":  "CRM Installed Tool Version History",
+    "naming_rule":  "Random",
+    "owner":  "Administrator",
+    "permissions":  [
+                        {
+                            "read":  1,
+                            "role":  "CRM Manager"
+                        },
+                        {
+                            "read":  1,
+                            "role":  "CRM Sales"
+                        },
+                        {
+                            "read":  1,
+                            "role":  "CRM Engineer"
+                        }
+                    ],
+    "sort_field":  "at",
+    "sort_order":  "DESC",
+    "states":  [
+
+               ]
+}

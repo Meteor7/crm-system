@@ -1,0 +1,68 @@
+# Frontend dependencies and build output
+node_modules/
+dist/
+coverage/
+.pnpm-store/
+.vite/
+.vitest-tmp/
+
+# Local environment and secrets
+.env
+.env.*
+!.env.example
+
+# Runtime output
+*.log
+logs/
+tmp/
+temp/
+.cache/
+.codex-tmp/
+.codex-test-tmp/
+.codex-qa/
+
+# Local databases and storage
+*.db
+*.db-journal
+*.sqlite
+*.sqlite3
+*.sql
+database/
+data/
+storage/
+uploads/
+runtime/
+
+# Frappe backend source and deployment configuration are versioned.
+backend/build/
+backend/sites/
+backend/logs/
+backend/volumes/
+backend/secrets/
+backend/apps/rayher_crm/rayher_crm/public/crm/
+backend/apps/rayher_crm/rayher_crm/assets/controlled_documents/
+backend/**/site_config.json
+backend/**/common_site_config.json
+
+# Generated reports and review artifacts
+artifacts/
+_archive/
+output/
+outputs/
+
+# Local tools and editor metadata
+.agents/
+.claude/
+.codex/
+.codex-docker-config/
+.superpowers/
+.work_spreadsheet/
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Python runtime files
+__pycache__/
+*.py[cod]
+*.egg-info/

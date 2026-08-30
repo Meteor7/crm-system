@@ -1,0 +1,18 @@
+{
+  "actions": [], "autoname": "hash", "creation": "2026-08-04 00:00:00.000000", "doctype": "DocType", "engine": "InnoDB",
+  "field_order": ["entity_type", "entity_id", "account", "actor", "action", "outcome", "reason", "at", "access_id", "request_id"],
+  "fields": [
+    {"fieldname": "entity_type", "fieldtype": "Select", "label": "Entity Type", "options": "Contact File\nDemo Artifact\nControlled Document\nRFQ", "reqd": 1},
+    {"fieldname": "entity_id", "fieldtype": "Data", "label": "Entity ID", "reqd": 1},
+    {"fieldname": "account", "fieldtype": "Link", "label": "Account", "options": "Customer"},
+    {"fieldname": "actor", "fieldtype": "Link", "label": "Actor", "options": "User", "reqd": 1},
+    {"fieldname": "action", "fieldtype": "Select", "label": "Action", "options": "Preview\nDownload\nPublish\nReject", "reqd": 1},
+    {"fieldname": "outcome", "fieldtype": "Select", "label": "Outcome", "options": "Allowed\nDenied", "reqd": 1},
+    {"fieldname": "reason", "fieldtype": "Data", "label": "Reason"},
+    {"fieldname": "at", "fieldtype": "Datetime", "label": "At", "reqd": 1},
+    {"fieldname": "access_id", "fieldtype": "Data", "label": "Access ID"},
+    {"fieldname": "request_id", "fieldtype": "Data", "label": "Request ID"}
+  ],
+  "index_web_pages_for_search": 0, "modified": "2026-08-04 00:00:00.000000", "modified_by": "Administrator", "module": "Rayher CRM", "name": "CRM File Access Audit", "naming_rule": "Random", "owner": "Administrator",
+  "permissions": [{"read": 1, "role": "CRM Manager"}], "sort_field": "at", "sort_order": "DESC", "states": []
+}

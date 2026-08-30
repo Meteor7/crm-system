@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<style>
+@page { size: A4; margin: 35mm 17mm 18mm 17mm; }
+* { box-sizing: border-box; }
+body { margin: 0; color: #111; font-family: Arial, "Microsoft YaHei", "Noto Sans CJK SC", sans-serif; font-size: 10.5pt; line-height: 1.45; }
+.page-header { position: relative; width: 176mm; height: 29mm; }
+.ref-cell { position: absolute; right: 0; top: 0; font-size: 12.5pt; font-weight: 700; }
+.logo { position: absolute; left: 0; top: 0; width: 43mm; height: auto; }
+.header-rule { position: absolute; left: 0; top: 16mm; width: 176mm; border-top: 1px solid #111; }
+h1 { margin: 4mm 0 8mm; text-align: center; font-size: 21pt; }
+.meta, .items { width: 100%; border-collapse: collapse; margin-bottom: 8mm; }
+.meta td { padding: 1mm; vertical-align: top; }
+.meta .label { width: 24mm; font-weight: 700; }
+.items th, .items td { padding: 2mm 1.5mm; border-bottom: 1px solid #888; vertical-align: top; }
+.items th { text-align: left; border-top: 1px solid #222; border-bottom-color: #222; }
+.items .number { width: 12mm; text-align: center; }.items .qty { width: 16mm; text-align: center; }.items .price { width: 32mm; text-align: right; }
+.totals { width: 72mm; margin: 0 0 8mm auto; border-collapse: collapse; }.totals td { padding: 1.5mm; }.totals td:last-child { text-align: right; }.totals .final td { border-top: 1px solid #222; font-weight: 700; }
+.terms h2 { margin: 5mm 0 2mm; font-size: 11pt; }.payment { display: grid; grid-template-columns: 34mm 1fr; margin: 1.5mm 0; }.payment strong { white-space: nowrap; }
+.signature { margin-top: 12mm; }
+</style>
+</head>
+<body>
+<header id="header-html" class="page-header hidden-pdf"><img class="logo" data-source="quotation-planck-logo.png" src="{{ logoDataUri | e }}" alt="QIHENG DEMO"><div class="ref-cell">Ref. No.: {{ refNo | e }}</div><div class="header-rule"></div></header>
+<h1>Service Quotation</h1>
+<table class="meta">
+<tr><td class="label">Customer:</td><td>{{ customerName | e }}</td><td class="label">Date:</td><td>{{ quoteDateDisplay | e }}</td></tr>
+<tr><td class="label">Address:</td><td>{{ addressText | e }}</td><td class="label">Sales:</td><td>{{ seller | e }}</td></tr>
+<tr><td class="label">ATTN:</td><td>{{ attentionName | e }}{% if attentionPhone %} / {{ attentionPhone | e }}{% endif %}</td><td class="label">Source:</td><td>{{ opportunityTitle | e }}</td></tr>
+</table>
+<table class="items"><thead><tr><th class="number">No.</th><th>Service / Part</th><th class="qty">QTY</th><th class="price">Unit Price (RMB)</th></tr></thead><tbody>
+{% for item in items %}<tr><td class="number">{{ loop.index }}</td><td><strong>{{ item.name | e }}</strong>{% if item.model %} / {{ item.model | e }}{% endif %}{% if item.description %}<br>{{ item.description | e }}{% endif %}</td><td class="qty">{{ item.quantity }}</td><td class="price">{{ item.unitPrice }}</td></tr>{% endfor %}
+</tbody></table>
+<table class="totals"><tr><td>Subtotal</td><td>{{ subtotal }}</td></tr><tr><td>Discount</td><td>- {{ discountAmount }}</td></tr><tr class="final"><td>Total (RMB)</td><td>{{ total }}</td></tr></table>
+<section class="terms"><h2>Payment Terms</h2>{% for term in paymentTerms %}<div class="payment"><strong>{{ term.triggerCondition | e }}:</strong><span>{{ term.description | e }}</span></div>{% endfor %}<p><strong>Validity:</strong> {{ validityMonths }} month(s)</p></section>
+<footer class="signature"><strong>示例企业032有限公司 / Qiheng Demo</strong></footer>
+</body>
+</html>

@@ -1,0 +1,31 @@
+<script setup lang="ts">
+import { ref } from 'vue'
+import ModalShell from '@/design-system/ModalShell.vue'
+import RequiredMark from '@/design-system/RequiredMark.vue'
+import PersonnelSelect from '@/design-system/PersonnelSelect.vue'
+import { preferredPersonnelId } from '@/demo/personnel'
+import { OPPORTUNITY_ACTION_STATUSES, type CreateOpportunityActionInput, type OpportunityActionDto } from '@/types/workspaces'
+
+const props = defineProps<{ action?: OpportunityActionDto | null; defaultOwner: string; busy?: boolean; error?: string }>()
+const emit = defineEmits<{ close: []; submit: [value: CreateOpportunityActionInput] }>()
+const form = ref<CreateOpportunityActionInput>({
+  title: props.action?.title ?? '', owner: props.action?.owner ?? preferredPersonnelId('Sales', props.defaultOwner),
+  due: props.action?.due ?? '2026-07-31', status: props.action?.status ?? 'Open',
+})
+</script>
+
+<template>
+  <ModalShell :title="action ? '编辑 Action' : '新增 Action'" eyebrow="ACTION PLAN" :busy="busy" @close="$emit('close')" @submit="$emit('submit', form)">
+    <p v-if="error" class="form-error">{{ error }}</p>
+    <div class="action-form-grid">
+      <label class="wide"><span>Action 标题<RequiredMark :show="!action" /></span><input v-model="form.title" aria-label="Action 标题" required /></label>
+      <label><span>Owner<RequiredMark :show="!action" /></span><PersonnelSelect v-model="form.owner" :roles="['Sales', 'Engineer']" ariaLabel="Action owner" required /></label>
+      <label><span>Due Date<RequiredMark :show="!action" /></span><input v-model="form.due" aria-label="Action 截止日期" type="date" required /></label>
+      <label><span>状态</span><select v-model="form.status" aria-label="Action 状态"><option v-for="item in OPPORTUNITY_ACTION_STATUSES" :key="item">{{ item }}</option></select></label>
+    </div>
+  </ModalShell>
+</template>
+
+<style scoped>
+.form-error{margin:0 0 12px;padding:10px;color:var(--crm-danger);background:var(--crm-danger-soft);border-radius:8px;font-size:9px}.action-form-grid{display:grid;grid-template-columns:1fr 1fr;gap:13px}.action-form-grid label{display:grid;gap:6px}.action-form-grid label.wide{grid-column:1/-1}.action-form-grid span{color:var(--crm-text-muted);font-size:9px;font-weight:700}.action-form-grid input,.action-form-grid select{height:38px;padding:0 10px;border:1px solid var(--crm-line);border-radius:8px;font:inherit}.action-form-grid :focus{border-color:var(--crm-teal);outline:0}@media(max-width:560px){.action-form-grid{grid-template-columns:1fr}.action-form-grid label.wide{grid-column:auto}}
+</style>

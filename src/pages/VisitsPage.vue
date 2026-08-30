@@ -1,0 +1,155 @@
+<script setup lang="ts">
+import { personnelDisplayName } from '@/demo/personnel'
+import { computed, nextTick, onMounted, ref, watch } from 'vue'
+import { CalendarPlus } from '@lucide/vue'
+import { useRoute, useRouter } from 'vue-router'
+import type { MultipartFilePart } from '@/api/binary-transport'
+import { api as defaultApi, type CrmApi } from '@/api'
+import { mapRequestError } from '@/api/request-state'
+import { useAppStore } from '@/stores/app'
+import type { AccountSummaryDto, ContactSummaryDto, CreateContactInput, CreateVisitInput, Tone, VisitDto, VisitStatus } from '@/types/crm'
+import { VISIT_STATUS_ORDER } from '@/domain/visits'
+import { formatDisplayDate } from '@/domain/time'
+import PageHeader from '@/design-system/PageHeader.vue'
+import DataState from '@/design-system/DataState.vue'
+import StatusBadge from '@/design-system/StatusBadge.vue'
+import FilterBar from '@/features/shared/FilterBar.vue'
+import VisitModal from '@/features/visits/VisitModal.vue'
+import PaginationControls from '@/features/shared/PaginationControls.vue'
+import { readAllPages } from '@/features/shared/read-all-pages'
+import ContactModal from '@/features/contacts/ContactModal.vue'
+
+const props = withDefaults(defineProps<{ apiClient?: CrmApi }>(), { apiClient: () => defaultApi })
+const app = useAppStore()
+const route = useRoute()
+const router = useRouter()
+const rows = ref<VisitDto[]>([]), accounts = ref<AccountSummaryDto[]>([]), contacts = ref<ContactSummaryDto[]>([]), loading = ref(false), busy = ref(false), error = ref(''), requestId = ref('')
+const total = ref(0), page = ref(1)
+const pageSize = ref(10)
+const accountId = ref('All'), status = ref('All'), owner = ref('All')
+const modal = ref<'create' | 'review' | null>(null), selected = ref<VisitDto | null>(null)
+const contactModal = ref(false), contactAccountId = ref(''), selectedContactId = ref('')
+const canCreate = computed(() => app.can('visit:create'))
+const canReview = computed(() => app.can('visit:review'))
+const focusedVisitId = computed(() => typeof route.query.focus === 'string' ? route.query.focus : '')
+const owners = computed(() => [...new Set([...accounts.value.map((item) => item.owner), ...rows.value.map((item) => item.owner)])])
+const statusLabel: Record<VisitStatus, string> = { Planned: '\u5f85\u63d0\u4ea4\u62dc\u8bbf\u8bb0\u5f55', Visited: '\u5df2\u5b8c\u6210', 'Minutes Submitted': '\u62dc\u8bbf\u8bb0\u5f55\u5df2\u63d0\u4ea4', 'Manager Reviewed': '\u7ba1\u7406\u8005\u5df2\u5ba1\u6838' }
+const statusTone: Record<VisitStatus, Tone> = { Planned: 'neutral', Visited: 'info', 'Minutes Submitted': 'warning', 'Manager Reviewed': 'positive' }
+let sequence = 0
+
+async function load() {
+  const current = ++sequence
+  loading.value = true; error.value = ''
+  try {
+    const contactId = typeof route.query.contactId === 'string' ? route.query.contactId : ''
+    const focusId = focusedVisitId.value
+    const [accountRows, visitResult, contactRows, focusResult] = await Promise.all([
+      readAllPages((referencePage, referencePageSize) => props.apiClient.listAccounts({ page: referencePage, pageSize: referencePageSize })),
+      props.apiClient.listVisits({ accountId: accountId.value, status: status.value, owner: owner.value, contactId, page: page.value, pageSize: pageSize.value }),
+      app.can('contact:view') ? readAllPages((referencePage, referencePageSize) => props.apiClient.listContacts({ page: referencePage, pageSize: referencePageSize })) : Promise.resolve(null),
+      focusId ? props.apiClient.getVisit(focusId) : Promise.resolve(null),
+    ])
+    if (current !== sequence) return
+    accounts.value = accountRows; rows.value = visitResult.data.items; total.value = visitResult.meta?.total ?? rows.value.length; contacts.value = contactRows ?? []
+    if (focusResult && !rows.value.some((item) => item.id === focusResult.data.id)) rows.value.push(focusResult.data)
+    await nextTick()
+    const focusedRow = Array.from(document.querySelectorAll<HTMLElement>('[data-visit-id]'))
+      .find((element) => element.dataset.visitId === focusId)
+    focusedRow?.scrollIntoView?.({ block: 'center' })
+  } catch (reason) {
+    if (current !== sequence) return
+    const mapped = mapRequestError(reason); error.value = mapped.message; requestId.value = mapped.requestId
+  } finally { if (current === sequence) loading.value = false }
+}
+function reset() { page.value = 1; accountId.value = status.value = owner.value = 'All'; void load() }
+function changeFilters() { page.value = 1; void load() }
+function goPage(target: number) { page.value = target; void load() }
+function changePageSize(value: number) { pageSize.value = value; page.value = 1; void load() }
+function open(mode: NonNullable<typeof modal.value>, visit: VisitDto | null = null) { selected.value = visit; modal.value = mode }
+function openContact(accountId: string) { contactAccountId.value = accountId; contactModal.value = true }
+async function saveContact(payload: CreateContactInput) {
+  busy.value = true; error.value = ''; requestId.value = ''
+  try {
+    const created = await props.apiClient.createContact(payload)
+    selectedContactId.value = created.data.id
+    contacts.value = await readAllPages((referencePage, referencePageSize) => props.apiClient.listContacts({ page: referencePage, pageSize: referencePageSize }))
+    contactModal.value = false
+  } catch (reason) { const mapped = mapRequestError(reason); error.value = mapped.message; requestId.value = mapped.requestId }
+  finally { busy.value = false }
+}
+async function submit(payload: CreateVisitInput, meetingFile?: MultipartFilePart) {
+  busy.value = true; error.value = ''
+  try {
+    if (modal.value === 'create') {
+      const input = payload as CreateVisitInput
+      const created = await props.apiClient.createVisit(input)
+      if (meetingFile) {
+        await props.apiClient.submitVisitRecord(created.data.id, meetingFile)
+        modal.value = null; selected.value = null
+        await router.push({ name: 'visit-detail', params: { visitId: created.data.id } })
+        return
+      }
+    }
+    else if (modal.value === 'review' && selected.value) await props.apiClient.reviewVisit(selected.value.id, selected.value.modified)
+    modal.value = null; selected.value = null; await load()
+  } catch (reason) { const mapped = mapRequestError(reason); error.value = mapped.message; requestId.value = mapped.requestId }
+  finally { busy.value = false }
+}
+onMounted(async () => {
+  await app.loadBootstrap(props.apiClient)
+  if (typeof route.query.accountId === 'string') accountId.value = route.query.accountId
+  await load()
+  if (route.query.create === '1' && canCreate.value) open('create')
+})
+watch(focusedVisitId, () => { void load() })
+</script>
+
+<template>
+  <div class="visits-page">
+    <PageHeader eyebrow="CUSTOMER ENGAGEMENT" title="拜访管理" description="创建拜访后提交拜访记录即视为完成，管理者可在记录完整后审核。">
+      <button v-if="canCreate" class="primary-button" type="button" data-testid="new-visit" @click="open('create')"><CalendarPlus :size="15" />新建拜访</button>
+    </PageHeader>
+
+    <FilterBar :result-label="`${rows.length} 条拜访`" @reset="reset">
+      <select v-model="accountId" class="filter-control" aria-label="拜访客户筛选" @change="changeFilters"><option value="All">全部客户</option><option v-for="account in accounts" :key="account.id" :value="account.id">{{ account.shortName }}</option></select>
+      <select v-model="status" class="filter-control" aria-label="拜访状态筛选" @change="changeFilters"><option value="All">全部状态</option><option v-for="item in VISIT_STATUS_ORDER" :key="item" :value="item">{{ statusLabel[item] }}</option></select>
+      <select v-model="owner" class="filter-control" aria-label="拜访负责人筛选" @change="changeFilters"><option value="All">全部负责人</option><option v-for="item in owners" :key="item" :value="item">{{ personnelDisplayName(item) }}</option></select>
+    </FilterBar>
+
+    <p v-if="error" class="form-error" data-delete-error>{{ error }}<small v-if="requestId">Request ID {{ requestId }}</small></p>
+    <DataState v-if="loading && !rows.length" type="loading" />
+    <DataState v-else-if="!rows.length" type="empty" title="没有匹配的拜访" message="调整筛选条件，或创建新的拜访计划。" />
+    <section v-else class="visits-card">
+      <div class="table-scroll">
+        <table class="crm-table visits-table is-responsive">
+          <thead><tr><th>拜访主题</th><th>客户</th><th>日期 / 方式</th><th>负责人</th><th>拜访目标</th><th>拜访结果</th><th>状态</th><th>操作</th></tr></thead>
+          <tbody>
+            <tr v-for="visit in rows" :key="visit.id" :data-visit-id="visit.id" :class="{ focused: visit.id === focusedVisitId }">
+              <td class="visit-subject" data-label="拜访主题"><RouterLink class="record-link" :to="`/visits/${visit.id}`"><strong>{{ visit.subject }}</strong></RouterLink><small>{{ visit.id }}</small></td>
+              <td class="visit-account" data-label="客户"><strong>{{ visit.accountName }}</strong></td>
+              <td class="visit-date" data-label="日期 / 方式"><strong>{{ formatDisplayDate(visit.date) }}</strong><small>{{ visit.type }}</small></td>
+              <td data-label="负责人">{{ personnelDisplayName(visit.owner) }}</td>
+              <td class="visit-text" data-label="拜访目标">{{ visit.objective }}</td>
+              <td class="visit-text" data-label="拜访结果">{{ visit.outcome || '—' }}</td>
+              <td data-label="状态"><StatusBadge :label="statusLabel[visit.status]" :tone="statusTone[visit.status]" /></td>
+              <td data-label="操作">
+                <div class="visit-actions">
+                  <button v-if="canReview && visit.status === 'Minutes Submitted'" class="primary-button" type="button" @click="open('review', visit)">经理审核</button>
+                </div>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+    <PaginationControls v-if="!error && total > pageSize" :page="page" :page-size="pageSize" :total="total" @change="goPage" @page-size-change="changePageSize" />
+
+    <VisitModal v-if="modal" :mode="modal" :visit="selected" :accounts="accounts" :contacts="contacts" :initial-account-id="typeof route.query.accountId === 'string' ? route.query.accountId : ''" :initial-primary-contact-id="selectedContactId || (typeof route.query.primaryContactId === 'string' ? route.query.primaryContactId : '')" :initial-opportunity-id="typeof route.query.opportunityId === 'string' ? route.query.opportunityId : ''" :busy="busy" @close="modal = null" @create-contact="openContact" @submit="submit" />
+    <ContactModal v-if="contactModal" :accounts="accounts" :sites="[]" :contacts="contacts" :fixed-account-id="contactAccountId" :busy="busy" :error="error" @close="contactModal = false" @submit="saveContact" />
+  </div>
+</template>
+
+<style scoped>
+.primary-button{display:flex;align-items:center;gap:7px}.search-control{display:flex;min-width:190px;height:34px;align-items:center;gap:7px;padding:0 10px;color:var(--crm-text-muted);background:var(--crm-surface);border:1px solid var(--crm-line);border-radius:8px}.search-control input{min-width:0;flex:1;background:transparent;border:0;outline:0;font-size:10px}.form-error{display:flex;justify-content:space-between;padding:10px 12px;color:var(--crm-danger);background:var(--crm-danger-soft);border-radius:9px;font-size:10px}.visits-card{overflow:hidden;background:#fff;border:1px solid var(--crm-line);border-radius:14px}.table-scroll{overflow:auto}.visits-table{min-width:1540px}.visits-table tbody tr.focused{background:var(--crm-teal-soft);box-shadow:inset 3px 0 0 var(--crm-teal)}.visits-table td{vertical-align:top}.visits-table td strong,.visits-table td small{display:block}.visits-table td small{margin-top:4px;color:var(--crm-text-muted);font-size:10px}.visit-subject{min-width:210px}.visit-subject strong{color:var(--crm-brand-strong);font-size:12px}.visit-account{min-width:180px}.visit-date{min-width:110px;font-variant-numeric:tabular-nums}.visit-text{min-width:210px;max-width:280px;line-height:1.55}.visit-next-action{min-width:200px}.visit-actions{display:flex;min-width:150px;flex-wrap:wrap;align-items:center;gap:7px}.text-button{display:flex;align-items:center;gap:4px;color:var(--crm-teal);background:transparent;border:0;font-size:9px;font-weight:700;cursor:pointer}.secondary-button,.visit-actions .primary-button{min-height:30px;padding:0 10px;font-size:9px}
+@media(max-width:839px){.search-control{width:100%;min-width:0}.visits-table .visit-subject,.visits-table .visit-account,.visits-table .visit-date,.visits-table .visit-text{min-width:0;max-width:none}.visit-actions{min-width:0}.form-error{align-items:flex-start;flex-direction:column;gap:4px}}
+</style>

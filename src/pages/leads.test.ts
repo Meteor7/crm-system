@@ -1,0 +1,199 @@
+import { createPinia } from 'pinia'
+import { flushPromises, mount } from '@vue/test-utils'
+import { createMemoryHistory, createRouter } from 'vue-router'
+import { describe, expect, it, vi } from 'vitest'
+import { createMockApi } from '@/api/mock-adapter'
+import { useAppStore } from '@/stores/app'
+import LeadListView from '@/features/leads/LeadListView.vue'
+import LeadDetailPage from './LeadDetailPage.vue'
+
+async function pageContext(role: 'Manager' | 'Manager' | 'Engineer' = 'Manager') {
+  const api = createMockApi({ latency: 0, role })
+  const pinia = createPinia()
+  useAppStore(pinia).bootstrap = (await api.getBootstrap()).data
+  const router = createRouter({
+    history: createMemoryHistory(),
+    routes: [
+      { path: '/leads', name: 'leads', component: { template: '<div />' } },
+      { path: '/leads/:leadId', name: 'lead-detail', component: { template: '<div />' } },
+      { path: '/opportunities', name: 'opportunities', component: { template: '<div />' } },
+      { path: '/leads-opportunities', name: 'leads-opportunities', component: { template: '<div />' } },
+      { path: '/accounts', name: 'accounts', component: { template: '<div />' } },
+      { path: '/accounts/:accountId', name: 'account-detail', component: { template: '<div />' } },
+      { path: '/contacts/:contactId', name: 'contact-detail', component: { template: '<div />' } },
+    ],
+  })
+  return { api, pinia, router }
+}
+
+describe('Leads pages', () => {
+  it('loads, filters, and opens an independent Lead detail route', async () => {
+    const { api, pinia, router } = await pageContext()
+    await router.push('/leads')
+    const wrapper = mount(LeadListView, { props: { apiClient: api }, global: { plugins: [pinia, router] } })
+    await flushPromises()
+
+    expect(wrapper.findAll('[data-lead-id]')).toHaveLength(6)
+    expect(wrapper.find('[data-testid="lead-search"]').exists()).toBe(false)
+    await wrapper.get('[aria-label="Lead 状态筛选"]').setValue('Qualified')
+    await flushPromises()
+    expect(wrapper.findAll('[data-lead-id]')).toHaveLength(2)
+
+    await wrapper.get('[data-lead-id="LEAD-001"]').trigger('click')
+    await flushPromises()
+    expect(router.currentRoute.value.path).toBe('/leads/LEAD-001')
+  })
+
+  it('shows a newly created Lead even when the previous filters would hide it', async () => {
+    const { api, pinia, router } = await pageContext()
+    await router.push('/leads')
+    const wrapper = mount(LeadListView, { props: { apiClient: api }, global: { plugins: [pinia, router] } })
+    await flushPromises()
+
+    await wrapper.get('[aria-label="Lead 状态筛选"]').setValue('Qualified')
+    await flushPromises()
+    await wrapper.get('[data-testid="new-lead"]').trigger('click')
+    await wrapper.get('[aria-label="Lead 姓名"]').setValue('韩宁')
+    await wrapper.get('[aria-label="Lead 公司"]').setValue('北京示例半导体有限公司')
+    await wrapper.get('[aria-label="Lead 职位"]').setValue('工艺经理')
+    await wrapper.get('[aria-label="Lead 电话"]').setValue('+86 10 5555 0101')
+    await wrapper.get('[data-modal-submit]').trigger('submit')
+    await flushPromises()
+
+    expect(wrapper.get('[aria-label="Lead 状态筛选"]').element).toHaveProperty('value', 'All')
+    expect(wrapper.text()).toContain('韩宁')
+    expect(wrapper.text()).toContain('北京示例半导体有限公司')
+  })
+
+  it('keeps create, edit, and convert actions role-aware', async () => {
+    const management = await pageContext('Engineer')
+    await management.router.push('/leads')
+    const readOnly = mount(LeadListView, {
+      props: { apiClient: management.api },
+      global: { plugins: [management.pinia, management.router] },
+    })
+    await flushPromises()
+    expect(readOnly.find('[data-testid="new-lead"]').exists()).toBe(false)
+    expect(readOnly.find('[data-testid="edit-lead"]').exists()).toBe(false)
+
+    const admin = await pageContext()
+    await admin.router.push('/leads/LEAD-002')
+    const detail = mount(LeadDetailPage, {
+      props: { apiClient: admin.api },
+      global: { plugins: [admin.pinia, admin.router] },
+    })
+    await flushPromises()
+    expect(detail.find('[data-testid="edit-lead"]').exists()).toBe(true)
+    expect(detail.find('[data-testid="convert-lead"]').exists()).toBe(true)
+  })
+
+  it('loads account references beyond the first page for Lead conversion', async () => {
+    const { api, pinia, router } = await pageContext()
+    const firstPage = await api.listAccounts({ page: 1, pageSize: 1 })
+    const listAccounts = vi.spyOn(api, 'listAccounts').mockImplementation(async (query = {}) => ({
+      data: { items: query.page === 2 ? [] : firstPage.data.items },
+      meta: { requestId: `req-lead-account-page-${query.page ?? 1}`, total: 201, page: query.page ?? 1, pageSize: query.pageSize ?? 20 },
+      warnings: [],
+    }))
+    await router.push('/leads/LEAD-002')
+    mount(LeadDetailPage, { props: { apiClient: api }, global: { plugins: [pinia, router] } })
+    await flushPromises()
+
+    expect(listAccounts).toHaveBeenNthCalledWith(1, { page: 1, pageSize: 200 })
+    expect(listAccounts).toHaveBeenNthCalledWith(2, { page: 2, pageSize: 200 })
+  })
+
+  it('edits first-contact qualification directly from its detail card', async () => {
+    const { api, pinia, router } = await pageContext()
+    await router.push('/leads/LEAD-002')
+    const wrapper = mount(LeadDetailPage, {
+      props: { apiClient: api },
+      global: { plugins: [pinia, router] },
+    })
+    await flushPromises()
+
+    await wrapper.get('[data-testid="edit-qualification"]').trigger('click')
+    await wrapper.get('[aria-label="首次联系与判断"]').setValue('已电话确认，客户将在本季度评估设备。')
+    await wrapper.get('[aria-label="判断结果"]').setValue('Working')
+    await wrapper.get('[data-testid="save-qualification"]').trigger('submit')
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('已电话确认，客户将在本季度评估设备。')
+    expect(wrapper.text()).toContain('Working')
+    await expect(api.getLead('LEAD-002')).resolves.toMatchObject({
+      data: {
+        firstContactNote: '已电话确认，客户将在本季度评估设备。',
+        status: 'Working',
+      },
+    })
+  })
+
+  it('adds a follow-up arrangement directly from the activity timeline', async () => {
+    const { api, pinia, router } = await pageContext()
+    const previousArrangement = (await api.getLead('LEAD-003')).data.nextAction
+    await router.push('/leads/LEAD-003')
+    const wrapper = mount(LeadDetailPage, {
+      props: { apiClient: api },
+      global: { plugins: [pinia, router] },
+    })
+    await flushPromises()
+
+    await wrapper.get('[data-testid="add-arrangement"]').trigger('click')
+    expect(wrapper.get('[aria-label="后续安排"]').element).toHaveProperty('value', '')
+    expect(wrapper.get('[aria-label="安排日期"]').element).toHaveProperty('value', '')
+    await wrapper.get('[aria-label="后续安排"]').setValue('安排 FAE 技术需求访谈')
+    await wrapper.get('[aria-label="安排日期"]').setValue('2026-08-08')
+    await wrapper.get('[data-testid="save-arrangement"]').trigger('submit')
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('安排 FAE 技术需求访谈')
+    expect(wrapper.text()).toContain('2026-08-08')
+    expect(wrapper.text()).toContain(previousArrangement)
+    await expect(api.getLead('LEAD-003')).resolves.toMatchObject({
+      data: {
+        nextAction: '安排 FAE 技术需求访谈',
+        nextActionDue: '2026-08-08',
+        activities: [
+          { action: previousArrangement, dueDate: '2026-08-04' },
+          { action: '安排 FAE 技术需求访谈', dueDate: '2026-08-08' },
+        ],
+      },
+    })
+  })
+
+  it('renders Lead-specific profile and completes conversion from the detail page', async () => {
+    const { api, pinia, router } = await pageContext()
+    const convertLead = vi.spyOn(api, 'convertLead')
+    await router.push('/leads/LEAD-001')
+    const wrapper = mount(LeadDetailPage, {
+      props: { apiClient: api },
+      global: { plugins: [pinia, router] },
+    })
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('周启明')
+    expect(wrapper.text()).toContain('示例企业016有限公司')
+    expect(wrapper.text()).toContain('Trade Show')
+    expect(wrapper.text()).toContain('SEMICON China')
+
+    await wrapper.get('[data-testid="convert-lead"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('[aria-label="Opportunity 名称"]').attributes('required')).toBeDefined()
+    expect(wrapper.find('[aria-label="新客户简称"]').exists()).toBe(true)
+    expect(wrapper.find('[aria-label="新厂区名称"]').exists()).toBe(true)
+    expect(wrapper.find('[aria-label="新联系人部门"]').exists()).toBe(true)
+    await wrapper.get('[aria-label="新客户业务领域"]').setValue('__custom_account_segment__')
+    await wrapper.get('[aria-label="新客户业务领域自定义"]').setValue('Power Semiconductor')
+    await wrapper.get('[aria-label="Opportunity 名称"]').setValue('示例企业016缺陷检测正式商机')
+    await wrapper.get('[aria-label="Opportunity 金额"]').setValue(9800000)
+    await wrapper.get('[data-modal-submit]').trigger('submit')
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('转换已完成')
+    expect(convertLead).toHaveBeenCalledWith('LEAD-001', expect.objectContaining({
+      newAccount: expect.objectContaining({ segment: 'Power Semiconductor' }),
+    }))
+    expect(wrapper.text()).toContain('OPP-')
+    expect(wrapper.find('[data-testid="convert-lead"]').exists()).toBe(false)
+  })
+})

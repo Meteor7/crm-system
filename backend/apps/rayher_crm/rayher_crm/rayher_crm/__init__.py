@@ -1,0 +1,1 @@
+"""Rayher CRM Frappe module."""

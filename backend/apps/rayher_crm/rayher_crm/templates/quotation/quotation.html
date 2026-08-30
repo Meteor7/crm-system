@@ -1,0 +1,117 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<style>
+@page { size: A4; margin: 35mm 17mm 18mm 17mm; }
+* { box-sizing: border-box; }
+body { margin: 0; color: #111; font-family: Arial, "Microsoft YaHei", "Noto Sans CJK SC", sans-serif; font-size: 10.5pt; line-height: 1.42; }
+.page-header { position: relative; width: 176mm !important; height: 29mm; }
+.page-header .ref-cell { position: absolute; right: 0; top: 0; text-align: right !important; font-size: 12.5pt; font-weight: 700; white-space: nowrap; }
+.logo { position: absolute; left: 0; top: 0; width: 43mm; height: auto; display: block; }
+.header-rule { position: absolute; left: 0; top: 16mm; width: 176mm; border-top: 1px solid #111; }
+h1 { margin: 4mm 0 9mm; text-align: center; font-size: 22pt; line-height: 1; }
+.party { width: 100%; border-collapse: collapse; margin-bottom: 12mm; }
+.party td { padding: 0.8mm 1.5mm; vertical-align: top; }
+.party .label { width: 10%; font-weight: 700; white-space: nowrap; }
+.party .customer { width: 40%; }
+.party .from-label { width: 9%; font-weight: 700; white-space: nowrap; }
+.party .company { width: 41%; font-weight: 700; }
+.company-address { font-weight: 400; line-height: 1.45; }
+.equals { margin: 0 0 4mm; font-family: "Courier New", monospace; font-weight: 700; font-size: 10pt; line-height: 1.05; letter-spacing: 0; overflow: hidden; white-space: nowrap; }
+.items { width: 100%; border-collapse: collapse; page-break-inside: auto; }
+.items thead { display: table-header-group; }
+.items tr { page-break-inside: avoid; }
+.items th { border-top: 1px solid #222; border-bottom: 1px solid #222; padding: 1.6mm 1.2mm; text-align: left; font-size: 10.5pt; }
+.items td { border-bottom: 0; padding: 1.3mm 1.2mm; vertical-align: top; }
+.items .item-no { width: 11%; text-align: center; }
+.items .description { width: 58%; }
+.items .qty { width: 10%; text-align: center; }
+.items .unit-price { width: 21%; text-align: right; white-space: nowrap; }
+.items .device td { padding-top: 2.5mm; border-top: 1px solid #777; }
+.items .device:first-child td { border-top: 0; }
+.items .device .description { font-weight: 700; }
+.items .system td { padding-top: 2mm; background: #f3f6f5; border-top: 1px solid #aab7b5; font-weight: 700; }
+.items .system .description { padding-left: 3mm; }
+.items .accessory .description { padding-left: 8mm; }
+.item-detail { white-space: pre-line; font-weight: 400; }
+.totals { width: 51%; margin: 7mm 0 1mm auto; border-collapse: collapse; page-break-inside: avoid; }
+.totals td { padding: 1.3mm 1.2mm; }
+.totals td:last-child { text-align: right; white-space: nowrap; }
+.totals .final td { border-top: 1px solid #222; border-bottom: 1px solid #222; font-weight: 700; }
+.tax-note { margin: 1mm 0 7mm; font-size: 9.5pt; text-align: right; page-break-inside: avoid; }
+.terms { page-break-inside: auto; }
+.term-row { display: table; width: 100%; margin: 1.5mm 0; }
+.term-label, .term-text { display: table-cell; vertical-align: top; }
+.term-label { width: 32mm; padding-right: 3mm; font-weight: 700; white-space: nowrap; }
+.section-title { margin: 4mm 0 2mm; font-weight: 700; }
+.payment-row { display: table; width: 100%; margin: 1.1mm 0; }
+.payment-label, .payment-text { display: table-cell; vertical-align: top; }
+.payment-label { width: 32mm; font-weight: 700; white-space: nowrap; }
+.fixed-list { width: 100%; border-collapse: collapse; margin-top: 1.5mm; }
+.fixed-list td { padding: 0.8mm 0; vertical-align: top; }
+.fixed-list .included { width: 25mm; text-align: right; }
+.signature { margin-top: 8mm; page-break-inside: avoid; }
+.signature strong, .signature span { display: block; }
+.signature span { margin-top: 2mm; }
+</style>
+</head>
+<body>
+<header id="header-html" class="page-header hidden-pdf" style="position:relative;width:176mm;height:29mm;">
+  <img class="logo" style="position:absolute;left:0;top:0;width:43mm;" data-source="quotation-planck-logo.png" src="{{ logoDataUri | e }}" alt="QIHENG DEMO">
+  <div class="ref-cell" style="position:absolute;right:0;top:0;text-align:right;font-weight:700;white-space:nowrap;">Ref. No.: {{ refNo | e }}</div>
+  <div class="header-rule" style="position:absolute;left:0;top:16mm;width:176mm;border-top:1px solid #111;"></div>
+</header>
+
+<h1>Quotation</h1>
+<table class="party">
+<tr><td class="label">To:</td><td class="customer">{{ customerName | e }}</td><td class="from-label">From:</td><td class="company">示例企业032有限公司&nbsp; Qiheng Demo</td></tr>
+<tr><td class="label">客户地址</td><td class="customer">{{ addressText | e }}</td><td></td><td class="company company-address">深圳市宝安区宝安中心龙光世纪大厦 B 座<br>Room 1106B, Bao'an Center, Bao'an District, Shenzhen</td></tr>
+<tr><td class="label">ATTN:</td><td class="customer">{{ attentionName | e }}{% if attentionTitle %} / {{ attentionTitle | e }}{% endif %}{% if attentionPhone %}<br>{{ attentionPhone | e }}{% endif %}</td><td></td><td></td></tr>
+</table>
+<div class="equals">====================================================================================================<br>================</div>
+
+<table class="items">
+<thead><tr><th class="item-no">Items</th><th class="description">Description</th><th class="qty">QTY</th><th class="unit-price">Unit price<br>（RMB）</th></tr></thead>
+<tbody>
+{% for item in items %}
+<tr class="{{ 'device' if item.lineType == 'Device' else 'system' if item.lineType == 'System' else 'accessory' }}">
+<td class="item-no">{{ item.displayIndex }}</td>
+<td class="description">{{ item.name | e }}{% if item.model %}&nbsp; {{ item.model | e }}{% endif %}{% if item.description %}<div class="item-detail">{{ item.description | e }}</div>{% endif %}</td>
+<td class="qty">{{ '—' if item.lineType == 'System' else item.quantity }}</td>
+<td class="unit-price">{{ '—' if item.lineType == 'System' else 'included' if item.pricingMode == 'Included' else item.unitPrice }}</td>
+</tr>
+{% endfor %}
+</tbody>
+</table>
+
+<table class="totals">
+{% for group in deviceGroups %}
+<tr><td>{{ group.displayIndex }}. {{ group.name | e }}{% if group.model %} {{ group.model | e }}{% endif %} 单台配置价（含税）（RMB）</td><td>{{ group.configurationUnitTotal }}</td></tr>
+{% endfor %}
+<tr><td>报价小计（RMB）</td><td>{{ subtotal }}</td></tr>
+<tr><td>整单折扣</td><td>- {{ discountAmount }}</td></tr>
+<tr class="final"><td>总价（折扣后）（RMB）</td><td>{{ total }}</td></tr>
+</table>
+<p class="tax-note">*设备单台配置价为该父设备及其收费配件的含税价格</p>
+
+<section class="terms">
+<div class="term-row"><div class="term-label">Incoterm：</div><div class="term-text">FOB上海&nbsp;&nbsp;FOB Shanghai</div></div>
+<div class="section-title">Payment Terms:</div>
+{% for term in paymentTerms %}<div class="payment-row"><div class="payment-label">{{ term.triggerCondition | e }}：</div><div class="payment-text">{{ term.description | e }}</div></div>{% endfor %}
+<div class="term-row"><div class="term-label">交期:</div><div class="term-text">{{ deliveryMonths }}月内(标准交期) 收到买方正式PO为准。</div></div>
+<div class="term-row"><div class="term-label">Warranty:</div><div class="term-text">{{ warrantyMonths }} 个月自发货日起维保</div></div>
+<div class="term-row"><div class="term-label">报价有效期:</div><div class="term-text">报价有效期{{ validityMonths }}个月</div></div>
+<div class="section-title">Installation &amp; Training: ( Total four credits of training classes (means four persons*2weeks))</div>
+<table class="fixed-list">
+<tr><td>1.Installation, 5 days</td><td class="included">included</td></tr>
+<tr><td>2.Maintenance training, 5 days /4 EE</td><td class="included">included</td></tr>
+<tr><td>3.Application training: 5 days /4 PE</td><td class="included">included</td></tr>
+<tr><td>4.Operator training: 2 days/ 3 operators</td><td class="included">included</td></tr>
+<tr><td>5.Documentation(manual printout on cleanroom paper)</td><td class="included">included</td></tr>
+<tr><td>6.Packing in stretched foil, alupack film and wooden crates</td><td class="included">included</td></tr>
+</table>
+</section>
+<footer class="signature"><strong>示例企业032有限公司</strong><span>{{ quoteDateDisplay | e }}</span></footer>
+</body>
+</html>

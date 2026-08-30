@@ -1,0 +1,364 @@
+from __future__ import annotations
+
+import frappe
+from frappe.tests.utils import FrappeTestCase
+
+from rayher_crm.api.v1.errors import CrmApiException
+from rayher_crm.api.v1.leads import create_lead as create_lead_endpoint
+from rayher_crm.services.accounts import create_account
+from rayher_crm.services.contacts import create_contact
+from rayher_crm.services.leads import convert_lead, create_lead, delete_lead, get_lead, list_leads, update_lead
+from rayher_crm.services.sites import create_site
+
+
+class TestLeadApi(FrappeTestCase):
+    def setUp(self):
+        super().setUp()
+        self.original_user = frappe.session.user
+        frappe.set_user("Administrator")
+        self.sales = self._user("crm-lead-sales@example.invalid", "CRM Sales")
+        self.other_sales = self._user("crm-lead-other@example.invalid", "CRM Sales")
+        self.manager = self._user("crm-lead-manager@example.invalid", "CRM Manager")
+
+    def tearDown(self):
+        frappe.set_user(self.original_user)
+        super().tearDown()
+
+    def _user(self, email: str, role: str) -> str:
+        if frappe.db.exists("User", email):
+            user = frappe.get_doc("User", email)
+            user.enabled = 1
+            if role not in {row.role for row in user.roles}:
+                user.append("roles", {"role": role})
+                user.save(ignore_permissions=True)
+            return email
+        return frappe.get_doc(
+            {
+                "doctype": "User",
+                "email": email,
+                "first_name": email.split("@", 1)[0],
+                "enabled": 1,
+                "send_welcome_email": 0,
+                "roles": [{"role": role}],
+            }
+        ).insert(ignore_permissions=True).name
+
+    def _input(self, name: str, owner: str | None = None, **overrides) -> dict:
+        payload = {
+            "name": name,
+            "company": f"{name} Semiconductor",
+            "title": "Process Manager",
+            "phone": "13800000004",
+            "email": f"{name.replace(' ', '.').lower()}@example.invalid",
+            "source": "Trade Show",
+            "status": "New",
+            "owner": owner or frappe.session.user,
+            "interest": "Advanced packaging inspection",
+            "firstContactNote": "Met at exhibition",
+            "nextAction": "Arrange discovery call",
+            "nextActionDue": "2026-08-20",
+            "activities": [],
+        }
+        payload.update(overrides)
+        return payload
+
+    def test_lead_create_list_update_and_endpoint_envelope(self):
+        frappe.set_user(self.sales)
+        created = create_lead(self._input("Lead Vertical Slice"))
+        self.assertTrue(created["id"])
+        self.assertEqual(created["owner"], self.sales)
+        self.assertEqual(created["status"], "New")
+        self.assertRegex(created["modified"], r"Z$")
+
+        items, total, page, page_size = list_leads(
+            {
+                "search": "Vertical Slice",
+                "status": "New",
+                "source": "Trade Show",
+                "owner": "All",
+                "page": 1,
+                "pageSize": 100000,
+            }
+        )
+        self.assertIn(created["id"], {item["id"] for item in items})
+        self.assertGreaterEqual(total, 1)
+        self.assertEqual((page, page_size), (1, 200))
+
+        with self.assertRaises(CrmApiException) as stale:
+            update_lead(created["id"], self._input("Stale Lead"), "2000-01-01T00:00:00Z")
+        self.assertEqual(stale.exception.code, "VERSION_CONFLICT")
+
+        updated = update_lead(
+            created["id"],
+            self._input("Lead Vertical Slice", status="Working", firstContactNote="Discovery completed"),
+            created["modified"],
+        )
+        self.assertEqual(updated["status"], "Working")
+        self.assertEqual(updated["firstContactNote"], "Discovery completed")
+        self.assertNotEqual(updated["modified"], created["modified"])
+
+        endpoint = create_lead_endpoint(self._input("Endpoint Lead"))
+        self.assertEqual(endpoint["data"]["name"], "Endpoint Lead")
+        self.assertRegex(endpoint["meta"]["requestId"], r"^req_[0-9a-f]{24}$")
+
+    def test_manager_assignment_notifies_owner_who_can_open_lead(self):
+        frappe.set_user(self.manager)
+        lead = create_lead(self._input("Assigned Lead", self.other_sales))
+        notice = frappe.get_all(
+            "CRM Notification Event",
+            filters={"source_doctype": "Lead", "source_name": lead["id"],
+                     "recipient_user": self.other_sales},
+            fields=["category", "route"], order_by="creation desc", limit=1,
+        )[0]
+        self.assertEqual((notice.category, notice.route), ("Lead", f"/leads/{lead['id']}"))
+        frappe.set_user(self.other_sales)
+        self.assertEqual(get_lead(lead["id"])["id"], lead["id"])
+
+    def test_lead_validation_owner_forgery_and_scope(self):
+        frappe.set_user(self.other_sales)
+        foreign = create_lead(self._input("Foreign Lead"))
+
+        frappe.set_user(self.sales)
+        with self.assertRaises(CrmApiException) as forged:
+            create_lead(self._input("Forged Lead", self.other_sales))
+        self.assertEqual(forged.exception.code, "SCOPE_DENIED")
+
+        with self.assertRaises(CrmApiException) as denied:
+            get_lead(foreign["id"])
+        self.assertEqual(denied.exception.code, "SCOPE_DENIED")
+
+        with self.assertRaises(CrmApiException) as missing_channel:
+            create_lead(self._input("No Channel", phone="", email=""))
+        self.assertEqual(missing_channel.exception.code, "VALIDATION_ERROR")
+
+        with self.assertRaises(CrmApiException) as bad_date:
+            create_lead(self._input("Bad Date", nextActionDue="2026-02-31"))
+        self.assertEqual(bad_date.exception.code, "VALIDATION_ERROR")
+
+        invalid_email = create_lead_endpoint(self._input("Bad Email", email="123123123123@qq"))
+        self.assertEqual(frappe.local.response["http_status_code"], 422)
+        self.assertEqual(invalid_email["error"]["code"], "VALIDATION_ERROR")
+        self.assertEqual(invalid_email["error"]["fieldErrors"], {"email": "Invalid email"})
+
+    def test_get_and_list_are_read_only(self):
+        frappe.set_user(self.sales)
+        created = create_lead(self._input("Read Only Lead"))
+        modified_before = frappe.db.get_value("Lead", created["id"], "modified")
+
+        detail = get_lead(created["id"])
+        list_leads({"search": "Read Only Lead", "page": 1, "pageSize": 20})
+
+        self.assertEqual(detail["id"], created["id"])
+        self.assertEqual(frappe.db.get_value("Lead", created["id"], "modified"), modified_before)
+
+    def test_only_manager_can_delete_lead(self):
+        frappe.set_user(self.other_sales)
+        lead = create_lead(self._input("Delete Lead"))
+
+        frappe.set_user(self.sales)
+        with self.assertRaises(frappe.PermissionError):
+            delete_lead(lead["id"])
+        self.assertTrue(frappe.db.exists("Lead", lead["id"]))
+
+        frappe.set_user("Administrator")
+        self.assertEqual(delete_lead(lead["id"]), {"id": lead["id"], "status": "Deleted"})
+        self.assertFalse(frappe.db.exists("Lead", lead["id"]))
+
+    def test_lead_create_fails_closed_if_erpnext_auto_contact_is_reenabled(self):
+        frappe.set_user(self.sales)
+        before = frappe.db.count("Contact")
+        frappe.db.set_single_value("CRM Settings", "auto_creation_of_contact", 1)
+        try:
+            with self.assertRaises(CrmApiException) as failure:
+                create_lead(self._input("Auto Contact Drift Lead"))
+            self.assertEqual(failure.exception.code, "INTERNAL_ERROR")
+            self.assertEqual(frappe.db.count("Contact"), before)
+        finally:
+            frappe.db.set_single_value("CRM Settings", "auto_creation_of_contact", 0)
+
+    def _account_input(self, name: str) -> dict:
+        return {
+            "name": name,
+            "shortName": name,
+            "segment": "Advanced Packaging",
+            "tier": "A",
+            "city": "Shanghai",
+            "region": "East China",
+            "owner": frappe.session.user,
+        }
+
+    def _contact_input(self, account_id: str, name: str) -> dict:
+        return {
+            "accountId": account_id,
+            "name": name,
+            "title": "Process Manager",
+            "department": "Process Engineering",
+            "phone": "13800000005",
+            "email": f"{name.replace(' ', '.').lower()}@example.invalid",
+            "relationship": "Developing",
+            "status": "Active",
+            "owner": frappe.session.user,
+        }
+
+    def _site_input(self, name: str) -> dict:
+        return {
+            "name": name,
+            "city": "Shanghai",
+            "type": "Fab",
+            "process": "Advanced Packaging",
+            "status": "量产",
+        }
+
+    def _conversion_input(self, **overrides) -> dict:
+        payload = {
+            "opportunityTitle": "Advanced Packaging Inspection",
+            "opportunityAmount": "250000.50",
+            "opportunityCloseDate": "2026-12-31",
+            "opportunityOwner": self.sales,
+            "toolType": "Inspection",
+        }
+        payload.update(overrides)
+        return payload
+
+    def test_conversion_reuses_records_uses_selected_owner_and_is_idempotent(self):
+        frappe.set_user(self.sales)
+        account = create_account(self._account_input("Lead Reuse Account"))
+        site = create_site(account["id"], self._site_input("Lead Reuse Site"))
+        contact_input = self._contact_input(account["id"], "Lead Reuse Contact")
+        contact_input["siteId"] = site["id"]
+        contact = create_contact(contact_input)
+        lead = create_lead(self._input("Reusable Conversion Lead"))
+
+        converted = convert_lead(
+            lead["id"],
+            self._conversion_input(accountId=account["id"], contactId=contact["id"], siteId=site["id"]),
+        )
+
+        self.assertEqual(converted["accountId"], account["id"])
+        self.assertEqual(converted["contactId"], contact["id"])
+        self.assertEqual(converted["lead"]["id"], lead["id"])
+        self.assertTrue(converted["reusedAccount"])
+        self.assertTrue(converted["reusedContact"])
+        opportunity = frappe.get_doc("CRM Opportunity", converted["opportunityId"])
+        self.assertEqual(opportunity.opportunity_owner, self.sales)
+        self.assertEqual(opportunity.account, account["id"])
+        self.assertEqual(opportunity.site, site["id"])
+        self.assertEqual(opportunity.source_lead, lead["id"])
+        self.assertEqual(str(opportunity.po_date), "2026-12-31")
+        self.assertEqual(opportunity.stage, "需求发现")
+        self.assertEqual(opportunity.forecast, "Pipeline")
+        self.assertEqual((opportunity.probability, opportunity.score), (17, 20))
+        self.assertEqual(opportunity.sale_type, "New Equipment")
+        self.assertEqual(opportunity.sub_region, "East China")
+        self.assertEqual(opportunity.original_amount, opportunity.amount)
+        history = frappe.get_all(
+            "CRM Opportunity History",
+            filters={"opportunity": opportunity.name},
+            fields=["actor", "field", "from_value", "to_value"],
+        )
+        self.assertEqual(
+            history,
+            [{"actor": self.sales, "field": "leadConversion", "from_value": "", "to_value": lead["id"]}],
+        )
+        self.assertFalse(frappe.db.exists("Company", "Lead Reuse Account"))
+
+        repeated = convert_lead(lead["id"], {"opportunityTitle": "Must Not Create Another"})
+        self.assertEqual(repeated, converted)
+        self.assertEqual(frappe.db.count("CRM Opportunity", {"source_lead": lead["id"]}), 1)
+
+    def test_manager_can_choose_opportunity_owner_during_conversion(self):
+        frappe.set_user(self.sales)
+        account = create_account(self._account_input("Lead Assigned Account"))
+        site = create_site(account["id"], self._site_input("Lead Assigned Site"))
+        contact_input = self._contact_input(account["id"], "Lead Assigned Contact")
+        contact_input["siteId"] = site["id"]
+        contact = create_contact(contact_input)
+        lead = create_lead(self._input("Manager Assigned Lead"))
+
+        frappe.set_user(self.manager)
+        converted = convert_lead(
+            lead["id"],
+            self._conversion_input(
+                accountId=account["id"],
+                contactId=contact["id"],
+                siteId=site["id"],
+                opportunityOwner=self.other_sales,
+            ),
+        )
+
+        self.assertEqual(
+            frappe.db.get_value("CRM Opportunity", converted["opportunityId"], "opportunity_owner"),
+            self.other_sales,
+        )
+    def test_conversion_can_create_account_and_contact_and_rolls_back_each_subwrite(self):
+        frappe.set_user(self.sales)
+        lead = create_lead(self._input("New Records Conversion Lead"))
+        conversion = self._conversion_input(
+            newAccount=self._account_input("Converted New Account"),
+            newSite=self._site_input("Converted New Site"),
+            newContact=self._contact_input("placeholder", "Converted New Contact"),
+        )
+
+        converted = convert_lead(lead["id"], conversion)
+        self.assertFalse(converted["reusedAccount"])
+        self.assertFalse(converted["reusedContact"])
+        self.assertEqual(
+            frappe.db.get_value("Lead", lead["id"], "custom_crm_status"),
+            "Converted",
+        )
+
+        for stage in ("account", "site", "contact", "opportunity", "lead"):
+            rollback_lead = create_lead(self._input(f"Rollback {stage} Lead"))
+            before = {
+                doctype: frappe.db.count(doctype)
+                for doctype in ("Customer", "Address", "Contact", "CRM Opportunity")
+            }
+
+            def fail_at(current_stage: str, expected=stage):
+                if current_stage == expected:
+                    raise RuntimeError(f"injected after {expected}")
+
+            with self.assertRaisesRegex(RuntimeError, f"injected after {stage}"):
+                convert_lead(
+                    rollback_lead["id"],
+                    self._conversion_input(
+                        newAccount=self._account_input(f"Rollback {stage} Account"),
+                        newSite=self._site_input(f"Rollback {stage} Site"),
+                        newContact=self._contact_input("placeholder", f"Rollback {stage} Contact"),
+                    ),
+                    failure_injector=fail_at,
+                )
+            self.assertEqual(
+                {doctype: frappe.db.count(doctype) for doctype in before},
+                before,
+            )
+            self.assertEqual(frappe.db.get_value("Lead", rollback_lead["id"], "custom_crm_status"), "New")
+
+    def test_conversion_rejects_invalid_money_and_close_date_without_writes(self):
+        frappe.set_user(self.sales)
+        lead = create_lead(self._input("Invalid Conversion Lead"))
+        before = frappe.db.count("CRM Opportunity")
+        for invalid in ("0", "-1", "1.234", "not-money"):
+            with self.assertRaises(CrmApiException) as failure:
+                convert_lead(
+                    lead["id"],
+                    self._conversion_input(
+                        opportunityAmount=invalid,
+                        newAccount=self._account_input("Invalid Conversion Account"),
+                        newSite=self._site_input("Invalid Conversion Site"),
+                        newContact=self._contact_input("placeholder", "Invalid Conversion Contact"),
+                    ),
+                )
+            self.assertEqual(failure.exception.code, "VALIDATION_ERROR")
+        with self.assertRaises(CrmApiException) as bad_date:
+            convert_lead(
+                lead["id"],
+                self._conversion_input(
+                    opportunityCloseDate="2026-02-31",
+                    newAccount=self._account_input("Invalid Date Account"),
+                    newSite=self._site_input("Invalid Date Site"),
+                    newContact=self._contact_input("placeholder", "Invalid Date Contact"),
+                ),
+            )
+        self.assertEqual(bad_date.exception.code, "VALIDATION_ERROR")
+        self.assertEqual(frappe.db.count("CRM Opportunity"), before)
