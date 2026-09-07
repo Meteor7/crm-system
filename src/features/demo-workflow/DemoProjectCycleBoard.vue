@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { demoHealthReason } from './demo-health-label'
 import { computed } from 'vue'
 import { CalendarClock, CheckCircle2, TriangleAlert } from '@lucide/vue'
 import {
@@ -11,6 +12,7 @@ import type { DemoHealthLevel } from '@/types/crm'
 import type { DemoWorkflowDto } from '@/types/workspaces'
 import DemoProjectTimeline from './DemoProjectTimeline.vue'
 import { personnelDisplayName } from '@/demo/personnel'
+import { useI18n } from '@/i18n'
 
 const props = defineProps<{
   items: DemoWorkflowDto[]
@@ -26,6 +28,13 @@ const emit = defineEmits<{
   'update:engineerOwner': [value: string]
   open: [item: DemoWorkflowDto]
 }>()
+const { locale } = useI18n()
+const copy = (english: string, chinese: string) => locale.value === 'en-US' ? english : chinese
+const stageLabel = (value: string) => copy(value, ({
+  'Sales Preparation': 'Sales 准备', 'Engineer Review': '工程评估', 'Manager Approval': '经理审批',
+  'Wafer & Test Preparation': 'Wafer 与测试准备', 'Test Execution': '测试执行',
+  'Internal Review': '内部评审', 'Customer Review': '客户评审',
+} as Record<string, string>)[value] || value)
 
 const timelineLabels = [
   'Sales Preparation',
@@ -67,11 +76,11 @@ const orderedItems = computed(() => {
 function currentStageOwner(item: DemoWorkflowDto): string {
   return buildDemoProjectTimeline(item).find((step) => step.state === 'Current')?.actor
     || item.engineerOwner
-    || '待确认'
+    || (locale.value === 'en-US' ? 'To be confirmed' : '待确认')
 }
 
 function formatCustomerExpectedDate(value?: string): string {
-  return /^(\d{4}-\d{2}-\d{2})/.exec(value ?? '')?.[1] ?? '待确认'
+  return /^(\d{4}-\d{2}-\d{2})/.exec(value ?? '')?.[1] ?? (locale.value === 'en-US' ? 'To be confirmed' : '待确认')
 }
 
 function startsCompletedBlock(item: DemoWorkflowDto, index: number): boolean {
@@ -84,55 +93,55 @@ function startsCompletedBlock(item: DemoWorkflowDto, index: number): boolean {
 <template>
   <section class="project-cycle-board" data-project-cycle-board>
     <div class="board-summary">
-      <article><CalendarClock :size="17" /><span>进行中项目</span><strong>{{ activeCount }}</strong></article>
-      <article class="risk"><TriangleAlert :size="17" /><span>客户预期 ≤ 7 天</span><strong>{{ riskCount }}</strong></article>
-      <article><CheckCircle2 :size="17" /><span>过去100天已完成</span><strong>{{ completedCount }}</strong></article>
+      <article><CalendarClock :size="17" /><span>{{ copy('Active projects', '进行中项目') }}</span><strong>{{ activeCount }}</strong></article>
+      <article class="risk"><TriangleAlert :size="17" /><span>{{ copy('Customer expected ≤ 7 days', '客户预期 ≤ 7 天') }}</span><strong>{{ riskCount }}</strong></article>
+      <article><CheckCircle2 :size="17" /><span>{{ copy('Completed in last 100 days', '过去 100 天已完成') }}</span><strong>{{ completedCount }}</strong></article>
     </div>
 
     <div class="board-toolbar">
       <label class="toolbar-filter">
-        <span>健康状态</span>
+        <span>{{ copy('Health', '健康状态') }}</span>
         <select
           :value="health"
-          aria-label="项目健康状态"
+          :aria-label="copy('Project health', '项目健康状态')"
           @change="emit('update:health', ($event.target as HTMLSelectElement).value as 'all' | DemoHealthLevel)"
         >
-          <option value="all">全部</option>
-          <option value="critical">红色 · 紧迫</option>
-          <option value="stalled">橙色 · 停滞</option>
-          <option value="healthy">绿色 · 正常</option>
+          <option value="all">{{ copy('All', '全部') }}</option>
+          <option value="critical">{{ copy('Red · Critical', '红色 · 紧迫') }}</option>
+          <option value="stalled">{{ copy('Orange · Stalled', '橙色 · 停滞') }}</option>
+          <option value="healthy">{{ copy('Green · Healthy', '绿色 · 正常') }}</option>
         </select>
       </label>
       <label class="toolbar-filter">
-        <span>客户</span>
+        <span>{{ copy('Account', '客户') }}</span>
         <select
           :value="customer"
-          aria-label="项目客户"
+          :aria-label="copy('Project account', '项目客户')"
           @change="emit('update:customer', ($event.target as HTMLSelectElement).value)"
         >
-          <option value="all">全部客户</option>
+          <option value="all">{{ copy('All accounts', '全部客户') }}</option>
           <option v-for="account in customers" :key="account" :value="account">{{ account }}</option>
         </select>
       </label>
       <label class="toolbar-filter">
-        <span>Sales</span>
+        <span>{{ copy('Sales', '销售') }}</span>
         <select
           :value="salesOwner"
-          aria-label="项目 Sales Owner"
+          :aria-label="copy('Project Sales owner', '项目 Sales 负责人')"
           @change="emit('update:salesOwner', ($event.target as HTMLSelectElement).value)"
         >
-          <option value="all">全部</option>
+          <option value="all">{{ copy('All', '全部') }}</option>
           <option v-for="owner in salesOwners" :key="owner" :value="owner">{{ personnelDisplayName(owner) }}</option>
         </select>
       </label>
       <label class="toolbar-filter">
-        <span>Engineer</span>
+        <span>{{ copy('Engineer', '工程师') }}</span>
         <select
           :value="engineerOwner"
-          aria-label="项目 Engineer Owner"
+          :aria-label="copy('Project Engineer owner', '项目工程师负责人')"
           @change="emit('update:engineerOwner', ($event.target as HTMLSelectElement).value)"
         >
-          <option value="all">全部</option>
+          <option value="all">{{ copy('All', '全部') }}</option>
           <option v-for="owner in engineerOwners" :key="owner" :value="owner">{{ personnelDisplayName(owner) }}</option>
         </select>
       </label>
@@ -141,13 +150,13 @@ function startsCompletedBlock(item: DemoWorkflowDto, index: number): boolean {
     <div class="project-cycle-table-shell">
       <div class="project-cycle-table" data-project-cycle-table>
         <header class="project-table-header">
-          <span>项目名称</span>
-          <span>当前阶段负责人</span>
+          <span>{{ copy('Project', '项目名称') }}</span>
+          <span>{{ copy('Current stage owner', '当前阶段负责人') }}</span>
           <span>DDL</span>
           <div class="timeline-column-header">
-            <strong>项目周期节点</strong>
+            <strong>{{ copy('Project milestones', '项目周期节点') }}</strong>
             <div>
-              <span v-for="label in timelineLabels" :key="label">{{ label }}</span>
+              <span v-for="label in timelineLabels" :key="label">{{ stageLabel(label) }}</span>
             </div>
           </div>
         </header>
@@ -172,13 +181,13 @@ function startsCompletedBlock(item: DemoWorkflowDto, index: number): boolean {
           >
             <span class="project-name-cell">
               <strong>{{ item.title }}</strong>
-              <small v-if="isCustomerExpectedRisk(item)">加急 · {{ item.health?.reason }}</small>
+               <small v-if="isCustomerExpectedRisk(item)">{{ copy('Urgent · ', '加急 · ') }}{{ demoHealthReason(item.health, locale) }}</small>
             </span>
             <span class="project-owner-cell" data-current-stage-owner>
               {{ personnelDisplayName(currentStageOwner(item)) }}
             </span>
             <span class="project-ddl" data-customer-expected-ddl>
-              DDL：{{ formatCustomerExpectedDate(item.customerExpectedDate) }}
+               {{ copy('DDL: ', 'DDL：') }}{{ formatCustomerExpectedDate(item.customerExpectedDate) }}
             </span>
             <span class="timeline-panel">
               <DemoProjectTimeline
@@ -197,7 +206,7 @@ function startsCompletedBlock(item: DemoWorkflowDto, index: number): boolean {
               />
             </span>
           </button>
-          <p v-if="!orderedItems.length" class="empty-list">当前筛选下暂无项目</p>
+           <p v-if="!orderedItems.length" class="empty-list">{{ copy('No projects match the current filters', '当前筛选下暂无项目') }}</p>
         </div>
       </div>
     </div>

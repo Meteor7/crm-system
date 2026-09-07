@@ -8,9 +8,11 @@ import PersonnelSelect from '@/design-system/PersonnelSelect.vue'
 import ContactPicker from '@/features/contacts/ContactPicker.vue'
 import { addIsoDateDays, shanghaiDate } from '@/domain/time'
 import { preferredPersonnelId } from '@/demo/personnel'
+import { useI18n } from '@/i18n'
 
 const props = withDefaults(defineProps<{ mode: 'create' | 'review'; visit?: VisitDto | null; accounts: AccountSummaryDto[]; contacts?: ContactSummaryDto[]; initialAccountId?: string; initialPrimaryContactId?: string; initialOpportunityId?: string; busy?: boolean }>(), { contacts: () => [], initialAccountId: '', initialPrimaryContactId: '', initialOpportunityId: '' })
 const emit = defineEmits<{ close: []; submit: [payload: CreateVisitInput, file?: MultipartFilePart]; 'create-contact': [accountId: string] }>()
+const { t } = useI18n()
 const defaultDate = shanghaiDate()
 const defaultDue = addIsoDateDays(defaultDate, 1)
 const form = reactive({ accountId: '', primaryContactId: '', subject: '', date: defaultDate, visitType: 'On-site' as VisitDto['type'], owner: '', objective: '', outcome: '', nextAction: '', actionOwner: '', due: defaultDue })
@@ -23,7 +25,7 @@ watch(() => [props.mode, props.visit, props.accounts, props.initialAccountId, pr
   form.date = props.visit?.date ?? defaultDate
   form.visitType = props.visit?.type ?? 'On-site'
   form.owner = props.visit?.owner ?? props.accounts.find((item) => item.id === form.accountId)?.owner ?? preferredPersonnelId('Sales', '')
-  form.objective = props.visit?.objective ?? '确认客户需求和下一步计划'
+  form.objective = props.visit?.objective ?? t('visitModal.objectiveDefault')
   form.outcome = props.visit?.outcome ?? ''
   form.nextAction = props.visit?.nextAction ?? ''
   form.actionOwner = props.visit?.actionOwner || form.owner
@@ -50,18 +52,18 @@ function selectMeetingFile(event: Event) {
 </script>
 
 <template>
-  <ModalShell :title="mode === 'create' ? '&#x65B0;&#x5EFA;&#x5BA2;&#x6237;&#x62DC;&#x8BBF;' : '&#x7ECF;&#x7406;&#x5BA1;&#x6838;&#x62DC;&#x8BBF;'" eyebrow="VISIT WORKFLOW" :busy="busy" @close="$emit('close')" @submit="submit">
+  <ModalShell :title="mode === 'create' ? t('visitModal.createTitle') : t('visitModal.reviewTitle')" eyebrow="VISIT WORKFLOW" :busy="busy" :cancel-label="t('common.cancel')" :close-label="t('common.close')" :submit-label="t('common.saveAndContinue')" :busy-label="t('common.processing')" @close="$emit('close')" @submit="submit">
     <div v-if="mode === 'create'" class="form-grid">
-      <label><span>&#x5BA2;&#x6237;<RequiredMark /></span><select v-model="form.accountId" aria-label="&#x62DC;&#x8BBF;&#x5BA2;&#x6237;" required><option v-for="account in accounts" :key="account.id" :value="account.id">{{ account.name }}</option></select></label>
-      <label>&#x4E3B;&#x8981;&#x8054;&#x7CFB;&#x4EBA;<ContactPicker v-model="form.primaryContactId" :contacts="contacts" :account-id="form.accountId" @create="emit('create-contact', form.accountId)" /></label>
-      <label>&#x62DC;&#x8BBF;&#x65B9;&#x5F0F;<select v-model="form.visitType" aria-label="&#x62DC;&#x8BBF;&#x65B9;&#x5F0F;"><option>On-site</option><option>Video</option><option>Phone</option></select></label>
-      <label class="full"><span>&#x62DC;&#x8BBF;&#x4E3B;&#x9898;<RequiredMark /></span><input v-model="form.subject" aria-label="&#x62DC;&#x8BBF;&#x4E3B;&#x9898;" required /></label>
-      <label><span>&#x65E5;&#x671F;<RequiredMark /></span><input v-model="form.date" aria-label="&#x62DC;&#x8BBF;&#x65E5;&#x671F;" type="date" required /></label>
-      <label><span>&#x8D1F;&#x8D23;&#x4EBA;<RequiredMark /></span><PersonnelSelect v-model="form.owner" :roles="['Sales']" :ariaLabel="'\u62dc\u8bbf\u8d1f\u8d23\u4eba'" required /></label>
-      <label class="full"><span>&#x62DC;&#x8BBF;&#x76EE;&#x6807;<RequiredMark /></span><textarea v-model="form.objective" aria-label="&#x62DC;&#x8BBF;&#x76EE;&#x6807;" required /></label>
-      <label class="full"><span>&#x62DC;&#x8BBF;&#x8BB0;&#x5F55;&#x6587;&#x4EF6;&#xFF08;&#x53EF;&#x9009;&#xFF09;</span><input aria-label="&#x62DC;&#x8BBF;&#x8BB0;&#x5F55;&#x6587;&#x4EF6;" type="file" @change="selectMeetingFile" /><small>&#x63D0;&#x4EA4;&#x6587;&#x4EF6;&#x540E;&#x81EA;&#x52A8;&#x89C6;&#x4E3A;&#x5B8C;&#x6210;&#x62DC;&#x8BBF;&#xFF1B;&#x539F;&#x6587;&#x4EF6;&#x4F1A;&#x5F52;&#x6863;&#x5E76;&#x5C3D;&#x529B;&#x89E3;&#x6790;&#x3002;</small></label>
+      <label><span>{{ t('visitModal.account') }}<RequiredMark /></span><select v-model="form.accountId" :aria-label="t('visitModal.accountAria')" required><option v-for="account in accounts" :key="account.id" :value="account.id">{{ account.name }}</option></select></label>
+      <label>{{ t('visitModal.primaryContact') }}<ContactPicker v-model="form.primaryContactId" :contacts="contacts" :account-id="form.accountId" @create="emit('create-contact', form.accountId)" /></label>
+      <label><span>{{ t('visitModal.visitType') }}</span><select v-model="form.visitType" :aria-label="t('visitModal.visitTypeAria')"><option value="On-site">{{ t('visitModal.onSite') }}</option><option value="Video">{{ t('visitModal.video') }}</option><option value="Phone">{{ t('visitModal.phone') }}</option></select></label>
+      <label class="full"><span>{{ t('visitModal.subject') }}<RequiredMark /></span><input v-model="form.subject" :aria-label="t('visitModal.subjectAria')" required /></label>
+      <label><span>{{ t('visitModal.date') }}<RequiredMark /></span><input v-model="form.date" :aria-label="t('visitModal.dateAria')" type="date" required /></label>
+      <label><span>{{ t('visitModal.owner') }}<RequiredMark /></span><PersonnelSelect v-model="form.owner" :roles="['Sales']" :ariaLabel="t('visitModal.ownerAria')" required /></label>
+      <label class="full"><span>{{ t('visitModal.objective') }}<RequiredMark /></span><textarea v-model="form.objective" :aria-label="t('visitModal.objectiveAria')" required /></label>
+      <label class="full"><span>{{ t('visitModal.recordFile') }}</span><input :aria-label="t('visitModal.recordFileAria')" type="file" @change="selectMeetingFile" /><small>{{ t('visitModal.recordHint') }}</small></label>
     </div>
-    <div v-else class="review-copy"><strong>{{ visit?.subject }}</strong><p>&#x5BA1;&#x6838;&#x540E;&#x72B6;&#x6001;&#x5C06;&#x53D8;&#x4E3A;&#x201C;&#x7BA1;&#x7406;&#x8005;&#x5DF2;&#x5BA1;&#x6838;&#x201D;&#xFF0C;&#x62DC;&#x8BBF;&#x8BB0;&#x5F55;&#x4ECD;&#x53EF;&#x8FFD;&#x6EAF;&#x3002;</p></div>
+    <div v-else class="review-copy"><strong>{{ visit?.subject }}</strong><p>{{ t('visitModal.reviewMessage') }}</p></div>
   </ModalShell>
 </template>
 

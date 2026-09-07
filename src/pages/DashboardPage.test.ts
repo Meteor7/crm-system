@@ -1,5 +1,7 @@
 import { flushPromises, mount } from '@vue/test-utils'
 import { createPinia } from 'pinia'
+import { defineComponent, nextTick, type PropType } from 'vue'
+import type { EChartsOption } from 'echarts'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { CrmApiError } from '@/api'
 import { createMockApi } from '@/api/mock-adapter'
@@ -7,6 +9,7 @@ import { DASHBOARD_CHART_IDS } from '@/features/dashboard/dashboard-subscription
 import DashboardPage from './DashboardPage.vue'
 import { createAppRouter } from '@/app/router'
 import { useAppStore } from '@/stores/app'
+import { setLocale } from '@/i18n'
 
 async function globals() {
   const router = createAppRouter()
@@ -14,6 +17,12 @@ async function globals() {
   await router.isReady()
   return { plugins: [createPinia(), router], stubs: { CrmChart: { template: '<div data-testid="chart" />' } } }
 }
+
+const ChartProbe = defineComponent({
+  name: 'ChartProbe',
+  props: { option: { type: Object as PropType<EChartsOption>, required: true } },
+  template: '<div data-testid="chart" />',
+})
 
 describe('DashboardPage', () => {
   beforeEach(() => {
@@ -72,6 +81,12 @@ describe('DashboardPage', () => {
     expect(wrapper.get('.snapshot-body').text()).toContain('DR-110')
     expect(wrapper.get('.snapshot-body').text()).toContain('EVAL-106')
     expect(wrapper.get('.snapshot-body').text()).toContain('提前客户预期 1 天')
+    setLocale('en-US')
+    await flushPromises()
+    expect(wrapper.get('.relation-timeline').text()).toContain('Customer expected date')
+    expect(wrapper.get('.relation-timeline').text()).not.toContain('客户预期')
+    setLocale('zh-CN')
+    await flushPromises()
 
     await wrapper.get('[data-testid="toggle-more-analysis"]').trigger('click')
 
@@ -132,6 +147,35 @@ describe('DashboardPage', () => {
 
     expect(restored.findAll('[data-subscribed-dashboard]').map((card) => card.attributes('data-dashboard-id')))
       .toEqual(['booking-month', 'top-accounts', 'region'])
+  })
+
+  it('keeps subscription changes visible and explains when the browser cannot persist them', async () => {
+    const wrapper = mount(DashboardPage, {
+      props: { apiClient: createMockApi({ latency: 0, role: 'Manager' }) },
+      global: await globals(),
+    })
+    await flushPromises()
+    expect(wrapper.get('.source-note').text()).toContain('Booking 仅统计 Confirmed')
+    await wrapper.get('[data-testid="manage-dashboard-subscriptions"]').trigger('click')
+    const dialog = wrapper.get('[role="dialog"]')
+    await dialog.get('[data-subscription-id="evaluation-status"]').trigger('click')
+    await dialog.get('[data-subscription-id="region"]').trigger('click')
+    const write = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => { throw new Error('Storage full') })
+    try {
+      await dialog.get('form').trigger('submit')
+      await flushPromises()
+      expect(wrapper.get('.subscription-storage-warning').text()).toBe('当前浏览器无法保存订阅；本次页面选择仍然有效。')
+    } finally {
+      write.mockRestore()
+    }
+    expect(wrapper.findAll('[data-subscribed-dashboard]').map((card) => card.attributes('data-dashboard-id')))
+      .toEqual(['booking-month', 'top-accounts', 'region'])
+    setLocale('en-US')
+    await flushPromises()
+    expect(wrapper.get('.subscription-storage-warning').text()).toBe('This browser could not save your subscriptions; your selections still apply to this page.')
+    expect(wrapper.get('.source-note').text()).toContain('Booking includes only Confirmed records')
+    expect(wrapper.get('.kpi-value-won').text()).toContain('Cumulative Closed Won')
+    wrapper.unmount()
   })
 
   it('lets Boss add a second complete subscription row and restores both rows', async () => {
@@ -244,6 +288,88 @@ describe('DashboardPage', () => {
 
     expect(wrapper.findAll('[data-subscribed-dashboard]').map((card) => card.attributes('data-dashboard-id')))
       .toEqual(['evaluation-status', 'booking-month', 'top-accounts'])
+  })
+
+  it.each(['Manager', 'Sales'] as const)('translates loaded reminder details for %s without refetching', async (role) => {
+    const apiClient = createMockApi({ latency: 0, role })
+    const pipeline = await apiClient.listPipeline({})
+    const booking = { ...pipeline.data.bookings[0], ddl: '2026-07-18', quantity: 3 }
+    pipeline.data.bookings = [booking]
+    const evaluations = await apiClient.listEvaluations({ page: 1, pageSize: 200 })
+    const evaluation = { ...evaluations.data.items[0], testRunDeadline: '2026-07-19', criteria: '' }
+    evaluations.data.items = [evaluation]
+    evaluations.meta = { ...evaluations.meta, requestId: 'locale-evaluations', total: 1 }
+    const readPipeline = vi.spyOn(apiClient, 'listPipeline').mockResolvedValue(pipeline)
+    const readEvaluations = vi.spyOn(apiClient, 'listEvaluations').mockResolvedValue(evaluations)
+    const empty = { data: { items: [] }, meta: { requestId: 'locale-reminders', total: 0 }, warnings: [] }
+    const readVisits = vi.spyOn(apiClient, 'listVisits').mockResolvedValue(empty)
+    const readRequests = vi.spyOn(apiClient, 'listDemoRequests').mockResolvedValue(empty)
+    const wrapper = mount(DashboardPage, { props: { apiClient }, global: await globals() })
+    await flushPromises()
+    expect(wrapper.text()).toContain('3 台')
+    expect(wrapper.text()).toContain('Demo Test 截止提醒')
+    if (role === 'Manager') {
+      await wrapper.findAll('.team-schedule-list > button')[1].trigger('click')
+    }
+    const reads = [readPipeline, readEvaluations, readVisits, readRequests]
+    const counts = reads.map((read) => read.mock.calls.length)
+    setLocale('en-US')
+    await flushPromises()
+    expect(wrapper.text()).toContain(`3 units · ${booking.status}`)
+    expect(wrapper.text()).toContain('Demo Test due reminder')
+    expect(wrapper.text()).not.toContain('3 台')
+    expect(wrapper.text()).not.toContain('Demo Test 截止提醒')
+    expect(reads.map((read) => read.mock.calls.length)).toEqual(counts)
+    wrapper.unmount()
+  })
+
+  it('updates chart options when locale changes without requesting dashboard data again', async () => {
+    setLocale('zh-CN')
+    const apiClient = createMockApi({ latency: 0, role: 'Manager', userName: '演示经理01' })
+    const reads = [
+      vi.spyOn(apiClient, 'getDashboard'),
+      vi.spyOn(apiClient, 'listVisits'),
+      vi.spyOn(apiClient, 'listDemoRequests'),
+      vi.spyOn(apiClient, 'listEvaluations'),
+      vi.spyOn(apiClient, 'listPipeline'),
+    ]
+    const router = createAppRouter()
+    await router.push('/dashboard')
+    await router.isReady()
+    const wrapper = mount(DashboardPage, {
+      props: { apiClient },
+      global: { plugins: [createPinia(), router], stubs: { CrmChart: ChartProbe } },
+    })
+    await flushPromises()
+
+    const chartOptions = () => wrapper.findAllComponents(ChartProbe).map((chart) => chart.props('option') as EChartsOption)
+    const initial = chartOptions()
+    const initialBookingSeries = (Array.isArray(initial[1]?.series) ? initial[1]?.series : [initial[1]?.series]) as Array<{ name?: string }>
+    expect(initialBookingSeries[0]?.name).toBe('金额')
+    const counts = reads.map((read) => read.mock.calls.length)
+
+    setLocale('en-US')
+    await nextTick()
+
+    const updated = chartOptions()
+    const updatedBookingSeries = (Array.isArray(updated[1]?.series) ? updated[1]?.series : [updated[1]?.series]) as Array<{ name?: string }>
+    expect(updatedBookingSeries[0]?.name).toBe('Amount')
+    expect(reads.map((read) => read.mock.calls.length)).toEqual(counts)
+    await wrapper.get('[data-testid="toggle-more-analysis"]').trigger('click')
+    await nextTick()
+    const categoryData = (option: EChartsOption) => {
+      const axis = Array.isArray(option.yAxis) ? option.yAxis[0] : option.yAxis
+      return (axis as { data?: unknown[] } | undefined)?.data ?? []
+    }
+    const expanded = chartOptions()
+    expect(expanded.some((option) => categoryData(option).includes('Planned') && categoryData(option).includes('Completed'))).toBe(true)
+    const riskCategories = expanded.find((option) => categoryData(option).includes('High risk'))
+    expect(riskCategories).toBeDefined()
+    const riskData = riskCategories ? categoryData(riskCategories) : []
+    expect(riskData).toEqual(expect.arrayContaining(['High risk', 'Steady']))
+    expect(riskData).not.toContain('高风险')
+    wrapper.unmount()
+    setLocale('zh-CN')
   })
 
   it('shows non-management users only the next 15 days reminder center', async () => {

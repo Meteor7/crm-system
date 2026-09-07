@@ -4,6 +4,7 @@ import { formatDisplayDate } from '@/domain/time'
 import { ArrowRight, Ban, CheckCircle2, Clock3, Download, Pencil, RotateCcw } from '@lucide/vue'
 import type { DemoRequestDto, Tone } from '@/types/crm'
 import StatusBadge from '@/design-system/StatusBadge.vue'
+import { useI18n } from '@/i18n'
 
 defineProps<{
   request: DemoRequestDto
@@ -14,25 +15,28 @@ defineProps<{
   downloading?: boolean
 }>()
 defineEmits<{ submit: [id: string]; edit: [request: DemoRequestDto]; cancel: [id: string]; engineer: [request: DemoRequestDto]; manager: [request: DemoRequestDto]; download: [request: DemoRequestDto] }>()
-const statusLabel: Record<DemoRequestDto['status'], string> = { Draft: '草稿', 'Engineer Review': '待工程评估', 'Engineer Returned': '工程退回', 'Manager Approval': '待经理审批', 'Manager Rejected': '经理驳回', Converted: '已转 Demo', Cancelled: '已取消' }
+const { locale } = useI18n()
+const statusLabel = (status: DemoRequestDto['status']) => locale.value === 'en-US'
+  ? ({ Draft: 'Draft', 'Engineer Review': 'Pending engineering review', 'Engineer Returned': 'Returned by engineering', 'Manager Approval': 'Pending manager approval', 'Manager Rejected': 'Rejected by manager', Converted: 'Converted to Demo', Cancelled: 'Cancelled' }[status])
+  : ({ Draft: '草稿', 'Engineer Review': '待工程评估', 'Engineer Returned': '工程退回', 'Manager Approval': '待经理审批', 'Manager Rejected': '经理驳回', Converted: '已转 Demo', Cancelled: '已取消' }[status])
 const tone = (status: DemoRequestDto['status']): Tone => status === 'Converted' ? 'positive' : ['Engineer Returned','Manager Rejected'].includes(status) ? 'warning' : status === 'Cancelled' ? 'danger' : 'info'
 </script>
 
 <template>
   <article class="request-card" :class="{ returned: ['Engineer Returned','Manager Rejected'].includes(request.status), converted: request.status === 'Converted' }" :data-demo-request="request.id">
-    <header><StatusBadge :label="statusLabel[request.status]" :tone="tone(request.status)" /><small>{{ request.id }} · 客户期望时间 {{ request.customerExpectedDate }}</small></header>
+    <header><StatusBadge :label="statusLabel(request.status)" :tone="tone(request.status)" /><small>{{ request.id }} · {{ locale === 'en-US' ? 'Customer expected date' : '客户期望时间' }} {{ request.customerExpectedDate }}</small></header>
     <h3>{{ request.title }}</h3>
     <p><strong>{{ request.accountName }}</strong> · Sales {{ personnelDisplayName(request.salesOwner) }}<br>{{ request.objective }}</p>
-    <div class="request-meta"><span v-if="request.requestMode === 'Self Test'">自测</span><span>{{ request.requestedEquipment }}</span><span>{{ request.sampleQuantity }} Samples</span><span>{{ request.priority }}</span><span>目标 {{ request.targetDate }}</span></div>
-    <div class="review-note"><p><b>FAE Review</b>{{ request.engineerComment || '待评估' }}</p><p><b>Boss</b>{{ request.managerComment || '待审批' }}</p><p v-if="request.evaluationId"><b>来源</b>{{ request.id }} → {{ request.evaluationId }}</p></div>
-    <div v-if="request.history[0]" class="timeline"><Clock3 :size="12" /><span>最近记录 · {{ formatDisplayDate(request.history[0].at) }} · {{ personnelDisplayName(request.history[0].actor) }}<br>{{ request.history[0].comment }}</span></div>
+    <div class="request-meta"><span v-if="request.requestMode === 'Self Test'">{{ locale === 'en-US' ? 'Self test' : '自测' }}</span><span>{{ request.requestedEquipment }}</span><span>{{ request.sampleQuantity }} Samples</span><span>{{ request.priority }}</span><span>{{ locale === 'en-US' ? 'Target' : '目标' }} {{ request.targetDate }}</span></div>
+    <div class="review-note"><p><b>FAE Review</b>{{ request.engineerComment || (locale === 'en-US' ? 'Pending review' : '待评估') }}</p><p><b>Boss</b>{{ request.managerComment || (locale === 'en-US' ? 'Pending approval' : '待审批') }}</p><p v-if="request.evaluationId"><b>{{ locale === 'en-US' ? 'Source' : '来源' }}</b>{{ request.id }} → {{ request.evaluationId }}</p></div>
+    <div v-if="request.history[0]" class="timeline"><Clock3 :size="12" /><span>{{ locale === 'en-US' ? 'Latest activity' : '最近记录' }} · {{ formatDisplayDate(request.history[0].at) }} · {{ personnelDisplayName(request.history[0].actor) }}<br>{{ request.history[0].comment }}</span></div>
     <footer>
-      <button class="subtle" :data-demo-download="request.id" type="button" :disabled="downloading" @click="$emit('download', request)"><Download :size="13" />{{ downloading ? '生成中' : '下载 Word' }}</button>
-      <button v-if="canCreate && ['Draft','Engineer Returned','Manager Rejected'].includes(request.status)" :data-demo-action="`${request.id}-submit`" type="button" :disabled="processing" @click="$emit('submit', request.id)"><ArrowRight :size="13" />提交工程评估</button>
-      <button v-if="canCreate && ['Draft','Engineer Returned','Manager Rejected'].includes(request.status)" :data-demo-action="`${request.id}-edit`" class="subtle" type="button" :disabled="processing" @click="$emit('edit', request)"><Pencil :size="13" />修改</button>
-      <button v-if="canCreate && ['Draft','Engineer Returned','Manager Rejected'].includes(request.status)" :data-demo-action="`${request.id}-cancel`" class="danger" type="button" :disabled="processing" @click="$emit('cancel', request.id)"><Ban :size="13" />取消</button>
-      <button v-if="canEngineer && request.status === 'Engineer Review'" :data-demo-action="`${request.id}-review`" type="button" :disabled="processing" @click="$emit('engineer', request)"><RotateCcw :size="13" />工程处理</button>
-      <button v-if="canManager && request.status === 'Manager Approval'" :data-demo-action="`${request.id}-review`" type="button" :disabled="processing" @click="$emit('manager', request)"><CheckCircle2 :size="13" />经理审批</button>
+      <button class="subtle" :data-demo-download="request.id" type="button" :disabled="downloading" @click="$emit('download', request)"><Download :size="13" />{{ downloading ? (locale === 'en-US' ? 'Generating' : '生成中') : (locale === 'en-US' ? 'Download Word' : '下载 Word') }}</button>
+      <button v-if="canCreate && ['Draft','Engineer Returned','Manager Rejected'].includes(request.status)" :data-demo-action="`${request.id}-submit`" type="button" :disabled="processing" @click="$emit('submit', request.id)"><ArrowRight :size="13" />{{ locale === 'en-US' ? 'Submit for engineering review' : '提交工程评估' }}</button>
+      <button v-if="canCreate && ['Draft','Engineer Returned','Manager Rejected'].includes(request.status)" :data-demo-action="`${request.id}-edit`" class="subtle" type="button" :disabled="processing" @click="$emit('edit', request)"><Pencil :size="13" />{{ locale === 'en-US' ? 'Edit' : '修改' }}</button>
+      <button v-if="canCreate && ['Draft','Engineer Returned','Manager Rejected'].includes(request.status)" :data-demo-action="`${request.id}-cancel`" class="danger" type="button" :disabled="processing" @click="$emit('cancel', request.id)"><Ban :size="13" />{{ locale === 'en-US' ? 'Cancel' : '取消' }}</button>
+      <button v-if="canEngineer && request.status === 'Engineer Review'" :data-demo-action="`${request.id}-review`" type="button" :disabled="processing" @click="$emit('engineer', request)"><RotateCcw :size="13" />{{ locale === 'en-US' ? 'Engineer review' : '工程处理' }}</button>
+      <button v-if="canManager && request.status === 'Manager Approval'" :data-demo-action="`${request.id}-review`" type="button" :disabled="processing" @click="$emit('manager', request)"><CheckCircle2 :size="13" />{{ locale === 'en-US' ? 'Manager approval' : '经理审批' }}</button>
     </footer>
   </article>
 </template>

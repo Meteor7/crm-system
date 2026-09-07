@@ -72,11 +72,13 @@ class TestStage5GDashboardStakeholders(FrappeTestCase):
         create_opportunity_action(opened["id"], {
             "title": "Overdue action", "owner": self.sales, "due": "2026-08-01", "status": "Open",
         })
-        create_booking({
+        booking_date = "2026-08-20"
+        booking = create_booking({
             "accountId": account["id"], "primaryContactId": contact["id"], "equipment": "Inspection",
             "quantity": 1, "ddl": "2026-12-31", "amount": "500.00", "currency": "CNY", "status": "Confirmed",
             "owner": self.sales, "source": "Opportunity", "sourceOpportunityId": won["id"], "note": "",
         })
+        frappe.db.set_value("CRM Booking", booking["id"], "booking_date", booking_date)
         create_visit({
             "accountId": account["id"], "primaryContactId": contact["id"], "subject": "Dashboard Visit",
             "date": "2026-08-20", "type": "Video", "owner": self.sales, "objective": "Review",
@@ -95,7 +97,7 @@ class TestStage5GDashboardStakeholders(FrappeTestCase):
         self.assertEqual(result["process"]["requirementsByStatus"], [])
         self.assertEqual(result["process"]["budgetByStatus"], [])
         self.assertEqual(result["process"]["visitsByStatus"], [{"label": "Planned", "count": 1}])
-        self.assertEqual(result["bookingByMonth"][0]["label"], "2026-08")
+        self.assertEqual(result["bookingByMonth"][0]["label"], booking_date[:7])
         self.assertNotIn("Hidden Open", {item["title"] for item in result["weeklyActions"]})
         with self.assertRaises(CrmApiException):
             get_dashboard({"range": "decade"})

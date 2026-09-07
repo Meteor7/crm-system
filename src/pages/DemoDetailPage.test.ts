@@ -100,7 +100,7 @@ describe('Demo detail page', () => {
     expect(wrapper.get('[data-demo-detail-tab="information"]').attributes('aria-current')).toBe('page')
     expect(wrapper.get('[data-demo-detail-information]').text()).toContain('Demo Request')
     expect(wrapper.get('[data-demo-detail-information]').text()).toContain('Demo Test')
-    expect(wrapper.get('[data-project-timeline-dashboard]').text()).toContain('Internal Review')
+    expect(wrapper.get('[data-project-timeline-dashboard]').text()).toContain('内部评审')
     expect(wrapper.findAll('[data-parallel-lane]')).toHaveLength(2)
   })
 

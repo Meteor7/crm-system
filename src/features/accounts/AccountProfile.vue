@@ -1,11 +1,12 @@
 <script setup lang="ts">
+import { bookingTitle, systemValueLabel } from '@/features/shared/system-labels'
 import { personnelDisplayName } from '@/demo/personnel'
 import { computed, reactive, ref, watch } from 'vue'
 import { CalendarDays, Download, Factory, FileSignature, FlaskConical, MapPin, Target, Users } from '@lucide/vue'
 import type { CrmApi } from '@/api'
 import type { Account360Dto, Tone } from '@/types/crm'
 import { useAppStore } from '@/stores/app'
-import { mapRequestError, readRequestMeta, type RequestMetaState } from '@/api/request-state'
+import { mapRequestError, readRequestMeta, requestErrorMessage, type RequestMetaState } from '@/api/request-state'
 import { buildCustomerReportModel } from './customer-report-model'
 import { downloadCustomerReport } from './xlsx-writer'
 import DataState from '@/design-system/DataState.vue'
@@ -14,11 +15,14 @@ import StatusBadge from '@/design-system/StatusBadge.vue'
 import PaginationControls from '@/features/shared/PaginationControls.vue'
 import { formatMoney, moneyByCurrency } from '@/domain/money'
 import { formatDisplayDate } from '@/domain/time'
+import { useI18n, useLocaleMessage } from '@/i18n'
+import { salesEnumLabel, opportunityStageLabel, recordTypeLabel } from '@/features/shared/sales-i18n'
 
 const props = defineProps<{ accountId: string; apiClient: CrmApi }>()
 const emit = defineEmits<{ loaded: [detail: Account360Dto]; 'manage-sites': [] }>()
 const app = useAppStore()
-const detail = ref<Account360Dto | null>(null), loading = ref(false), error = ref(''), exportError = ref(''), denied = ref(false), requestId = ref(''), meta = ref<RequestMetaState | null>(null)
+const { locale, t, message } = useI18n()
+const detail = ref<Account360Dto | null>(null), loading = ref(false), error = useLocaleMessage(), exportError = useLocaleMessage(), denied = ref(false), requestId = ref(''), meta = ref<RequestMetaState | null>(null)
 const canExport = computed(() => app.can('account:view'))
 const canWrite = computed(() => {
   if (!app.can('account:write') || !detail.value) return false
@@ -49,7 +53,7 @@ const projectOptions = computed(() => {
   }))
   const bookings = detail.value.bookings.map((item) => ({
     key: `booking:${item.id}`,
-    label: `${item.id} · ${item.title}`,
+    label: `${item.id} · ${bookingTitle(item, locale.value)}`,
     owner: item.owner,
     type: 'booking' as const,
   }))
@@ -125,21 +129,21 @@ const dealRows = computed<ProjectRow[]>(() => [
     status: item.stage, tone: item.stage === 'Won' ? 'positive' as const : item.stage === 'Lost' ? 'danger' as const : 'info' as const,
   })),
   ...filteredBookings.value.map((item) => ({
-    id: item.id, title: item.title, meta: `${item.id} · ${formatMoney(item.amount, item.currency)} · ${formatDisplayDate(item.bookingDate)}`,
+    id: item.id, title: bookingTitle(item, locale.value), meta: `${item.id} · ${formatMoney(item.amount, item.currency)} · ${formatDisplayDate(item.bookingDate)}`,
     status: item.status, tone: item.status === 'Confirmed' ? 'positive' as const : 'warning' as const,
   })),
 ])
 const contractRows = computed<ProjectRow[]>(() => filteredContracts.value.map((item) => ({
-  id: item.id, title: `${item.quotationType} Quotation · ${item.refNo}`, meta: `${item.id} · ${item.opportunityTitle || 'Others'} · ${personnelDisplayName(item.owner)}`,
+  id: item.id, title: `${salesEnumLabel(item.quotationType, locale.value)} ${locale.value === 'en-US' ? 'quotation' : '报价单'} · ${item.refNo}`, meta: `${item.id} · ${item.opportunityTitle || (locale.value === 'en-US' ? 'Others' : '其他')} · ${personnelDisplayName(item.owner)}`,
   status: item.status, tone: item.status === 'Accepted' ? 'positive' : item.status === 'Rejected' || item.status === 'Expired' ? 'danger' : item.status === 'Published' ? 'info' : 'warning',
 })))
 const activityRows = computed<ProjectRow[]>(() => [
   ...filteredVisits.value.map((item) => ({
-    id: item.id, title: item.subject, meta: `${formatDisplayDate(item.date)} · ${item.type} · ${item.nextAction || '—'}`,
+    id: item.id, title: item.subject, meta: `${formatDisplayDate(item.date)} · ${salesEnumLabel(item.type ?? '', locale.value)} · ${item.nextAction || '—'}`,
     status: item.status, tone: item.status === 'Manager Reviewed' ? 'positive' as const : 'info' as const,
   })),
   ...filteredActions.value.map((item) => ({
-    id: item.id, title: item.title, meta: `${item.owner} · ${formatDisplayDate(item.due)} · ${item.sourceType}`,
+    id: item.id, title: item.title, meta: `${personnelDisplayName(item.owner)} · ${formatDisplayDate(item.due)} · ${recordTypeLabel(item.sourceType, locale.value)}`,
     status: item.status, tone: item.status === 'Completed' ? 'positive' as const : 'warning' as const,
   })),
 ])
@@ -149,7 +153,7 @@ const demoRows = computed<ProjectRow[]>(() => [
     status: item.status, tone: item.status === 'Converted' ? 'positive' as const : 'info' as const,
   })),
   ...filteredEvaluations.value.map((item) => ({
-    id: item.id, title: item.title, meta: `${item.id} · ${item.wafers} Wafers · ${item.owner}`,
+    id: item.id, title: item.title, meta: `${item.id} · ${item.wafers} ${locale.value === 'en-US' ? 'wafers' : '片晶圆'} · ${personnelDisplayName(item.owner)}`,
     status: item.status, tone: 'info' as const,
   })),
 ])
@@ -176,14 +180,14 @@ async function load() {
     const result = await props.apiClient.getAccount360(accountId)
     if (sequence === loadSequence && accountId === props.accountId) { detail.value = result.data; meta.value = readRequestMeta(result); emit('loaded', result.data) }
   } catch (reason) {
-    if (sequence === loadSequence && accountId === props.accountId) { const mapped = mapRequestError(reason); error.value = mapped.message; requestId.value = mapped.requestId; denied.value = mapped.denied }
+    if (sequence === loadSequence && accountId === props.accountId) { const mapped = mapRequestError(reason); error.value = mapped.localizedMessage ?? mapped.message; requestId.value = mapped.requestId; denied.value = mapped.denied }
   } finally { if (sequence === loadSequence && accountId === props.accountId) loading.value = false }
 }
 function exportReport() {
   if (!detail.value) return
   exportError.value = ''
-  try { downloadCustomerReport(buildCustomerReportModel(detail.value, new Date().toISOString().slice(0, 10))) }
-  catch (reason) { exportError.value = reason instanceof Error ? reason.message : '客户报告导出失败，请重试' }
+  try { downloadCustomerReport(buildCustomerReportModel(detail.value, new Date().toISOString().slice(0, 10), locale.value)) }
+  catch (reason) { exportError.value = requestErrorMessage(reason, message('accounts.exportFailed')) }
 }
 watch(() => props.accountId, () => {
   selectedProjectType.value = 'all'
@@ -196,39 +200,39 @@ watch(selectedProject, resetSectionPages)
 
 <template>
   <section class="account-profile">
-    <DataState v-if="!accountId" type="empty" title="请选择客户" message="从左侧客户列表选择后查看完整档案。" />
+    <DataState v-if="!accountId" type="empty" :title="locale === 'en-US' ? 'Select an account' : '请选择客户'" :message="locale === 'en-US' ? 'Select an account from the list to view its complete profile.' : '从左侧客户列表选择后查看完整档案。'" />
     <DataState v-else-if="loading" type="loading" />
     <DataState v-else-if="denied" type="denied" :message="error" :request-id="requestId" />
     <DataState v-else-if="error" type="error" :message="error" :request-id="requestId" @retry="load" />
     <template v-else-if="detail">
-      <DataNotice v-if="meta?.stale" :message="meta.message" :request-id="meta.requestId" @refresh="load" />
+      <DataNotice v-if="meta?.stale" :message="meta.localizedMessage ?? meta.message" :request-id="meta.requestId" @refresh="load" />
       <div class="account-360" data-testid="account-360">
         <header class="profile-hero">
           <span class="hero-mark">{{ detail.account.shortName.slice(0, 2) }}</span>
-          <div><span class="eyebrow">ACCOUNT 360</span><h2>{{ detail.account.name }}</h2><p><MapPin :size="13" />{{ detail.account.city }} · {{ detail.account.region }} · {{ detail.account.segment }} · Owner {{ personnelDisplayName(detail.account.owner) }}</p></div>
-          <div class="hero-actions"><StatusBadge :label="`${detail.account.tier} 级客户`" tone="positive" /><button v-if="canExport" class="report-button" type="button" data-testid="export-customer-report" @click="exportReport"><Download :size="14" />导出客户报告</button><small v-if="exportError" class="export-error">{{ exportError }}</small></div>
+          <div><span class="eyebrow">ACCOUNT 360</span><h2>{{ detail.account.name }}</h2><p><MapPin :size="13" />{{ detail.account.city }} · {{ detail.account.region }} · {{ salesEnumLabel(detail.account.segment, locale) }} · {{ locale === 'en-US' ? 'Owner' : '负责人' }} {{ personnelDisplayName(detail.account.owner) }}</p></div>
+          <div class="hero-actions"><StatusBadge :label="locale === 'en-US' ? `Tier ${detail.account.tier} account` : `${detail.account.tier} 级客户`" tone="positive" /><button v-if="canExport" class="report-button" type="button" data-testid="export-customer-report" @click="exportReport"><Download :size="14" />{{ locale === 'en-US' ? 'Export account report' : '导出客户报告' }}</button><small v-if="exportError" class="export-error">{{ exportError }}</small></div>
         </header>
 
         <section class="profile-kpis">
-          <div><span>CONFIRMED BOOKING</span><strong v-for="total in confirmedBooking" :key="total.currency">{{ formatMoney(total.amount, total.currency) }}</strong></div><div><span>关键人</span><strong>{{ detail.contacts.length }}</strong></div><div><span>拜访记录</span><strong>{{ detail.visits.length }}</strong></div><div><span>数据完整度</span><strong>{{ detail.account.completeness }}%</strong></div>
+          <div><span>{{ locale === 'en-US' ? 'Confirmed booking' : '已确认 Booking' }}</span><strong v-for="total in confirmedBooking" :key="total.currency">{{ formatMoney(total.amount, total.currency) }}</strong></div><div><span>{{ locale === 'en-US' ? 'Stakeholders' : '关键人' }}</span><strong>{{ detail.contacts.length }}</strong></div><div><span>{{ locale === 'en-US' ? 'Visit records' : '拜访记录' }}</span><strong>{{ detail.visits.length }}</strong></div><div><span>{{ locale === 'en-US' ? 'Profile completeness' : '数据完整度' }}</span><strong>{{ detail.account.completeness }}%</strong></div>
         </section>
 
         <div class="profile-grid">
-          <section class="profile-section"><header><Factory :size="16" /><strong>Site / 厂区</strong><span>{{ detail.sites.length }}</span><button v-if="canWrite" type="button" class="profile-section-action" data-manage-sites @click="emit('manage-sites')">管理厂区</button></header><article v-for="site in detail.sites" :key="site.id"><div><strong>{{ site.name }}</strong><small>{{ site.city }} · {{ site.type }} · {{ site.process }}</small></div><StatusBadge :label="site.status" tone="positive" /></article><div v-if="!detail.sites.length" class="mini-empty">暂无厂区记录</div></section>
-          <section class="profile-section"><header><Users :size="16" /><strong>关键人与组织关系</strong><span>{{ detail.contacts.length }}</span></header><article v-for="contact in detail.contacts" :key="contact.id"><span class="avatar">{{ contact.name.slice(-1) }}</span><div><strong>{{ contact.name }} · {{ contact.title }}</strong><small>{{ contact.department }} · {{ contact.role }} · {{ contact.email || '—' }}</small></div><StatusBadge :label="contact.relationship" :tone="relationshipTone(contact.relationship)" /></article><div v-if="!detail.contacts.length" class="mini-empty">关键人关系待补充</div></section>
+          <section class="profile-section"><header><Factory :size="16" /><strong>{{ locale === 'en-US' ? 'Sites' : 'Site / 厂区' }}</strong><span>{{ detail.sites.length }}</span><button v-if="canWrite" type="button" class="profile-section-action" data-manage-sites @click="emit('manage-sites')">{{ locale === 'en-US' ? 'Manage sites' : '管理厂区' }}</button></header><article v-for="site in detail.sites" :key="site.id"><div><strong>{{ site.name }}</strong><small>{{ site.city }} · {{ site.type }} · {{ systemValueLabel(site.process, locale) }}</small></div><StatusBadge :label="site.status === '量产' ? t('site.status.production') : site.status === '建设中' ? t('site.status.construction') : site.status === '规划中' ? t('site.status.planning') : site.status" tone="positive" /></article><div v-if="!detail.sites.length" class="mini-empty">{{ locale === 'en-US' ? 'No site records' : '暂无厂区记录' }}</div></section>
+          <section class="profile-section"><header><Users :size="16" /><strong>{{ locale === 'en-US' ? 'Stakeholders & reporting lines' : '关键人与组织关系' }}</strong><span>{{ detail.contacts.length }}</span></header><article v-for="contact in detail.contacts" :key="contact.id"><span class="avatar">{{ contact.name.slice(-1) }}</span><div><strong>{{ contact.name }} · {{ contact.title }}</strong><small>{{ contact.department }} · {{ salesEnumLabel(contact.role ?? '', locale) }} · {{ contact.email || '—' }}</small></div><StatusBadge :label="salesEnumLabel(contact.relationship, locale)" :tone="relationshipTone(contact.relationship)" /></article><div v-if="!detail.contacts.length" class="mini-empty">{{ locale === 'en-US' ? 'Stakeholder details pending' : '关键人关系待补充' }}</div></section>
           <section class="project-workspace">
             <header class="project-workspace-header">
-              <div><span class="eyebrow">PROJECT BUSINESS VIEW</span><h3>项目业务视图</h3><p>选择项目后，商机、合同、拜访与 Demo 信息同步切换。</p></div>
+              <div><span class="eyebrow">{{ locale === 'en-US' ? 'PROJECT BUSINESS VIEW' : '项目业务视图' }}</span><h3>{{ locale === 'en-US' ? 'Project business view' : '项目业务视图' }}</h3><p>{{ locale === 'en-US' ? 'Select a project to switch opportunities, contracts, visits, and Demo information together.' : '选择项目后，商机、合同、拜访与 Demo 信息同步切换。' }}</p></div>
               <div class="project-filter-controls">
-                <div class="project-type-filter" aria-label="项目类型筛选">
-                  <button type="button" data-testid="project-type-all" :class="{ active: selectedProjectType === 'all' }" @click="selectProjectType('all')">全部</button>
-                  <button type="button" data-testid="project-type-booking" :class="{ active: selectedProjectType === 'booking' }" @click="selectProjectType('booking')">Booking</button>
-                  <button type="button" data-testid="project-type-opportunity" :class="{ active: selectedProjectType === 'opportunity' }" @click="selectProjectType('opportunity')">Opportunities</button>
+                <div class="project-type-filter" :aria-label="t('accounts.projectFilter')">
+                  <button type="button" data-testid="project-type-all" :class="{ active: selectedProjectType === 'all' }" @click="selectProjectType('all')">{{ locale === 'en-US' ? 'All' : '全部' }}</button>
+                  <button type="button" data-testid="project-type-booking" :class="{ active: selectedProjectType === 'booking' }" @click="selectProjectType('booking')">{{ salesEnumLabel('Booking', locale) }}</button>
+                  <button type="button" data-testid="project-type-opportunity" :class="{ active: selectedProjectType === 'opportunity' }" @click="selectProjectType('opportunity')">{{ locale === 'en-US' ? 'Opportunities' : '商机' }}</button>
                 </div>
                 <label>
-                  <span>对应项目与负责人</span>
-                  <select v-model="selectedProject" data-testid="account-project-filter" aria-label="对应项目与负责人">
-                    <option value="all">{{ selectedProjectType === 'booking' ? '全部 Booking' : selectedProjectType === 'opportunity' ? '全部 Opportunities' : '全部项目' }}</option>
+                  <span>{{ locale === 'en-US' ? 'Project and owner' : '对应项目与负责人' }}</span>
+                  <select v-model="selectedProject" data-testid="account-project-filter" :aria-label="locale === 'en-US' ? 'Project and owner' : '对应项目与负责人'">
+                    <option value="all">{{ selectedProjectType === 'booking' ? (locale === 'en-US' ? 'All bookings' : '全部 Booking') : selectedProjectType === 'opportunity' ? (locale === 'en-US' ? 'All opportunities' : '全部商机') : (locale === 'en-US' ? 'All projects' : '全部项目') }}</option>
                     <option v-for="project in projectOptions" :key="project.key" :value="project.key">{{ project.label }} · {{ personnelDisplayName(project.owner) }}</option>
                   </select>
                 </label>
@@ -237,27 +241,27 @@ watch(selectedProject, resetSectionPages)
 
             <div class="project-section-grid">
               <section class="project-section">
-                <header><Target :size="16" /><strong>商机与 Booking</strong><span>{{ dealRows.length }}</span></header>
-                <article v-for="item in pagedRows(dealRows, 'deals')" :key="item.id"><div><strong>{{ item.title }}</strong><small>{{ item.meta }}</small></div><StatusBadge :label="item.status" :tone="item.tone" /></article>
-                <div v-if="!dealRows.length" class="mini-empty">该项目暂无商机或 Booking</div>
+                <header><Target :size="16" /><strong>{{ locale === 'en-US' ? 'Opportunities & Bookings' : '商机与 Booking' }}</strong><span>{{ dealRows.length }}</span></header>
+                <article v-for="item in pagedRows(dealRows, 'deals')" :key="item.id"><div><strong>{{ item.title }}</strong><small>{{ item.meta }}</small></div><StatusBadge :label="opportunityStageLabel(item.status, locale)" :tone="item.tone" /></article>
+                <div v-if="!dealRows.length" class="mini-empty">{{ locale === 'en-US' ? 'No opportunities or bookings for this project' : '该项目暂无商机或 Booking' }}</div>
                 <PaginationControls v-if="dealRows.length > PROJECT_PAGE_SIZE" :page="sectionPages.deals" :page-size="PROJECT_PAGE_SIZE" :total="dealRows.length" @change="sectionPages.deals = $event" />
               </section>
               <section class="project-section">
-                <header><FileSignature :size="16" /><strong>合同</strong><span>{{ contractRows.length }}</span></header>
-                <article v-for="item in pagedRows(contractRows, 'contracts')" :key="item.id"><div><strong>{{ item.title }}</strong><small>{{ item.meta }}</small></div><StatusBadge :label="item.status" :tone="item.tone" /></article>
-                <div v-if="!contractRows.length" class="mini-empty">该项目暂无关联合同</div>
+                <header><FileSignature :size="16" /><strong>{{ locale === 'en-US' ? 'Contracts' : '合同' }}</strong><span>{{ contractRows.length }}</span></header>
+                <article v-for="item in pagedRows(contractRows, 'contracts')" :key="item.id"><div><strong>{{ item.title }}</strong><small>{{ item.meta }}</small></div><StatusBadge :label="salesEnumLabel(item.status, locale)" :tone="item.tone" /></article>
+                <div v-if="!contractRows.length" class="mini-empty">{{ locale === 'en-US' ? 'No contracts linked to this project' : '该项目暂无关联合同' }}</div>
                 <PaginationControls v-if="contractRows.length > PROJECT_PAGE_SIZE" :page="sectionPages.contracts" :page-size="PROJECT_PAGE_SIZE" :total="contractRows.length" @change="sectionPages.contracts = $event" />
               </section>
               <section class="project-section">
-                <header><CalendarDays :size="16" /><strong>拜访与下一步</strong><span>{{ activityRows.length }}</span></header>
-                <article v-for="item in pagedRows(activityRows, 'activities')" :key="item.id"><div><strong>{{ item.title }}</strong><small>{{ item.meta }}</small></div><StatusBadge :label="item.status" :tone="item.tone" /></article>
-                <div v-if="!activityRows.length" class="mini-empty">该项目暂无拜访或行动</div>
+                <header><CalendarDays :size="16" /><strong>{{ locale === 'en-US' ? 'Visits & next steps' : '拜访与下一步' }}</strong><span>{{ activityRows.length }}</span></header>
+                <article v-for="item in pagedRows(activityRows, 'activities')" :key="item.id"><div><strong>{{ item.title }}</strong><small>{{ item.meta }}</small></div><StatusBadge :label="salesEnumLabel(item.status, locale)" :tone="item.tone" /></article>
+                <div v-if="!activityRows.length" class="mini-empty">{{ locale === 'en-US' ? 'No visits or actions for this project' : '该项目暂无拜访或行动' }}</div>
                 <PaginationControls v-if="activityRows.length > PROJECT_PAGE_SIZE" :page="sectionPages.activities" :page-size="PROJECT_PAGE_SIZE" :total="activityRows.length" @change="sectionPages.activities = $event" />
               </section>
               <section class="project-section">
-                <header><FlaskConical :size="16" /><strong>Demo / Wafer Test</strong><span>{{ demoRows.length }}</span></header>
-                <article v-for="item in pagedRows(demoRows, 'demos')" :key="item.id"><div><strong>{{ item.title }}</strong><small>{{ item.meta }}</small></div><StatusBadge :label="item.status" :tone="item.tone" /></article>
-                <div v-if="!demoRows.length" class="mini-empty">该项目暂无 Demo 或 Test</div>
+                <header><FlaskConical :size="16" /><strong>{{ locale === 'en-US' ? 'Demo / wafer test' : 'Demo / 晶圆测试' }}</strong><span>{{ demoRows.length }}</span></header>
+                <article v-for="item in pagedRows(demoRows, 'demos')" :key="item.id"><div><strong>{{ item.title }}</strong><small>{{ item.meta }}</small></div><StatusBadge :label="salesEnumLabel(item.status, locale)" :tone="item.tone" /></article>
+                <div v-if="!demoRows.length" class="mini-empty">{{ locale === 'en-US' ? 'No Demo or Test records for this project' : '该项目暂无 Demo 或 Test' }}</div>
                 <PaginationControls v-if="demoRows.length > PROJECT_PAGE_SIZE" :page="sectionPages.demos" :page-size="PROJECT_PAGE_SIZE" :total="demoRows.length" @change="sectionPages.demos = $event" />
               </section>
             </div>

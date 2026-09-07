@@ -48,7 +48,7 @@ describe('InstalledToolProjectCycleBoard', () => {
     const wrapper = mount(InstalledToolProjectCycleBoard, { props: { items: [item], selectedId: item.id } })
 
     expect(wrapper.findAll('[data-installed-tool-stage-header]').map((node) => node.text()))
-      .toEqual(stageOrder)
+      .toEqual(['FAT', '发运', '安装', 'SAT', '质保'])
     const row = wrapper.get('[data-installed-tool-project-id="001"]')
     expect(row.classes()).toContain('selected')
     expect(row.text()).toContain('SN-001')

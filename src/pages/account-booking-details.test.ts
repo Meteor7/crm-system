@@ -56,8 +56,8 @@ describe('Account and Booking details', () => {
     await wrapper.get('[data-testid="edit-account"]').trigger('click')
     expect(wrapper.get('[role="dialog"]').text()).toContain('修改客户档案')
     await wrapper.get('input[aria-label="客户全称"]').setValue('示例企业044科技（更新）有限责任公司')
-    await wrapper.get('[aria-label="客户业务领域"]').setValue('__custom_account_segment__')
-    await wrapper.get('[aria-label="客户业务领域自定义"]').setValue('Power Semiconductor')
+    await wrapper.get('[aria-label="业务领域"]').setValue('__custom_account_segment__')
+    await wrapper.get('[aria-label="业务领域自定义"]').setValue('Power Semiconductor')
     await wrapper.get('[data-modal-submit]').trigger('submit')
     expect(updateAccount).toHaveBeenCalledWith(
       'ACC-002',

@@ -64,7 +64,7 @@ describe('Leads&Opportunities workspace', () => {
     expect(wrapper.get('[data-testid="opportunity-number-header"]').text()).toBe('编号')
     expect(wrapper.find('input[type="checkbox"]').exists()).toBe(false)
     expect(wrapper.get('[data-opportunity-number="OPP-001"]').text()).toBe('OPP-001')
-    expect(wrapper.text()).toContain('Close Date')
+    expect(wrapper.text()).toContain('预计成交日期')
     const priorityOpportunity = wrapper.get('[data-opportunity-id="OPP-003"]')
     expect(priorityOpportunity.get('[data-opportunity-probability]').text()).toContain('88%')
     expect(priorityOpportunity.get('[data-opportunity-intent]').text()).toContain('86/100')
@@ -91,7 +91,7 @@ describe('Leads&Opportunities workspace', () => {
     await wrapper.get('[data-testid="new-opportunity"]').trigger('click')
 
     expect(wrapper.find('[aria-label="Opportunity 赢率"]').exists()).toBe(false)
-    const intent = wrapper.get('[aria-label="Opportunity 购买意愿"]')
+    const intent = wrapper.get('[aria-label="购买意愿"]')
     expect(intent.attributes('type')).toBe('range')
     expect(intent.attributes('min')).toBe('0')
     expect(intent.attributes('max')).toBe('100')
@@ -114,12 +114,12 @@ describe('Leads&Opportunities workspace', () => {
     await flushPromises()
 
     expect(wrapper.find('[aria-label="搜索 Opportunity"]').exists()).toBe(false)
-    await wrapper.get('[aria-label="Opportunity Stage 筛选"]').setValue('采购流程')
+    await wrapper.get('[aria-label="全部 Stage"]').setValue('采购流程')
     await flushPromises()
     expect(wrapper.findAll('[data-opportunity-id]')).toHaveLength(1)
     expect(wrapper.text()).toContain('HBM AOI 扩线项目')
 
-    await wrapper.get('[aria-label="Opportunity Stage 筛选"]').setValue('Wafer Demo确认')
+    await wrapper.get('[aria-label="全部 Stage"]').setValue('Wafer Demo确认')
     await flushPromises()
     expect(wrapper.findAll('[data-opportunity-id]')).toHaveLength(1)
     expect(wrapper.find('[data-opportunity-id="OPP-001"]').exists()).toBe(true)
@@ -137,8 +137,8 @@ describe('Leads&Opportunities workspace', () => {
       .mockImplementationOnce(() => older.promise)
       .mockImplementationOnce(() => latest.promise)
 
-    await wrapper.get('[aria-label="Opportunity Stage 筛选"]').setValue('采购流程')
-    await wrapper.get('[aria-label="Opportunity Stage 筛选"]').setValue('Wafer Demo确认')
+    await wrapper.get('[aria-label="全部 Stage"]').setValue('采购流程')
+    await wrapper.get('[aria-label="全部 Stage"]').setValue('Wafer Demo确认')
     latest.resolve(latestResult)
     await flushPromises()
     expect(wrapper.find('[data-opportunity-id="OPP-001"]').exists()).toBe(true)
@@ -166,7 +166,7 @@ describe('Leads&Opportunities workspace', () => {
     expect(wrapper.get('[data-opportunity-stage="报价"]').text()).toContain('0 条')
     expect(wrapper.get('[data-opportunity-board-link="OPP-003"]').text()).toContain('HBM AOI 扩线项目')
 
-    await wrapper.get('[aria-label="Opportunity Stage 筛选"]').setValue('Wafer Demo确认')
+    await wrapper.get('[aria-label="全部 Stage"]').setValue('Wafer Demo确认')
     expect(wrapper.findAll('[data-opportunity-id]')).toHaveLength(1)
     expect(wrapper.get('[data-opportunity-stage="Wafer Demo确认"]').find('[data-opportunity-id="OPP-001"]').exists()).toBe(true)
 

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { bookingTimelineTitle } from '@/features/shared/system-labels'
 import { computed, onMounted, ref, watch } from 'vue'
 import { ArrowLeft, BriefcaseBusiness, CalendarPlus, Edit3, GitMerge, Mail, Phone, Trash2, UserRound } from '@lucide/vue'
 import { RouterLink, useRoute, useRouter } from 'vue-router'
@@ -17,26 +18,29 @@ import ModalShell from '@/design-system/ModalShell.vue'
 import { personnelDisplayName } from '@/demo/personnel'
 import { formatDisplayDate } from '@/domain/time'
 import { readAllPages } from '@/features/shared/read-all-pages'
+import { useI18n, useLocaleMessage, localeMessage } from '@/i18n'
+import { contactStatusLabel, salesEnumLabel, recordTypeLabel, opportunityStageLabel } from '@/features/shared/sales-i18n'
 
 const props = withDefaults(defineProps<{ apiClient?: CrmApi }>(), { apiClient: () => defaultApi })
 const route = useRoute()
 const router = useRouter()
 const app = useAppStore()
+const { locale, t } = useI18n()
 const detail = ref<ContactDetailDto | null>(null)
 const accounts = ref<AccountSummaryDto[]>([])
 const sites = ref<Array<SiteDto & { accountId: string }>>([])
 const contacts = ref<ContactSummaryDto[]>([])
 const loading = ref(false)
 const denied = ref(false)
-const error = ref('')
+const error = useLocaleMessage()
 const requestId = ref('')
 const editOpen = ref(false)
 const mergeOpen = ref(false)
 const deleteOpen = ref(false)
 const busy = ref(false)
-const actionError = ref('')
+const actionError = useLocaleMessage()
 const referencesReady = ref(false)
-const referencesError = ref('')
+const referencesError = useLocaleMessage()
 const currentAccount = computed(() => accounts.value.find((account) => account.id === detail.value?.contact.accountId))
 const canWrite = computed(() => {
   const user = app.bootstrap?.user
@@ -50,8 +54,8 @@ const siteRestricted = computed(() => {
   return user?.role === 'Sales' && Boolean(currentAccount.value) && currentAccount.value?.owner !== user.id
 })
 const siteDisplay = computed(() => {
-  if (siteRestricted.value) return '仅客户负责人可见'
-  return detail.value?.contact.siteName || detail.value?.contact.siteId || '未指定'
+  if (siteRestricted.value) return t('contacts.ownerOnly')
+  return detail.value?.contact.siteName || detail.value?.contact.siteId || t('detail.notSpecified')
 })
 const canMerge = computed(() => app.can('contact:merge'))
 const canCreateOpportunity = computed(() => canWrite.value && app.can('deal:write'))
@@ -105,7 +109,7 @@ async function load() {
   } catch (reason) {
     if (sequence !== loadSequence) return
     const mapped = mapRequestError(reason)
-    error.value = mapped.message
+    error.value = mapped.localizedMessage ?? mapped.message
     requestId.value = mapped.requestId
     denied.value = mapped.denied
   } finally {
@@ -116,7 +120,7 @@ async function load() {
     await loadReferences(detail.value.contact)
   } catch {
     if (sequence !== loadSequence) return
-    referencesError.value = '编辑所需的客户、厂区和直属上司选项暂时无法加载。'
+    referencesError.value = localeMessage('Accounts, sites, and reporting-line options for editing are unavailable.', '编辑所需的客户、厂区和直属上司选项暂时无法加载。')
   }
 }
 async function saveContact(payload: CreateContactInput) {
@@ -127,7 +131,7 @@ async function saveContact(payload: CreateContactInput) {
     editOpen.value = false
     await load()
   } catch (reason) {
-    actionError.value = mapRequestError(reason).message
+    const mapped = mapRequestError(reason); actionError.value = mapped.localizedMessage ?? mapped.message
   } finally {
     busy.value = false
   }
@@ -141,7 +145,7 @@ async function mergeContact(payload: { survivorId: string; duplicateId: string }
     await router.replace({ name: 'contact-detail', params: { contactId: result.data.id } })
     await load()
   } catch (reason) {
-    actionError.value = mapRequestError(reason).message
+    const mapped = mapRequestError(reason); actionError.value = mapped.localizedMessage ?? mapped.message
   } finally {
     busy.value = false
   }
@@ -155,7 +159,7 @@ async function deleteContact() {
     deleteOpen.value = false
     await router.push({ name: 'contacts' })
   } catch (reason) {
-    actionError.value = mapRequestError(reason).message
+    const mapped = mapRequestError(reason); actionError.value = mapped.localizedMessage ?? mapped.message
   } finally {
     busy.value = false
   }
@@ -186,53 +190,53 @@ onMounted(async () => {
   <div class="contact-detail-page">
     <DataState v-if="loading && !detail" type="loading" />
     <DataState v-else-if="denied" type="denied" :message="error" :request-id="requestId" />
-    <DataState v-else-if="error || !detail" type="error" :message="error || '未找到联系人'" :request-id="requestId" @retry="load" />
+    <DataState v-else-if="error || !detail" type="error" :message="error || t('detail.notFoundContact')" :request-id="requestId" @retry="load" />
     <template v-else>
-      <RouterLink class="back-link detail-back-button" :to="{ name: 'contacts' }"><ArrowLeft :size="14" />返回联系人列表</RouterLink>
+      <RouterLink class="back-link detail-back-button" :to="{ name: 'contacts' }"><ArrowLeft :size="14" />{{ t('detail.backContacts') }}</RouterLink>
       <PageHeader eyebrow="CONTACT 360" :title="detail.contact.name" :description="`${detail.contact.accountName} · ${detail.contact.title} · ${personnelDisplayName(detail.contact.owner)}`">
-        <button v-if="isActive && canCreateOpportunity" class="secondary-button" type="button" data-testid="new-opportunity" @click="createOpportunity"><BriefcaseBusiness :size="14" />新建 Opportunity</button>
-        <button v-if="isActive && canCreateVisit" class="secondary-button" type="button" data-testid="record-visit" @click="createVisit"><CalendarPlus :size="14" />记录拜访</button>
-        <button v-if="isActive && canWrite" class="primary-button" type="button" data-testid="edit-contact" :disabled="!referencesReady" @click="actionError = ''; editOpen = true"><Edit3 :size="14" />编辑联系人</button>
-        <button v-if="isActive && canMerge" class="secondary-button merge-action" type="button" data-testid="merge-contact" @click="actionError = ''; mergeOpen = true"><GitMerge :size="14" />合并重复联系人</button>
-        <button v-if="canDelete" class="delete-button" type="button" data-testid="delete-contact" @click="actionError = ''; deleteOpen = true"><Trash2 :size="14" />删除联系人</button>
+        <button v-if="isActive && canCreateOpportunity" class="secondary-button" type="button" data-testid="new-opportunity" @click="createOpportunity"><BriefcaseBusiness :size="14" />{{ locale === 'en-US' ? 'New opportunity' : '新建 Opportunity' }}</button>
+        <button v-if="isActive && canCreateVisit" class="secondary-button" type="button" data-testid="record-visit" @click="createVisit"><CalendarPlus :size="14" />{{ locale === 'en-US' ? 'Record visit' : '记录拜访' }}</button>
+        <button v-if="isActive && canWrite" class="primary-button" type="button" data-testid="edit-contact" :disabled="!referencesReady" @click="actionError = ''; editOpen = true"><Edit3 :size="14" />{{ locale === 'en-US' ? 'Edit contact' : '编辑联系人' }}</button>
+        <button v-if="isActive && canMerge" class="secondary-button merge-action" type="button" data-testid="merge-contact" @click="actionError = ''; mergeOpen = true"><GitMerge :size="14" />{{ locale === 'en-US' ? 'Merge duplicate' : '合并重复联系人' }}</button>
+        <button v-if="canDelete" class="delete-button" type="button" data-testid="delete-contact" @click="actionError = ''; deleteOpen = true"><Trash2 :size="14" />{{ locale === 'en-US' ? 'Delete contact' : '删除联系人' }}</button>
       </PageHeader>
 
       <div class="contact-summary">
         <span class="avatar"><UserRound :size="24" /></span>
-        <div><small>联系人状态</small><StatusBadge :label="detail.contact.status" :tone="statusTone" /></div>
-        <div><small>关系强度</small><strong>{{ detail.contact.relationship }}</strong></div>
-        <div><small>数据质量</small><StatusBadge v-if="detail.contact.dataQuality === 'Needs Review'" data-testid="needs-review" label="Needs Review" tone="warning" /><strong v-else>{{ detail.contact.dataQuality }}</strong></div>
-        <div><small>最近更新</small><strong>{{ formatDisplayDate(detail.contact.updatedAt) }}</strong></div>
+        <div><small>{{ t('detail.contactStatus') }}</small><StatusBadge :label="contactStatusLabel(detail.contact.status, locale)" :tone="statusTone" /></div>
+        <div><small>{{ t('detail.relationship') }}</small><strong>{{ salesEnumLabel(detail.contact.relationship, locale) }}</strong></div>
+        <div><small>{{ t('detail.dataQuality') }}</small><StatusBadge v-if="detail.contact.dataQuality === 'Needs Review'" data-testid="needs-review" :label="salesEnumLabel(detail.contact.dataQuality, locale)" tone="warning" /><strong v-else>{{ detail.contact.dataQuality }}</strong></div>
+        <div><small>{{ t('detail.updated') }}</small><strong>{{ formatDisplayDate(detail.contact.updatedAt) }}</strong></div>
       </div>
       <p v-if="referencesError" data-testid="contact-references-unavailable">{{ referencesError }}</p>
 
       <div class="detail-grid">
-        <SectionCard title="资料与组织关系" eyebrow="CONTACT PROFILE">
+        <SectionCard :title="t('detail.profileRelations')" eyebrow="CONTACT PROFILE">
           <dl class="profile-list">
-            <div><dt>客户</dt><dd><RouterLink :to="{ name: 'account-detail', params: { accountId: detail.contact.accountId } }">{{ detail.contact.accountName }}</RouterLink></dd></div>
-            <div><dt>厂区</dt><dd><RouterLink v-if="detail.contact.siteId && !siteRestricted" :to="{ name: 'account-detail', params: { accountId: detail.contact.accountId } }">{{ siteDisplay }}</RouterLink><span v-else>{{ siteDisplay }}</span></dd></div>
-            <div><dt>职位 / 部门</dt><dd>{{ detail.contact.title }} / {{ detail.contact.department }}</dd></div>
-            <div><dt>电话</dt><dd><a v-if="detail.contact.phone" :href="`tel:${detail.contact.phone}`"><Phone :size="13" />{{ detail.contact.phone }}</a><span v-else>—</span></dd></div>
-            <div><dt>邮箱</dt><dd><a v-if="detail.contact.email" :href="`mailto:${detail.contact.email}`"><Mail :size="13" />{{ detail.contact.email }}</a><span v-else>—</span></dd></div>
-            <div><dt>直属上司</dt><dd><RouterLink v-if="detail.reportsTo" :to="{ name: 'contact-detail', params: { contactId: detail.reportsTo.id } }">{{ detail.reportsTo.name }} · {{ detail.reportsTo.title }}</RouterLink><span v-else>未维护</span></dd></div>
-            <div><dt>直接下属</dt><dd><span v-if="!detail.directReports.length">未维护</span><RouterLink v-for="item in detail.directReports" v-else :key="item.id" class="report-link" :to="{ name: 'contact-detail', params: { contactId: item.id } }">{{ item.name }}</RouterLink></dd></div>
+            <div><dt>{{ t('detail.account') }}</dt><dd><RouterLink :to="{ name: 'account-detail', params: { accountId: detail.contact.accountId } }">{{ detail.contact.accountName }}</RouterLink></dd></div>
+            <div><dt>{{ t('detail.site') }}</dt><dd><RouterLink v-if="detail.contact.siteId && !siteRestricted" :to="{ name: 'account-detail', params: { accountId: detail.contact.accountId } }">{{ siteDisplay }}</RouterLink><span v-else>{{ siteDisplay }}</span></dd></div>
+            <div><dt>{{ t('detail.department') }}</dt><dd>{{ detail.contact.title }} / {{ detail.contact.department }}</dd></div>
+            <div><dt>{{ t('detail.phone') }}</dt><dd><a v-if="detail.contact.phone" :href="`tel:${detail.contact.phone}`"><Phone :size="13" />{{ detail.contact.phone }}</a><span v-else>—</span></dd></div>
+            <div><dt>{{ t('detail.email') }}</dt><dd><a v-if="detail.contact.email" :href="`mailto:${detail.contact.email}`"><Mail :size="13" />{{ detail.contact.email }}</a><span v-else>—</span></dd></div>
+            <div><dt>{{ t('detail.manager') }}</dt><dd><RouterLink v-if="detail.reportsTo" :to="{ name: 'contact-detail', params: { contactId: detail.reportsTo.id } }">{{ detail.reportsTo.name }} · {{ detail.reportsTo.title }}</RouterLink><span v-else>{{ t('detail.notMaintained') }}</span></dd></div>
+            <div><dt>{{ t('detail.directReports') }}</dt><dd><span v-if="!detail.directReports.length">{{ t('detail.notMaintained') }}</span><RouterLink v-for="item in detail.directReports" v-else :key="item.id" class="report-link" :to="{ name: 'contact-detail', params: { contactId: item.id } }">{{ item.name }}</RouterLink></dd></div>
           </dl>
         </SectionCard>
 
-        <SectionCard title="活动时间线" eyebrow="ACTIVITY TIMELINE">
+        <SectionCard :title="t('detail.activityTimeline')" eyebrow="ACTIVITY TIMELINE">
           <div v-if="detail.timeline.length" class="timeline">
-            <RouterLink v-for="item in detail.timeline" :key="item.id" :data-timeline-id="item.id" :to="item.href"><span>{{ item.type }}</span><strong>{{ item.title }}</strong><p>{{ item.summary }}</p><time>{{ formatDisplayDate(item.at) }}</time></RouterLink>
+            <RouterLink v-for="item in detail.timeline" :key="item.id" :data-timeline-id="item.id" :to="item.href"><span>{{ recordTypeLabel(item.type, locale) }}</span><strong>{{ item.type === 'Booking' ? bookingTimelineTitle(item.title, locale) : item.title }}</strong><p>{{ item.type === 'Opportunity' ? opportunityStageLabel(item.summary, locale) : item.summary }}</p><time>{{ formatDisplayDate(item.at) }}</time></RouterLink>
           </div>
-          <DataState v-else type="empty" title="暂无关联活动" message="联系人参与业务后，记录会汇总到这里。" />
+          <DataState v-else type="empty" :title="t('detail.noRelatedActivity')" :message="t('detail.relatedActivityHint')" />
         </SectionCard>
 
         <div class="related-column">
-          <SectionCard title="关联业务" eyebrow="RELATED BUSINESS">
+          <SectionCard :title="t('detail.relatedBusiness')" eyebrow="RELATED BUSINESS">
             <nav class="related-links">
-              <RouterLink data-related="opportunities" :to="relatedRoute('opportunities')"><span>Opportunities</span><strong>{{ detail.opportunities.length }}</strong></RouterLink>
-              <RouterLink data-related="visits" :to="relatedRoute('visits')"><span>拜访记录</span><strong>{{ detail.visits.length }}</strong></RouterLink>
-              <RouterLink data-related="demo-requests" :to="relatedRoute('demo-requests')"><span>Demo Requests</span><strong>{{ detail.demoRequests.length }}</strong></RouterLink>
-              <RouterLink data-related="bookings" :to="relatedRoute('bookings')"><span>Bookings</span><strong>{{ detail.bookings.length }}</strong></RouterLink>
+              <RouterLink data-related="opportunities" :to="relatedRoute('opportunities')"><span>{{ locale === 'en-US' ? 'Opportunities' : '商机' }}</span><strong>{{ detail.opportunities.length }}</strong></RouterLink>
+              <RouterLink data-related="visits" :to="relatedRoute('visits')"><span>{{ t('detail.relatedVisits') }}</span><strong>{{ detail.visits.length }}</strong></RouterLink>
+              <RouterLink data-related="demo-requests" :to="relatedRoute('demo-requests')"><span>{{ locale === 'en-US' ? 'Demo Requests' : 'Demo Request' }}</span><strong>{{ detail.demoRequests.length }}</strong></RouterLink>
+              <RouterLink data-related="bookings" :to="relatedRoute('bookings')"><span>{{ locale === 'en-US' ? 'Bookings' : 'Booking' }}</span><strong>{{ detail.bookings.length }}</strong></RouterLink>
             </nav>
           </SectionCard>
           <ContactFilesCard :contact-id="detail.contact.id" :can-write="isActive && canWrite" :can-delete="isActive && canDeleteContactFiles" :api-client="apiClient" />
@@ -241,8 +245,8 @@ onMounted(async () => {
 
       <ContactModal v-if="editOpen" :contact="detail.contact" :accounts="accounts" :sites="sites" :contacts="contacts" :busy="busy" :error="actionError" :can-delete="canDelete" @close="editOpen = false" @submit="saveContact" @delete="requestDeleteFromEdit" />
       <ContactMergeModal v-if="mergeOpen" :contact="detail.contact" :contacts="contacts" :busy="busy" :error="actionError" @close="mergeOpen = false" @submit="mergeContact" />
-      <ModalShell v-if="deleteOpen" title="永久删除联系人" eyebrow="HARD DELETE" :busy="busy" @close="deleteOpen = false" @submit="deleteContact">
-        <p class="delete-note">此操作不可恢复。联系人会从本地数据中物理删除；Opportunity 中对应关键人关联会移除，Booking 与 Demo Request 会优先改绑到同客户的现有联系人。</p>
+      <ModalShell v-if="deleteOpen" :title="t('detail.permanentDeleteContact')" eyebrow="HARD DELETE" :busy="busy" @close="deleteOpen = false" @submit="deleteContact">
+        <p class="delete-note">{{ t('detail.deleteContactWarning') }}</p>
         <p v-if="actionError" class="form-error">{{ actionError }}</p>
       </ModalShell>
     </template>

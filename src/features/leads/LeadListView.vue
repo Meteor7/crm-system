@@ -13,17 +13,20 @@ import PaginationControls from '@/features/shared/PaginationControls.vue'
 import StatusBadge from '@/design-system/StatusBadge.vue'
 import LeadEditorModal from './LeadEditorModal.vue'
 import { formatDisplayDate } from '@/domain/time'
+import { useI18n, useLocaleMessage } from '@/i18n'
+import { salesEnumLabel } from '@/features/shared/sales-i18n'
 
 const props = withDefaults(defineProps<{ apiClient?: CrmApi }>(), { apiClient: () => defaultApi })
 const router = useRouter()
 const app = useAppStore()
+const { t, locale } = useI18n()
 const rows = ref<LeadDto[]>([])
 const total = ref(0)
 const page = ref(1)
 const pageSize = ref(12)
 const loading = ref(false)
 const denied = ref(false)
-const error = ref('')
+const error = useLocaleMessage()
 const requestId = ref('')
 const status = ref<LeadStatus | 'All'>('All')
 const source = ref<LeadSource | 'All'>('All')
@@ -31,7 +34,7 @@ const owner = ref('All')
 const editorOpen = ref(false)
 const editing = ref<LeadDto | null>(null)
 const busy = ref(false)
-const editorError = ref('')
+const editorError = useLocaleMessage()
 const canWrite = computed(() => app.can('deal:write'))
 const owners = computed(() => [...new Set(rows.value.map((lead) => lead.owner))].sort())
 let sequence = 0
@@ -57,7 +60,7 @@ async function load() {
     const mapped = mapRequestError(reason)
     rows.value = []
     total.value = 0
-    error.value = mapped.message
+    error.value = mapped.localizedMessage ?? mapped.message
     requestId.value = mapped.requestId
     denied.value = mapped.denied
   } finally {
@@ -96,7 +99,7 @@ async function saveLead(payload: CreateLeadInput) {
     editing.value = null
     await load()
   } catch (reason) {
-    editorError.value = mapRequestError(reason).message
+    const mapped = mapRequestError(reason); editorError.value = mapped.localizedMessage ?? mapped.message
   } finally {
     busy.value = false
   }
@@ -115,34 +118,34 @@ onMounted(async () => {
 <template>
   <div class="lead-list-view">
     <div class="lead-actions">
-      <div><span>LEAD QUALIFICATION</span><strong>潜在线索</strong><small>判断这个人或公司是否值得继续投入销售时间。</small></div>
-      <button v-if="canWrite" class="primary-button" type="button" data-testid="new-lead" @click="openCreate"><Plus :size="14" />新增 Lead</button>
+      <div><span>{{ t('leads.qualificationEyebrow') }}</span><strong>{{ t('leads.qualificationTitle') }}</strong><small>{{ t('leads.qualificationDescription') }}</small></div>
+      <button v-if="canWrite" class="primary-button" type="button" data-testid="new-lead" @click="openCreate"><Plus :size="14" />{{ t('leads.new') }}</button>
     </div>
-    <FilterBar :result-label="`${total} 条 Leads`" @reset="resetFilters">
-      <select v-model="status" class="filter-control" aria-label="Lead 状态筛选"><option value="All">全部状态</option><option>New</option><option>Working</option><option>Qualified</option><option>Nurturing</option><option>Disqualified</option><option>Converted</option></select>
-      <select v-model="source" class="filter-control" aria-label="Lead 来源筛选"><option value="All">全部来源</option><option>Website</option><option>Trade Show</option><option>Partner Referral</option><option>Outbound</option><option>Customer Referral</option><option>Other</option></select>
-      <select v-model="owner" class="filter-control" aria-label="Lead 负责人筛选"><option value="All">全部负责人</option><option v-for="item in owners" :key="item" :value="item">{{ personnelDisplayName(item) }}</option></select>
+     <FilterBar :result-label="locale === 'en-US' ? `${total} Leads` : `${total} 条 Leads`" @reset="resetFilters">
+       <select v-model="status" class="filter-control" :aria-label="t('leads.status')"><option value="All">{{ t('leads.allStatuses') }}</option><option v-for="item in ['New', 'Working', 'Qualified', 'Nurturing', 'Disqualified', 'Converted']" :key="item" :value="item">{{ salesEnumLabel(item, locale) }}</option></select>
+       <select v-model="source" class="filter-control" :aria-label="t('leads.source')"><option value="All">{{ t('leads.allSources') }}</option><option v-for="item in ['Website', 'Trade Show', 'Partner Referral', 'Outbound', 'Customer Referral', 'Other']" :key="item" :value="item">{{ salesEnumLabel(item, locale) }}</option></select>
+      <select v-model="owner" class="filter-control" :aria-label="t('leads.owner')"><option value="All">{{ t('leads.allOwners') }}</option><option v-for="item in owners" :key="item" :value="item">{{ personnelDisplayName(item) }}</option></select>
     </FilterBar>
 
     <section class="lead-table-card">
       <DataState v-if="loading && !rows.length" type="loading" />
       <DataState v-else-if="denied" type="denied" :message="error" :request-id="requestId" />
       <DataState v-else-if="error" type="error" :message="error" :request-id="requestId" @retry="load" />
-      <DataState v-else-if="!rows.length" type="empty" title="没有匹配的 Lead" message="调整筛选条件，或创建第一条潜在线索。" />
+      <DataState v-else-if="!rows.length" type="empty" :title="t('leads.emptyTitle')" :message="t('leads.emptyMessage')" />
       <div v-else class="table-scroll">
         <table class="crm-table lead-table">
-          <thead><tr><th>姓名</th><th>公司 / 职位</th><th>联系方式</th><th>来源</th><th>状态</th><th>负责人</th><th>下一步</th><th>更新日期</th><th v-if="canWrite">操作</th></tr></thead>
+          <thead><tr><th>{{ t('leads.name') }}</th><th>{{ t('leads.companyTitle') }}</th><th>{{ t('leads.contact') }}</th><th>{{ t('leads.source') }}</th><th>{{ t('leads.status') }}</th><th>{{ t('leads.owner') }}</th><th>{{ t('leads.nextStep') }}</th><th>{{ t('leads.updated') }}</th><th v-if="canWrite">{{ t('leads.actions') }}</th></tr></thead>
           <tbody>
             <tr v-for="lead in rows" :key="lead.id">
               <td><button class="lead-link record-name-link" type="button" :data-lead-id="lead.id" @click="openDetail(lead)"><span><UserRoundSearch :size="14" /></span><strong>{{ lead.name }}</strong></button></td>
               <td><strong>{{ lead.company }}</strong><small>{{ lead.title }}</small></td>
               <td><strong>{{ lead.phone || '—' }}</strong><small>{{ lead.email || '—' }}</small></td>
-              <td>{{ lead.source }}</td>
-              <td><StatusBadge :label="lead.status" :tone="statusTone(lead.status)" /></td>
+               <td>{{ salesEnumLabel(lead.source, locale) }}</td>
+               <td><StatusBadge :label="salesEnumLabel(lead.status, locale)" :tone="statusTone(lead.status)" /></td>
               <td>{{ personnelDisplayName(lead.owner) }}</td>
-              <td><strong>{{ lead.nextAction || '—' }}</strong><small>{{ lead.nextActionDue || '未设日期' }}</small></td>
+              <td><strong>{{ lead.nextAction || '—' }}</strong><small>{{ lead.nextActionDue || t('leads.noDate') }}</small></td>
               <td>{{ formatDisplayDate(lead.updatedAt) }}</td>
-              <td v-if="canWrite"><button v-if="lead.status !== 'Converted'" class="edit-button" type="button" data-testid="edit-lead" @click="openEdit(lead)"><Edit3 :size="13" />编辑</button></td>
+              <td v-if="canWrite"><button v-if="lead.status !== 'Converted'" class="edit-button" type="button" data-testid="edit-lead" @click="openEdit(lead)"><Edit3 :size="13" />{{ t('leads.edit') }}</button></td>
             </tr>
           </tbody>
         </table>

@@ -16,15 +16,18 @@ import { useAppStore } from '@/stores/app'
 import type { Tone } from '@/types/crm'
 import type { StrategyOpportunityDto } from '@/types/workspaces'
 import type { RfqStatus, RfqSummaryDto } from '@/features/rfqs/types'
+import { localeMessage, useI18n, useLocaleMessage } from '@/i18n'
 
 const props = withDefaults(defineProps<{ apiClient?: CrmApi }>(), { apiClient: () => defaultApi })
 const app = useAppStore()
 const route = useRoute()
 const router = useRouter()
+const { locale, t, message } = useI18n()
+const ui = (english: string, chinese: string) => localeMessage(english, chinese)[locale.value]
 const rows = ref<RfqSummaryDto[]>([])
 const opportunities = ref<StrategyOpportunityDto[]>([])
 const loading = ref(true)
-const error = ref('')
+const error = useLocaleMessage()
 const denied = ref(false)
 const requestId = ref('')
 const page = ref(1)
@@ -34,7 +37,7 @@ const status = ref<RfqStatus | 'All'>('All')
 const owner = ref('All')
 const modalOpen = ref(false)
 const modalBusy = ref(false)
-const modalError = ref('')
+const modalError = useLocaleMessage()
 const opportunityId = ref(typeof route.query.opportunityId === 'string' ? route.query.opportunityId : '')
 const engineerId = ref('')
 const note = ref('')
@@ -42,7 +45,7 @@ const file = ref<File | null>(null)
 let sequence = 0
 const MAX_FILE_BYTES = 100 * 1024 * 1024
 const TIPRAY_HEADER = new TextEncoder().encode('%TSD-Header-###%')
-const TIPRAY_UPLOAD_CONFIRM = '天锐绿盾加密文件无法生成在线预览，但下载后仍可正常浏览，确定上传吗？'
+const tipRayUploadConfirm = () => t('rfqs.tipRayConfirm')
 
 const canCreate = computed(() => ['Sales', 'Manager'].includes(app.bootstrap?.user.role ?? '') && app.can('rfq:create'))
 const engineers = computed(() => (app.bootstrap?.personnel ?? []).filter((person) => person.role === 'Engineer' && person.availableForAssignment))
@@ -53,6 +56,20 @@ const owners = computed(() => [...new Set([
 const usedOpportunityIds = computed(() => new Set(rows.value.map((item) => item.opportunity.id)))
 const availableOpportunities = computed(() => opportunities.value.filter((item) => item.stage === '设备规格确认' && !usedOpportunityIds.value.has(item.id)))
 const visibleRows = computed(() => rows.value)
+
+function statusLabel(value: RfqStatus) {
+  return ({
+    'Engineer Review': ui('Engineer review', '工程师评审'), 'Manager Approval': ui('Manager approval', '经理审批'),
+    'Sales Revision': ui('Sales revision', '销售修订'), Approved: ui('Approved', '已批准'),
+  } satisfies Record<RfqStatus, string>)[value]
+}
+function opportunityStageLabel(value: string) {
+  const keys: Record<string, string> = {
+    '需求发现': 'opportunities.stage.discovery', 'Wafer Demo确认': 'opportunities.stage.waferDemo', '预算审批': 'opportunities.stage.budget',
+    '设备规格确认': 'opportunities.stage.specification', '报价': 'opportunities.stage.quotation', '采购流程': 'opportunities.stage.procurement', Won: 'opportunities.stage.won', Lost: 'opportunities.stage.lost',
+  }
+  return keys[value] ? t(keys[value]) : value
+}
 
 function statusTone(value: RfqStatus): Tone {
   if (value === 'Approved') return 'positive'
@@ -81,7 +98,7 @@ async function load() {
   } catch (cause) {
     if (current !== sequence) return
     const mapped = mapRequestError(cause)
-    error.value = mapped.message
+    error.value = mapped.localizedMessage ?? mapped.message
     requestId.value = mapped.requestId
     denied.value = mapped.denied
   } finally {
@@ -113,7 +130,8 @@ async function openCreate() {
     await loadOpportunities()
     modalOpen.value = true
   } catch (cause) {
-    error.value = mapRequestError(cause).message
+    const mapped = mapRequestError(cause)
+    error.value = mapped.localizedMessage ?? mapped.message
   }
 }
 
@@ -121,7 +139,7 @@ function selectFile(event: Event) {
   const selected = (event.target as HTMLInputElement).files?.[0] ?? null
   if (selected && selected.size > MAX_FILE_BYTES) {
     file.value = null
-    modalError.value = 'RFQ 文件不能超过 100 MiB。'
+    modalError.value = message('rfqs.fileTooLarge')
     return
   }
   modalError.value = ''
@@ -135,7 +153,7 @@ async function isTipRayProtected(selected: File) {
 
 async function createRfq() {
   if (!opportunityId.value || !engineerId.value || !file.value) {
-    modalError.value = '请选择 Opportunity、Engineer 和 RFQ 文件。'
+    modalError.value = message('rfqs.requiredFields')
     return
   }
   modalBusy.value = true
@@ -143,10 +161,10 @@ async function createRfq() {
   try {
     const selected = file.value
     if (selected.size > MAX_FILE_BYTES) {
-      modalError.value = 'RFQ 文件不能超过 100 MiB。'
+      modalError.value = message('rfqs.fileTooLarge')
       return
     }
-    if (await isTipRayProtected(selected) && !window.confirm(TIPRAY_UPLOAD_CONFIRM)) {
+    if (await isTipRayProtected(selected) && !window.confirm(tipRayUploadConfirm())) {
       return
     }
     const part: MultipartFilePart = { blob: selected, fileName: selected.name, mimeType: selected.type, size: selected.size }
@@ -154,7 +172,8 @@ async function createRfq() {
     modalOpen.value = false
     await router.push({ name: 'rfq-detail', params: { rfqId: result.data.id } })
   } catch (cause) {
-    modalError.value = mapRequestError(cause).message
+    const mapped = mapRequestError(cause)
+    modalError.value = mapped.localizedMessage ?? mapped.message
   } finally {
     modalBusy.value = false
   }
@@ -183,37 +202,37 @@ onMounted(async () => {
 
 <template>
   <div class="rfq-page">
-    <PageHeader eyebrow="SPECIFICATION CONTROL" title="RFQ Center" description="集中管理客户 RFQ 文件、Engineer Comment 与 Manager Approve。" />
+    <PageHeader :eyebrow="ui('SPECIFICATION CONTROL', '规格管控')" :title="t('rfqs.title')" :description="t('rfqs.description')" />
     <section class="rfq-list" data-testid="rfq-list">
       <header class="list-heading">
         <span class="title-mark"><FileCheck2 :size="21" /></span>
-        <div><small>RFQ PROJECTS</small><h2>Request for Quotation</h2><p>一条 RFQ 对应一个 Opportunity。</p></div>
-        <button v-if="canCreate" class="primary-button" type="button" data-testid="new-rfq" @click="openCreate"><FilePlus2 :size="14" />新建 RFQ</button>
+        <div><small>{{ ui('RFQ PROJECTS', 'RFQ 项目') }}</small><h2>{{ ui('Request for Quotation', '报价请求') }}</h2><p>{{ ui('Each RFQ belongs to one Opportunity.', '每条 RFQ 对应一个 Opportunity。') }}</p></div>
+        <button v-if="canCreate" class="primary-button" type="button" data-testid="new-rfq" @click="openCreate"><FilePlus2 :size="14" />{{ (locale === 'en-US' ? 'New RFQ' : '新建 RFQ') }}</button>
       </header>
 
       <div class="toolbar">
-        <select v-model="status" aria-label="RFQ 状态"><option value="All">全部状态</option><option>Engineer Review</option><option>Manager Approval</option><option>Sales Revision</option><option>Approved</option></select>
-        <select v-model="owner" aria-label="RFQ 负责人"><option value="All">全部负责人</option><option v-for="item in owners" :key="item" :value="item">{{ personnelDisplayName(item) }}</option></select>
-        <span>{{ visibleRows.length }} / {{ rows.length }}</span><button type="button" @click="resetFilters">重置条件</button>
+        <select v-model="status" :aria-label="(locale === 'en-US' ? 'RFQ status' : 'RFQ 状态')"><option value="All">{{ (locale === 'en-US' ? 'All statuses' : '全部状态') }}</option><option value="Engineer Review">{{ statusLabel('Engineer Review') }}</option><option value="Manager Approval">{{ statusLabel('Manager Approval') }}</option><option value="Sales Revision">{{ statusLabel('Sales Revision') }}</option><option value="Approved">{{ statusLabel('Approved') }}</option></select>
+        <select v-model="owner" :aria-label="(locale === 'en-US' ? 'RFQ owner' : 'RFQ 负责人')"><option value="All">{{ (locale === 'en-US' ? 'All owners' : '全部负责人') }}</option><option v-for="item in owners" :key="item" :value="item">{{ personnelDisplayName(item) }}</option></select>
+        <span>{{ visibleRows.length }} / {{ rows.length }}</span><button type="button" @click="resetFilters">{{ (locale === 'en-US' ? 'Reset filters' : '重置条件') }}</button>
       </div>
 
       <div class="table-card">
         <DataState v-if="loading && !rows.length" type="loading" />
         <DataState v-else-if="denied" type="denied" :message="error" :request-id="requestId" />
         <DataState v-else-if="error" type="error" :message="error" :request-id="requestId" @retry="load" />
-        <DataState v-else-if="!visibleRows.length" type="empty" title="暂无 RFQ" message="当前筛选条件下没有可见 RFQ。" />
+        <DataState v-else-if="!visibleRows.length" type="empty" :title="t('rfqs.emptyTitle')" :message="t('rfqs.emptyMessage')" />
         <div v-else class="table-scroll">
           <table class="crm-table rfq-table">
-            <thead><tr><th>RFQ</th><th>Opportunity</th><th>Account / Site</th><th>Opportunity Stage</th><th>RFQ Status</th><th>Sales</th><th>Engineer</th><th>File / Version</th><th>Updated</th></tr></thead>
+            <thead><tr><th>RFQ</th><th>{{ ui('Opportunity', '商机') }}</th><th>{{ ui('Account / Site', '客户 / 厂区') }}</th><th>{{ ui('Opportunity Stage', '商机阶段') }}</th><th>{{ ui('RFQ Status', 'RFQ 状态') }}</th><th>{{ ui('Sales', '销售') }}</th><th>{{ ui('Engineer', '工程师') }}</th><th>{{ ui('File / Version', '文件 / 版本') }}</th><th>{{ ui('Updated', '更新日期') }}</th></tr></thead>
             <tbody><tr v-for="item in visibleRows" :key="item.id" :data-rfq-id="item.id">
               <td><strong>{{ item.id }}</strong></td>
               <td><RouterLink class="record-link" :to="{ name: 'rfq-detail', params: { rfqId: item.id } }"><strong>{{ item.opportunity.title }}</strong><small>{{ item.opportunity.id }}</small></RouterLink></td>
               <td><strong>{{ item.opportunity.account }}</strong><small>{{ item.opportunity.site }}</small></td>
-              <td>{{ item.opportunity.stage }}</td>
-              <td><StatusBadge :label="item.status" :tone="statusTone(item.status)" /></td>
+              <td>{{ opportunityStageLabel(item.opportunity.stage) }}</td>
+              <td><StatusBadge :label="statusLabel(item.status)" :tone="statusTone(item.status)" /></td>
               <td>{{ item.salesOwnerName || personnelDisplayName(item.salesOwner) }}</td>
               <td>{{ item.engineerOwnerName || personnelDisplayName(item.engineerOwner) }}</td>
-              <td><strong>{{ item.fileName }}</strong><small>Version {{ item.latestVersion }}</small></td>
+              <td><strong>{{ item.fileName }}</strong><small>{{ ui('Version', '版本') }} {{ item.latestVersion }}</small></td>
               <td>{{ formatDisplayDate(item.modified) }}</td>
             </tr></tbody>
           </table>
@@ -222,12 +241,12 @@ onMounted(async () => {
       </div>
     </section>
 
-    <ModalShell v-if="modalOpen" title="上传 RFQ" eyebrow="SALES UPLOAD" :busy="modalBusy" submit-label="上传并提交 Engineer" @close="modalOpen = false" @submit="createRfq">
+    <ModalShell v-if="modalOpen" :title="t('rfqs.upload')" :eyebrow="ui('SALES UPLOAD', '销售上传')" :busy="modalBusy" :submit-label="t('rfqs.uploadSubmit')" @close="modalOpen = false" @submit="createRfq">
       <div class="create-form">
-        <label><span>Opportunity</span><select v-model="opportunityId" required><option value="">请选择 Opportunity</option><option v-for="item in availableOpportunities" :key="item.id" :value="item.id">{{ item.id }} · {{ item.title }} · {{ item.account }}</option></select></label>
-        <label><span>Engineer</span><select v-model="engineerId" required><option value="">请选择 Engineer</option><option v-for="item in engineers" :key="item.id" :value="item.id">{{ item.name }}</option></select></label>
-        <label><span>RFQ 文件</span><input type="file" accept=".pdf,.png,.jpg,.jpeg,.docx,.xlsx,.pptx" required @change="selectFile" /><small>PDF、PNG、JPG、DOCX、XLSX、PPTX，最大 100 MiB</small></label>
-        <label><span>备注</span><textarea v-model="note" rows="3" placeholder="可选" /></label>
+        <label><span>{{ ui('Opportunity', '商机') }}</span><select v-model="opportunityId" required><option value="">{{ t('rfqs.selectOpportunity') }}</option><option v-for="item in availableOpportunities" :key="item.id" :value="item.id">{{ item.id }} · {{ item.title }} · {{ item.account }}</option></select></label>
+        <label><span>{{ ui('Engineer', '工程师') }}</span><select v-model="engineerId" required><option value="">{{ t('rfqs.selectEngineer') }}</option><option v-for="item in engineers" :key="item.id" :value="item.id">{{ item.name }}</option></select></label>
+        <label><span>{{ (locale === 'en-US' ? 'RFQ file' : 'RFQ 文件') }}</span><input type="file" :aria-label="(locale === 'en-US' ? 'RFQ file' : 'RFQ 文件')" accept=".pdf,.png,.jpg,.jpeg,.docx,.xlsx,.pptx" required @change="selectFile" /><small>{{ (locale === 'en-US' ? 'PDF, PNG, JPG, DOCX, XLSX, PPTX, up to 100 MiB' : 'PDF、PNG、JPG、DOCX、XLSX、PPTX，最大 100 MiB') }}</small></label>
+        <label><span>{{ (locale === 'en-US' ? 'Notes' : '备注') }}</span><textarea v-model="note" rows="3" :placeholder="(locale === 'en-US' ? 'Optional' : '可选')" /></label>
         <p v-if="modalError" class="form-error">{{ modalError }}</p>
       </div>
     </ModalShell>

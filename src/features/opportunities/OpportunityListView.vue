@@ -16,11 +16,14 @@ import { useAppStore } from '@/stores/app'
 import type { AccountSummaryDto, SiteDto, Tone } from '@/types/crm'
 import type { CreateStrategyOpportunityInput, StrategyOpportunityDto } from '@/types/workspaces'
 import { formatMoney, moneyByCurrency } from '@/domain/money'
+import { useI18n, useLocaleMessage } from '@/i18n'
+import { salesEnumLabel } from '@/features/shared/sales-i18n'
 
 const props = withDefaults(defineProps<{ apiClient?: CrmApi }>(), { apiClient: () => defaultApi })
 const app = useAppStore()
 const route = useRoute()
 const router = useRouter()
+const { t, locale } = useI18n()
 const rows = ref<StrategyOpportunityDto[]>([])
 const total = ref(0)
 const page = ref(typeof route.query.page === 'string' && Number(route.query.page) > 0 ? Number(route.query.page) : 1)
@@ -29,10 +32,10 @@ const accounts = ref<AccountSummaryDto[]>([])
 const sitesByAccount = ref<Record<string, SiteDto[]>>({})
 const loading = ref(true)
 const denied = ref(false)
-const error = ref('')
+const error = useLocaleMessage()
 const requestId = ref('')
 const busy = ref(false)
-const modalError = ref('')
+const modalError = useLocaleMessage()
 const editorOpen = ref(false)
 const layout = ref<'list' | 'board'>('list')
 const stage = ref(typeof route.query.status === 'string' ? route.query.status : 'All')
@@ -69,6 +72,10 @@ function forecastTone(value: string): Tone {
   if (value === 'Commit') return 'positive'
   if (value === 'Upside') return 'warning'
   return 'info'
+}
+function stageLabel(value: string) {
+  const key: Record<string, string> = { '需求发现': 'opportunities.stage.discovery', 'Wafer Demo确认': 'opportunities.stage.waferDemo', '预算审批': 'opportunities.stage.budget', '设备规格确认': 'opportunities.stage.specification', '报价': 'opportunities.stage.quotation', '采购流程': 'opportunities.stage.procurement', Won: 'opportunities.stage.won', Lost: 'opportunities.stage.lost' }
+  return t(key[value] || value)
 }
 function stageMoney(items: StrategyOpportunityDto[]) {
   return moneyByCurrency(items).map((item) => formatMoney(item.amount, item.currency)).join(' · ')
@@ -113,7 +120,7 @@ async function load() {
   } catch (reason) {
     if (current !== sequence) return
     const mapped = mapRequestError(reason)
-    error.value = mapped.message
+    error.value = mapped.localizedMessage ?? mapped.message
     requestId.value = mapped.requestId
     denied.value = mapped.denied
   } finally {
@@ -128,7 +135,7 @@ async function saveOpportunity(input: CreateStrategyOpportunityInput) {
     editorOpen.value = false
     await router.push({ name: 'opportunity-detail', params: { opportunityId: result.data.id } })
   } catch (reason) {
-    modalError.value = mapRequestError(reason).message
+    const mapped = mapRequestError(reason); modalError.value = mapped.localizedMessage ?? mapped.message
   } finally {
     busy.value = false
   }
@@ -155,43 +162,43 @@ watch(() => [route.query.page, route.query.pageSize, route.query.status, route.q
       <div class="opportunity-title-mark"><BriefcaseBusiness :size="21" /></div>
       <div>
         <span>OPPORTUNITIES</span>
-        <h2>Recently Viewed</h2>
-        <p>{{ rows.length }} 条机会 · 以具体交易和收入推进为核心</p>
+        <h2>{{ t('opportunities.recentlyViewed') }}</h2>
+        <p>{{ t('opportunities.countHint', { count: rows.length }) }}</p>
       </div>
-      <button v-if="canWrite" class="primary-button" type="button" data-testid="new-opportunity" @click="editorOpen = true"><Plus :size="14" />新增 Opportunity</button>
+      <button v-if="canWrite" class="primary-button" type="button" data-testid="new-opportunity" @click="editorOpen = true"><Plus :size="14" />{{ t('opportunities.new') }}</button>
     </header>
 
     <div class="opportunity-list-toolbar">
-      <select v-model="stage" aria-label="Opportunity Stage 筛选"><option value="All">全部 Stage</option><option v-for="item in OPPORTUNITY_STAGES" :key="item">{{ item }}</option></select>
-      <select v-model="forecast" aria-label="Opportunity Forecast 筛选"><option value="All">全部 Forecast</option><option v-for="item in forecasts" :key="item">{{ item }}</option></select>
-      <select v-model="owner" aria-label="Opportunity Owner 筛选"><option value="All">全部 Owner</option><option v-for="item in owners" :key="item" :value="item">{{ personnelDisplayName(item) }}</option></select>
-      <div class="opportunity-layout-switch" aria-label="Opportunity 展示方式">
-        <button type="button" data-opportunity-layout="list" :class="{ active: layout === 'list' }" aria-label="列表视图" @click="layout = 'list'"><List :size="14" />列表</button>
-        <button type="button" data-opportunity-layout="board" :class="{ active: layout === 'board' }" aria-label="看板视图" @click="layout = 'board'"><Kanban :size="14" />看板</button>
+      <select v-model="stage" :aria-label="t('opportunities.allStages')"><option value="All">{{ t('opportunities.allStages') }}</option><option v-for="item in OPPORTUNITY_STAGES" :key="item" :value="item">{{ stageLabel(item) }}</option></select>
+      <select v-model="forecast" :aria-label="t('opportunities.allForecasts')"><option value="All">{{ t('opportunities.allForecasts') }}</option><option v-for="item in forecasts" :key="item" :value="item">{{ salesEnumLabel(item, locale) }}</option></select>
+      <select v-model="owner" :aria-label="t('opportunities.allOwners')"><option value="All">{{ t('opportunities.allOwners') }}</option><option v-for="item in owners" :key="item" :value="item">{{ personnelDisplayName(item) }}</option></select>
+      <div class="opportunity-layout-switch" :aria-label="t('opportunities.viewMode')">
+        <button type="button" data-opportunity-layout="list" :class="{ active: layout === 'list' }" :aria-label="t('opportunities.listView')" @click="layout = 'list'"><List :size="14" />{{ t('opportunities.list') }}</button>
+        <button type="button" data-opportunity-layout="board" :class="{ active: layout === 'board' }" :aria-label="t('opportunities.boardView')" @click="layout = 'board'"><Kanban :size="14" />{{ t('opportunities.board') }}</button>
       </div>
       <span>{{ visibleRows.length }} / {{ rows.length }}</span>
-      <button type="button" @click="resetFilters">重置条件</button>
+      <button type="button" @click="resetFilters">{{ t('opportunities.reset') }}</button>
     </div>
 
     <div class="opportunity-table-card">
       <DataState v-if="loading && !rows.length" type="loading" />
       <DataState v-else-if="denied" type="denied" :message="error" :request-id="requestId" />
       <DataState v-else-if="error" type="error" :message="error" :request-id="requestId" @retry="load" />
-      <DataState v-else-if="!visibleRows.length" type="empty" title="没有匹配的 Opportunity" message="调整搜索或筛选条件后重试。" />
+      <DataState v-else-if="!visibleRows.length" type="empty" :title="t('opportunities.emptyTitle')" :message="t('opportunities.emptyMessage')" />
       <div v-else-if="layout === 'list'" class="table-scroll">
         <table class="crm-table opportunity-table">
-          <thead><tr><th data-testid="opportunity-number-header">编号</th><th>Opportunity Name</th><th>Account / Site</th><th>Stage</th><th>Close Date</th><th>Amount</th><th>成交概率</th><th>购买意愿</th><th>Forecast</th><th>Owner</th><th>Updated</th></tr></thead>
+          <thead><tr><th data-testid="opportunity-number-header">{{ t('opportunities.number') }}</th><th>{{ t('oppEditor.name') }}</th><th>{{ t('detail.account') }} / {{ t('detail.site') }}</th><th>{{ t('oppEditor.stage') }}</th><th>{{ t('detail.closeDate') }}</th><th>{{ t('detail.amount') }}</th><th>{{ t('opportunities.winProbability') }}</th><th>{{ t('opportunities.purchaseIntent') }}</th><th>{{ t('oppEditor.forecast') }}</th><th>{{ t('detail.owner') }}</th><th>{{ t('detail.updated') }}</th></tr></thead>
           <tbody>
             <tr v-for="item in visibleRows" :key="item.id" :data-opportunity-id="item.id">
               <td class="opportunity-number" :data-opportunity-number="item.id">{{ item.id }}</td>
               <td><RouterLink class="record-link" :to="{ name: 'opportunity-detail', params: { opportunityId: item.id } }" :data-opportunity-link="item.id"><strong>{{ item.title }}</strong></RouterLink></td>
               <td><strong>{{ item.account }}</strong><small>{{ item.site }}</small></td>
-              <td><strong>{{ item.stage }}</strong></td>
+              <td><strong>{{ stageLabel(item.stage) }}</strong></td>
               <td>{{ formatDisplayDate(item.poDate) }}</td>
-              <td><strong>{{ formatMoney(item.amount, item.currency) }}</strong><small>Original {{ formatMoney(item.originalAmount, item.currency) }}</small></td>
-              <td data-opportunity-probability><strong class="calculated-probability">{{ item.probability }}%</strong><small>阶段 60% + 意愿 40%</small></td>
-              <td data-opportunity-intent><strong class="purchase-intent">{{ item.score }}/100</strong><small>{{ item.score >= 70 ? '高意愿' : item.score >= 50 ? '中意愿' : '低意愿' }}</small></td>
-              <td><StatusBadge :label="item.forecast" :tone="forecastTone(item.forecast)" /></td>
+              <td><strong>{{ formatMoney(item.amount, item.currency) }}</strong><small>{{ locale === 'en-US' ? 'Original' : '原始金额' }} {{ formatMoney(item.originalAmount, item.currency) }}</small></td>
+              <td data-opportunity-probability><strong class="calculated-probability">{{ item.probability }}%</strong><small>{{ t('opportunities.probabilityFormula') }}</small></td>
+              <td data-opportunity-intent><strong class="purchase-intent">{{ item.score }}/100</strong><small>{{ item.score >= 70 ? t('opportunities.highIntent') : item.score >= 50 ? t('opportunities.mediumIntent') : t('opportunities.lowIntent') }}</small></td>
+              <td><StatusBadge :label="salesEnumLabel(item.forecast, locale)" :tone="forecastTone(item.forecast)" /></td>
               <td>{{ personnelDisplayName(item.owner) }}</td>
               <td>{{ formatDisplayDate(item.updated) }}</td>
             </tr>
@@ -202,21 +209,21 @@ watch(() => [route.query.page, route.query.pageSize, route.query.status, route.q
         <div class="opportunity-board">
           <section v-for="stageName in OPPORTUNITY_STAGES" :key="stageName" class="opportunity-board-column" :data-opportunity-stage="stageName">
             <header>
-              <div><strong>{{ stageName }}</strong><span>{{ boardRows[stageName].length }} 条</span></div>
+              <div><strong>{{ stageLabel(stageName) }}</strong><span>{{ t('opportunities.count', { count: boardRows[stageName].length }) }}</span></div>
               <em>{{ stageMoney(boardRows[stageName]) }}</em>
             </header>
             <div class="opportunity-board-cards">
               <article v-for="item in visibleBoardRows[stageName]" :key="item.id" class="opportunity-board-card" :data-opportunity-id="item.id">
-                <div class="board-card-topline"><span>{{ item.id }}</span><StatusBadge :label="item.forecast" :tone="forecastTone(item.forecast)" /></div>
+                <div class="board-card-topline"><span>{{ item.id }}</span><StatusBadge :label="salesEnumLabel(item.forecast, locale)" :tone="forecastTone(item.forecast)" /></div>
                 <RouterLink class="record-link" :to="{ name: 'opportunity-detail', params: { opportunityId: item.id } }" :data-opportunity-board-link="item.id">{{ item.title }}</RouterLink>
                 <p>{{ item.account }}<small>{{ item.site }}</small></p>
                 <dl>
-                  <div><dt>Amount</dt><dd>{{ formatMoney(item.amount, item.currency) }}</dd></div>
-                  <div><dt>成交概率</dt><dd>{{ item.probability }}%</dd></div>
+                  <div><dt>{{ t('detail.amount') }}</dt><dd>{{ formatMoney(item.amount, item.currency) }}</dd></div>
+                  <div><dt>{{ t('opportunities.winProbability') }}</dt><dd>{{ item.probability }}%</dd></div>
                 </dl>
                 <footer><span>{{ personnelDisplayName(item.owner) }}</span><time>{{ formatDisplayDate(item.poDate) }}</time></footer>
               </article>
-              <p v-if="!boardRows[stageName].length" class="opportunity-board-empty">暂无 Opportunity</p><button v-else-if="visibleBoardRows[stageName].length < boardRows[stageName].length" type="button" class="secondary-button board-load-more" :data-load-more-stage="stageName" @click="loadMoreStage(stageName)">加载更多</button>
+              <p v-if="!boardRows[stageName].length" class="opportunity-board-empty">{{ t('opportunities.noItems') }}</p><button v-else-if="visibleBoardRows[stageName].length < boardRows[stageName].length" type="button" class="secondary-button board-load-more" :data-load-more-stage="stageName" @click="loadMoreStage(stageName)">{{ t('opportunities.loadMore') }}</button>
             </div>
           </section>
         </div>

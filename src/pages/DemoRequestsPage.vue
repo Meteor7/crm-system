@@ -4,7 +4,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { ClipboardCheck, Plus } from '@lucide/vue'
 import { api as defaultApi, CrmApiError, type CrmApi } from '@/api'
 import type { AccountSummaryDto, ContactSummaryDto, CreateContactInput, CreateDemoRequestInput, DemoRequestCommand, DemoRequestDto } from '@/types/crm'
-import { mapRequestError, readRequestMeta, type RequestMetaState } from '@/api/request-state'
+import { mapRequestError, requestErrorMessage, readRequestMeta, type RequestMetaState } from '@/api/request-state'
 import { useAppStore } from '@/stores/app'
 import PageHeader from '@/design-system/PageHeader.vue'
 import DataState from '@/design-system/DataState.vue'
@@ -16,20 +16,23 @@ import PaginationControls from '@/features/shared/PaginationControls.vue'
 import { readAllPages } from '@/features/shared/read-all-pages'
 import ContactModal from '@/features/contacts/ContactModal.vue'
 import { generateDemoRequestDocxArtifact } from '@/features/demo-requests/demo-request-docx'
+import { useI18n, useLocaleMessage, localeMessage, type LocaleMessage } from '@/i18n'
 
 const props = withDefaults(defineProps<{ apiClient?: CrmApi }>(), { apiClient: () => defaultApi })
 const app = useAppStore()
 const route = useRoute()
 const router = useRouter()
-const rows = ref<DemoRequestDto[]>([]), accounts = ref<AccountSummaryDto[]>([]), loading = ref(false), error = ref(''), requestId = ref(''), denied = ref(false), meta = ref<RequestMetaState | null>(null)
+const { t, locale, message } = useI18n()
+const rows = ref<DemoRequestDto[]>([]), accounts = ref<AccountSummaryDto[]>([]), loading = ref(false), error = useLocaleMessage(), requestId = ref(''), denied = ref(false), meta = ref<RequestMetaState | null>(null)
 const total = ref(0), page = ref(1)
 const pageSize = ref(10)
-const actionError = ref(''), actionRequestId = ref('')
+const actionError = useLocaleMessage(), actionRequestId = ref('')
 const processing = ref(''), modalMode = ref<'create'|'edit'|'engineer'|'manager'|''>(''), selected = ref<DemoRequestDto | null>(null)
 const activeView = ref<DemoRequestView>('overview')
 const selectedRequestId = ref('')
-const downloadingId = ref(''), downloadError = ref('')
-const preparedDownload = ref<{ requestId: string; url: string; fileName: string; notice: string } | null>(null)
+const downloadingId = ref(''), downloadError = useLocaleMessage()
+const downloadNotice = useLocaleMessage()
+const preparedDownload = ref<{ requestId: string; url: string; fileName: string } | null>(null)
 const demoTestHandoff = ref<{ requestId: string; evaluationId: string } | null>(null)
 const contacts = ref<ContactSummaryDto[]>([])
 const contactModal = ref(false)
@@ -40,13 +43,15 @@ const activeRows = computed(() => rows.value.filter((item) => !['Converted', 'Ca
 const canCreate = computed(() => app.can('demo_request:create'))
 const canEngineer = computed(() => app.can('demo_request:engineering_review'))
 const canManager = computed(() => app.can('demo_request:manager_approve'))
-const viewCopy: Record<DemoRequestView, { eyebrow: string; title: string; description: string }> = {
-  overview: { eyebrow: 'DEMO REQUEST CENTER', title: 'Demo Request 总览', description: '查看和管理全部 Demo Request，跟踪申请状态与处理进度。' },
-  sales: { eyebrow: 'DEMO REQUEST CENTER', title: 'Sales Preparation', description: '完善客户需求、设备与样品信息，提交工程评估。' },
-  engineer: { eyebrow: 'DEMO REQUEST CENTER', title: 'Engineer Review', description: '依据 Sales 填写的 DRF 信息形成工程评估结论。' },
-  manager: { eyebrow: 'DEMO REQUEST CENTER', title: 'Manager Approval', description: '基于工程评估与风险检查完成最终审批。' },
-}
-const currentViewCopy = computed(() => viewCopy[activeView.value])
+const currentViewCopy = computed(() => {
+  const copy: Record<DemoRequestView, { eyebrow: string; title: string; description: string }> = {
+    overview: { eyebrow: 'DEMO REQUEST CENTER', title: t('demoRequests.overviewTitle'), description: t('demoRequests.overviewDescription') },
+    sales: { eyebrow: 'DEMO REQUEST CENTER', title: t('demoRequests.salesTitle'), description: t('demoRequests.salesDescription') },
+    engineer: { eyebrow: 'DEMO REQUEST CENTER', title: t('demoRequests.engineerTitle'), description: t('demoRequests.engineerDescription') },
+    manager: { eyebrow: 'DEMO REQUEST CENTER', title: t('demoRequests.managerTitle'), description: t('demoRequests.managerDescription') },
+  }
+  return copy[activeView.value]
+})
 
 async function load() {
   const current = ++sequence; loading.value = true; error.value = ''; denied.value = false; meta.value = null
@@ -59,7 +64,7 @@ async function load() {
     ])
     if (current !== sequence) return
     rows.value = requests.data.items; total.value = requests.meta?.total ?? rows.value.length; accounts.value = accountRows; contacts.value = contactRows ?? []; meta.value = readRequestMeta(requests)
-  } catch (reason) { if (current !== sequence) return; const mapped = mapRequestError(reason); error.value = mapped.message; requestId.value = mapped.requestId; denied.value = mapped.denied; if (mapped.denied) rows.value = [] }
+  } catch (reason) { if (current !== sequence) return; const mapped = mapRequestError(reason); error.value = mapped.localizedMessage ?? mapped.message; requestId.value = mapped.requestId; denied.value = mapped.denied; if (mapped.denied) rows.value = [] }
   finally { if (current === sequence) loading.value = false }
 }
 function goPage(target: number) { page.value = target; void load() }
@@ -81,13 +86,13 @@ function clearActionError() { actionError.value = ''; actionRequestId.value = ''
 async function handleWriteError(reason: unknown) {
   const mapped = mapRequestError(reason)
   if (mapped.denied) {
-    error.value = mapped.message; requestId.value = mapped.requestId; denied.value = true; rows.value = []; modalMode.value = ''; selected.value = null
+    error.value = mapped.localizedMessage ?? mapped.message; requestId.value = mapped.requestId; denied.value = true; rows.value = []; modalMode.value = ''; selected.value = null
     clearActionError()
     return
   }
   actionError.value = reason instanceof CrmApiError && reason.code === 'VERSION_CONFLICT'
-    ? '记录已被其他用户更新，已刷新最新数据，请重新确认后操作。'
-    : mapped.message
+    ? message('demoRequests.versionConflict')
+    : mapped.localizedMessage ?? mapped.message
   actionRequestId.value = mapped.requestId
   if (reason instanceof CrmApiError && reason.code === 'VERSION_CONFLICT') await load()
 }
@@ -123,7 +128,7 @@ async function downloadRequest(request: DemoRequestDto) {
   clearPreparedDownload()
   try {
     const artifact = await generateDemoRequestDocxArtifact(request)
-    let archiveWarning = ''
+    let archiveWarning: LocaleMessage | '' = ''
     try {
       await props.apiClient.saveDemoArtifact({
         demoRequestId: request.id,
@@ -139,20 +144,20 @@ async function downloadRequest(request: DemoRequestDto) {
     } catch (reason) {
       const mapped = mapRequestError(reason)
       archiveWarning = mapped.denied
-        ? '当前角色没有 Artifact 写入权限，本次文件不会保存到归档。'
-        : `归档保存失败：${mapped.message}`
+        ? localeMessage('Your role cannot write Artifacts; this file will not be saved to the archive.', '当前角色没有 Artifact 写入权限，本次文件不会保存到归档。')
+        : requestErrorMessage(reason, localeMessage('Archive save failed. Please retry.', '归档保存失败，请重试。'))
     }
+    downloadNotice.value = archiveWarning || localeMessage('Word is ready. Click “Save Word file” to download.', 'Word 已生成，请点击“保存 Word 文件”完成下载。')
     preparedDownload.value = {
       requestId: request.id,
       url: URL.createObjectURL(artifact.blob),
       fileName: artifact.fileName,
-      notice: archiveWarning || 'Word 已生成，请点击“保存 Word 文件”完成下载。',
     }
   }
   catch (reason) {
     downloadError.value = reason instanceof Error && reason.message === 'Word 模板加载失败，请重试'
-      ? 'Word 模板加载失败，请重试'
-      : 'Word 文档生成失败，请检查申请内容后重试'
+      ? localeMessage('Word template failed to load. Please retry.', 'Word 模板加载失败，请重试')
+      : requestErrorMessage(reason, localeMessage('Word generation failed. Check the request content and try again.', 'Word 文档生成失败，请检查申请内容后重试'))
   }
   finally { downloadingId.value = '' }
 }
@@ -169,20 +174,20 @@ onBeforeUnmount(clearPreparedDownload)
 
 <template>
   <div>
-    <PageHeader :eyebrow="currentViewCopy.eyebrow" :title="currentViewCopy.title" :description="currentViewCopy.description"><button v-if="canCreate" class="primary-button" type="button" @click="open('create')"><Plus :size="15" />新建 Demo Request</button></PageHeader>
-    <DataNotice v-if="meta?.stale" :message="meta.message" :request-id="meta.requestId" @refresh="load" />
+    <PageHeader :eyebrow="currentViewCopy.eyebrow" :title="currentViewCopy.title" :description="currentViewCopy.description"><button v-if="canCreate" class="primary-button" type="button" @click="open('create')"><Plus :size="15" />{{ t('demoRequests.new') }}</button></PageHeader>
+    <DataNotice v-if="meta?.stale" :message="meta.localizedMessage ?? meta.message" :request-id="meta.requestId" @refresh="load" />
     <div v-if="actionError" class="api-error" data-api-error role="alert"><span>{{ actionError }}</span><small v-if="actionRequestId">Request ID · {{ actionRequestId }}</small></div>
     <DemoRequestWorkspaceNav v-if="!denied" v-model="activeView" />
     <div v-if="demoTestHandoff" class="demo-test-handoff" data-demo-test-handoff role="status">
-      <span><strong>{{ demoTestHandoff.requestId }}</strong> 已批准，并已创建 Demo Test <strong>{{ demoTestHandoff.evaluationId }}</strong>。</span>
-      <RouterLink :to="{ name: 'evaluations', query: { focus: demoTestHandoff.evaluationId } }">前往 Demo Test</RouterLink>
+      <span><strong>{{ demoTestHandoff.requestId }}</strong> {{ locale === 'en-US' ? 'was approved and created Demo Test' : '已批准，并已创建 Demo Test' }} <strong>{{ demoTestHandoff.evaluationId }}</strong>{{ locale === 'en-US' ? '.' : '。' }}</span>
+      <RouterLink :to="{ name: 'evaluations', query: { focus: demoTestHandoff.evaluationId } }">{{ locale === 'en-US' ? 'Go to Demo Test' : '前往 Demo Test' }}</RouterLink>
     </div>
     <div v-if="downloadError" class="download-error" role="alert">{{ downloadError }}</div>
     <div v-if="preparedDownload" class="download-ready" role="status">
-      <span>{{ preparedDownload.notice }}</span>
-      <a :data-demo-save="preparedDownload.requestId" :href="preparedDownload.url" :download="preparedDownload.fileName">保存 Word 文件</a>
+      <span>{{ downloadNotice }}</span>
+      <a :data-demo-save="preparedDownload.requestId" :href="preparedDownload.url" :download="preparedDownload.fileName">{{ locale === 'en-US' ? 'Save Word file' : '保存 Word 文件' }}</a>
     </div>
-    <DataState v-if="loading && !activeRows.length" type="loading" /><DataState v-else-if="denied" type="denied" :message="error" :request-id="requestId" /><DataState v-else-if="error" type="error" :message="error" :request-id="requestId" @retry="load" /><DataState v-else-if="!activeRows.length" type="empty" title="没有匹配的 Demo Request" message="调整筛选条件，或新建第一条 Demo Request。" />
+    <DataState v-if="loading && !activeRows.length" type="loading" /><DataState v-else-if="denied" type="denied" :message="error" :request-id="requestId" /><DataState v-else-if="error" type="error" :message="error" :request-id="requestId" @retry="load" /><DataState v-else-if="!activeRows.length" type="empty" :title="t('demoRequests.emptyTitle')" :message="t('demoRequests.emptyMessage')" />
     <DemoRequestWorkspace
       v-else
       :view="activeView"

@@ -1,6 +1,10 @@
 import type { DemoRequestDto, DemoWaferDetailDto } from '@/types/crm'
 import { countDemoWafers, getDemoRequestFormData } from '@/domain/demo-request-form'
 import { downloadBlob } from '@/features/shared/download-blob'
+import { ClientRequestError } from '@/api/request-state'
+import { localeMessage } from '@/i18n'
+
+const docxError = (english: string, chinese: string) => new ClientRequestError('DOCX_GENERATION_FAILED', localeMessage(english, chinese), '')
 
 const WORD_NAMESPACE = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main'
 const XML_NAMESPACE = 'http://www.w3.org/XML/1998/namespace'
@@ -30,7 +34,7 @@ function readStoredZip(input: Uint8Array | ArrayBuffer) {
   while (offset + 4 <= bytes.length) {
     const signature = new DataView(bytes.buffer, bytes.byteOffset + offset, Math.min(bytes.length - offset, 30)).getUint32(0, true)
     if (signature === 0x02014b50 || signature === 0x06054b50) break
-    if (signature !== 0x04034b50 || offset + 30 > bytes.length) throw new Error('Word 模板不是有效的 ZIP 文件')
+    if (signature !== 0x04034b50 || offset + 30 > bytes.length) throw docxError('The Word template is not a valid ZIP file.', 'Word 模板不是有效的 ZIP 文件')
     const header = new DataView(bytes.buffer, bytes.byteOffset + offset, 30)
     const flags = header.getUint16(6, true)
     const method = header.getUint16(8, true)
@@ -38,22 +42,22 @@ function readStoredZip(input: Uint8Array | ArrayBuffer) {
     const uncompressedSize = header.getUint32(22, true)
     const nameLength = header.getUint16(26, true)
     const extraLength = header.getUint16(28, true)
-    if (flags & 0x08) throw new Error('Word 模板 ZIP 不支持数据描述符')
-    if (method !== 0 || compressedSize !== uncompressedSize) throw new Error('Word 模板必须使用未压缩 ZIP Store 格式')
+    if (flags & 0x08) throw docxError('The Word template ZIP cannot use data descriptors.', 'Word 模板 ZIP 不支持数据描述符')
+    if (method !== 0 || compressedSize !== uncompressedSize) throw docxError('The Word template must use uncompressed ZIP Store format.', 'Word 模板必须使用未压缩 ZIP Store 格式')
     const nameStart = offset + 30
     const dataStart = nameStart + nameLength + extraLength
     const dataEnd = dataStart + compressedSize
-    if (dataEnd > bytes.length) throw new Error('Word 模板 ZIP 条目不完整')
+    if (dataEnd > bytes.length) throw docxError('A ZIP entry in the Word template is incomplete.', 'Word 模板 ZIP 条目不完整')
     entries.push({ name: decoder.decode(bytes.slice(nameStart, nameStart + nameLength)), data: bytes.slice(dataStart, dataEnd) })
     offset = dataEnd
   }
-  if (!entries.length) throw new Error('Word 模板不是有效的 ZIP 文件')
+  if (!entries.length) throw docxError('The Word template is not a valid ZIP file.', 'Word 模板不是有效的 ZIP 文件')
   return entries
 }
 
 export function extractDemoRequestLogo(templateBytes: Uint8Array | ArrayBuffer) {
   const entry = readStoredZip(templateBytes).find((item) => item.name === 'word/media/image1.png')
-  if (!entry) throw new Error('Word 模板缺少公司 Logo')
+  if (!entry) throw docxError('The Word template is missing the company logo.', 'Word 模板缺少公司 Logo')
   return entry.data
 }
 
@@ -132,7 +136,7 @@ function tableCell(tables: Element[], tableIndex: number, rowIndex: number, cell
   const table = tables[tableIndex]
   const row = table && directChildren(table, 'tr')[rowIndex]
   const cell = row && directChildren(row, 'tc')[cellIndex]
-  if (!cell) throw new Error(`Word 模板缺少表格单元格 ${tableIndex}/${rowIndex}/${cellIndex}`)
+  if (!cell) throw docxError(`The Word template is missing table cell ${tableIndex}/${rowIndex}/${cellIndex}.`, `Word 模板缺少表格单元格 ${tableIndex}/${rowIndex}/${cellIndex}`)
   return cell
 }
 
@@ -160,16 +164,16 @@ function setCellText(documentXml: XMLDocument, cell: Element, value: string) {
 function fillWaferRow(documentXml: XMLDocument, row: Element, wafer?: DemoWaferDetailDto) {
   const cells = directChildren(row, 'tc')
   const values = wafer ? [wafer.slotId, wafer.wid, wafer.waferSpecificity, wafer.notchFlat, wafer.doiMetrologyItems, wafer.resultFileProvided] : ['', '', '', '', '', '']
-  if (cells.length < values.length) throw new Error('Word 模板 Wafer Details 列数量不正确')
+  if (cells.length < values.length) throw docxError('The Word template has an incorrect number of Wafer Details columns.', 'Word 模板 Wafer Details 列数量不正确')
   values.forEach((value, index) => setCellText(documentXml, cells[index], value))
 }
 
 function populateDocumentXml(request: DemoRequestDto, xml: string) {
-  if (!request.formData) throw new Error('Demo Request 缺少已保存的完整表单，无法生成 Word 文件')
+  if (!request.formData) throw docxError('The Demo Request has no complete saved form, so a Word file cannot be generated.', 'Demo Request 缺少已保存的完整表单，无法生成 Word 文件')
   const documentXml = new DOMParser().parseFromString(xml, 'application/xml')
-  if (documentXml.querySelector('parsererror')) throw new Error('Word 模板 document.xml 格式错误')
+  if (documentXml.querySelector('parsererror')) throw docxError('The Word template document.xml is malformed.', 'Word 模板 document.xml 格式错误')
   const tables = Array.from(documentXml.getElementsByTagNameNS('*', 'tbl'))
-  if (tables.length < 3) throw new Error('Word 模板缺少 Demo Request 表格')
+  if (tables.length < 3) throw docxError('The Word template is missing the Demo Request tables.', 'Word 模板缺少 Demo Request 表格')
   const form = getDemoRequestFormData(request)
   const values: Record<keyof typeof MAIN_CELLS, string> = {
     companyName: request.accountName,
@@ -201,7 +205,7 @@ function populateDocumentXml(request: DemoRequestDto, xml: string) {
 
   const waferTable = tables[2]
   const rows = directChildren(waferTable, 'tr')
-  if (rows.length < 2) throw new Error('Word 模板缺少 Wafer Details 数据行')
+  if (rows.length < 2) throw docxError('The Word template is missing the Wafer Details data row.', 'Word 模板缺少 Wafer Details 数据行')
   const templateRow = rows[rows.length - 1]
   while (directChildren(waferTable, 'tr').length - 1 < form.wafers.length) waferTable.appendChild(templateRow.cloneNode(true))
   directChildren(waferTable, 'tr').slice(1).forEach((row, index) => fillWaferRow(documentXml, row, form.wafers[index]))
@@ -211,7 +215,7 @@ function populateDocumentXml(request: DemoRequestDto, xml: string) {
 export function buildDemoRequestDocx(request: DemoRequestDto, templateBytes: Uint8Array | ArrayBuffer) {
   const entries = readStoredZip(templateBytes)
   const documentEntry = entries.find((entry) => entry.name === 'word/document.xml')
-  if (!documentEntry) throw new Error('Word 模板缺少 word/document.xml')
+  if (!documentEntry) throw docxError('The Word template is missing word/document.xml.', 'Word 模板缺少 word/document.xml')
   const xml = new TextDecoder().decode(documentEntry.data)
   documentEntry.data = new TextEncoder().encode(populateDocumentXml(request, xml))
   return writeStoredZip(entries)
@@ -220,7 +224,7 @@ export function buildDemoRequestDocx(request: DemoRequestDto, templateBytes: Uin
 export async function loadDemoRequestTemplate() {
   const url = new URL(TEMPLATE_PATH, document.baseURI)
   const response = await fetch(url)
-  if (!response.ok) throw new Error('Word 模板加载失败，请重试')
+  if (!response.ok) throw docxError('The Word template could not be loaded. Please try again.', 'Word 模板加载失败，请重试')
   return response.arrayBuffer()
 }
 

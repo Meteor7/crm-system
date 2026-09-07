@@ -1,4 +1,5 @@
-import { mount } from '@vue/test-utils'
+import { setLocale } from '@/i18n'
+import { flushPromises, mount } from '@vue/test-utils'
 import { describe, expect, it } from 'vitest'
 import { createMockApi } from '@/api/mock-adapter'
 import type { InstalledToolDetailDto } from '@/types/workspaces'
@@ -40,7 +41,7 @@ describe('InstalledToolArchiveView', () => {
     const masterData = wrapper.get('[data-testid="installed-tool-master-data"]').text()
     expect(masterData).toContain(apiDetail.salesOrder)
     expect(masterData).toContain(apiDetail.contract)
-    expect(masterData).toContain('Engineer Owner')
+    expect(masterData).toContain('工程师负责人')
     expect(masterData).not.toContain('@crm.example.invalid')
     expect(masterData).toContain(apiDetail.sourceBookingId)
     expect(masterData).toContain(apiDetail.warrantyStart)
@@ -108,4 +109,45 @@ describe('InstalledToolArchiveView', () => {
     expect(failed.text()).toContain('无权查看该设备')
     expect(failed.find('.tool-header').exists()).toBe(false)
   })
+})
+
+it.each([['Production', '生产中'], ['Upgrade Due', '待升级'], ['Installation', '安装中']])('translates %s without changing the selected equipment or raw status', async (status, chinese) => {
+  const { items } = await fixture()
+  items[0].status = status
+  const wrapper = mount(InstalledToolArchiveView, { props: { items, selectedId: items[0].id } })
+  const row = wrapper.get(`[data-installed-tool-archive-id="${items[0].id}"]`)
+  expect(row.text()).toContain(chinese)
+  setLocale('en-US')
+  await flushPromises()
+  expect(row.text()).toContain(status)
+  await row.trigger('click')
+  expect(wrapper.emitted('select')?.[0]).toEqual([items[0]])
+  expect(items[0].status).toBe(status)
+  wrapper.unmount()
+})
+
+
+it('localizes stored system defaults across equipment lifecycle, version and service views', async () => {
+  const { detail } = await fixture()
+  Object.assign(detail, { location: '待确认', software: '待确认', firmware: '待确认', operatingSystem: '待确认', configuration: '待确认', salesOrder: '待确认', contract: '待确认', serviceContract: '待确认', pmCycle: '待确认', warrantyStart: '待确认', warrantyEnd: '待确认', lastService: '尚未开始' })
+  detail.milestones = detail.milestones.map(stage => ({ ...stage, date: '待确认' }))
+  detail.versionHistory = [{ id: 'V-1', at: '2026-09-07', actor: 'Engineer', changeDate: '2026-09-07', changeType: 'Software', fromValue: '待确认', toValue: '1.0', reason: '用户写下的中文原因', comment: '' }]
+  detail.serviceHistory = [{ id: 'S-1', at: '2026-09-07', actor: 'Engineer', serviceDate: '2026-09-07', serviceType: 'Remote Support', result: '用户的服务结果', openIssues: '无', nextAction: '', actionOwner: '', due: '', comment: '', warrantyStart: '', warrantyEnd: '', serviceContract: '', pmCycle: '' }]
+  const original = structuredClone(detail)
+  const wrapper = mount(InstalledToolArchiveView, { props: { items: [detail], selectedId: detail.id, detail } })
+  expect(wrapper.text()).toContain('待确认')
+  setLocale('en-US')
+  await flushPromises()
+  expect(wrapper.text()).toContain('To be confirmed')
+  expect(wrapper.text()).not.toContain('待确认')
+  await wrapper.findAll('.detail-tabs button')[1].trigger('click')
+  expect(wrapper.text()).not.toContain('待确认')
+  expect(wrapper.text()).toContain('用户写下的中文原因')
+  await wrapper.findAll('.detail-tabs button')[2].trigger('click')
+  expect(wrapper.text()).not.toContain('待确认')
+  expect(wrapper.text()).not.toContain('尚未开始')
+  expect(wrapper.text()).toContain('None')
+  expect(wrapper.text()).toContain('用户的服务结果')
+  expect(detail).toEqual(original)
+  wrapper.unmount()
 })

@@ -1,11 +1,14 @@
+import { setLocale } from '@/i18n'
 import { createPinia } from 'pinia'
-import { flushPromises, mount } from '@vue/test-utils'
-import { describe, expect, it, vi } from 'vitest'
+import { enableAutoUnmount, flushPromises, mount } from '@vue/test-utils'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import AppShell from './AppShell.vue'
 import { createAppRouter } from './router'
 import { createMockApi } from '@/api/mock-adapter'
 import { useAppStore } from '@/stores/app'
 import { useNotificationStore } from '@/stores/notifications'
+
+enableAutoUnmount(afterEach)
 
 describe('AppShell', () => {
   it('uses the approved PLANCK CRM brand without the retired RAYHER label', async () => {
@@ -203,7 +206,11 @@ describe('AppShell', () => {
     useAppStore(pinia).bootstrap = (await createMockApi({ latency: 0, role: 'Manager' }).getBootstrap()).data
     const wrapper = mount(AppShell, { global: { plugins: [pinia, router], stubs: { CrmChart: { template: '<div />' } } } })
 
+    expect(wrapper.text()).toContain('经理')
+    setLocale('en-US')
+    await flushPromises()
     expect(wrapper.text()).toContain('Manager')
+    wrapper.unmount()
   })
 
   it('exposes the P1 workspace and retains the CRM foundation', async () => {

@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ArrowRight } from '@lucide/vue'
+import { useI18n } from '@/i18n'
 
 export type EvaluationView = 'overview' | 'wafer' | 'preparation' | 'execution' | 'internal' | 'customer'
 
@@ -7,16 +8,18 @@ defineProps<{ modelValue: EvaluationView }>()
 defineEmits<{ 'update:modelValue': [view: EvaluationView] }>()
 
 const flow = [
-  { key: 'wafer', label: 'Wafer Preparation' },
-  { key: 'preparation', label: 'Test Preparation' },
-  { key: 'execution', label: 'Test Execution' },
-  { key: 'internal', label: 'Internal Review' },
-  { key: 'customer', label: 'Customer Review' },
+  { key: 'wafer', en: 'Wafer Preparation', zh: 'Wafer 准备' },
+  { key: 'preparation', en: 'Test Preparation', zh: '测试准备' },
+  { key: 'execution', en: 'Test Execution', zh: '测试执行' },
+  { key: 'internal', en: 'Internal Review', zh: '内部评审' },
+  { key: 'customer', en: 'Customer Review', zh: '客户评审' },
 ] as const
+const { locale, t } = useI18n()
+const copy = (english: string, chinese: string) => locale.value === 'en-US' ? english : chinese
 </script>
 
 <template>
-  <nav class="evaluation-workspace-nav" aria-label="Demo Test 工作区">
+  <nav class="evaluation-workspace-nav" :aria-label="t('evaluationNav.workspace')">
     <button
       type="button"
       data-evaluation-view="overview"
@@ -24,10 +27,10 @@ const flow = [
       :aria-current="modelValue === 'overview' ? 'page' : undefined"
       @click="$emit('update:modelValue', 'overview')"
     >
-      Demo Test
+      {{ copy('Demo Test', 'Demo 测试') }}
     </button>
     <span class="nav-divider" aria-hidden="true" />
-    <span class="flow-label">处理流程</span>
+    <span class="flow-label">{{ t('evaluationNav.flow') }}</span>
     <div class="flow-nodes">
       <template v-for="(item, index) in flow" :key="item.key">
         <ArrowRight v-if="index" data-evaluation-flow-arrow :size="17" aria-hidden="true" />
@@ -38,7 +41,7 @@ const flow = [
           :aria-current="modelValue === item.key ? 'page' : undefined"
           @click="$emit('update:modelValue', item.key)"
         >
-          {{ item.label }}
+          {{ copy(item.en, item.zh) }}
         </button>
       </template>
     </div>

@@ -4,7 +4,7 @@ import { ArrowLeft } from '@lucide/vue'
 import { useRoute, useRouter } from 'vue-router'
 import { api as defaultApi } from '@/api'
 import type { CrmApi } from '@/api'
-import { mapRequestError } from '@/api/request-state'
+import { mapRequestError, requestErrorMessage } from '@/api/request-state'
 import type { DemoArchiveGroupMode } from '@/domain/demo-archive'
 import type { DemoHealthLevel } from '@/types/crm'
 import type { DemoWorkflowDto } from '@/types/workspaces'
@@ -15,19 +15,21 @@ import DemoProjectCycleBoard from '@/features/demo-workflow/DemoProjectCycleBoar
 import { useAppStore } from '@/stores/app'
 import { downloadBlob } from '@/features/shared/download-blob'
 import { readAllPages } from '@/features/shared/read-all-pages'
+import { useI18n, useLocaleMessage, localeMessage } from '@/i18n'
 
 type DemoSurface = 'project' | 'board' | 'archive'
 type ArchiveResult = 'all' | 'Accepted' | 'Rejected'
 
 const props = withDefaults(defineProps<{ apiClient?: CrmApi }>(), { apiClient: () => defaultApi })
 const app = useAppStore()
+const { t, locale } = useI18n()
 const route = useRoute() as ReturnType<typeof useRoute> | undefined
 const router = useRouter() as ReturnType<typeof useRouter> | undefined
 const archives = ref<DemoWorkflowDto[]>([])
 const loading = ref(true)
-const error = ref('')
-const notice = ref('')
-const artifactBusyId = ref(''), artifactError = ref(''), artifactRequestId = ref('')
+const error = useLocaleMessage()
+const notice = useLocaleMessage()
+const artifactBusyId = ref(''), artifactError = useLocaleMessage(), artifactRequestId = ref('')
 const surface = ref<DemoSurface>(parseSurface(readQuery('surface')))
 const detailFocus = ref(readQuery('view') === 'detail' ? readQuery('focus') : '')
 const health = ref<'all' | DemoHealthLevel>(
@@ -110,12 +112,12 @@ async function load() {
     await app.loadBootstrap(props.apiClient)
     archives.value = await readAllPages((page, pageSize) => props.apiClient.listDemoWorkflows({ page, pageSize }))
     if (detailFocus.value && !selected.value) {
-      notice.value = `未找到 Demo 档案 ${detailFocus.value}，已返回当前视图。`
+      notice.value = localeMessage(`Demo archive ${detailFocus.value} was not found. Returned to the current view.`, `未找到 Demo 档案 ${detailFocus.value}，已返回当前视图。`)
       detailFocus.value = ''
       await router?.replace({ name: 'demo-workflow', query: surfaceQuery() })
     }
   } catch (reason) {
-    error.value = reason instanceof Error ? reason.message : 'Demo 档案加载失败'
+    error.value = requestErrorMessage(reason, localeMessage('Failed to load Demo archives.', 'Demo 档案加载失败'))
   } finally {
     loading.value = false
   }
@@ -185,7 +187,7 @@ async function downloadArtifact(id: string) {
     downloadBlob(result.blob, result.fileName)
   } catch (reason) {
     const mapped = mapRequestError(reason)
-    artifactError.value = mapped.message
+    artifactError.value = mapped.localizedMessage ?? mapped.message
     artifactRequestId.value = mapped.requestId
   } finally {
     artifactBusyId.value = ''
@@ -219,36 +221,36 @@ onMounted(load)
   <div class="workspace-page demo-archive-page" data-page="demo-workflow">
     <header class="page-title-row demo-page-header">
       <div>
-        <span class="eyebrow">DEMO ARCHIVE</span>
-        <h1>{{ surface === 'project' ? '项目周期看板' : 'Demo 档案' }}</h1>
+        <span class="eyebrow">{{ locale === 'en-US' ? 'DEMO ARCHIVE' : 'DEMO 档案' }}</span>
+        <h1>{{ surface === 'project' ? t('demo.projectTitle') : t('demo.title') }}</h1>
         <p>
           {{ surface === 'project'
-            ? '每个项目一行对照负责人、DDL 与完整周期节点，已完成项目统一排列在底部。'
+            ? t('demo.projectDescription')
             : surface === 'board'
-              ? '追踪 Demo 全生命周期与测试进展，高效推进客户验证流程。'
-              : '查看已完成 Demo 的完整记录，并按客户或设备分类追溯。' }}
+              ? t('demo.boardDescription')
+              : t('demo.archiveDescription') }}
         </p>
       </div>
       <div class="header-actions">
-        <nav class="surface-switch" aria-label="Demo 档案视图">
+        <nav class="surface-switch" :aria-label="locale === 'en-US' ? 'Demo archive views' : 'Demo 档案视图'">
           <button
             type="button"
             data-demo-surface="project"
             :class="{ active: surface === 'project' }"
             @click="switchSurface('project')"
-          >项目周期看板</button>
+          >{{ t('demo.projectTab') }}</button>
           <button
             type="button"
             data-demo-surface="board"
             :class="{ active: surface === 'board' }"
             @click="switchSurface('board')"
-          >生命周期看板</button>
+          >{{ t('demo.boardTab') }}</button>
           <button
             type="button"
             data-demo-surface="archive"
             :class="{ active: surface === 'archive' }"
             @click="switchSurface('archive')"
-          >Demo 档案</button>
+          >{{ t('demo.archiveTab') }}</button>
         </nav>
         <button
           v-if="isDetail"
@@ -259,24 +261,20 @@ onMounted(load)
           @click="backToSurface"
         >
           <ArrowLeft :size="16" />
-          {{ surface === 'archive'
-            ? '返回 Demo 档案'
-            : surface === 'project'
-              ? '返回项目周期看板'
-              : '返回生命周期看板' }}
+          {{ surface === 'archive' ? t('demo.backArchive') : surface === 'project' ? t('demo.backProject') : t('demo.backBoard') }}
         </button>
       </div>
     </header>
 
     <p v-if="notice" class="board-notice" role="status">{{ notice }}</p>
     <p v-if="artifactError" class="board-notice" data-artifact-error role="alert">{{ artifactError }}<small v-if="artifactRequestId">Request ID {{ artifactRequestId }}</small></p>
-    <section v-if="loading" class="workspace-panel workspace-panel-body">正在读取 Demo 档案…</section>
+    <section v-if="loading" class="workspace-panel workspace-panel-body">{{ t('demo.loading') }}</section>
     <section v-else-if="error" class="workspace-panel workspace-panel-body">
       <p>{{ error }}</p>
-      <button type="button" class="secondary-button" @click="load">重试</button>
+      <button type="button" class="secondary-button" @click="load">{{ t('demo.retry') }}</button>
     </section>
     <section v-else-if="!archives.length" class="workspace-panel workspace-panel-body">
-      当前权限范围内暂无已提交的 Demo 档案。
+      {{ t('demo.empty') }}
     </section>
 
     <DemoProjectCycleBoard
@@ -331,8 +329,8 @@ onMounted(load)
         @download="downloadArtifact"
       />
       <section v-else class="archive-placeholder">
-        <strong>选择一个 Demo 档案</strong>
-        <span>左侧分类保留已归档 Demo 的客户、设备、负责人和完整生命周期记录。</span>
+        <strong>{{ locale === 'en-US' ? 'Select a Demo archive' : '选择一个 Demo 档案' }}</strong>
+        <span>{{ locale === 'en-US' ? 'Use the groups on the left to review archived Demo customers, equipment, owners, and lifecycle records.' : '左侧分类保留已归档 Demo 的客户、设备、负责人和完整生命周期记录。' }}</span>
       </section>
     </div>
   </div>

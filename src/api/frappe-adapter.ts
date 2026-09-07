@@ -1,6 +1,8 @@
 import type { ApiResponse } from '@/types/crm'
 import type { CrmApi, CrmApiErrorCode } from './contracts'
 import { CrmApiError, normalizeCrmApiErrorCode } from './contracts'
+import { ClientRequestError } from './request-state'
+import { localeMessage } from '@/i18n'
 import { appendMultipartFile, type BinaryDownload } from './binary-transport'
 
 const API_PREFIX = '/api/method/rayher_crm.api.v1.'
@@ -192,10 +194,10 @@ function statusCode(status: number): CrmApiErrorCode {
 }
 
 function statusMessage(status: number) {
-  if (status === 401 || status === 403) return '当前会话无权执行此操作。'
-  if (status === 409) return '记录已被其他用户修改，请刷新后重试。'
-  if (status === 422) return '请求数据未通过校验。'
-  return status >= 500 ? '后端服务暂时不可用，请稍后重试。' : '数据请求失败。'
+  if (status === 401 || status === 403) return localeMessage('Your session does not have permission to perform this action.', '当前会话无权执行此操作。')
+  if (status === 409) return localeMessage('This record was changed by another user. Refresh and try again.', '记录已被其他用户修改，请刷新后重试。')
+  if (status === 422) return localeMessage('The request data failed validation.', '请求数据未通过校验。')
+  return status >= 500 ? localeMessage('The backend service is temporarily unavailable. Please try again later.', '后端服务暂时不可用，请稍后重试。') : localeMessage('Data request failed.', '数据请求失败。')
 }
 
 function errorFromPayload(payload: unknown, response: Response, fallbackRequestId: string) {
@@ -210,15 +212,16 @@ function errorFromPayload(payload: unknown, response: Response, fallbackRequestI
     const fieldErrors = isRecord(error.fieldErrors)
       ? Object.fromEntries(Object.entries(error.fieldErrors).filter((entry): entry is [string, string] => typeof entry[1] === 'string'))
       : {}
-    return new CrmApiError(
+    if (typeof error.message === 'string') return new CrmApiError(safeCode(error.code, fallback), error.message, resolvedRequestId, error.retryable === true, fieldErrors)
+    return new ClientRequestError(
       safeCode(error.code, fallback),
-      typeof error.message === 'string' ? error.message : statusMessage(response.status),
+      statusMessage(response.status),
       resolvedRequestId,
       error.retryable === true,
       fieldErrors,
     )
   }
-  return new CrmApiError(
+  return new ClientRequestError(
     statusCode(response.status),
     statusMessage(response.status),
     resolvedRequestId,
@@ -240,12 +243,12 @@ async function parseJson(response: Response) {
 export function normalizeFrappeError(error: unknown, fallbackRequestId: string): CrmApiError {
   if (error instanceof CrmApiError) return error
   if (error instanceof DOMException && error.name === 'AbortError') {
-    return new CrmApiError('NETWORK_ERROR', '后端请求超时，请稍后重试。', fallbackRequestId, true)
+    return new ClientRequestError('NETWORK_ERROR', localeMessage('The backend request timed out. Please try again later.', '后端请求超时，请稍后重试。'), fallbackRequestId, true)
   }
   if (error instanceof TypeError) {
-    return new CrmApiError('NETWORK_ERROR', '无法连接后端服务，请检查网络后重试。', fallbackRequestId, true)
+    return new ClientRequestError('NETWORK_ERROR', localeMessage('Unable to connect to the backend. Check your network and try again.', '无法连接后端服务，请检查网络后重试。'), fallbackRequestId, true)
   }
-  return new CrmApiError('INTERNAL_ERROR', '数据请求失败，请稍后重试。', fallbackRequestId, true)
+  return new ClientRequestError('INTERNAL_ERROR', localeMessage('Data request failed. Please try again later.', '数据请求失败，请稍后重试。'), fallbackRequestId, true)
 }
 
 function redirectUnauthenticated(error: CrmApiError) {
@@ -321,7 +324,7 @@ export function createFrappeApi(options: FrappeApiOptions = {}): CrmApi {
     if (isRecord(envelope) && isRecord(envelope.error)) throwRequestError(payload, response, fallbackRequestId)
     if (!response.ok) throwRequestError(payload, response, fallbackRequestId)
     if (!isRecord(envelope) || !('data' in envelope)) {
-      throw new CrmApiError('INTERNAL_ERROR', '后端返回了无法识别的数据格式。', fallbackRequestId, true)
+      throw new ClientRequestError('INTERNAL_ERROR', localeMessage('The backend returned an unrecognized data format.', '后端返回了无法识别的数据格式。'), fallbackRequestId, true)
     }
     return {
       data: envelope.data as T,

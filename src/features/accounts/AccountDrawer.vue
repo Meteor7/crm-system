@@ -11,8 +11,10 @@ import StatusBadge from '@/design-system/StatusBadge.vue'
 import { mapRequestError, readRequestMeta, type RequestMetaState } from '@/api/request-state'
 import { formatDisplayDate, shanghaiDate } from '@/domain/time'
 import { formatMoney, moneyByCurrency } from '@/domain/money'
+import { useI18n } from '@/i18n'
 
 const props = defineProps<{ modelValue: boolean; accountId: string; apiClient: CrmApi }>()
+const { locale } = useI18n()
 const emit = defineEmits<{ 'update:modelValue': [value: boolean] }>()
 const detail = ref<Account360Dto | null>(null)
 const loading = ref(false)
@@ -77,43 +79,43 @@ watch([() => props.modelValue, () => props.accountId], ([open]) => {
       <header class="drawer-hero">
         <span class="hero-mark">{{ detail.account.shortName.slice(0, 2) }}</span>
         <div><span class="eyebrow">ACCOUNT 360</span><h2>{{ detail.account.name }}</h2><p><MapPin :size="13" />{{ detail.account.city }} · {{ detail.account.segment }} · Owner {{ personnelDisplayName(detail.account.owner) }}</p></div>
-        <StatusBadge :label="`${detail.account.tier} 级客户`" tone="positive" />
+        <StatusBadge :label="locale === 'en-US' ? `Tier ${detail.account.tier} account` : `${detail.account.tier} 级客户`" tone="positive" />
       </header>
 
       <section class="drawer-kpis">
         <div><span>OPEN PIPELINE</span><strong v-for="total in opportunityTotals" :key="total.currency">{{ formatMoney(total.amount, total.currency) }}</strong></div>
-        <div><span>意愿评分</span><strong>{{ detail.account.intentScore }}</strong></div>
-        <div><span>活跃 DEMO</span><strong>{{ detail.summary.activeDemos }}</strong></div>
-        <div><span>数据完整度</span><strong>{{ detail.account.completeness }}%</strong></div>
+        <div><span>{{ locale === 'en-US' ? 'Intent score' : '意愿评分' }}</span><strong>{{ detail.account.intentScore }}</strong></div>
+        <div><span>{{ locale === 'en-US' ? 'Active demos' : '活跃 DEMO' }}</span><strong>{{ detail.summary.activeDemos }}</strong></div>
+        <div><span>{{ locale === 'en-US' ? 'Profile completeness' : '数据完整度' }}</span><strong>{{ detail.account.completeness }}%</strong></div>
       </section>
 
       <ElTabs class="drawer-tabs">
-        <ElTabPane label="经营全貌">
+        <ElTabPane :label="locale === 'en-US' ? '360 overview' : '经营全貌'">
           <div class="drawer-grid">
             <section class="drawer-section sites-section">
-              <header><Factory :size="16" /><strong>Site / 厂区</strong><span>{{ detail.sites.length }}</span></header>
+              <header><Factory :size="16" /><strong>{{ locale === 'en-US' ? 'Sites' : 'Site / 厂区' }}</strong><span>{{ detail.sites.length }}</span></header>
               <article v-for="site in detail.sites" :key="site.id"><div><strong>{{ site.name }}</strong><small>{{ site.city }} · {{ site.type }} · {{ site.process }}</small></div><StatusBadge :label="site.status" tone="positive" /></article>
             </section>
             <section class="drawer-section contacts-section">
-              <header><Users :size="16" /><strong>关键人与组织关系</strong><span>{{ detail.contacts.length }}</span></header>
+              <header><Users :size="16" /><strong>{{ locale === 'en-US' ? 'Stakeholders & reporting lines' : '关键人与组织关系' }}</strong><span>{{ detail.contacts.length }}</span></header>
               <article v-for="contact in detail.contacts" :key="contact.id"><span class="contact-avatar">{{ contact.name.slice(-2) }}</span><div><strong>{{ contact.name }} · {{ contact.title }}</strong><small>{{ contact.department }} · {{ contact.role }}</small></div><StatusBadge :label="contact.relationship" :tone="contact.relationship === 'Strong' ? 'positive' : 'info'" /></article>
-              <div v-if="!detail.contacts.length" class="mini-empty">关键人关系待补充</div>
+              <div v-if="!detail.contacts.length" class="mini-empty">{{ locale === 'en-US' ? 'Stakeholder details pending' : '关键人关系待补充' }}</div>
             </section>
           </div>
           <section class="drawer-section full-section">
-            <header><CalendarClock :size="16" /><strong>下一步行动与风险</strong><span>{{ detail.actions.length }}</span></header>
-            <article v-for="action in detail.actions" :key="action.id"><div><strong>{{ action.title }}</strong><small>{{ personnelDisplayName(action.owner) }} · {{ formatDisplayDate(action.due) }} · 来源 {{ action.sourceType }}</small></div><StatusBadge :label="action.status" :tone="action.due && action.due < today ? 'danger' : 'info'" /></article>
+            <header><CalendarClock :size="16" /><strong>{{ locale === 'en-US' ? 'Next actions & risks' : '下一步行动与风险' }}</strong><span>{{ detail.actions.length }}</span></header>
+            <article v-for="action in detail.actions" :key="action.id"><div><strong>{{ action.title }}</strong><small>{{ personnelDisplayName(action.owner) }} · {{ formatDisplayDate(action.due) }} · {{ locale === 'en-US' ? 'Source' : '来源' }} {{ action.sourceType }}</small></div><StatusBadge :label="action.status" :tone="action.due && action.due < today ? 'danger' : 'info'" /></article>
           </section>
         </ElTabPane>
-        <ElTabPane :label="`需求 ${detail.requirements.length}`">
+        <ElTabPane :label="locale === 'en-US' ? `Requirements ${detail.requirements.length}` : `需求 ${detail.requirements.length}`">
           <section class="drawer-section full-section"><article v-for="item in detail.requirements" :key="item.id"><Building2 :size="16" /><div><strong>{{ item.title }}</strong><small>{{ item.equipment }} · {{ money(item.budgetAmount) }} · {{ item.nextAction }}</small></div><StatusBadge :label="item.status" tone="info" /></article></section>
         </ElTabPane>
-        <ElTabPane :label="`Demo / 验证 ${detail.demoRequests.length + detail.evaluations.length}`">
-          <section class="drawer-section full-section"><header><ClipboardCheck :size="16" /><strong>Demo Request</strong><span>{{ detail.demoRequests.length }}</span></header><article v-for="item in detail.demoRequests" :key="item.id"><ClipboardCheck :size="16" /><div><strong>{{ item.title }}</strong><small>{{ item.id }} · {{ item.requestedEquipment }} · 目标 {{ item.targetDate }}</small></div><StatusBadge :label="item.status" :tone="item.status === 'Converted' ? 'positive' : 'info'" /></article><div v-if="!detail.demoRequests.length" class="mini-empty">暂无 Demo Request</div></section>
-          <section class="drawer-section full-section"><header><FlaskConical :size="16" /><strong>Evaluation / Wafer Test</strong><span>{{ detail.evaluations.length }}</span></header><article v-for="item in detail.evaluations" :key="item.id"><FlaskConical :size="16" /><div><strong>{{ item.title }}</strong><small>{{ item.id }} · {{ item.wafers }} Wafers · {{ personnelDisplayName(item.owner) }}</small></div><StatusBadge :label="item.status" tone="info" /></article><div v-if="!detail.evaluations.length" class="mini-empty">暂无验证项目</div></section>
+        <ElTabPane :label="locale === 'en-US' ? `Demo / evaluations ${detail.demoRequests.length + detail.evaluations.length}` : `Demo / 验证 ${detail.demoRequests.length + detail.evaluations.length}`">
+          <section class="drawer-section full-section"><header><ClipboardCheck :size="16" /><strong>Demo Request</strong><span>{{ detail.demoRequests.length }}</span></header><article v-for="item in detail.demoRequests" :key="item.id"><ClipboardCheck :size="16" /><div><strong>{{ item.title }}</strong><small>{{ item.id }} · {{ item.requestedEquipment }} · {{ locale === 'en-US' ? 'Target' : '目标' }} {{ item.targetDate }}</small></div><StatusBadge :label="item.status" :tone="item.status === 'Converted' ? 'positive' : 'info'" /></article><div v-if="!detail.demoRequests.length" class="mini-empty">{{ locale === 'en-US' ? 'No Demo Requests' : '暂无 Demo Request' }}</div></section>
+          <section class="drawer-section full-section"><header><FlaskConical :size="16" /><strong>Evaluation / Wafer Test</strong><span>{{ detail.evaluations.length }}</span></header><article v-for="item in detail.evaluations" :key="item.id"><FlaskConical :size="16" /><div><strong>{{ item.title }}</strong><small>{{ item.id }} · {{ item.wafers }} Wafers · {{ personnelDisplayName(item.owner) }}</small></div><StatusBadge :label="item.status" tone="info" /></article><div v-if="!detail.evaluations.length" class="mini-empty">{{ locale === 'en-US' ? 'No evaluation projects' : '暂无验证项目' }}</div></section>
         </ElTabPane>
-        <ElTabPane :label="`合同 ${detail.contracts.length}`">
-          <section class="drawer-section full-section"><article v-for="item in detail.contracts" :key="item.id"><FileSignature :size="16" /><div><strong>{{ item.type }} · {{ item.id }}</strong><small>{{ money(item.amount) }} · {{ item.start }} 至 {{ item.end }}</small></div><StatusBadge :label="item.status" :tone="item.signed ? 'positive' : 'warning'" /></article><div v-if="!detail.contracts.length" class="mini-empty">暂无合同</div></section>
+        <ElTabPane :label="locale === 'en-US' ? `Contracts ${detail.contracts.length}` : `合同 ${detail.contracts.length}`">
+          <section class="drawer-section full-section"><article v-for="item in detail.contracts" :key="item.id"><FileSignature :size="16" /><div><strong>{{ item.type }} · {{ item.id }}</strong><small>{{ money(item.amount) }} · {{ item.start }} {{ locale === 'en-US' ? 'to' : '至' }} {{ item.end }}</small></div><StatusBadge :label="item.status" :tone="item.signed ? 'positive' : 'warning'" /></article><div v-if="!detail.contracts.length" class="mini-empty">{{ locale === 'en-US' ? 'No contracts' : '暂无合同' }}</div></section>
         </ElTabPane>
       </ElTabs>
       </div>

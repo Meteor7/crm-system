@@ -6,6 +6,7 @@ import { Ban, CheckCircle2, Download, ExternalLink, Pencil } from '@lucide/vue'
 import type { DemoRequestDto, Tone } from '@/types/crm'
 import StatusBadge from '@/design-system/StatusBadge.vue'
 import type { DemoRequestView } from './DemoRequestWorkspaceNav.vue'
+import { useI18n } from '@/i18n'
 
 const props = defineProps<{
   view: DemoRequestView
@@ -17,6 +18,8 @@ const props = defineProps<{
   processing?: string
   downloading?: string
 }>()
+const { locale } = useI18n()
+const copy = (english: string, chinese: string) => locale.value === 'en-US' ? english : chinese
 
 const emit = defineEmits<{
   select: [id: string]
@@ -52,6 +55,10 @@ const statusLabel: Record<DemoRequestDto['status'], string> = {
   Converted: '已转 Demo',
   Cancelled: '已取消',
 }
+function statusText(status: DemoRequestDto['status']) {
+  if (locale.value !== 'en-US') return statusLabel[status]
+  return ({ Draft: 'Draft', 'Engineer Review': 'Engineer review', 'Engineer Returned': 'Returned by engineering', 'Manager Approval': 'Manager approval', 'Manager Rejected': 'Rejected by manager', Converted: 'Converted to Demo', Cancelled: 'Cancelled' } as Record<DemoRequestDto['status'], string>)[status]
+}
 const statusTone = (status: DemoRequestDto['status']): Tone => status === 'Converted'
   ? 'positive'
   : ['Engineer Returned', 'Manager Rejected'].includes(status)
@@ -67,9 +74,9 @@ const editable = computed(() => Boolean(selected.value && ['Draft', 'Engineer Re
     <div class="workspace-main">
       <div class="toolbar">
         <label>
-          Sales
-          <select v-model="sales" aria-label="工作区 Sales">
-            <option value="All">全部 Sales</option>
+          {{ copy('Sales', '销售') }}
+          <select v-model="sales" :aria-label="copy('Workspace Sales', '工作区 Sales')">
+            <option value="All">{{ copy('All Sales', '全部 Sales') }}</option>
             <option v-for="item in salesOptions" :key="item">{{ item }}</option>
           </select>
         </label>
@@ -80,13 +87,13 @@ const editable = computed(() => Boolean(selected.value && ['Draft', 'Engineer Re
         <table class="request-table">
           <thead>
             <tr>
-              <th>Request / 项目</th>
-              <th>客户</th>
-              <th>Sales</th>
-              <th>Engineer</th>
-              <th>状态</th>
-              <th>目标日期</th>
-              <th>更新日期</th>
+              <th>{{ locale === 'en-US' ? 'Request / Project' : 'Request / 项目' }}</th>
+              <th>{{ locale === 'en-US' ? 'Account' : '客户' }}</th>
+              <th>{{ copy('Sales', '销售') }}</th>
+              <th>{{ copy('Engineer', '工程师') }}</th>
+              <th>{{ locale === 'en-US' ? 'Status' : '状态' }}</th>
+              <th>{{ locale === 'en-US' ? 'Target date' : '目标日期' }}</th>
+              <th>{{ locale === 'en-US' ? 'Updated' : '更新日期' }}</th>
             </tr>
           </thead>
           <tbody>
@@ -110,33 +117,33 @@ const editable = computed(() => Boolean(selected.value && ['Draft', 'Engineer Re
               </td>
               <td>{{ item.accountName }}</td>
               <td>{{ personnelDisplayName(item.salesOwner) }}</td>
-              <td>{{ item.engineerOwner ? personnelDisplayName(item.engineerOwner) : '待分配' }}</td>
-              <td><StatusBadge :label="statusLabel[item.status]" :tone="statusTone(item.status)" /></td>
+              <td>{{ item.engineerOwner ? personnelDisplayName(item.engineerOwner) : (locale === 'en-US' ? 'Unassigned' : '待分配') }}</td>
+              <td><StatusBadge :label="statusText(item.status)" :tone="statusTone(item.status)" /></td>
               <td>{{ item.customerExpectedDate || item.targetDate }}</td>
               <td>{{ formatDisplayDate(item.updatedAt) }}</td>
             </tr>
           </tbody>
         </table>
-        <p v-if="!scopedRows.length" class="workspace-empty">当前分类暂无 Demo Request</p>
+        <p v-if="!scopedRows.length" class="workspace-empty">{{ locale === 'en-US' ? 'No Demo Requests in this view' : '当前分类暂无 Demo Request' }}</p>
       </div>
     </div>
 
       <aside v-if="selected" class="request-actions action-panel" data-demo-request-actions>
         <header>
-          <span>相关人员操作</span>
-          <StatusBadge :label="statusLabel[selected.status]" :tone="statusTone(selected.status)" />
+          <span>{{ locale === 'en-US' ? 'Owner actions' : '相关人员操作' }}</span>
+          <StatusBadge :label="statusText(selected.status)" :tone="statusTone(selected.status)" />
         </header>
         <b>{{ selected.id }}</b>
         <h2>{{ selected.title }}</h2>
         <p>{{ selected.accountName }}</p>
         <dl>
-          <div><dt>Sales</dt><dd>{{ personnelDisplayName(selected.salesOwner) }}</dd></div>
-          <div><dt>Engineer</dt><dd>{{ selected.engineerOwner ? personnelDisplayName(selected.engineerOwner) : '待分配' }}</dd></div>
-          <div><dt>目标日期</dt><dd>{{ selected.customerExpectedDate || selected.targetDate }}</dd></div>
+          <div><dt>{{ copy('Sales', '销售') }}</dt><dd>{{ personnelDisplayName(selected.salesOwner) }}</dd></div>
+          <div><dt>{{ copy('Engineer', '工程师') }}</dt><dd>{{ selected.engineerOwner ? personnelDisplayName(selected.engineerOwner) : (locale === 'en-US' ? 'Unassigned' : '待分配') }}</dd></div>
+          <div><dt>{{ locale === 'en-US' ? 'Target date' : '目标日期' }}</dt><dd>{{ selected.customerExpectedDate || selected.targetDate }}</dd></div>
         </dl>
 
         <button type="button" class="secondary-button" @click="emit('open-detail', selected)">
-          <ExternalLink :size="14" />查看详细信息
+          <ExternalLink :size="14" />{{ locale === 'en-US' ? 'View details' : '查看详细信息' }}
         </button>
         <button
           type="button"
@@ -145,17 +152,17 @@ const editable = computed(() => Boolean(selected.value && ['Draft', 'Engineer Re
           :disabled="downloading === selected.id"
           @click="emit('download', selected)"
         >
-          <Download :size="14" />{{ downloading === selected.id ? '生成中…' : '下载 Word' }}
+          <Download :size="14" />{{ downloading === selected.id ? (locale === 'en-US' ? 'Generating…' : '生成中…') : (locale === 'en-US' ? 'Download Word' : '下载 Word') }}
         </button>
         <template v-if="canCreate && editable">
           <button type="button" class="primary-button" :data-demo-action="`${selected.id}-submit`" :disabled="processing === selected.id" @click="emit('submit', selected.id)">
-            <CheckCircle2 :size="14" />提交工程评估
+            <CheckCircle2 :size="14" />{{ locale === 'en-US' ? 'Submit for engineering review' : '提交工程评估' }}
           </button>
           <button type="button" class="secondary-button" :data-demo-action="`${selected.id}-edit`" :disabled="processing === selected.id" @click="emit('edit', selected)">
-            <Pencil :size="14" />编辑 Request
+            <Pencil :size="14" />{{ locale === 'en-US' ? 'Edit Request' : '编辑 Request' }}
           </button>
           <button type="button" class="danger-button" :data-demo-action="`${selected.id}-cancel`" :disabled="processing === selected.id" @click="emit('cancel', selected.id)">
-            <Ban :size="14" />取消
+            <Ban :size="14" />{{ locale === 'en-US' ? 'Cancel' : '取消' }}
           </button>
         </template>
         <button
@@ -166,7 +173,7 @@ const editable = computed(() => Boolean(selected.value && ['Draft', 'Engineer Re
           :disabled="processing === selected.id"
           @click="emit('engineer', selected)"
         >
-          <CheckCircle2 :size="14" />工程评估
+          <CheckCircle2 :size="14" />{{ locale === 'en-US' ? 'Engineering review' : '工程评估' }}
         </button>
         <button
           v-if="canManager && selected.status === 'Manager Approval'"
@@ -176,7 +183,7 @@ const editable = computed(() => Boolean(selected.value && ['Draft', 'Engineer Re
           :disabled="processing === selected.id"
           @click="emit('manager', selected)"
         >
-          <CheckCircle2 :size="14" />经理审批
+          <CheckCircle2 :size="14" />{{ locale === 'en-US' ? 'Manager approval' : '经理审批' }}
         </button>
       </aside>
   </section>

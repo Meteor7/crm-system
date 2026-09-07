@@ -5,6 +5,7 @@ import type { DemoWorkflowDto } from '@/types/workspaces'
 import DemoStageColumn from './DemoStageColumn.vue'
 import PipelineBoard from '@/design-system/PipelineBoard.vue'
 import { personnelDisplayName } from '@/demo/personnel'
+import { useI18n } from '@/i18n'
 
 const props = defineProps<{
   items: DemoWorkflowDto[]
@@ -18,6 +19,8 @@ const emit = defineEmits<{
   'update:engineerOwner': [value: string]
   open: [item: DemoWorkflowDto]
 }>()
+const { locale } = useI18n()
+const stageLabel = (stage: string) => locale.value === 'en-US' ? stage : ({ 'Engineer Review': '工程评估', 'Manager Approval': '经理审批', 'Test Preparation': '测试准备', 'Test Execution': '测试执行', 'Internal Review': '内部评审', 'Customer Review': '客户评审' } as Record<string, string>)[stage] || stage
 
 const stages: DemoLifecycleStage[] = [
   'Engineer Review',
@@ -38,7 +41,7 @@ const filtered = computed(() => {
 
 const salesOwners = computed(() => [...new Set(props.items.map((item) => item.salesOwner))].sort())
 const engineerOwners = computed(() => [...new Set(props.items.map((item) => item.engineerOwner))].sort())
-const boardStages = computed(() => stages.map((stage) => ({ key: stage, label: stage, count: stageItems(stage).length })))
+const boardStages = computed(() => stages.map((stage) => ({ key: stage, label: stageLabel(stage), count: stageItems(stage).length })))
 
 function stageItems(stage: DemoLifecycleStage) {
   return filtered.value.filter((item) => item.stage === stage)
@@ -49,26 +52,26 @@ function stageItems(stage: DemoLifecycleStage) {
   <section class="demo-board" data-demo-board>
     <div class="board-toolbar">
       <label class="health-filter">
-        <span>健康状态</span>
+        <span>{{ locale === 'en-US' ? 'Health' : '健康状态' }}</span>
         <select
           :value="health"
-          aria-label="健康状态"
+          :aria-label="locale === 'en-US' ? 'Health' : '健康状态'"
           @change="emit('update:health', ($event.target as HTMLSelectElement).value as 'all' | DemoHealthLevel)"
         >
-          <option value="all">全部</option>
-          <option value="critical">红色 · 紧迫</option>
-          <option value="stalled">橙色 · 停滞</option>
-          <option value="healthy">绿色 · 正常</option>
+          <option value="all">{{ locale === 'en-US' ? 'All' : '全部' }}</option>
+          <option value="critical">{{ locale === 'en-US' ? 'Red · Critical' : '红色 · 紧迫' }}</option>
+          <option value="stalled">{{ locale === 'en-US' ? 'Orange · Stalled' : '橙色 · 停滞' }}</option>
+          <option value="healthy">{{ locale === 'en-US' ? 'Green · Healthy' : '绿色 · 正常' }}</option>
         </select>
       </label>
       <label class="owner-filter">
         <span>Sales</span>
         <select
           :value="salesOwner"
-          aria-label="Sales Owner"
+          :aria-label="locale === 'en-US' ? 'Sales owner' : 'Sales Owner'"
           @change="emit('update:salesOwner', ($event.target as HTMLSelectElement).value)"
         >
-          <option value="all">全部</option>
+          <option value="all">{{ locale === 'en-US' ? 'All' : '全部' }}</option>
           <option v-for="owner in salesOwners" :key="owner" :value="owner">{{ personnelDisplayName(owner) }}</option>
         </select>
       </label>
@@ -76,22 +79,22 @@ function stageItems(stage: DemoLifecycleStage) {
         <span>Engineer</span>
         <select
           :value="engineerOwner"
-          aria-label="Engineer Owner"
+          :aria-label="locale === 'en-US' ? 'Engineer owner' : 'Engineer Owner'"
           @change="emit('update:engineerOwner', ($event.target as HTMLSelectElement).value)"
         >
-          <option value="all">全部</option>
+          <option value="all">{{ locale === 'en-US' ? 'All' : '全部' }}</option>
           <option v-for="owner in engineerOwners" :key="owner" :value="owner">{{ personnelDisplayName(owner) }}</option>
         </select>
       </label>
     </div>
 
-    <div class="health-legend" aria-label="健康状态规则">
-      <span class="critical"><i></i>红：客户预期 ≤ 7 天</span>
-      <span class="stalled"><i></i>橙：5 天无有效进展</span>
-      <span class="healthy"><i></i>绿：正常推进</span>
+    <div class="health-legend" :aria-label="locale === 'en-US' ? 'Health rules' : '健康状态规则'">
+      <span class="critical"><i></i>{{ locale === 'en-US' ? 'Red: customer expected ≤ 7 days' : '红：客户预期 ≤ 7 天' }}</span>
+      <span class="stalled"><i></i>{{ locale === 'en-US' ? 'Orange: no effective progress for 5 days' : '橙：5 天无有效进展' }}</span>
+      <span class="healthy"><i></i>{{ locale === 'en-US' ? 'Green: progressing normally' : '绿：正常推进' }}</span>
     </div>
 
-    <PipelineBoard :stages="boardStages" :columns="6" aria-label="Demo 全生命周期">
+    <PipelineBoard :stages="boardStages" :columns="6" :aria-label="locale === 'en-US' ? 'Demo lifecycle' : 'Demo 全生命周期'">
       <template #stage="{ stage }">
         <DemoStageColumn :stage="stage.key" :items="stageItems(stage.key)" @open="emit('open', $event)" />
       </template>

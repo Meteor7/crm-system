@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
+import { useI18n } from '@/i18n'
 
 const CUSTOM_SEGMENT = '__custom_account_segment__'
 const props = withDefaults(defineProps<{
@@ -9,6 +10,7 @@ const props = withDefaults(defineProps<{
   required?: boolean
 }>(), { required: false })
 const emit = defineEmits<{ 'update:modelValue': [value: string] }>()
+const { locale, t } = useI18n()
 
 const options = computed(() => [...new Set(props.segments.map((value) => value.trim()).filter(Boolean))])
 const customMode = ref(!options.value.includes(props.modelValue))
@@ -37,14 +39,14 @@ function updateCustomSegment(event: Event) {
   <div class="account-segment-select">
     <select :value="selectedValue" :aria-label="label" :required="required" @change="selectSegment">
       <option v-for="segment in options" :key="segment" :value="segment">{{ segment }}</option>
-      <option :value="CUSTOM_SEGMENT">＋自定义领域</option>
+      <option :value="CUSTOM_SEGMENT">{{ locale === 'en-US' ? '+ Custom area' : '＋自定义领域' }}</option>
     </select>
     <input
       v-if="customMode"
       :value="modelValue"
-      :aria-label="`${label}自定义`"
+      :aria-label="t('common.customField', { label })"
       :required="required"
-      placeholder="请输入自定义业务领域"
+      :placeholder="locale === 'en-US' ? 'Enter a custom business area' : '请输入自定义业务领域'"
       @input="updateCustomSegment"
     />
   </div>

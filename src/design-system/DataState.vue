@@ -1,10 +1,12 @@
 <script setup lang="ts">
 import { AlertTriangle, Ban, Inbox, LoaderCircle, RefreshCw } from '@lucide/vue'
+import { useI18n } from '@/i18n'
 
 withDefaults(defineProps<{ type: 'loading' | 'empty' | 'error' | 'denied'; title?: string; message?: string; requestId?: string }>(), {
   title: '', message: '', requestId: '',
 })
 defineEmits<{ retry: [] }>()
+const { t } = useI18n()
 </script>
 
 <template>
@@ -13,10 +15,10 @@ defineEmits<{ retry: [] }>()
     <Inbox v-else-if="type === 'empty'" :size="28" />
     <AlertTriangle v-else-if="type === 'error'" :size="28" />
     <Ban v-else :size="28" />
-    <strong>{{ title || ({ loading: '正在读取经营数据', empty: '当前没有匹配记录', error: '数据暂时无法加载', denied: '你没有查看权限' }[type]) }}</strong>
-    <p>{{ message || ({ loading: '正在同步客户、商机与情报口径…', empty: '调整筛选条件，或创建第一条业务记录。', error: '请稍后重试；若持续失败，请提供请求编号。', denied: '如需访问，请联系 CRM 管理员调整数据范围。' }[type]) }}</p>
+    <strong>{{ title || t(`state.${type}Title`) }}</strong>
+    <p>{{ message || t(`state.${type}Message`) }}</p>
     <small v-if="requestId">Request ID · {{ requestId }}</small>
-    <button v-if="type === 'error'" type="button" @click="$emit('retry')"><RefreshCw :size="14" />重试</button>
+    <button v-if="type === 'error'" type="button" @click="$emit('retry')"><RefreshCw :size="14" />{{ t('common.retry') }}</button>
   </div>
 </template>
 

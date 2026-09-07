@@ -41,8 +41,8 @@ describe('Booking page', () => {
     expect(wrapper.get('[data-booking-source="OPP-006"]').attributes('href')).toBe('/opportunities/OPP-006')
     expect(wrapper.text()).toContain('FastScan 1200')
     expect(wrapper.text()).toContain('Service Expansion Kit')
-    expect(wrapper.get('select[aria-label="Booking 来源筛选"]').text()).toContain('Opportunity')
-    expect(wrapper.get('select[aria-label="Booking 来源筛选"]').text()).toContain('Upsell')
+    expect(wrapper.get('select[aria-label="来源"]').text()).toContain('Opportunity')
+    expect(wrapper.get('select[aria-label="来源"]').text()).toContain('客户增购')
   })
 
   it('keeps Booking visible when optional account or contact references fail', async () => {
@@ -96,8 +96,8 @@ describe('Booking page', () => {
       .mockImplementationOnce(() => older.promise)
       .mockImplementationOnce(() => latest.promise)
 
-    await wrapper.get('[aria-label="Booking 来源筛选"]').setValue('Upsell')
-    await wrapper.get('[aria-label="Booking 来源筛选"]').setValue('Opportunity')
+    await wrapper.get('[aria-label="来源"]').setValue('Upsell')
+    await wrapper.get('[aria-label="来源"]').setValue('Opportunity')
     latest.resolve(latestResult)
     await flushPromises()
     expect(wrapper.findAll('[data-booking-id]').map((row) => row.attributes('data-booking-id')))
@@ -116,7 +116,7 @@ describe('Booking page', () => {
 
     await wrapper.get('[data-testid="new-booking"]').trigger('click')
     const source = wrapper.get('select[aria-label="Booking 来源"]')
-    expect(source.findAll('option').map((option) => option.text())).toEqual(['Opportunity', 'Upsell'])
+    expect(source.findAll('option').map((option) => option.text())).toEqual(['Opportunity', '客户增购'])
     expect(wrapper.find('input[aria-label="Booking 直接来源"]').exists()).toBe(false)
     expect(wrapper.find('input[aria-label="Booking 直接创建原因"]').exists()).toBe(false)
   })
@@ -156,14 +156,14 @@ describe('Booking page', () => {
     await flushPromises()
     expect(wrapper.get('[role="dialog"]').text()).toContain('转入 Installed Tool')
     expect(wrapper.get('select[aria-label="负责工程师"]').text()).toContain('演示员工14 · FAE')
-    expect(wrapper.get('select[aria-label="负责工程师"]').text()).toContain('演示员工15 · Engineer')
+    expect(wrapper.get('select[aria-label="负责工程师"]').text()).toContain('演示员工15 · 工程师')
     expect((wrapper.get('select[aria-label="客户厂区"]').element as HTMLSelectElement).value).toBe('SITE-006')
     await wrapper.get('[data-modal-submit]').trigger('submit')
     await flushPromises()
     expect(convert).toHaveBeenCalledWith('BKG-001', expect.any(Object), version)
 
     const archived = wrapper.get('[data-booking-id="BKG-001"]')
-    expect(archived.text()).toContain('Completed')
+    expect(archived.text()).toContain('已完成')
     expect(archived.text()).toContain('TOOL-004')
     expect(archived.find('[data-testid="convert-BKG-001"]').exists()).toBe(false)
   })

@@ -64,6 +64,17 @@ describe('Demo Request Word form', () => {
     expect(errors).not.toHaveProperty('contactPerson')
   })
 
+  it('formats UI validation messages for English without changing default validator output', () => {
+    const form = createEmptyDemoRequestFormData()
+
+    expect(validateDemoRequestFormData(form, { locale: 'en-US' })).toMatchObject({
+      industry: 'Enter Industry',
+      salesContact: 'Enter Sales Contact',
+      wafers: 'Add at least one Wafer Details row',
+    })
+    expect(validateDemoRequestFormData(form).industry).toBe('请填写 Industry')
+  })
+
   it('does not require Customer Information fields for Self Test', () => {
     const form = createEmptyDemoRequestFormData()
     const errors = validateDemoRequestFormData(form, { requireCustomerInformation: false })

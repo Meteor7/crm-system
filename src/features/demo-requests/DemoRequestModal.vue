@@ -1,13 +1,15 @@
 <script setup lang="ts">
+import { opportunityStageLabel } from '@/features/shared/sales-i18n'
 import { computed, reactive, ref, watch } from 'vue'
 import { api as defaultApi, type CrmApi } from '@/api'
 import type { AccountSummaryDto, ContactSummaryDto, CreateDemoRequestInput, DemoRequestCommand, DemoRequestDto, DemoRequestFormData } from '@/types/crm'
 import type { StrategyOpportunityDto } from '@/types/workspaces'
 import { applyDemoRequestImport, cloneDemoRequestFormData, createEmptyDemoRequestFormData, getDemoRequestFormData, validateDemoRequestFormData } from '@/domain/demo-request-form'
-import { mapRequestError } from '@/api/request-state'
+import { requestErrorMessage } from '@/api/request-state'
 import ModalShell from '@/design-system/ModalShell.vue'
 import RequiredMark from '@/design-system/RequiredMark.vue'
 import DemoRequestForm from './DemoRequestForm.vue'
+import { useI18n, useLocaleMessage, localeMessage } from '@/i18n'
 
 const props = defineProps<{
   mode: 'create' | 'edit' | 'engineer' | 'manager'
@@ -21,6 +23,7 @@ const props = defineProps<{
   apiClient?: CrmApi
 }>()
 const emit = defineEmits<{ close: []; submit: [payload: CreateDemoRequestInput | DemoRequestCommand]; 'create-contact': [accountId: string] }>()
+const { locale } = useI18n()
 
 const accountId = ref('')
 const opportunityId = ref('')
@@ -28,14 +31,17 @@ const SELF_TEST_OPTION = '__SELF_TEST__'
 const opportunitySearch = ref('')
 const loadedOpportunities = ref<StrategyOpportunityDto[]>([])
 const opportunityLoading = ref(false)
+const opportunityLoadError = useLocaleMessage()
 const primaryContactId = ref('')
 const formData = ref<DemoRequestFormData>(createEmptyDemoRequestFormData())
 const errors = ref<Record<string, string>>({})
+type ValidationSnapshot = Record<'en-US' | 'zh-CN', Record<string, string>>
+const validationSnapshot = ref<ValidationSnapshot | null>(null)
 const submitImmediately = ref(true)
 const customerExpectedDate = ref('')
 const importBusy = ref(false)
-const importError = ref('')
-const importNotice = ref('')
+const importError = useLocaleMessage()
+const importNotice = useLocaleMessage()
 const isSelfTest = computed(() => opportunityId.value === SELF_TEST_OPTION)
 const review = reactive({ decision: 'approve', engineerOwner: '', testPlan: '', assignedEquipment: '', resourceWindow: '', estimatedCompletionDate: '2026-08-15', technicalRisk: '', comment: '' })
 
@@ -52,6 +58,7 @@ async function loadOpportunities() {
   if (props.opportunities || !accountId.value || (props.mode !== 'create' && props.mode !== 'edit')) return
   const request = ++opportunityRequest
   opportunityLoading.value = true
+  opportunityLoadError.value = ''
   try {
     const query = { accountId: accountId.value, search: opportunitySearch.value.trim(), page: 1, pageSize: 20 }
     const results = await Promise.all([
@@ -66,8 +73,9 @@ async function loadOpportunities() {
       eligible.unshift(linked.data)
     }
     loadedOpportunities.value = Array.from(new Map(eligible.map((item) => [item.id, item])).values())
+    opportunityLoadError.value = ''
   } catch (reason) {
-    if (request === opportunityRequest) errors.value.opportunityId = mapRequestError(reason).message
+    if (request === opportunityRequest) opportunityLoadError.value = requestErrorMessage(reason, localeMessage('Unable to load eligible opportunities.', '暂时无法读取可关联的 Opportunity。'))
   } finally {
     if (request === opportunityRequest) opportunityLoading.value = false
   }
@@ -81,6 +89,8 @@ watch(() => [props.mode, props.request, props.accounts, props.currentSalesContac
     ? getDemoRequestFormData(props.request)
     : createEmptyDemoRequestFormData(props.currentSalesContact || '')
   errors.value = {}
+  opportunityLoadError.value = ''
+  validationSnapshot.value = null
   submitImmediately.value = true
   customerExpectedDate.value = props.request?.customerExpectedDate || ''
   review.decision = 'approve'
@@ -105,6 +115,14 @@ watch(accountId, () => {
   void loadOpportunities()
 })
 watch(opportunitySearch, () => { void loadOpportunities() })
+watch(locale, () => {
+  if (!validationSnapshot.value) return
+  const validationKeys = new Set([...Object.keys(validationSnapshot.value['en-US']), ...Object.keys(validationSnapshot.value['zh-CN'])])
+  const refreshed = { ...errors.value }
+  validationKeys.forEach((key) => { delete refreshed[key] })
+  Object.assign(refreshed, validationSnapshot.value[locale.value])
+  errors.value = refreshed
+})
 
 async function importCompletedForm(event: Event) {
   const input = event.target as HTMLInputElement
@@ -113,12 +131,12 @@ async function importCompletedForm(event: Event) {
   importError.value = ''
   importNotice.value = ''
   if (!/\.(pdf|docx)$/i.test(file.name)) {
-    importError.value = '仅支持 PDF 或 Word（.docx）文件'
+    importError.value = localeMessage('Only PDF or Word (.docx) files are supported', '仅支持 PDF 或 Word（.docx）文件')
     input.value = ''
     return
   }
   if (!file.size || file.size > 100 * 1024 * 1024) {
-    importError.value = '文件不能为空且不能超过 100 MiB'
+    importError.value = localeMessage('File cannot be empty and must not exceed 100 MiB', '文件不能为空且不能超过 100 MiB')
     input.value = ''
     return
   }
@@ -143,9 +161,10 @@ async function importCompletedForm(event: Event) {
     if (applied.primaryContactId) primaryContactId.value = applied.primaryContactId
     if (applied.customerExpectedDate) customerExpectedDate.value = applied.customerExpectedDate
     errors.value = {}
-    importNotice.value = `已从 ${response.data.fileName} 识别并回填 ${response.data.detectedFields.length} 个字段，请检查后再保存。`
+    validationSnapshot.value = null
+    importNotice.value = localeMessage(`Detected ${response.data.detectedFields.length} fields from ${response.data.fileName}; review before saving.`, `已从 ${response.data.fileName} 识别并回填 ${response.data.detectedFields.length} 个字段，请检查后再保存。`)
   } catch (reason) {
-    importError.value = mapRequestError(reason).message
+    importError.value = requestErrorMessage(reason, localeMessage('Demo Request form import failed. Please retry.', 'Demo Request 表单导入失败，请重试。'))
   } finally {
     importBusy.value = false
     input.value = ''
@@ -154,10 +173,19 @@ async function importCompletedForm(event: Event) {
 
 function submit() {
   if (props.mode === 'create' || props.mode === 'edit') {
-    errors.value = validateDemoRequestFormData(formData.value, { requireCustomerInformation: !isSelfTest.value })
-    if (!isSelfTest.value && !primaryContactId.value) errors.value.primaryContactId = '请选择主要联系人'
-    if (!opportunityId.value) errors.value.opportunityId = '请选择关联 Opportunity 或自测'
-    if (!customerExpectedDate.value) errors.value.customerExpectedDate = '请填写客户期望时间'
+    const validationSnapshotValue: ValidationSnapshot = {
+      'en-US': validateDemoRequestFormData(formData.value, { requireCustomerInformation: !isSelfTest.value, locale: 'en-US' }),
+      'zh-CN': validateDemoRequestFormData(formData.value, { requireCustomerInformation: !isSelfTest.value, locale: 'zh-CN' }),
+    }
+    const addModalValidation = (messages: Record<string, string>, language: 'en-US' | 'zh-CN') => {
+      if (!isSelfTest.value && !primaryContactId.value) messages.primaryContactId = language === 'en-US' ? 'Select a primary contact' : '请选择主要联系人'
+      if (!opportunityId.value) messages.opportunityId = language === 'en-US' ? 'Select an opportunity or self-test' : '请选择关联 Opportunity 或自测'
+      if (!customerExpectedDate.value) messages.customerExpectedDate = language === 'en-US' ? 'Enter the customer expected date' : '请填写客户期望时间'
+    }
+    addModalValidation(validationSnapshotValue['en-US'], 'en-US')
+    addModalValidation(validationSnapshotValue['zh-CN'], 'zh-CN')
+    validationSnapshot.value = validationSnapshotValue
+    errors.value = { ...validationSnapshotValue[locale.value] }
     if (Object.keys(errors.value).length) return
     emit('submit', {
       accountId: isSelfTest.value ? '' : accountId.value,
@@ -182,8 +210,8 @@ function submit() {
 
 <template>
   <ModalShell
-    :title="mode === 'create' ? '新建 Demo Request' : mode === 'edit' ? '修改 Demo Request' : mode === 'engineer' ? 'FAE Review' : 'Boss Approval'"
-    :eyebrow="mode === 'create' || mode === 'edit' ? 'DEMO REQUEST FORM' : mode === 'engineer' ? 'FAE REVIEW' : 'BOSS APPROVAL'"
+    :title="mode === 'create' ? (locale === 'en-US' ? 'New Demo Request' : '新建 Demo Request') : mode === 'edit' ? (locale === 'en-US' ? 'Edit Demo Request' : '修改 Demo Request') : mode === 'engineer' ? (locale === 'en-US' ? 'FAE Review' : '工程评估') : (locale === 'en-US' ? 'Boss Approval' : '经理审批')"
+    :eyebrow="mode === 'create' || mode === 'edit' ? (locale === 'en-US' ? 'DEMO REQUEST FORM' : 'DEMO REQUEST 表单') : mode === 'engineer' ? (locale === 'en-US' ? 'FAE REVIEW' : '工程评估') : (locale === 'en-US' ? 'BOSS APPROVAL' : '经理审批')"
     :busy="busy"
     :wide="mode === 'create' || mode === 'edit'"
     @close="$emit('close')"
@@ -192,11 +220,11 @@ function submit() {
     <template v-if="mode === 'create' || mode === 'edit'">
       <section class="drf-import-panel" data-demo-request-import>
         <div>
-          <strong>导入已填写的 DRF</strong>
-          <span>支持 PDF 和 Word（.docx），自动识别后回填当前表单，不会自动提交。</span>
+          <strong>{{ locale === 'en-US' ? 'Import completed DRF' : '导入已填写的 DRF' }}</strong>
+          <span>{{ locale === 'en-US' ? 'PDF and Word (.docx) are supported. Fields are filled into this form for review; nothing is submitted automatically.' : '支持 PDF 和 Word（.docx），自动识别后回填当前表单，不会自动提交。' }}</span>
         </div>
         <label class="drf-import-button" :class="{ disabled: importBusy || busy }">
-          {{ importBusy ? '正在识别…' : '选择文件并识别' }}
+          {{ importBusy ? (locale === 'en-US' ? 'Recognizing…' : '正在识别…') : (locale === 'en-US' ? 'Choose file and recognize' : '选择文件并识别') }}
           <input
             data-import-demo-request-input
             type="file"
@@ -209,20 +237,20 @@ function submit() {
         <p v-if="importError" class="import-error" data-demo-request-import-error>{{ importError }}</p>
       </section>
       <div class="request-meta-grid">
-        <label>关联 Opportunity / 自测<RequiredMark :show="mode === 'create'" />
-          <input v-model="opportunitySearch" aria-label="搜索 Opportunity" type="search" placeholder="按编号或名称搜索" />
-          <select v-model="opportunityId" aria-label="关联 Opportunity" required :disabled="mode === 'edit' || opportunityLoading">
-            <option value="">{{ opportunityLoading ? '正在读取…' : '请选择 Opportunity 或自测' }}</option>
-            <option :value="SELF_TEST_OPTION">自测（无需关联 Opportunity）</option>
+        <label>{{ locale === 'en-US' ? 'Opportunity / self-test' : '关联 Opportunity / 自测' }}<RequiredMark :show="mode === 'create'" />
+          <input v-model="opportunitySearch" :aria-label="locale === 'en-US' ? 'Search opportunity' : '搜索 Opportunity'" type="search" :placeholder="locale === 'en-US' ? 'Search by number or name' : '按编号或名称搜索'" />
+          <select v-model="opportunityId" :aria-label="locale === 'en-US' ? 'Linked opportunity' : '关联 Opportunity'" required :disabled="mode === 'edit' || opportunityLoading">
+            <option value="">{{ opportunityLoading ? (locale === 'en-US' ? 'Loading…' : '正在读取…') : (locale === 'en-US' ? 'Select an opportunity or self-test' : '请选择 Opportunity 或自测') }}</option>
+            <option :value="SELF_TEST_OPTION">{{ locale === 'en-US' ? 'Self-test (no opportunity link)' : '自测（无需关联 Opportunity）' }}</option>
             <option v-for="opportunity in opportunityOptions" :key="opportunity.id" :value="opportunity.id">
-              {{ opportunity.id }} · {{ opportunity.title }} · {{ opportunity.stage }}
+              {{ opportunity.id }} · {{ opportunity.title }} · {{ opportunityStageLabel(opportunity.stage, locale) }}
             </option>
           </select>
-          <small v-if="errors.opportunityId" data-field-error="opportunityId">{{ errors.opportunityId }}</small>
+          <small v-if="errors.opportunityId || opportunityLoadError" data-field-error="opportunityId">{{ errors.opportunityId || opportunityLoadError }}</small>
         </label>
-        <label>客户期望时间<RequiredMark :show="mode === 'create'" />
-          <input v-model="customerExpectedDate" aria-label="客户期望时间" type="date" required />
-          <small>仅用于系统排期与沟通，不写入 Demo Request Word</small>
+        <label>{{ locale === 'en-US' ? 'Customer expected date' : '客户期望时间' }}<RequiredMark :show="mode === 'create'" />
+          <input v-model="customerExpectedDate" :aria-label="locale === 'en-US' ? 'Customer expected date' : '客户期望时间'" type="date" required />
+          <small>{{ locale === 'en-US' ? 'Used for scheduling and communication only; not written to the Demo Request Word file.' : '仅用于系统排期与沟通，不写入 Demo Request Word' }}</small>
           <small v-if="errors.customerExpectedDate" data-field-error="customerExpectedDate">{{ errors.customerExpectedDate }}</small>
         </label>
       </div>
@@ -238,20 +266,20 @@ function submit() {
         :hide-customer-information="isSelfTest"
         @create-contact="emit('create-contact', accountId)"
       />
-      <label class="submit-choice"><input v-model="submitImmediately" type="checkbox" />{{ mode === 'edit' ? '保存后重新提交 FAE Review' : '创建后直接提交 FAE Review' }}</label>
+      <label class="submit-choice"><input v-model="submitImmediately" type="checkbox" />{{ mode === 'edit' ? (locale === 'en-US' ? 'Resubmit for FAE Review after saving' : '保存后重新提交 FAE Review') : (locale === 'en-US' ? 'Submit for FAE Review after creating' : '创建后直接提交 FAE Review') }}</label>
     </template>
     <div v-else-if="mode === 'engineer'" class="form-grid">
-      <label>评估结论<select v-model="review.decision"><option value="approve">确认可做</option><option value="return">退回 Sales</option></select></label>
-      <label class="full">测试方案<textarea v-model="review.testPlan" /></label>
-      <label>分配设备<input v-model="review.assignedEquipment" /></label>
-      <label>资源窗口<input v-model="review.resourceWindow" placeholder="2026-08-01 ~ 2026-08-10" /></label>
-      <label>预计完成<input v-model="review.estimatedCompletionDate" type="date" /></label>
-      <label>技术风险<input v-model="review.technicalRisk" /></label>
-      <label class="full">工程意见 / 退回原因<textarea v-model="review.comment" aria-label="工程评估意见" /></label>
+      <label>{{ locale === 'en-US' ? 'Assessment decision' : '评估结论' }}<select v-model="review.decision"><option value="approve">{{ locale === 'en-US' ? 'Confirm feasible' : '确认可做' }}</option><option value="return">{{ locale === 'en-US' ? 'Return to Sales' : '退回 Sales' }}</option></select></label>
+      <label class="full">{{ locale === 'en-US' ? 'Test plan' : '测试方案' }}<textarea v-model="review.testPlan" /></label>
+      <label>{{ locale === 'en-US' ? 'Assigned equipment' : '分配设备' }}<input v-model="review.assignedEquipment" /></label>
+      <label>{{ locale === 'en-US' ? 'Resource window' : '资源窗口' }}<input v-model="review.resourceWindow" placeholder="2026-08-01 ~ 2026-08-10" /></label>
+      <label>{{ locale === 'en-US' ? 'Estimated completion' : '预计完成' }}<input v-model="review.estimatedCompletionDate" type="date" /></label>
+      <label>{{ locale === 'en-US' ? 'Technical risk' : '技术风险' }}<input v-model="review.technicalRisk" /></label>
+      <label class="full">{{ locale === 'en-US' ? 'Engineer comment / return reason' : '工程意见 / 退回原因' }}<textarea v-model="review.comment" :aria-label="locale === 'en-US' ? 'Engineer assessment comment' : '工程评估意见'" /></label>
     </div>
     <div v-else class="form-grid">
-      <label>审批决定<select v-model="review.decision"><option value="approve">批准并转 Demo</option><option value="reject">驳回 Sales</option></select></label>
-      <label class="full">Boss 审批意见<textarea v-model="review.comment" aria-label="Boss 审批意见" /></label>
+      <label>{{ locale === 'en-US' ? 'Approval decision' : '审批决定' }}<select v-model="review.decision"><option value="approve">{{ locale === 'en-US' ? 'Approve and convert to Demo' : '批准并转 Demo' }}</option><option value="reject">{{ locale === 'en-US' ? 'Reject Sales' : '驳回 Sales' }}</option></select></label>
+      <label class="full">{{ locale === 'en-US' ? 'Boss approval comment' : 'Boss 审批意见' }}<textarea v-model="review.comment" :aria-label="locale === 'en-US' ? 'Boss approval comment' : 'Boss 审批意见'" /></label>
     </div>
   </ModalShell>
 </template>

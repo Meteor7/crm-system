@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { accounts, demoRequests } from '@/api/mock-data'
 import { createMockApi } from '@/api/mock-adapter'
 import { createEmptyDemoRequestFormData } from '@/domain/demo-request-form'
+import { setLocale } from '@/i18n'
 import { opportunities } from '@/demo/operations-data'
 import DemoRequestForm from './DemoRequestForm.vue'
 import DemoRequestModal from './DemoRequestModal.vue'
@@ -189,6 +190,30 @@ describe('DemoRequestForm', () => {
     expect(wrapper.find('[data-field-error="complementaryTool"]').exists()).toBe(false)
   })
 
+  it('updates submitted validation errors on locale change without resetting the form draft', async () => {
+    setLocale('zh-CN')
+    const wrapper = mount(DemoRequestModal, {
+      props: { mode: 'create', accounts, opportunities, currentSalesContact: 'person002@crm.example.invalid' },
+    })
+
+    await wrapper.get('[name="primaryTool"]').setValue('Aconca FS Edge')
+    await wrapper.get('.modal-card form').trigger('submit')
+    expect(wrapper.get('[data-field-error="industry"]').text()).toContain('请填写')
+
+    await wrapper.get('[name="industry"]').setValue('Frontend Fab')
+    setLocale('en-US')
+    await flushPromises()
+    expect(wrapper.get('[data-field-error="industry"]').text()).toBe('Enter Industry')
+    expect((wrapper.get('[name="industry"]').element as HTMLInputElement).value).toBe('Frontend Fab')
+    expect((wrapper.get('[name="primaryTool"]').element as HTMLInputElement).value).toBe('Aconca FS Edge')
+
+    await wrapper.get('.modal-card form').trigger('submit')
+    expect(wrapper.find('[data-field-error="industry"]').exists()).toBe(false)
+
+    setLocale('zh-CN')
+    wrapper.unmount()
+  })
+
   it('submits customer expected date without materializing a system Q&A assignment', async () => {
     const wrapper = mount(DemoRequestModal, {
       props: {
@@ -208,7 +233,7 @@ describe('DemoRequestForm', () => {
 
     expect(wrapper.get('[aria-label="客户期望时间"]').element).toBeInstanceOf(HTMLInputElement)
     expect(wrapper.find('[aria-label="Q&A 分配"]').exists()).toBe(false)
-    expect(wrapper.text()).toContain('Customer Questions for Internal Team')
+    expect(wrapper.text()).toContain('客户给内部团队的问题')
 
     await wrapper.get('[aria-label="客户期望时间"]').setValue('2026-09-15')
     await wrapper.get('.modal-card form').trigger('submit')

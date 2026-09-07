@@ -2,6 +2,8 @@
 import { computed, nextTick, ref } from 'vue'
 import { Check, ChevronDown, Plus, Search } from '@lucide/vue'
 import type { QuotationCatalogItemDto } from './types'
+import { useI18n } from '@/i18n'
+import { quotationCatalogLabel } from './catalog-labels'
 
 const props = withDefaults(defineProps<{
   options: QuotationCatalogItemDto[]
@@ -14,6 +16,7 @@ const props = withDefaults(defineProps<{
   disabled?: boolean
 }>(), { selectedIds: () => [], multiple: false, disabled: false })
 const emit = defineEmits<{ select: [item: QuotationCatalogItemDto]; custom: [name: string] }>()
+const { locale } = useI18n()
 
 const open = ref(false)
 const search = ref('')
@@ -21,7 +24,7 @@ const customName = ref('')
 const searchInput = ref<HTMLInputElement>()
 const normalizedSearch = computed(() => search.value.trim().toLocaleLowerCase())
 const filteredOptions = computed(() => props.options.filter((item) =>
-  !normalizedSearch.value || item.name.toLocaleLowerCase().includes(normalizedSearch.value),
+  !normalizedSearch.value || [item.name, quotationCatalogLabel(item.name, locale.value)].some((name) => name.toLocaleLowerCase().includes(normalizedSearch.value)),
 ))
 
 async function toggle() {
@@ -56,18 +59,18 @@ function closeOnFocusOut(event: FocusEvent) {
       <Plus :size="14" aria-hidden="true" /><span>{{ placeholder }}</span><ChevronDown :size="14" aria-hidden="true" />
     </button>
     <div v-if="open" class="catalog-menu">
-      <label class="catalog-search"><Search :size="14" aria-hidden="true" /><input ref="searchInput" v-model="search" :aria-label="`${label}搜索`" placeholder="搜索已有选项" /></label>
+      <label class="catalog-search"><Search :size="14" aria-hidden="true" /><input ref="searchInput" v-model="search" :aria-label="locale === 'en-US' ? `${label} search` : `${label}搜索`" :placeholder="locale === 'en-US' ? 'Search existing options' : '搜索已有选项'" /></label>
       <div class="catalog-options" role="listbox" :aria-label="label" :aria-multiselectable="multiple">
         <button v-for="item in filteredOptions" :key="item.id" type="button" role="option" :aria-selected="selectedIds.includes(item.id)" :disabled="selectedIds.includes(item.id)" @click="choose(item)">
-          <span>{{ item.name }}</span><Check v-if="selectedIds.includes(item.id)" :size="13" aria-hidden="true" />
+          <span>{{ quotationCatalogLabel(item.name, locale) }}</span><Check v-if="selectedIds.includes(item.id)" :size="13" aria-hidden="true" />
         </button>
-        <p v-if="!filteredOptions.length">没有匹配的已有选项</p>
+        <p v-if="!filteredOptions.length">{{ locale === 'en-US' ? 'No existing options match' : '没有匹配的已有选项' }}</p>
       </div>
       <div class="catalog-custom">
-        <input v-model="customName" :aria-label="`${label}自定义名称`" :placeholder="customPlaceholder" maxlength="140" @keydown.enter.prevent="addCustom" />
-        <button type="button" :disabled="!customName.trim()" :aria-label="`新增自定义${label}`" @click="addCustom"><Plus :size="14" aria-hidden="true" /></button>
+        <input v-model="customName" :aria-label="locale === 'en-US' ? `${label} custom name` : `${label}自定义名称`" :placeholder="customPlaceholder" maxlength="140" @keydown.enter.prevent="addCustom" />
+        <button type="button" :disabled="!customName.trim()" :aria-label="locale === 'en-US' ? `Add custom ${label}` : `新增自定义${label}`" @click="addCustom"><Plus :size="14" aria-hidden="true" /></button>
       </div>
-      <small>自定义内容将在提交审批或直接发布后加入全局目录</small>
+      <small>{{ locale === 'en-US' ? 'Custom entries are added to the global catalog after submission or publication.' : '自定义内容将在提交审批或直接发布后加入全局目录' }}</small>
     </div>
   </div>
 </template>

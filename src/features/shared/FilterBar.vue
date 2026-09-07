@@ -1,16 +1,18 @@
 <script setup lang="ts">
 import { RotateCcw, SlidersHorizontal } from '@lucide/vue'
+import { useI18n } from '@/i18n'
 
 defineProps<{ resultLabel?: string }>()
 defineEmits<{ reset: [] }>()
+const { t } = useI18n()
 </script>
 
 <template>
   <div class="filter-bar">
-    <div class="filter-title"><SlidersHorizontal :size="15" /><span>筛选</span></div>
+    <div class="filter-title"><SlidersHorizontal :size="15" /><span>{{ t('common.filter') }}</span></div>
     <div class="filter-fields"><slot /></div>
     <span v-if="resultLabel" class="result-label">{{ resultLabel }}</span>
-    <button class="reset-button" type="button" @click="$emit('reset')"><RotateCcw :size="13" />重置条件</button>
+    <button class="reset-button" type="button" @click="$emit('reset')"><RotateCcw :size="13" />{{ t('common.reset') }}</button>
   </div>
 </template>
 

@@ -35,7 +35,7 @@ describe('Leads pages', () => {
 
     expect(wrapper.findAll('[data-lead-id]')).toHaveLength(6)
     expect(wrapper.find('[data-testid="lead-search"]').exists()).toBe(false)
-    await wrapper.get('[aria-label="Lead 状态筛选"]').setValue('Qualified')
+    await wrapper.get('[aria-label="状态"]').setValue('Qualified')
     await flushPromises()
     expect(wrapper.findAll('[data-lead-id]')).toHaveLength(2)
 
@@ -50,17 +50,17 @@ describe('Leads pages', () => {
     const wrapper = mount(LeadListView, { props: { apiClient: api }, global: { plugins: [pinia, router] } })
     await flushPromises()
 
-    await wrapper.get('[aria-label="Lead 状态筛选"]').setValue('Qualified')
+    await wrapper.get('[aria-label="状态"]').setValue('Qualified')
     await flushPromises()
     await wrapper.get('[data-testid="new-lead"]').trigger('click')
-    await wrapper.get('[aria-label="Lead 姓名"]').setValue('韩宁')
-    await wrapper.get('[aria-label="Lead 公司"]').setValue('北京示例半导体有限公司')
-    await wrapper.get('[aria-label="Lead 职位"]').setValue('工艺经理')
-    await wrapper.get('[aria-label="Lead 电话"]').setValue('+86 10 5555 0101')
+    await wrapper.get('[aria-label="姓名"]').setValue('韩宁')
+    await wrapper.get('[aria-label="公司"]').setValue('北京示例半导体有限公司')
+    await wrapper.get('[aria-label="职位"]').setValue('工艺经理')
+    await wrapper.get('[aria-label="电话"]').setValue('+86 10 5555 0101')
     await wrapper.get('[data-modal-submit]').trigger('submit')
     await flushPromises()
 
-    expect(wrapper.get('[aria-label="Lead 状态筛选"]').element).toHaveProperty('value', 'All')
+    expect(wrapper.get('[aria-label="状态"]').element).toHaveProperty('value', 'All')
     expect(wrapper.text()).toContain('韩宁')
     expect(wrapper.text()).toContain('北京示例半导体有限公司')
   })
@@ -119,7 +119,7 @@ describe('Leads pages', () => {
     await flushPromises()
 
     expect(wrapper.text()).toContain('已电话确认，客户将在本季度评估设备。')
-    expect(wrapper.text()).toContain('Working')
+    expect(wrapper.text()).toContain('跟进中')
     await expect(api.getLead('LEAD-002')).resolves.toMatchObject({
       data: {
         firstContactNote: '已电话确认，客户将在本季度评估设备。',
@@ -173,19 +173,19 @@ describe('Leads pages', () => {
 
     expect(wrapper.text()).toContain('周启明')
     expect(wrapper.text()).toContain('示例企业016有限公司')
-    expect(wrapper.text()).toContain('Trade Show')
+    expect(wrapper.text()).toContain('展会')
     expect(wrapper.text()).toContain('SEMICON China')
 
     await wrapper.get('[data-testid="convert-lead"]').trigger('click')
     await flushPromises()
     expect(wrapper.find('[aria-label="Opportunity 名称"]').attributes('required')).toBeDefined()
-    expect(wrapper.find('[aria-label="新客户简称"]').exists()).toBe(true)
-    expect(wrapper.find('[aria-label="新厂区名称"]').exists()).toBe(true)
+    expect(wrapper.find('[aria-label="客户简称"]').exists()).toBe(true)
+    expect(wrapper.find('[aria-label="厂区名称"]').exists()).toBe(true)
     expect(wrapper.find('[aria-label="新联系人部门"]').exists()).toBe(true)
-    await wrapper.get('[aria-label="新客户业务领域"]').setValue('__custom_account_segment__')
-    await wrapper.get('[aria-label="新客户业务领域自定义"]').setValue('Power Semiconductor')
+    await wrapper.get('[aria-label="业务领域"]').setValue('__custom_account_segment__')
+    await wrapper.get('[aria-label="业务领域自定义"]').setValue('Power Semiconductor')
     await wrapper.get('[aria-label="Opportunity 名称"]').setValue('示例企业016缺陷检测正式商机')
-    await wrapper.get('[aria-label="Opportunity 金额"]').setValue(9800000)
+    await wrapper.get('[aria-label="金额"]').setValue(9800000)
     await wrapper.get('[data-modal-submit]').trigger('submit')
     await flushPromises()
 

@@ -1,12 +1,14 @@
 <script setup lang="ts">
+import { useI18n } from '@/i18n'
 defineProps<{ src: string }>()
+const { locale } = useI18n()
 </script>
 
 <template>
   <iframe
     class="quotation-preview"
     data-testid="quotation-preview"
-    title="报价单 PDF 预览"
+    :title="locale === 'en-US' ? 'Quotation PDF preview' : '报价单 PDF 预览'"
     :src="src"
   />
 </template>

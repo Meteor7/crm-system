@@ -5,6 +5,8 @@ import type { AccountSummaryDto, ContactDto, ContactStatus, ContactSummaryDto, C
 import ModalShell from '@/design-system/ModalShell.vue'
 import RequiredMark from '@/design-system/RequiredMark.vue'
 import PersonnelSelect from '@/design-system/PersonnelSelect.vue'
+import { useI18n } from '@/i18n'
+import { contactStatusLabel, salesEnumLabel } from '@/features/shared/sales-i18n'
 
 const props = defineProps<{
   contact?: ContactDto | null
@@ -17,6 +19,7 @@ const props = defineProps<{
   canDelete?: boolean
 }>()
 const emit = defineEmits<{ close: []; submit: [payload: CreateContactInput]; delete: [] }>()
+const { locale, t } = useI18n()
 
 const form = reactive({
   accountId: '',
@@ -78,20 +81,20 @@ function submit() {
 </script>
 
 <template>
-  <ModalShell :title="contact ? '编辑联系人' : '新增联系人'" eyebrow="CONTACT MASTER" :busy="busy" @close="emit('close')" @submit="submit">
+  <ModalShell :title="contact ? (locale === 'en-US' ? 'Edit contact' : '编辑联系人') : (locale === 'en-US' ? 'New contact' : '新增联系人')" eyebrow="CONTACT MASTER" :busy="busy" @close="emit('close')" @submit="submit">
     <p v-if="error" class="form-error">{{ error }}</p>
     <div class="contact-form">
-      <label><span>姓名<RequiredMark :show="!contact" /></span><input v-model="form.name" aria-label="联系人姓名" required /></label>
-      <label><span>所属客户<RequiredMark :show="!contact" /></span><select v-model="form.accountId" aria-label="所属客户" :disabled="Boolean(fixedAccountId)" required><option v-for="account in accounts" :key="account.id" :value="account.id">{{ account.name }}</option></select></label>
-      <label><span>所属厂区</span><select v-model="form.siteId" aria-label="所属厂区"><option value="">未指定</option><option v-for="site in accountSites" :key="site.id" :value="site.id" :data-site-option="site.id">{{ site.name }}</option></select></label>
-      <label><span>职位<RequiredMark :show="!contact" /></span><input v-model="form.title" aria-label="联系人职位" required /></label>
-      <label><span>部门<RequiredMark :show="!contact" /></span><input v-model="form.department" aria-label="联系人部门" required /></label>
-      <label><span>电话</span><input v-model="form.phone" aria-label="联系人电话" /></label>
-      <label><span>邮箱</span><input v-model="form.email" aria-label="联系人邮箱" type="email" /></label>
-      <label><span>直属上司</span><select v-model="form.reportsToContactId" aria-label="直属上司"><option value="">未指定</option><option v-for="item in reportingOptions" :key="item.id" :value="item.id" :data-reports-to-option="item.id">{{ item.name }} · {{ item.title }}</option></select></label>
-      <label><span>关系强度</span><select v-model="form.relationship" aria-label="关系强度"><option>Strong</option><option>Developing</option><option>Weak</option></select></label>
-      <label><span>负责人<RequiredMark :show="!contact" /></span><PersonnelSelect v-model="form.owner" :roles="['Sales']" :ariaLabel="'\u8054\u7cfb\u4eba\u8d1f\u8d23\u4eba'" required /></label>
-      <label class="wide"><span>状态</span><select v-model="form.status" aria-label="联系人状态"><option>Active</option><option>Left Company</option><option>Archived</option></select></label>
+      <label><span>{{ locale === 'en-US' ? 'Name' : '姓名' }}<RequiredMark :show="!contact" /></span><input v-model="form.name" :aria-label="locale === 'en-US' ? 'Contact name' : '联系人姓名'" required /></label>
+      <label><span>{{ locale === 'en-US' ? 'Account' : '所属客户' }}<RequiredMark :show="!contact" /></span><select v-model="form.accountId" :aria-label="locale === 'en-US' ? 'Account' : '所属客户'" :disabled="Boolean(fixedAccountId)" required><option v-for="account in accounts" :key="account.id" :value="account.id">{{ account.name }}</option></select></label>
+      <label><span>{{ locale === 'en-US' ? 'Site' : '所属厂区' }}</span><select v-model="form.siteId" :aria-label="locale === 'en-US' ? 'Site' : '所属厂区'"><option value="">{{ t('detail.notSpecified') }}</option><option v-for="site in accountSites" :key="site.id" :value="site.id" :data-site-option="site.id">{{ site.name }}</option></select></label>
+      <label><span>{{ locale === 'en-US' ? 'Title' : '职位' }}<RequiredMark :show="!contact" /></span><input v-model="form.title" :aria-label="locale === 'en-US' ? 'Contact title' : '联系人职位'" required /></label>
+      <label><span>{{ locale === 'en-US' ? 'Department' : '部门' }}<RequiredMark :show="!contact" /></span><input v-model="form.department" :aria-label="locale === 'en-US' ? 'Contact department' : '联系人部门'" required /></label>
+      <label><span>{{ t('detail.phone') }}</span><input v-model="form.phone" :aria-label="locale === 'en-US' ? 'Contact phone' : '联系人电话'" /></label>
+      <label><span>{{ t('detail.email') }}</span><input v-model="form.email" :aria-label="locale === 'en-US' ? 'Contact email' : '联系人邮箱'" type="email" /></label>
+      <label><span>{{ t('detail.manager') }}</span><select v-model="form.reportsToContactId" :aria-label="t('detail.manager')"><option value="">{{ t('detail.notSpecified') }}</option><option v-for="item in reportingOptions" :key="item.id" :value="item.id" :data-reports-to-option="item.id">{{ item.name }} · {{ item.title }}</option></select></label>
+      <label><span>{{ t('detail.relationship') }}</span><select v-model="form.relationship" :aria-label="t('detail.relationship')"><option v-for="item in ['Strong', 'Developing', 'Weak']" :key="item" :value="item">{{ salesEnumLabel(item, locale) }}</option></select></label>
+      <label><span>{{ t('detail.owner') }}<RequiredMark :show="!contact" /></span><PersonnelSelect v-model="form.owner" :roles="['Sales']" :ariaLabel="locale === 'en-US' ? 'Contact owner' : '联系人负责人'" required /></label>
+      <label class="wide"><span>{{ t('detail.status') }}</span><select v-model="form.status" :aria-label="t('detail.contactStatus')"><option v-for="item in ['Active', 'Left Company', 'Archived']" :key="item" :value="item">{{ contactStatusLabel(item, locale) }}</option></select></label>
     </div>
     <button
       v-if="contact && canDelete"
@@ -101,7 +104,7 @@ function submit() {
       :disabled="busy"
       @click="emit('delete')"
     >
-      <Trash2 :size="14" />删除联系人
+      <Trash2 :size="14" />{{ locale === 'en-US' ? 'Delete contact' : '删除联系人' }}
     </button>
   </ModalShell>
 </template>

@@ -1,11 +1,16 @@
 <script setup lang="ts">
+import { systemValueLabel } from '@/features/shared/system-labels'
 import { computed } from 'vue'
 import { CalendarClock, Check, Cpu, Wrench } from '@lucide/vue'
 import { personnelDisplayName } from '@/demo/personnel'
 import type { InstalledToolDto } from '@/types/workspaces'
+import { useI18n } from '@/i18n'
 
 const props = withDefaults(defineProps<{ items: InstalledToolDto[]; selectedId?: string }>(), { selectedId: '' })
 const emit = defineEmits<{ select: [item: InstalledToolDto] }>()
+const { locale, t } = useI18n()
+const stageLabel = (stage: string) => locale.value === 'en-US' ? stage : ({ FAT: 'FAT', Shipment: '发运', Installation: '安装', SAT: 'SAT', Warranty: '质保', Completed: '已完成' } as Record<string, string>)[stage] || stage
+const statusLabel = (status: string) => locale.value === 'en-US' ? status : ({ Production: '生产中', 'Upgrade Due': '待升级', Installation: '安装中', Active: '启用', Pending: '待确认', Completed: '已完成', Retired: '已退役', Decommissioned: '已停用' } as Record<string, string>)[status] || status
 
 const stageOrder = ['FAT', 'Shipment', 'Installation', 'SAT', 'Warranty'] as const
 const currentCount = computed(() => props.items.filter((item) => item.milestones.some((stage) => stage.state === 'Current')).length)
@@ -36,23 +41,23 @@ function keyMilestone(item: InstalledToolDto) {
 <template>
   <section class="project-cycle-board" data-installed-tool-project-board>
     <div class="board-summary">
-      <article><Cpu :size="17" /><span>筛选内设备</span><strong>{{ items.length }}</strong></article>
-      <article><Wrench :size="17" /><span>当前推进中</span><strong>{{ currentCount }}</strong></article>
-      <article><CalendarClock :size="17" /><span>已完成节点</span><strong>{{ completedNodes }}/{{ items.length * stageOrder.length }}</strong></article>
-      <article class="warranty"><Check :size="17" /><span>质保 / 已交付</span><strong>{{ warrantyCount }}</strong></article>
+      <article><Cpu :size="17" /><span>{{ t('installed.projectSummary.filtered') }}</span><strong>{{ items.length }}</strong></article>
+      <article><Wrench :size="17" /><span>{{ t('installed.projectSummary.inProgress') }}</span><strong>{{ currentCount }}</strong></article>
+      <article><CalendarClock :size="17" /><span>{{ t('installed.projectSummary.completed') }}</span><strong>{{ completedNodes }}/{{ items.length * stageOrder.length }}</strong></article>
+      <article class="warranty"><Check :size="17" /><span>{{ t('installed.projectSummary.warranty') }}</span><strong>{{ warrantyCount }}</strong></article>
     </div>
 
     <div class="cycle-table-shell">
       <div class="cycle-table">
         <header class="cycle-table-header">
-          <span>设备</span>
-          <span>客户 / Site</span>
-          <span>当前阶段负责人</span>
-          <span>关键日期</span>
+          <span>{{ t('installed.projectHeader.device') }}</span>
+          <span>{{ t('installed.projectHeader.customerSite') }}</span>
+          <span>{{ t('installed.projectHeader.stageOwner') }}</span>
+          <span>{{ t('installed.projectHeader.keyDate') }}</span>
           <div class="timeline-header">
-            <strong>项目周期节点</strong>
+            <strong>{{ t('installed.projectHeader.cycle') }}</strong>
             <div>
-              <span v-for="stage in stageOrder" :key="stage" data-installed-tool-stage-header>{{ stage }}</span>
+               <span v-for="stage in stageOrder" :key="stage" data-installed-tool-stage-header>{{ stageLabel(stage) }}</span>
             </div>
           </div>
         </header>
@@ -70,16 +75,16 @@ function keyMilestone(item: InstalledToolDto) {
           >
             <span class="tool-cell">
               <strong>{{ item.model }} · {{ item.serial }}</strong>
-              <small>{{ item.id }} · {{ item.status }}</small>
+               <small>{{ item.id }} · {{ statusLabel(item.status) }}</small>
             </span>
             <span class="customer-cell">
               <strong>{{ item.account }}</strong>
-              <small>{{ item.site }} · {{ item.location }}</small>
+              <small>{{ item.site }} · {{ systemValueLabel(item.location, locale) }}</small>
             </span>
-            <span class="owner-cell">{{ personnelDisplayName(item.engineerOwner) || '待确认' }}</span>
+            <span class="owner-cell">{{ personnelDisplayName(item.engineerOwner) || t('installed.confirmPending') }}</span>
             <span class="date-cell">
-              <strong>{{ keyMilestone(item)?.label ?? 'Completed' }}</strong>
-              <small>{{ keyMilestone(item)?.date ?? '—' }}</small>
+               <strong>{{ stageLabel(keyMilestone(item)?.label ?? 'Completed') }}</strong>
+              <small>{{ systemValueLabel(keyMilestone(item)?.date, locale) || '—' }}</small>
             </span>
             <span class="timeline-cell">
               <span class="timeline-track">
@@ -92,12 +97,12 @@ function keyMilestone(item: InstalledToolDto) {
                   data-installed-tool-milestone
                 >
                   <span class="node"><Check v-if="milestoneState(item, stage) === 'Done'" :size="12" /><template v-else>{{ index + 1 }}</template></span>
-                  <time>{{ milestoneFor(item, stage)?.date ?? '—' }}</time>
+                  <time>{{ systemValueLabel(milestoneFor(item, stage)?.date, locale) || '—' }}</time>
                 </span>
               </span>
             </span>
           </button>
-          <p v-if="!items.length" class="empty-state">当前筛选下暂无设备</p>
+          <p v-if="!items.length" class="empty-state">{{ t('installed.noDevices') }}</p>
         </div>
       </div>
     </div>

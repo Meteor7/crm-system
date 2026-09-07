@@ -5,6 +5,7 @@ import { createAppRouter } from '@/app/router'
 import { CrmApiError } from '@/api'
 import { createMockApi } from '@/api/mock-adapter'
 import { useAppStore } from '@/stores/app'
+import { setLocale } from '@/i18n'
 import OpportunityDetailPage from './OpportunityDetailPage.vue'
 
 function requireOpportunityVersion(api: ReturnType<typeof createMockApi>) {
@@ -154,6 +155,7 @@ describe('Opportunity detail', () => {
   })
 
   it('preserves the existing strategy capabilities in the recomposed detail', async () => {
+    setLocale('en-US')
     const { api, pinia, router } = await context('OPP-003')
     const wrapper = mount(OpportunityDetailPage, {
       props: { apiClient: api },
@@ -163,16 +165,20 @@ describe('Opportunity detail', () => {
 
     expect(wrapper.text()).toContain('About')
     expect(wrapper.text()).toContain('Status')
-    expect(wrapper.text()).toContain('Action Plan')
+    expect(wrapper.text()).toContain('Action plan')
     expect(wrapper.text()).not.toContain('Change History')
-    expect(wrapper.text()).toContain('Commercial Forecast')
-    expect(wrapper.text()).toContain('Buying Influence')
+    expect(wrapper.text()).toContain('Commercial forecast')
+    expect(wrapper.text()).toContain('Buying influence')
     expect(wrapper.text()).toContain('Strength')
-    expect(wrapper.text()).toContain('Red Flag')
-    expect(wrapper.text()).toContain('Information Needed')
+    expect(wrapper.text()).toContain('Red flag')
+    expect(wrapper.text()).toContain('Information needed')
     expect(wrapper.get('[data-testid="opportunity-probability"]').text()).toBe('88%')
     expect(wrapper.get('[data-testid="opportunity-intent"]').text()).toBe('86/100')
-    expect(wrapper.get('[data-testid="opportunity-probability-explanation"]').text()).toContain('阶段基础概率 90% × 60% + 购买意愿 86 × 40%')
+    expect(wrapper.get('[data-testid="opportunity-probability-explanation"]').text()).toBe('Stage base probability 90% × 60% + purchase intent 86 × 40%')
+    setLocale('zh-CN')
+    await flushPromises()
+    expect(wrapper.get('[data-testid="opportunity-probability-explanation"]').text()).toBe('阶段基础概率 90% × 60% + 购买意愿 86 × 40%')
+    expect(wrapper.get('[data-testid="opportunity-probability"]').text()).toBe('88%')
   })
 
   it('does not expose manual advancement for automatic Demo gate stages', async () => {
@@ -277,7 +283,7 @@ describe('Opportunity detail', () => {
 
     await wrapper.get('[data-testid="create-booking-from-opportunity"]').trigger('click')
 
-    expect((wrapper.get('[aria-label="Booking 来源 Opportunity"]').element as HTMLSelectElement).value).toBe('OPP-003')
+    expect((wrapper.get('[aria-label="来源 Opportunity"]').element as HTMLSelectElement).value).toBe('OPP-003')
     expect((wrapper.get('[aria-label="选择联系人"]').element as HTMLSelectElement).value).toBe(primaryContact.id)
     expect((wrapper.get('[aria-label="Booking 金额"]').element as HTMLInputElement).value).toBe('32500000.00')
 

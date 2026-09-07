@@ -4,14 +4,17 @@ import { Upload, X } from '@lucide/vue'
 import type { CrmApi } from '@/api'
 import { mapRequestError } from '@/api/request-state'
 import type { DemoTestReportUploadResult, EvaluationDto } from '@/types/crm'
+import { useI18n, useLocaleMessage } from '@/i18n'
 
 const props = defineProps<{ evaluation: EvaluationDto; apiClient: CrmApi }>()
 const emit = defineEmits<{ close: []; uploaded: [result: DemoTestReportUploadResult] }>()
 const internalFile = ref<File | null>(null)
 const externalFile = ref<File | null>(null)
 const busy = ref(false)
-const error = ref('')
+const error = useLocaleMessage()
 const requestId = ref('')
+const { locale, t, message } = useI18n()
+const copy = (english: string, chinese: string) => locale.value === 'en-US' ? english : chinese
 const allowed = new Set(['application/pdf', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'text/csv', 'text/plain', 'image/png', 'image/jpeg'])
 
 function choose(kind: 'internal' | 'external', event: Event) {
@@ -20,14 +23,14 @@ function choose(kind: 'internal' | 'external', event: Event) {
   requestId.value = ''
   const target = kind === 'internal' ? internalFile : externalFile
   if (!selected) { target.value = null; return }
-  if (!selected.size) { error.value = '报告文件不能为空'; target.value = null; return }
-  if (selected.size > 100 * 1024 * 1024) { error.value = '文件不能超过 100 MiB'; target.value = null; return }
-  if (!allowed.has(selected.type)) { error.value = '仅支持 PDF、DOCX、XLSX、CSV、TXT、PNG、JPEG'; target.value = null; return }
+  if (!selected.size) { error.value = message('evaluationReport.emptyFile'); target.value = null; return }
+  if (selected.size > 100 * 1024 * 1024) { error.value = message('evaluationReport.maxFile'); target.value = null; return }
+  if (!allowed.has(selected.type)) { error.value = message('evaluationReport.fileTypes'); target.value = null; return }
   target.value = selected
 }
 
 async function upload() {
-  if (!internalFile.value || !externalFile.value) { error.value = '请选择 Internal 和 External 两份测试报告'; return }
+  if (!internalFile.value || !externalFile.value) { error.value = message('evaluationReport.selectBoth'); return }
   busy.value = true; error.value = ''; requestId.value = ''
   try {
     const result = await props.apiClient.releaseDemoTestReport(props.evaluation.id, {
@@ -37,7 +40,7 @@ async function upload() {
     emit('uploaded', result.data)
   } catch (reason) {
     const mapped = mapRequestError(reason)
-    error.value = mapped.message
+    error.value = mapped.localizedMessage ?? mapped.message
     requestId.value = mapped.requestId
   }
   finally { busy.value = false }
@@ -46,16 +49,16 @@ async function upload() {
 
 <template>
   <div class="host" role="presentation" @mousedown.self="!busy && emit('close')">
-    <section role="dialog" aria-modal="true" aria-label="上传 Test Report">
-      <header><div><span>TEST REPORT</span><h2>上传测试报告</h2></div><button type="button" aria-label="关闭" :disabled="busy" @click="emit('close')"><X :size="18" /></button></header>
+    <section role="dialog" aria-modal="true" :aria-label="t('evaluationReport.uploadTitle')">
+      <header><div><span>TEST REPORT</span><h2>{{ t('evaluationReport.uploadTitle') }}</h2></div><button type="button" :aria-label="t('detail.close')" :disabled="busy" @click="emit('close')"><X :size="18" /></button></header>
       <div class="body">
         <p>{{ evaluation.title }} · {{ evaluation.id }}</p>
-        <label>Internal Report<input data-internal-report type="file" accept=".pdf,.docx,.xlsx,.csv,.txt,.png,.jpg,.jpeg" @change="choose('internal', $event)" /><small v-if="internalFile">{{ internalFile.name }}</small></label>
-        <label>External Report<input data-external-report type="file" accept=".pdf,.docx,.xlsx,.csv,.txt,.png,.jpg,.jpeg" @change="choose('external', $event)" /><small v-if="externalFile">{{ externalFile.name }}</small></label>
-        <small>两份报告均必传；支持 PDF、DOCX、XLSX、CSV、TXT、PNG、JPEG，单文件最大 100 MiB。</small>
+        <label>{{ copy('Internal Report', '内部报告') }}<input data-internal-report type="file" accept=".pdf,.docx,.xlsx,.csv,.txt,.png,.jpg,.jpeg" @change="choose('internal', $event)" /><small v-if="internalFile">{{ internalFile.name }}</small></label>
+        <label>{{ copy('External Report', '外部报告') }}<input data-external-report type="file" accept=".pdf,.docx,.xlsx,.csv,.txt,.png,.jpg,.jpeg" @change="choose('external', $event)" /><small v-if="externalFile">{{ externalFile.name }}</small></label>
+        <small>{{ t('evaluationReport.hint') }}</small>
         <p v-if="error" class="error" role="alert">{{ error }}<small v-if="requestId">Request ID: {{ requestId }}</small></p>
       </div>
-      <footer><button type="button" class="secondary-button" :disabled="busy" @click="emit('close')">取消</button><button type="button" class="primary-button" :disabled="busy || !internalFile || !externalFile" data-upload-test-report @click="upload"><Upload :size="15" />{{ busy ? '上传中…' : '上传两份报告' }}</button></footer>
+      <footer><button type="button" class="secondary-button" :disabled="busy" @click="emit('close')">{{ t('detail.cancel') }}</button><button type="button" class="primary-button" :disabled="busy || !internalFile || !externalFile" data-upload-test-report @click="upload"><Upload :size="15" />{{ busy ? t('evaluationReport.uploading') : t('evaluationReport.uploadBoth') }}</button></footer>
     </section>
   </div>
 </template>

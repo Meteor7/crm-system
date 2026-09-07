@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { participantRoleLabel } from '@/features/shared/sales-i18n'
 import { computed, onMounted, ref, watch } from 'vue'
 import { ArrowLeft, MessageSquareText, UsersRound } from '@lucide/vue'
 import { RouterLink, useRoute, useRouter } from 'vue-router'
@@ -14,6 +15,7 @@ import DemoProjectTimeline from '@/features/demo-workflow/DemoProjectTimeline.vu
 import { downloadBlob } from '@/features/shared/download-blob'
 import { readAllPages } from '@/features/shared/read-all-pages'
 import { PERSONNEL, personnelById, personnelDisplayName } from '@/demo/personnel'
+import { useI18n, useLocaleMessage } from '@/i18n'
 
 type DetailTab = 'information' | 'comment'
 
@@ -21,16 +23,19 @@ const props = withDefaults(defineProps<{ apiClient?: CrmApi }>(), { apiClient: (
 const route = useRoute()
 const router = useRouter()
 const app = useAppStore()
+const { locale, t } = useI18n()
+const copy = (english: string, chinese: string) => locale.value === 'en-US' ? english : chinese
+const statusLabel = (status: string) => copy(status, ({ Requested: '已申请', 'Scope Confirmed': '范围已确认', 'Sample Received': '样品已收到', Scheduled: '已排期', Testing: '测试中', Analysis: '分析中', 'Internal Review': '内部评审', 'Customer Review': '客户评审', Accepted: '已接受', Rejected: '已拒绝' } as Record<string, string>)[status] || status)
 const notifications = useNotificationStore()
 const project = ref<DemoWorkflowDto | null>(null)
 const comments = ref<DemoCommentDto[]>([])
 const loading = ref(true)
-const error = ref('')
+const error = useLocaleMessage()
 const requestId = ref('')
 const denied = ref(false)
 const commentBusy = ref(false)
-const commentError = ref('')
-const artifactBusyId = ref(''), artifactError = ref(''), artifactRequestId = ref('')
+const commentError = useLocaleMessage()
+const artifactBusyId = ref(''), artifactError = useLocaleMessage(), artifactRequestId = ref('')
 let loadSequence = 0
 const tab = computed<DetailTab>(() => route.query.tab === 'comment' ? 'comment' : 'information')
 const demoId = computed(() => String(route.params.demoId || ''))
@@ -83,12 +88,13 @@ async function load() {
       if (sequence !== loadSequence) return
       comments.value = allComments
     } catch (reason) {
-      commentError.value = mapRequestError(reason).message
+      const mapped = mapRequestError(reason)
+      commentError.value = mapped.localizedMessage ?? mapped.message
     }
   } catch (reason) {
     if (sequence !== loadSequence) return
     const mapped = mapRequestError(reason)
-    error.value = mapped.message
+    error.value = mapped.localizedMessage ?? mapped.message
     requestId.value = mapped.requestId
     denied.value = mapped.denied
   } finally {
@@ -127,7 +133,8 @@ async function publishComment(payload: { body: string; mentions: string[] }) {
       })
     }
   } catch (reason) {
-    commentError.value = mapRequestError(reason).message
+    const mapped = mapRequestError(reason)
+    commentError.value = mapped.localizedMessage ?? mapped.message
   } finally {
     commentBusy.value = false
   }
@@ -143,7 +150,7 @@ async function downloadArtifact(id: string) {
     downloadBlob(result.blob, result.fileName)
   } catch (reason) {
     const mapped = mapRequestError(reason)
-    artifactError.value = mapped.message
+    artifactError.value = mapped.localizedMessage ?? mapped.message
     artifactRequestId.value = mapped.requestId
   } finally {
     artifactBusyId.value = ''
@@ -162,7 +169,7 @@ async function previewArtifact(id: string) {
     window.setTimeout(() => URL.revokeObjectURL(url), 60_000)
   } catch (reason) {
     const mapped = mapRequestError(reason)
-    artifactError.value = mapped.message
+    artifactError.value = mapped.localizedMessage ?? mapped.message
     artifactRequestId.value = mapped.requestId
   } finally {
     artifactBusyId.value = ''
@@ -178,23 +185,23 @@ onMounted(load)
     <DataState v-if="loading && !project" type="loading" />
     <DataState v-else-if="denied" type="denied" :message="error" :request-id="requestId" />
     <section v-else-if="error || !project" class="detail-state">
-      <DataState type="error" :message="error || '未找到 Demo 项目'" :request-id="requestId" @retry="load" />
-      <RouterLink class="back-link detail-back-button" :to="backTarget"><ArrowLeft :size="14" />返回 Demo 列表</RouterLink>
+      <DataState type="error" :message="error || t('demoDetail.notFound')" :request-id="requestId" @retry="load" />
+      <RouterLink class="back-link detail-back-button" :to="backTarget"><ArrowLeft :size="14" />{{ t('demoDetail.back') }}</RouterLink>
     </section>
     <template v-else>
-      <RouterLink class="back-link detail-back-button" :to="backTarget"><ArrowLeft :size="14" />返回 Demo 列表</RouterLink>
+      <RouterLink class="back-link detail-back-button" :to="backTarget"><ArrowLeft :size="14" />{{ t('demoDetail.back') }}</RouterLink>
 
       <header class="project-heading">
         <div>
-          <span>Demo 档案 / {{ project.id }}</span>
+          <span>{{ t('demoDetail.archive') }} / {{ project.id }}</span>
           <h1>{{ project.title }}</h1>
-          <p>客户：<strong>{{ project.account }}</strong></p>
+          <p>{{ t('demoDetail.customer') }}: <strong>{{ project.account }}</strong></p>
         </div>
         <dl>
-          <div><dt>当前状态</dt><dd><span class="status-chip">{{ project.status }}</span></dd></div>
-          <div><dt>负责销售</dt><dd>{{ personnelDisplayName(project.salesOwner) }}</dd></div>
-          <div><dt>负责工程师</dt><dd>{{ personnelDisplayName(project.engineerOwner) }}</dd></div>
-          <div><dt>创建日期</dt><dd>{{ createdDate }}</dd></div>
+           <div><dt>{{ t('demoDetail.status') }}</dt><dd><span class="status-chip">{{ statusLabel(project.status) }}</span></dd></div>
+          <div><dt>{{ t('demoDetail.salesOwner') }}</dt><dd>{{ personnelDisplayName(project.salesOwner) }}</dd></div>
+          <div><dt>{{ t('demoDetail.engineerOwner') }}</dt><dd>{{ personnelDisplayName(project.engineerOwner) }}</dd></div>
+          <div><dt>{{ t('demoDetail.createdAt') }}</dt><dd>{{ createdDate }}</dd></div>
         </dl>
       </header>
 
@@ -202,21 +209,21 @@ onMounted(load)
         <DemoProjectTimeline :item="project" />
       </section>
 
-      <nav class="detail-tabs" aria-label="Demo 详情分类">
+      <nav class="detail-tabs" :aria-label="t('demoDetail.tabs')">
         <button
           type="button"
           data-demo-detail-tab="information"
           :class="{ active: tab === 'information' }"
           :aria-current="tab === 'information' ? 'page' : undefined"
           @click="switchTab('information')"
-        >Information</button>
+        >{{ copy('Information', '基本信息') }}</button>
         <button
           type="button"
           data-demo-detail-tab="comment"
           :class="{ active: tab === 'comment' }"
           :aria-current="tab === 'comment' ? 'page' : undefined"
           @click="switchTab('comment')"
-        >Comment <span>{{ comments.length }}</span></button>
+        >{{ copy('Comments', '评论') }} <span>{{ comments.length }}</span></button>
       </nav>
       <p v-if="artifactError" class="inline-error" data-artifact-error>{{ artifactError }}<small v-if="artifactRequestId">Request ID {{ artifactRequestId }}</small></p>
 
@@ -229,10 +236,10 @@ onMounted(load)
           @download="downloadArtifact"
         />
         <aside class="participants-panel">
-          <header><UsersRound :size="17" /><strong>项目参与人</strong></header>
+          <header><UsersRound :size="17" /><strong>{{ t('demoDetail.participants') }}</strong></header>
           <article v-for="person in participants" :key="person.name">
             <span>{{ person.name.slice(0, 1) }}</span>
-            <div><strong>{{ person.name }}</strong><small>{{ person.role }}</small></div>
+            <div><strong>{{ person.name }}</strong><small>{{ participantRoleLabel(person.role, locale) }}</small></div>
           </article>
         </aside>
       </div>
@@ -246,8 +253,8 @@ onMounted(load)
         />
         <aside class="comment-summary">
           <MessageSquareText :size="18" />
-          <strong>{{ comments.length }} 条 Comments</strong>
-          <span>项目参与人可在此同步风险、结论与下一步。</span>
+          <strong>{{ t('demoDetail.comments', { count: comments.length }) }}</strong>
+          <span>{{ t('demoDetail.commentHint') }}</span>
         </aside>
       </div>
     </template>

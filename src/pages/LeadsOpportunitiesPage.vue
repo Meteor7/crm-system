@@ -6,6 +6,7 @@ import { api as defaultApi, type CrmApi } from '@/api'
 import PageHeader from '@/design-system/PageHeader.vue'
 import LeadListView from '@/features/leads/LeadListView.vue'
 import OpportunityListView from '@/features/opportunities/OpportunityListView.vue'
+import { useI18n } from '@/i18n'
 
 const props = withDefaults(defineProps<{ apiClient?: CrmApi; fixedView?: 'leads' | 'opportunities' }>(), {
   apiClient: () => defaultApi,
@@ -13,13 +14,14 @@ const props = withDefaults(defineProps<{ apiClient?: CrmApi; fixedView?: 'leads'
 })
 const route = useRoute()
 const router = useRouter()
+const { t, locale } = useI18n()
 const view = computed<'leads' | 'opportunities'>(() => props.fixedView ?? (route.query.view === 'opportunities' ? 'opportunities' : 'leads'))
-const title = computed(() => props.fixedView === 'leads' ? 'Leads' : props.fixedView === 'opportunities' ? 'Opportunities' : 'Leads&Opportunities')
+const title = computed(() => props.fixedView === 'leads' ? t('nav.leads') : props.fixedView === 'opportunities' ? t('nav.opportunities') : 'Leads&Opportunities')
 const description = computed(() => props.fixedView === 'leads'
-  ? '判断潜在线索是否值得投入，并将合格线索转换为正式商机。'
+  ? t('leads.description')
   : props.fixedView === 'opportunities'
-    ? '管理具体生意从需求发现到成交的推进过程。'
-    : 'Leads 判断潜在线索是否值得投入；Opportunities 管理一笔具体生意如何推进到成交。')
+    ? t('opportunities.description')
+    : t('sales.workspaceDescription'))
 
 function switchView(next: 'leads' | 'opportunities') {
   void router.replace({ query: { ...route.query, view: next } })
@@ -27,26 +29,26 @@ function switchView(next: 'leads' | 'opportunities') {
 </script>
 
 <template>
-  <div class="leads-opportunities-page">
+      <div class="leads-opportunities-page">
     <PageHeader
       eyebrow="QUALIFY → CONVERT → WIN"
       :title="title"
       :description="description"
     />
     <div :class="['workspace-layout', { 'is-fixed-view': fixedView }]">
-      <aside v-if="!fixedView" class="workspace-switch" aria-label="Leads 与 Opportunities 视图切换">
+      <aside v-if="!fixedView" class="workspace-switch" :aria-label="locale === 'en-US' ? 'Leads and Opportunities view switch' : '线索与商机视图切换'">
         <button type="button" data-workspace-view="leads" :class="{ active: view === 'leads' }" @click="switchView('leads')">
           <span><UserRoundSearch :size="17" /></span>
-          <strong>Leads</strong>
-          <small>识别人和来源</small>
+          <strong>{{ t('nav.leads') }}</strong>
+          <small>{{ locale === 'en-US' ? 'Identify people and sources' : '识别人和来源' }}</small>
         </button>
-        <div class="flow-connector"><Route :size="14" /><span>Qualified → Convert</span></div>
+        <div class="flow-connector"><Route :size="14" /><span>{{ locale === 'en-US' ? 'Qualified → convert' : '合格 → 转换' }}</span></div>
         <button type="button" data-workspace-view="opportunities" :class="{ active: view === 'opportunities' }" @click="switchView('opportunities')">
           <span><BriefcaseBusiness :size="17" /></span>
-          <strong>Opportunities</strong>
-          <small>推进交易与收入</small>
+          <strong>{{ t('nav.opportunities') }}</strong>
+          <small>{{ locale === 'en-US' ? 'Move deals and revenue' : '推进交易与收入' }}</small>
         </button>
-        <p>Lead 转换后才进入正式 Account、Contact 与 Opportunity。Booking 在左侧主导航中独立管理。</p>
+        <p>{{ locale === 'en-US' ? 'Converted leads become formal accounts, contacts, and opportunities. Bookings are managed separately in the main navigation.' : 'Lead 转换后才进入正式 Account、Contact 与 Opportunity。Booking 在左侧主导航中独立管理。' }}</p>
       </aside>
       <main class="workspace-content">
         <LeadListView v-if="view === 'leads'" :api-client="apiClient" />

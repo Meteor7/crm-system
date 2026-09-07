@@ -6,6 +6,8 @@ import type { ContactSummaryDto, SiteDto } from '@/types/crm'
 import type { QuotationCatalogItemDto, QuotationDiscountType, QuotationDraftInput, QuotationItemDto, QuotationPricingMode, QuotationType } from './types'
 import QuotationCatalogFilter from './QuotationCatalogFilter.vue'
 import QuotationPicker from './QuotationPicker.vue'
+import { quotationCatalogLabel } from './catalog-labels'
+import { localeMessage, useI18n } from '@/i18n'
 
 const props = withDefaults(defineProps<{
   modelValue: QuotationDraftInput
@@ -17,18 +19,21 @@ const props = withDefaults(defineProps<{
   readonly?: boolean
 }>(), { catalog: () => [], catalogError: '', readonly: false })
 const emit = defineEmits<{ 'update:modelValue': [value: QuotationDraftInput]; changed: [] }>()
+const { t, locale } = useI18n()
+const ui = (english: string, chinese: string) => localeMessage(english, chinese)[locale.value]
 const model = computed({ get: () => props.modelValue, set: (value: QuotationDraftInput) => emit('update:modelValue', value) })
-const discountTypes: { value: QuotationDiscountType; label: string }[] = [
-  { value: 'None', label: '无折扣' }, { value: 'Percentage', label: '百分比' }, { value: 'Fixed Amount', label: '固定金额' },
-]
-const pricingModeOptions: { value: QuotationPricingMode; label: string }[] = [
-  { value: 'Included', label: 'Included' }, { value: 'Charged', label: 'Charged' },
-]
+const discountTypes = computed<{ value: QuotationDiscountType; label: string }[]>(() => [
+  { value: 'None', label: t('quotationEditor.noDiscount') }, { value: 'Percentage', label: t('quotationEditor.percentage') }, { value: 'Fixed Amount', label: t('quotationEditor.fixedAmount') },
+])
+const pricingModeOptions = computed<{ value: QuotationPricingMode; label: string }[]>(() => [
+  { value: 'Included', label: ui('Included', '包含') }, { value: 'Charged', label: ui('Charged', '收费') },
+])
+// Display explanations follow the UI language; the persisted payment terms are unchanged.
 const paymentDescriptions = [
-  (value: string) => `收到订单1周内，买方电汇方式支付订单总价${value}%作为预付款。`,
-  (value: string) => `发货前两周内，买方电汇方式支付订单总价${value}%作为发货款。`,
-  (value: string) => `设备验收完成后两周内，支付订单总价${value}%，发货之后两个月之内组织验收。`,
-  (value: string) => `设备发货之后一年，买方付${value}% PO的尾款。`,
+  (value: string) => ui(`Within one week of receiving the order, the buyer pays ${value}% of the order total by bank transfer as an advance payment.`, `收到订单1周内，买方电汇方式支付订单总价${value}%作为预付款。`),
+  (value: string) => ui(`Within the two weeks before shipment, the buyer pays ${value}% of the order total by bank transfer as the shipment payment.`, `发货前两周内，买方电汇方式支付订单总价${value}%作为发货款。`),
+  (value: string) => ui(`Within two weeks after equipment acceptance, pay ${value}% of the order total. Arrange acceptance within two months after shipment.`, `设备验收完成后两周内，支付订单总价${value}%，发货之后两个月之内组织验收。`),
+  (value: string) => ui(`One year after equipment shipment, the buyer pays the remaining ${value}% of the PO total.`, `设备发货之后一年，买方付${value}% PO的尾款。`),
 ]
 const fixedServices = [
   'Installation, 5 days – included', 'Maintenance training, 5 days /4 EE – included',
@@ -42,6 +47,7 @@ function touch() {
 }
 const contactOptions = computed(() => props.contacts.map((item) => ({ value: item.id, label: [item.name, item.title].filter(Boolean).join(' · ') })))
 const siteOptions = computed(() => props.sites.map((item) => ({ value: item.id, label: item.name })))
+const itemName = (item: QuotationItemDto) => item.catalogItemId ? quotationCatalogLabel(item.name, locale.value) : item.name
 const devices = computed(() => model.value.items.filter((item) => item.lineType === 'Device'))
 const systems = (deviceKey: string) => model.value.items.filter((item) => item.lineType === 'System' && item.parentDeviceKey === deviceKey)
 const accessories = (systemKey: string) => model.value.items.filter((item) => item.lineType === 'Accessory' && item.parentSystemKey === systemKey)
@@ -120,93 +126,93 @@ function setDiscountType(value: QuotationDiscountType) {
 
 <template>
   <div class="quotation-editor" @input="touch" @change="touch">
-    <SectionCard title="客户与报价信息" eyebrow="HEADER">
+    <SectionCard :title="t('quotationEditor.customerQuote')" :eyebrow="ui('HEADER', '抬头信息')">
       <div class="form-grid four">
-        <label><span>ATTN</span><QuotationPicker v-model="model.primaryContactId" :options="contactOptions" placeholder="请选择联系人" label="ATTN" test-id="quotation-contact-select" :disabled="readonly" @change="touch" /></label>
-        <label><span>地址 / Site</span><QuotationPicker v-model="model.addressId" :options="siteOptions" placeholder="请选择地址" label="地址 / Site" test-id="quotation-site-select" :disabled="readonly" @change="touch" /></label>
-        <label><span>报价日期</span><input v-model="model.quoteDate" type="date" :disabled="readonly" /></label>
-        <label><span>报价有效期（月）</span><input v-model.number="model.validityMonths" aria-label="报价有效期月数" type="number" min="1" step="1" :disabled="readonly" /></label>
+        <label><span>ATTN</span><QuotationPicker v-model="model.primaryContactId" :options="contactOptions" :placeholder="t('quotationEditor.selectContact')" label="ATTN" test-id="quotation-contact-select" :disabled="readonly" @change="touch" /></label>
+        <label><span>{{ t('quotationEditor.site') }}</span><QuotationPicker v-model="model.addressId" :options="siteOptions" :placeholder="t('quotationEditor.selectSite')" :label="t('quotationEditor.site')" test-id="quotation-site-select" :disabled="readonly" @change="touch" /></label>
+        <label><span>{{ t('quotationEditor.quoteDate') }}</span><input v-model="model.quoteDate" type="date" :disabled="readonly" /></label>
+        <label><span>{{ t('quotationEditor.validity') }}</span><input v-model.number="model.validityMonths" :aria-label="t('quotationEditor.validity')" type="number" min="1" step="1" :disabled="readonly" /></label>
       </div>
     </SectionCard>
 
     <SectionCard
-      :title="quotationType === 'Service' ? '服务与配件项目' : '设备、系统与选装配件'"
-      :eyebrow="quotationType === 'Service' ? 'SERVICE ITEMS' : 'CONFIGURATION'"
-      :description="quotationType === 'Service' ? '用于售后服务、维修和配件订购；数量仅允许正整数。' : '从全局目录逐级选择设备、系统和配件；系统仅分组，不参与计价。'"
+      :title="quotationType === 'Service' ? t('quotationEditor.serviceItems') : t('quotationEditor.deviceItems')"
+      :eyebrow="quotationType === 'Service' ? ui('SERVICE ITEMS', '服务项目') : ui('CONFIGURATION', '设备配置')"
+      :description="quotationType === 'Service' ? t('quotationEditor.serviceHint') : t('quotationEditor.deviceHint')"
     >
       <template #action>
-        <button v-if="!readonly && quotationType === 'Service'" class="secondary-button" type="button" data-testid="add-device" @click="addServiceItem"><Plus :size="14" />添加项目</button>
-        <QuotationCatalogFilter v-else-if="!readonly" :options="catalogDevices" :selected-ids="selectedDeviceIds" label="设备" placeholder="添加设备" custom-placeholder="输入自定义设备名称" test-id="add-device" @select="addDevice" @custom="addCustomDevice" />
+        <button v-if="!readonly && quotationType === 'Service'" class="secondary-button" type="button" data-testid="add-device" @click="addServiceItem"><Plus :size="14" />{{ t('quotationEditor.addItem') }}</button>
+        <QuotationCatalogFilter v-else-if="!readonly" :options="catalogDevices" :selected-ids="selectedDeviceIds" :label="t('quotationEditor.device')" :placeholder="t('quotationEditor.addDevice')" :custom-placeholder="t('quotationEditor.customDevice')" test-id="add-device" @select="addDevice" @custom="addCustomDevice" />
       </template>
       <p v-if="quotationType === 'Device' && catalogError" class="catalog-error">{{ catalogError }}</p>
       <div class="device-stack">
         <article v-for="(device, index) in devices" :key="device.lineKey" class="device-card">
-          <header><div><span>{{ quotationType === 'Service' ? 'SERVICE ITEM' : 'DEVICE' }} {{ index + 1 }}</span><strong>{{ device.name || (quotationType === 'Service' ? '未命名项目' : '未命名设备') }}</strong></div><button v-if="!readonly && (devices.length > 1 || quotationType === 'Device')" class="remove-line-button" type="button" :aria-label="quotationType === 'Service' ? '删除项目' : '删除设备'" @click="removeLine(device)"><Trash2 :size="14" /></button></header>
+           <header><div><span>{{ quotationType === 'Service' ? ui('SERVICE ITEM', '服务项目') : ui('DEVICE', '设备') }} {{ index + 1 }}</span><strong>{{ itemName(device) || (quotationType === 'Service' ? (locale === 'en-US' ? 'Unnamed item' : '未命名项目') : (locale === 'en-US' ? 'Unnamed equipment' : '未命名设备')) }}</strong></div><button v-if="!readonly && (devices.length > 1 || quotationType === 'Device')" class="remove-line-button" type="button" :aria-label="quotationType === 'Service' ? (locale === 'en-US' ? 'Remove item' : '删除项目') : (locale === 'en-US' ? 'Remove equipment' : '删除设备')" @click="removeLine(device)"><Trash2 :size="14" /></button></header>
           <div class="form-grid item-fields">
-            <label><span>{{ quotationType === 'Service' ? '服务 / 配件项目' : '设备名称' }}</span><input v-model="device.name" :aria-label="quotationType === 'Service' ? '服务或配件项目' : '设备名称'" :disabled="readonly || (quotationType === 'Device' && !!device.catalogItemId)" /></label>
-            <label><span>型号</span><input v-model="device.model" :disabled="readonly" /></label>
-            <label class="wide"><span>规格 / 描述</span><textarea v-model="device.description" :disabled="readonly" /></label>
-            <label><span>数量</span><input v-model.number="device.quantity" type="number" min="1" step="1" aria-label="设备数量" :disabled="readonly" /></label>
-            <label><span>含税单价 (CNY)</span><input v-model="device.unitPrice" aria-label="设备含税单价" inputmode="decimal" :disabled="readonly" /></label>
+            <label><span>{{ quotationType === 'Service' ? (locale === 'en-US' ? 'Service / accessory item' : '服务 / 配件项目') : (locale === 'en-US' ? 'Equipment name' : '设备名称') }}</span><input :value="itemName(device)" @input="device.name = ($event.target as HTMLInputElement).value" :aria-label="quotationType === 'Service' ? (locale === 'en-US' ? 'Service or accessory item' : '服务或配件项目') : (locale === 'en-US' ? 'Equipment name' : '设备名称')" :disabled="readonly || (quotationType === 'Device' && !!device.catalogItemId)" /></label>
+            <label><span>{{ (locale === 'en-US' ? 'Model' : '型号') }}</span><input v-model="device.model" :aria-label="(locale === 'en-US' ? 'Model' : '型号')" :disabled="readonly" /></label>
+            <label class="wide"><span>{{ (locale === 'en-US' ? 'Specification / description' : '规格 / 描述') }}</span><textarea v-model="device.description" :aria-label="(locale === 'en-US' ? 'Specification / description' : '规格 / 描述')" :disabled="readonly" /></label>
+            <label><span>{{ (locale === 'en-US' ? 'Quantity' : '数量') }}</span><input v-model.number="device.quantity" type="number" min="1" step="1" :aria-label="(locale === 'en-US' ? 'Equipment quantity' : '设备数量')" :disabled="readonly" /></label>
+            <label><span>{{ (locale === 'en-US' ? 'Unit price (tax included, CNY)' : '含税单价 (CNY)') }}</span><input v-model="device.unitPrice" :aria-label="(locale === 'en-US' ? 'Equipment unit price including tax' : '设备含税单价')" inputmode="decimal" :disabled="readonly" /></label>
           </div>
           <template v-if="quotationType === 'Device'">
             <section v-for="(system, systemIndex) in systems(device.lineKey)" :key="system.lineKey" class="system-card">
               <header>
-                <div><span>SYSTEM {{ index + 1 }}.{{ systemIndex + 1 }}</span><input v-if="!system.catalogItemId" v-model="system.name" aria-label="系统名称" :disabled="readonly" /><strong v-else>{{ system.name }}</strong></div>
-                <button v-if="!readonly" class="remove-line-button" type="button" aria-label="删除系统" @click="removeLine(system)"><Trash2 :size="14" /></button>
+                 <div><span>{{ ui('SYSTEM', '系统') }} {{ index + 1 }}.{{ systemIndex + 1 }}</span><input v-if="!system.catalogItemId" v-model="system.name" :aria-label="(locale === 'en-US' ? 'System name' : '系统名称')" :disabled="readonly" /><strong v-else>{{ itemName(system) }}</strong></div>
+                <button v-if="!readonly" class="remove-line-button" type="button" :aria-label="(locale === 'en-US' ? 'Remove system' : '删除系统')" @click="removeLine(system)"><Trash2 :size="14" /></button>
               </header>
               <div class="accessory-list">
                 <div v-for="accessory in accessories(system.lineKey)" :key="accessory.lineKey" class="accessory-row">
                   <div class="form-grid item-fields">
-                    <label><span>配件名称</span><input v-model="accessory.name" aria-label="配件名称" :disabled="readonly || !!accessory.catalogItemId" /></label>
-                    <label><span>型号</span><input v-model="accessory.model" :disabled="readonly" /></label>
-                    <label class="wide"><span>规格 / 描述</span><textarea v-model="accessory.description" :disabled="readonly" /></label>
-                    <label><span>计价方式</span><QuotationPicker :model-value="accessory.pricingMode" :options="pricingModeOptions" placeholder="请选择计价方式" label="计价方式" test-id="accessory-pricing-mode-select" :allow-empty="false" :disabled="readonly" @update:model-value="setAccessoryPricingMode(accessory, $event)" /></label>
-                    <label><span>总数量</span><input v-model.number="accessory.quantity" type="number" min="1" step="1" aria-label="配件数量" :disabled="readonly" /></label>
-                    <label><span>含税单价</span><input v-model="accessory.unitPrice" aria-label="配件含税单价" inputmode="decimal" :disabled="readonly || accessory.pricingMode === 'Included'" /></label>
+                    <label><span>{{ (locale === 'en-US' ? 'Accessory name' : '配件名称') }}</span><input :value="itemName(accessory)" @input="accessory.name = ($event.target as HTMLInputElement).value" :aria-label="(locale === 'en-US' ? 'Accessory name' : '配件名称')" :disabled="readonly || !!accessory.catalogItemId" /></label>
+                    <label><span>{{ (locale === 'en-US' ? 'Model' : '型号') }}</span><input v-model="accessory.model" :aria-label="(locale === 'en-US' ? 'Model' : '型号')" :disabled="readonly" /></label>
+                    <label class="wide"><span>{{ (locale === 'en-US' ? 'Specification / description' : '规格 / 描述') }}</span><textarea v-model="accessory.description" :aria-label="(locale === 'en-US' ? 'Specification / description' : '规格 / 描述')" :disabled="readonly" /></label>
+                    <label><span>{{ (locale === 'en-US' ? 'Pricing mode' : '计价方式') }}</span><QuotationPicker :model-value="accessory.pricingMode" :options="pricingModeOptions" :placeholder="(locale === 'en-US' ? 'Select pricing mode' : '请选择计价方式')" :label="(locale === 'en-US' ? 'Pricing mode' : '计价方式')" test-id="accessory-pricing-mode-select" :allow-empty="false" :disabled="readonly" @update:model-value="setAccessoryPricingMode(accessory, $event)" /></label>
+                    <label><span>{{ (locale === 'en-US' ? 'Total quantity' : '总数量') }}</span><input v-model.number="accessory.quantity" type="number" min="1" step="1" :aria-label="(locale === 'en-US' ? 'Accessory quantity' : '配件数量')" :disabled="readonly" /></label>
+                    <label><span>{{ (locale === 'en-US' ? 'Unit price (tax included)' : '含税单价') }}</span><input v-model="accessory.unitPrice" :aria-label="(locale === 'en-US' ? 'Accessory unit price including tax' : '配件含税单价')" inputmode="decimal" :disabled="readonly || accessory.pricingMode === 'Included'" /></label>
                   </div>
-                  <button v-if="!readonly" class="remove-line-button" type="button" aria-label="删除配件" @click="removeLine(accessory)"><Trash2 :size="14" /></button>
+                  <button v-if="!readonly" class="remove-line-button" type="button" :aria-label="(locale === 'en-US' ? 'Remove accessory' : '删除配件')" @click="removeLine(accessory)"><Trash2 :size="14" /></button>
                 </div>
               </div>
-              <QuotationCatalogFilter v-if="!readonly" class="add-child" :options="catalogAccessories(system)" :selected-ids="selectedAccessoryIds(system.lineKey)" label="配件" placeholder="添加配件" custom-placeholder="输入自定义配件名称" :test-id="`add-accessory-${system.lineKey}`" multiple @select="addAccessory(system, $event)" @custom="addCustomAccessory(system, $event)" />
+              <QuotationCatalogFilter v-if="!readonly" class="add-child" :options="catalogAccessories(system)" :selected-ids="selectedAccessoryIds(system.lineKey)" :label="(locale === 'en-US' ? 'Accessory' : '配件')" :placeholder="(locale === 'en-US' ? 'Add accessory' : '添加配件')" :custom-placeholder="(locale === 'en-US' ? 'Enter custom accessory name' : '输入自定义配件名称')" :test-id="`add-accessory-${system.lineKey}`" multiple @select="addAccessory(system, $event)" @custom="addCustomAccessory(system, $event)" />
             </section>
             <section v-if="legacyAccessories(device.lineKey).length" class="system-card legacy-system">
-              <header><div><span>LEGACY</span><strong>历史未分组配件</strong></div></header>
-              <div class="accessory-list"><div v-for="accessory in legacyAccessories(device.lineKey)" :key="accessory.lineKey" class="accessory-row"><div class="form-grid item-fields"><label><span>配件名称</span><input v-model="accessory.name" aria-label="配件名称" :disabled="readonly" /></label><label><span>型号</span><input v-model="accessory.model" :disabled="readonly" /></label><label class="wide"><span>规格 / 描述</span><textarea v-model="accessory.description" :disabled="readonly" /></label><label><span>计价方式</span><QuotationPicker :model-value="accessory.pricingMode" :options="pricingModeOptions" placeholder="请选择计价方式" label="计价方式" test-id="accessory-pricing-mode-select" :allow-empty="false" :disabled="readonly" @update:model-value="setAccessoryPricingMode(accessory, $event)" /></label><label><span>总数量</span><input v-model.number="accessory.quantity" type="number" min="1" step="1" aria-label="配件数量" :disabled="readonly" /></label><label><span>含税单价</span><input v-model="accessory.unitPrice" aria-label="配件含税单价" inputmode="decimal" :disabled="readonly || accessory.pricingMode === 'Included'" /></label></div><button v-if="!readonly" class="remove-line-button" type="button" aria-label="删除配件" @click="removeLine(accessory)"><Trash2 :size="14" /></button></div></div>
+               <header><div><span>{{ ui('LEGACY', '历史数据') }}</span><strong>{{ (locale === 'en-US' ? 'Legacy ungrouped accessories' : '历史未分组配件') }}</strong></div></header>
+              <div class="accessory-list"><div v-for="accessory in legacyAccessories(device.lineKey)" :key="accessory.lineKey" class="accessory-row"><div class="form-grid item-fields"><label><span>{{ locale === 'en-US' ? 'Accessory name' : '配件名称' }}</span><input :value="itemName(accessory)" @input="accessory.name = ($event.target as HTMLInputElement).value" :aria-label="locale === 'en-US' ? 'Accessory name' : '配件名称'" :disabled="readonly" /></label><label><span>{{ locale === 'en-US' ? 'Model' : '型号' }}</span><input v-model="accessory.model" :disabled="readonly" /></label><label class="wide"><span>{{ locale === 'en-US' ? 'Specification / description' : '规格 / 描述' }}</span><textarea v-model="accessory.description" :disabled="readonly" /></label><label><span>{{ locale === 'en-US' ? 'Pricing mode' : '计价方式' }}</span><QuotationPicker :model-value="accessory.pricingMode" :options="pricingModeOptions" :placeholder="locale === 'en-US' ? 'Select pricing mode' : '请选择计价方式'" :label="locale === 'en-US' ? 'Pricing mode' : '计价方式'" test-id="accessory-pricing-mode-select" :allow-empty="false" :disabled="readonly" @update:model-value="setAccessoryPricingMode(accessory, $event)" /></label><label><span>{{ locale === 'en-US' ? 'Total quantity' : '总数量' }}</span><input v-model.number="accessory.quantity" type="number" min="1" step="1" :aria-label="locale === 'en-US' ? 'Accessory quantity' : '配件数量'" :disabled="readonly" /></label><label><span>{{ locale === 'en-US' ? 'Unit price (tax included)' : '含税单价' }}</span><input v-model="accessory.unitPrice" :aria-label="locale === 'en-US' ? 'Accessory unit price including tax' : '配件含税单价'" inputmode="decimal" :disabled="readonly || accessory.pricingMode === 'Included'" /></label></div><button v-if="!readonly" class="remove-line-button" type="button" :aria-label="locale === 'en-US' ? 'Remove accessory' : '删除配件'" @click="removeLine(accessory)"><Trash2 :size="14" /></button></div></div>
             </section>
-            <QuotationCatalogFilter v-if="!readonly" class="add-child" :options="catalogSystems(device)" :selected-ids="selectedSystemIds(device.lineKey)" label="系统" placeholder="添加系统" custom-placeholder="输入自定义系统名称" :test-id="`add-system-${device.lineKey}`" @select="addSystem(device, $event)" @custom="addCustomSystem(device, $event)" />
+            <QuotationCatalogFilter v-if="!readonly" class="add-child" :options="catalogSystems(device)" :selected-ids="selectedSystemIds(device.lineKey)" :label="(locale === 'en-US' ? 'System' : '系统')" :placeholder="(locale === 'en-US' ? 'Add system' : '添加系统')" :custom-placeholder="(locale === 'en-US' ? 'Enter custom system name' : '输入自定义系统名称')" :test-id="`add-system-${device.lineKey}`" @select="addSystem(device, $event)" @custom="addCustomSystem(device, $event)" />
           </template>
         </article>
       </div>
     </SectionCard>
 
-    <SectionCard title="价格与整单折扣" eyebrow="PRICING">
+    <SectionCard :title="t('quotationEditor.pricing')" :eyebrow="ui('PRICING', '计价')">
       <div class="pricing-grid">
-        <label><span>币种</span><input value="CNY / RMB" disabled /></label>
-        <div class="discount-field"><span>折扣方式</span><div class="discount-options"><button v-for="option in discountTypes" :key="option.value" type="button" :data-discount-type="option.value" :class="{ active: model.discountType === option.value }" :disabled="readonly" @click="setDiscountType(option.value)">{{ option.label }}</button></div></div>
-        <label><span>{{ model.discountType === 'Percentage' ? '折扣百分比' : '折扣金额' }}</span><input v-model="model.discountValue" aria-label="整单折扣值" inputmode="decimal" :disabled="readonly || model.discountType === 'None'" /></label>
-        <div class="tax-note"><strong>含税价</strong><small>系统不拆分税额</small></div>
+        <label><span>{{ t('quotationEditor.currency') }}</span><input value="CNY / RMB" disabled /></label>
+        <div class="discount-field"><span>{{ t('quotationEditor.discountMode') }}</span><div class="discount-options"><button v-for="option in discountTypes" :key="option.value" type="button" :data-discount-type="option.value" :class="{ active: model.discountType === option.value }" :disabled="readonly" @click="setDiscountType(option.value)">{{ option.label }}</button></div></div>
+        <label><span>{{ model.discountType === 'Percentage' ? t('quotationEditor.discountPercent') : t('quotationEditor.discountAmount') }}</span><input v-model="model.discountValue" :aria-label="t('quotationEditor.discountValue')" inputmode="decimal" :disabled="readonly || model.discountType === 'None'" /></label>
+        <div class="tax-note"><strong>{{ t('quotationEditor.taxIncluded') }}</strong><small>{{ t('quotationEditor.taxNote') }}</small></div>
       </div>
     </SectionCard>
 
-    <SectionCard title="商务条款" eyebrow="COMMERCIAL TERMS" description="付款比例可在草稿中调整，提交审批或发布时合计必须为 100%。">
+    <SectionCard :title="t('quotationEditor.terms')" eyebrow="COMMERCIAL TERMS" :description="t('quotationEditor.termsHint')">
       <div v-if="quotationType === 'Device'" class="form-grid three">
-        <label><span>交期（月）</span><input v-model.number="model.deliveryMonths" aria-label="交期月数" type="number" min="1" step="1" :disabled="readonly" /><small>{{ model.deliveryMonths }}月内(标准交期) 收到买方正式PO为准。</small></label>
-        <label><span>Warranty（月）</span><input v-model.number="model.warrantyMonths" aria-label="维保月数" type="number" min="1" step="1" :disabled="readonly" /><small>{{ model.warrantyMonths }}个月自发货日起维保</small></label>
-        <label><span>报价有效期（月）</span><input v-model.number="model.validityMonths" type="number" min="1" step="1" aria-label="商务报价有效期月数" :disabled="readonly" /><small>报价有效期{{ model.validityMonths }}个月</small></label>
+        <label><span>{{ locale === 'en-US' ? 'Delivery (months)' : '交期（月）' }}</span><input v-model.number="model.deliveryMonths" :aria-label="locale === 'en-US' ? 'Delivery months' : '交期月数'" type="number" min="1" step="1" :disabled="readonly" /><small>{{ locale === 'en-US' ? `${model.deliveryMonths} months from receipt of formal buyer PO (standard lead time).` : `${model.deliveryMonths}月内(标准交期) 收到买方正式PO为准。` }}</small></label>
+        <label><span>{{ locale === 'en-US' ? 'Warranty (months)' : 'Warranty（月）' }}</span><input v-model.number="model.warrantyMonths" :aria-label="locale === 'en-US' ? 'Warranty months' : '维保月数'" type="number" min="1" step="1" :disabled="readonly" /><small>{{ locale === 'en-US' ? `${model.warrantyMonths}-month warranty from shipment date` : `${model.warrantyMonths}个月自发货日起维保` }}</small></label>
+        <label><span>{{ locale === 'en-US' ? 'Quotation validity (months)' : '报价有效期（月）' }}</span><input v-model.number="model.validityMonths" type="number" min="1" step="1" :aria-label="locale === 'en-US' ? 'Quotation validity months' : '商务报价有效期月数'" :disabled="readonly" /><small>{{ locale === 'en-US' ? `Quotation valid for ${model.validityMonths} months` : `报价有效期${model.validityMonths}个月` }}</small></label>
       </div>
       <div class="fixed-terms">
-        <p v-if="quotationType === 'Device'"><strong>Incoterm：</strong>FOB上海&nbsp;&nbsp;FOB Shanghai</p>
+        <p v-if="quotationType === 'Device'"><strong>Incoterm:</strong>{{ locale === 'en-US' ? 'FOB Shanghai' : 'FOB上海  FOB Shanghai' }}</p>
         <h3>Payment Terms</h3>
         <div v-for="(term, index) in model.paymentTerms" :key="term.triggerCondition || index" class="payment-term-row">
           <label>
-            <span>第 {{ index + 1 }} 期比例</span>
+            <span>{{ locale === 'en-US' ? `Payment ${index + 1} percentage` : `第 ${index + 1} 期比例` }}</span>
             <span class="percentage-input"><input v-model="term.percentage" :data-payment-percentage="index" inputmode="decimal" :disabled="readonly" /><b>%</b></span>
           </label>
           <p>{{ paymentDescriptions[index]?.(term.percentage) || term.description }}</p>
         </div>
         <template v-if="quotationType === 'Device'">
-          <h3>Installation &amp; Training</h3>
+          <h3>{{ locale === 'en-US' ? 'Installation &amp; training' : '安装与培训' }}</h3>
           <ol><li v-for="line in fixedServices" :key="line">{{ line }}</li></ol>
         </template>
       </div>

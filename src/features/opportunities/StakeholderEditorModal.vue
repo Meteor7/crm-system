@@ -1,10 +1,14 @@
 <script setup lang="ts">
+import { useLocalizedInput } from '@/i18n/localized-input'
+import { systemValueLabel } from '@/features/shared/system-labels'
 import { ref, watch } from 'vue'
 import ModalShell from '@/design-system/ModalShell.vue'
 import RequiredMark from '@/design-system/RequiredMark.vue'
 import ContactPicker from '@/features/contacts/ContactPicker.vue'
 import type { ContactSummaryDto } from '@/types/crm'
 import { OPPORTUNITY_STAKEHOLDER_INFLUENCES, OPPORTUNITY_STAKEHOLDER_ROLES, OPPORTUNITY_STAKEHOLDER_STANCES, type CreateOpportunityStakeholderInput, type OpportunityStakeholderDto } from '@/types/workspaces'
+import { useI18n } from '@/i18n'
+import { salesEnumLabel } from '@/features/shared/sales-i18n'
 
 const props = defineProps<{
   stakeholder?: OpportunityStakeholderDto | null
@@ -15,6 +19,7 @@ const props = defineProps<{
   error?: string
 }>()
 const emit = defineEmits<{ close: []; submit: [value: CreateOpportunityStakeholderInput]; createContact: [] }>()
+const { t, locale } = useI18n()
 const form = ref<CreateOpportunityStakeholderInput>({
   contactId: props.stakeholder?.contactId ?? '',
   role: props.stakeholder?.role ?? 'Influencer', influence: props.stakeholder?.influence ?? 'Medium',
@@ -32,20 +37,22 @@ watch(() => props.accountId, () => {
     form.value.contactId = ''
   }
 })
+
+const coverageInput = useLocalizedInput(() => form.value.coverage, (value) => { form.value.coverage = value }, (value) => systemValueLabel(value, locale.value))
 </script>
 
 <template>
-  <ModalShell :title="stakeholder ? '编辑机会关键人' : '新增机会关键人'" eyebrow="BUYING INFLUENCE" :busy="busy" @close="$emit('close')" @submit="$emit('submit', form)">
+  <ModalShell :title="stakeholder ? t('stakeholderEditor.edit') : t('stakeholderEditor.new')" eyebrow="BUYING INFLUENCE" :busy="busy" @close="$emit('close')" @submit="$emit('submit', { ...form, coverage: stakeholder ? form.coverage : coverageInput })">
     <p v-if="error" class="form-error">{{ error }}</p>
     <div class="compact-form-grid">
-      <label class="wide"><span>联系人<RequiredMark :show="!stakeholder" /></span><ContactPicker v-model="form.contactId" :contacts="contacts" :account-id="accountId" data-testid="opportunity-contact-picker" :disabled="busy" required @create="emit('createContact')" /></label>
-      <label><span>Buying Role</span><select v-model="form.role" aria-label="关键人角色"><option v-for="item in OPPORTUNITY_STAKEHOLDER_ROLES" :key="item">{{ item }}</option></select></label>
-      <label><span>Influence</span><select v-model="form.influence" aria-label="关键人影响力"><option v-for="item in OPPORTUNITY_STAKEHOLDER_INFLUENCES" :key="item">{{ item }}</option></select></label>
-      <label><span>Attitude</span><select v-model="form.stance" aria-label="关键人态度"><option v-for="item in OPPORTUNITY_STAKEHOLDER_STANCES" :key="item">{{ item }}</option></select></label>
-      <label><span>Coverage Evidence<RequiredMark :show="!stakeholder" /></span><input v-model="form.coverage" aria-label="关键人覆盖证据" required /></label>
-      <label><span>Win Result</span><input v-model="form.winResult" aria-label="关键人赢单结果" /></label>
-      <label><span>Opportunity Notes</span><input v-model="form.opportunityNotes" aria-label="关键人机会备注" /></label>
-      <label class="coach"><input v-model="form.isCoach" aria-label="关键人是教练" type="checkbox" /><span>Coach</span></label>
+      <label class="wide"><span>{{ t('detail.contact') }}<RequiredMark :show="!stakeholder" /></span><ContactPicker v-model="form.contactId" :contacts="contacts" :account-id="accountId" data-testid="opportunity-contact-picker" :disabled="busy" required @create="emit('createContact')" /></label>
+      <label><span>{{ t('stakeholderEditor.role') }}</span><select v-model="form.role" :aria-label="t('stakeholderEditor.role')"><option v-for="item in OPPORTUNITY_STAKEHOLDER_ROLES" :key="item" :value="item">{{ salesEnumLabel(item, locale) }}</option></select></label>
+      <label><span>{{ t('stakeholderEditor.influence') }}</span><select v-model="form.influence" :aria-label="t('stakeholderEditor.influence')"><option v-for="item in OPPORTUNITY_STAKEHOLDER_INFLUENCES" :key="item" :value="item">{{ salesEnumLabel(item, locale) }}</option></select></label>
+      <label><span>{{ t('stakeholderEditor.attitude') }}</span><select v-model="form.stance" :aria-label="t('stakeholderEditor.attitude')"><option v-for="item in OPPORTUNITY_STAKEHOLDER_STANCES" :key="item" :value="item">{{ salesEnumLabel(item, locale) }}</option></select></label>
+      <label><span>{{ t('stakeholderEditor.coverage') }}<RequiredMark :show="!stakeholder" /></span><input v-model="coverageInput" :aria-label="t('stakeholderEditor.coverage')" required /></label>
+      <label><span>{{ t('stakeholderEditor.winResult') }}</span><input v-model="form.winResult" :aria-label="t('stakeholderEditor.winResult')" /></label>
+      <label><span>{{ t('stakeholderEditor.notes') }}</span><input v-model="form.opportunityNotes" :aria-label="t('stakeholderEditor.notes')" /></label>
+      <label class="coach"><input v-model="form.isCoach" :aria-label="t('stakeholderEditor.coach')" type="checkbox" /><span>{{ t('stakeholderEditor.coach') }}</span></label>
     </div>
   </ModalShell>
 </template>

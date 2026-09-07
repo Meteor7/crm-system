@@ -1,21 +1,19 @@
 <script setup lang="ts">
 import { X } from '@lucide/vue'
+import { useI18n } from '@/i18n'
 
-withDefaults(defineProps<{ title: string; eyebrow?: string; busy?: boolean; wide?: boolean; submitDisabled?: boolean; submitLabel?: string; cancelLabel?: string; closeLabel?: string; busyLabel?: string }>(), {
-  cancelLabel: '取消',
-  closeLabel: '关闭',
-  busyLabel: '处理中…',
-})
+defineProps<{ title: string; eyebrow?: string; busy?: boolean; wide?: boolean; submitDisabled?: boolean; submitLabel?: string; cancelLabel?: string; closeLabel?: string; busyLabel?: string }>()
+const { t } = useI18n()
 defineEmits<{ close: []; submit: [] }>()
 </script>
 
 <template>
   <div class="modal-host" role="presentation" @mousedown.self="$emit('close')">
     <section class="modal-card" :class="{ wide }" role="dialog" aria-modal="true" :aria-label="title">
-      <header><div><span>{{ eyebrow || 'WORKFLOW' }}</span><h2>{{ title }}</h2></div><button type="button" :aria-label="closeLabel" @click="$emit('close')"><X :size="18" /></button></header>
+      <header><div><span>{{ eyebrow || 'WORKFLOW' }}</span><h2>{{ title }}</h2></div><button type="button" :aria-label="closeLabel ?? t('common.close')" @click="$emit('close')"><X :size="18" /></button></header>
       <form @submit.prevent="$emit('submit')">
         <div class="modal-body"><slot /></div>
-        <footer><button class="secondary-button" type="button" @click="$emit('close')">{{ cancelLabel }}</button><button class="primary-button" data-modal-submit type="submit" :disabled="busy || submitDisabled">{{ busy ? busyLabel : submitLabel || '保存并继续' }}</button></footer>
+        <footer><button class="secondary-button" type="button" @click="$emit('close')">{{ cancelLabel ?? t('common.cancel') }}</button><button class="primary-button" data-modal-submit type="submit" :disabled="busy || submitDisabled">{{ busy ? (busyLabel ?? t('common.processing')) : submitLabel || t('common.saveAndContinue') }}</button></footer>
       </form>
     </section>
   </div>

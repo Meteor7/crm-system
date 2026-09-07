@@ -70,7 +70,7 @@ describe('TestReportUploadModal', () => {
     void wrapper.get('[data-upload-test-report]').trigger('click')
     await flushPromises()
     expect(wrapper.get('[data-upload-test-report]').attributes('disabled')).toBeDefined()
-    expect(wrapper.get('[aria-label="关闭"]').attributes('disabled')).toBeDefined()
+    expect(wrapper.get('[role="dialog"] header button').attributes('disabled')).toBeDefined()
     resolve({ data: uploadResult, warnings: [] })
     await flushPromises()
   })

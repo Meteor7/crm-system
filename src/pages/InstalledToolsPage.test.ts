@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { CrmApiError } from '@/api/contracts'
 import { createMockApi } from '@/api/mock-adapter'
 import type { CrmApi } from '@/api'
+import { setLocale } from '@/i18n'
 import { createAppRouter } from '@/app/router'
 import InstalledToolsPage from './InstalledToolsPage.vue'
 
@@ -150,6 +151,12 @@ describe('InstalledToolsPage three-surface workspace', () => {
     })
     expect(transition.mock.calls[0][2]).toEqual(expect.any(String))
     expect(wrapper.get('[data-installed-tool-archive]').text()).toContain('SAT')
+    expect(wrapper.get('.demo-toast').text()).toContain('已推进到下一生命周期节点')
+    setLocale('en-US')
+    await flushPromises()
+    expect(wrapper.get('.demo-toast').text()).toContain('advanced to the next lifecycle stage')
+    expect(transition).toHaveBeenCalledTimes(1)
+    wrapper.unmount()
   })
 
   it('shows the request id when installed-tool detail access is denied', async () => {

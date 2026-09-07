@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { requestErrorMessage } from '@/api/request-state'
 import { personnelDisplayName } from '@/demo/personnel'
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRouter, type RouteLocationRaw } from 'vue-router'
@@ -6,7 +7,8 @@ import { CalendarDays, ChevronLeft, ChevronRight, Clock3, MapPin, UserRound, Use
 import { api as defaultApi, type CrmApi } from '@/api'
 import { useAppStore } from '@/stores/app'
 import { formatDisplayDate } from '@/domain/time'
-import type { ApiResponse, PageData } from '@/types/crm'
+import type { ApiResponse, BookingDto, DemoRequestDto, EvaluationDto, PageData, VisitDto } from '@/types/crm'
+import { useI18n, useLocaleMessage } from '@/i18n'
 
 type CalendarEventType = 'visit' | 'demo-request' | 'demo-test' | 'booking'
 interface CalendarEvent {
@@ -23,9 +25,12 @@ interface CalendarEvent {
 const props = withDefaults(defineProps<{ apiClient?: CrmApi }>(), { apiClient: () => defaultApi })
 const app = useAppStore()
 const router = useRouter()
+const { locale, t, message } = useI18n()
 const loading = ref(true)
-const error = ref('')
-const events = ref<CalendarEvent[]>([])
+const error = useLocaleMessage()
+const sources = ref<{ visits: VisitDto[]; requests: DemoRequestDto[]; evaluations: EvaluationDto[]; bookings: BookingDto[] }>({
+  visits: [], requests: [], evaluations: [], bookings: [],
+})
 const view = ref<'month' | 'week'>('month')
 const cursor = ref(new Date())
 const selectedId = ref('')
@@ -40,12 +45,23 @@ let loadRevision = 0
 let activeLoadKey = ''
 let loadedBootstrapKey = ''
 
-const typeMeta: Record<CalendarEventType, { label: string; className: string }> = {
-  visit: { label: 'Sales 拜访', className: 'visit' },
-  'demo-request': { label: '客户预期', className: 'request' },
-  'demo-test': { label: 'Demo Test DDL', className: 'test' },
-  booking: { label: 'Booking DDL', className: 'booking' },
-}
+const typeMeta = computed<Record<CalendarEventType, { label: string; className: string }>>(() => ({
+  visit: { label: t('calendar.event.visit'), className: 'visit' },
+  'demo-request': { label: t('calendar.event.demoRequest'), className: 'request' },
+  'demo-test': { label: t('calendar.event.demoTest'), className: 'test' },
+  booking: { label: t('calendar.event.booking'), className: 'booking' },
+}))
+
+const weekdayLabels = computed(() => [
+  t('calendar.weekday.sun'),
+  t('calendar.weekday.mon'),
+  t('calendar.weekday.tue'),
+  t('calendar.weekday.wed'),
+  t('calendar.weekday.thu'),
+  t('calendar.weekday.fri'),
+  t('calendar.weekday.sat'),
+])
+const monthWeekdayLabels = computed(() => [...weekdayLabels.value.slice(1), weekdayLabels.value[0]])
 
 function iso(date: Date) {
   const year = date.getFullYear()
@@ -68,6 +84,27 @@ function startOfWeek(date: Date) {
 function isMine(event: CalendarEvent) {
   return event.owner === currentUser.value
 }
+const events = computed(() => [
+  ...sources.value.visits.map((item): CalendarEvent => ({
+    id: `visit-${item.id}`, sourceId: item.id, type: 'visit', date: item.date, title: item.subject,
+    account: item.accountName, owner: item.owner, detail: `${item.type} · ${item.objective}`,
+  })),
+  ...sources.value.requests.filter((item) => item.status !== 'Cancelled').map((item): CalendarEvent => ({
+    id: `request-${item.id}`, sourceId: item.id, type: 'demo-request', date: item.customerExpectedDate || item.targetDate,
+    title: `${item.id} ${t('calendar.customerExpected')}`, account: item.accountName, owner: isEngineer.value ? item.engineerOwner : item.salesOwner,
+    detail: `${item.title} · ${item.requestedEquipment}`,
+  })),
+  ...sources.value.evaluations.filter((item) => item.testRunDeadline).map((item): CalendarEvent => ({
+    id: `test-${item.id}`, sourceId: item.id, type: 'demo-test', date: item.testRunDeadline,
+    title: `${item.id} ${t('calendar.testRunDdl')}`, account: item.accountName, owner: item.owner,
+    detail: item.title,
+  })),
+  ...sources.value.bookings.filter((item) => item.status !== 'Cancelled' && item.ddl).map((item): CalendarEvent => ({
+    id: `booking-${item.id}`, sourceId: item.id, type: 'booking', date: item.ddl,
+    title: `${item.id} ${t('calendar.customerDdl')}`, account: item.accountName, owner: item.owner,
+    detail: `${item.equipment} · ${item.quantity} ${t('calendar.units')}`,
+  })),
+].filter((item) => item.date))
 const scopedEvents = computed(() => isBoss.value && scope.value === 'mine' ? events.value.filter(isMine) : events.value)
 const accountOptions = computed(() => [...new Set(scopedEvents.value.map((item) => item.account).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'zh-CN')))
 const ownerOptions = computed(() => [...new Set(scopedEvents.value.map((item) => item.owner).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'zh-CN')))
@@ -87,9 +124,11 @@ const weekDays = computed(() => {
   const first = startOfWeek(cursor.value)
   return Array.from({ length: 7 }, (_, index) => addDays(first, index))
 })
-const title = computed(() => view.value === 'month'
-  ? `${cursor.value.getFullYear()}年 ${cursor.value.getMonth() + 1}月`
-  : `${iso(weekDays.value[0])} — ${iso(weekDays.value[6])}`)
+const title = computed(() => {
+  if (locale.value === 'zh-CN' && view.value === 'month') return `${cursor.value.getFullYear()}年 ${cursor.value.getMonth() + 1}月`
+  const format = (date: Date) => new Intl.DateTimeFormat(locale.value, { year: 'numeric', month: 'short', day: 'numeric' }).format(date)
+  return view.value === 'month' ? new Intl.DateTimeFormat(locale.value, { year: 'numeric', month: 'long' }).format(cursor.value) : `${format(weekDays.value[0])} — ${format(weekDays.value[6])}`
+})
 const selected = computed(() => visibleEvents.value.find((item) => item.id === selectedId.value) ?? visibleEvents.value[0])
 const today = iso(new Date())
 
@@ -161,30 +200,10 @@ async function load() {
       props.apiClient.listPipeline({ dateFrom, dateTo }),
     ])
     if (revision !== loadRevision) return
-    events.value = [
-      ...visits.map((item): CalendarEvent => ({
-        id: `visit-${item.id}`, sourceId: item.id, type: 'visit', date: item.date, title: item.subject,
-        account: item.accountName, owner: item.owner, detail: `${item.type} · ${item.objective}`,
-      })),
-      ...requests.filter((item) => item.status !== 'Cancelled').map((item): CalendarEvent => ({
-        id: `request-${item.id}`, sourceId: item.id, type: 'demo-request', date: item.customerExpectedDate || item.targetDate,
-        title: `${item.id} 客户预期`, account: item.accountName, owner: isEngineer.value ? item.engineerOwner : item.salesOwner,
-        detail: `${item.title} · ${item.requestedEquipment}`,
-      })),
-      ...evaluations.filter((item) => item.testRunDeadline).map((item): CalendarEvent => ({
-        id: `test-${item.id}`, sourceId: item.id, type: 'demo-test', date: item.testRunDeadline,
-        title: `${item.id} Test Run DDL`, account: item.accountName, owner: item.owner,
-        detail: item.title,
-      })),
-      ...pipeline.data.bookings.filter((item) => item.status !== 'Cancelled' && item.ddl).map((item): CalendarEvent => ({
-        id: `booking-${item.id}`, sourceId: item.id, type: 'booking', date: item.ddl,
-        title: `${item.id} 客户 DDL`, account: item.accountName, owner: item.owner,
-        detail: `${item.equipment} · ${item.quantity} 台`,
-      })),
-    ].filter((item) => item.date)
+    sources.value = { visits, requests, evaluations, bookings: pipeline.data.bookings }
     if (!visibleEvents.value.some((item) => item.id === selectedId.value)) selectedId.value = visibleEvents.value[0]?.id ?? ''
   } catch (reason) {
-    if (revision === loadRevision) error.value = reason instanceof Error ? reason.message : 'Calendar 数据加载失败'
+    if (revision === loadRevision) error.value = requestErrorMessage(reason, message('calendar.loadFailed'))
   } finally {
     if (revision === loadRevision) {
       loading.value = false
@@ -196,7 +215,7 @@ async function load() {
 onMounted(async () => {
   await app.loadBootstrap(props.apiClient)
   if (!app.bootstrap && app.error) {
-    error.value = app.error
+    error.value = app.errorSource
     loading.value = false
   }
 })
@@ -220,72 +239,72 @@ watch([cursor, view], () => { void load() })
 <template>
   <div class="workspace-page calendar-page" data-page="calendar">
     <header class="page-title-row">
-      <div><span class="eyebrow">PERSONAL WORK CALENDAR</span><h1>Calendar</h1><p>汇总个人拜访、Demo Request 客户预期、Demo Test DDL 与 Booking DDL；Boss 可切换到全员视角统一查看。</p></div>
-      <span class="context-chip"><CalendarDays :size="15" />{{ visibleEvents.length }} 项安排</span>
+      <div><span class="eyebrow">{{ t('calendar.eyebrow') }}</span><h1>{{ t('calendar.title') }}</h1><p>{{ t('calendar.description') }}</p></div>
+      <span class="context-chip"><CalendarDays :size="15" />{{ t('calendar.items', { count: visibleEvents.length }) }}</span>
     </header>
 
     <section class="calendar-shell">
       <header class="calendar-toolbar">
         <div class="calendar-navigation">
-          <button type="button" aria-label="上一周期" @click="move(-1)"><ChevronLeft :size="17" /></button>
-          <button class="today-button" type="button" @click="backToToday">今天</button>
-          <button type="button" aria-label="下一周期" @click="move(1)"><ChevronRight :size="17" /></button>
+          <button type="button" :aria-label="t('calendar.previousPeriod')" @click="move(-1)"><ChevronLeft :size="17" /></button>
+          <button class="today-button" type="button" @click="backToToday">{{ t('calendar.today') }}</button>
+          <button type="button" :aria-label="t('calendar.nextPeriod')" @click="move(1)"><ChevronRight :size="17" /></button>
           <h2>{{ title }}</h2>
         </div>
         <div class="calendar-controls">
           <div class="scope-switch">
-            <button type="button" :class="{ active: scope === 'mine' }" @click="scope = 'mine'"><UserRound :size="13" />我的安排</button>
-            <button v-if="isBoss" type="button" :class="{ active: scope === 'all' }" @click="scope = 'all'"><UsersRound :size="13" />全员安排</button>
+            <button type="button" :class="{ active: scope === 'mine' }" @click="scope = 'mine'"><UserRound :size="13" />{{ t('calendar.mine') }}</button>
+            <button v-if="isBoss" type="button" :class="{ active: scope === 'all' }" @click="scope = 'all'"><UsersRound :size="13" />{{ t('calendar.all') }}</button>
           </div>
-          <div class="view-switch"><button type="button" :class="{ active: view === 'week' }" @click="view = 'week'">周</button><button type="button" :class="{ active: view === 'month' }" @click="view = 'month'">月</button></div>
+          <div class="view-switch"><button type="button" :class="{ active: view === 'week' }" @click="view = 'week'">{{ t('calendar.week') }}</button><button type="button" :class="{ active: view === 'month' }" @click="view = 'month'">{{ t('calendar.month') }}</button></div>
         </div>
       </header>
 
-      <div class="calendar-filters" aria-label="Calendar 分类筛选">
-        <strong>分类</strong>
+      <div class="calendar-filters" :aria-label="t('calendar.filtersLabel')">
+        <strong>{{ t('calendar.category') }}</strong>
         <label>
-          <span>公司</span>
-          <select v-model="accountFilter" aria-label="按公司分类">
-            <option value="">全部公司</option>
+          <span>{{ t('calendar.account') }}</span>
+          <select v-model="accountFilter" :aria-label="t('calendar.account')">
+            <option value="">{{ t('calendar.allAccounts') }}</option>
             <option v-for="account in accountOptions" :key="account" :value="account">{{ account }}</option>
           </select>
         </label>
         <label>
-          <span>负责人</span>
-          <select v-model="ownerFilter" aria-label="按负责人分类">
-            <option value="">全部负责人</option>
+          <span>{{ t('calendar.owner') }}</span>
+          <select v-model="ownerFilter" :aria-label="t('calendar.owner')">
+            <option value="">{{ t('calendar.allOwners') }}</option>
             <option v-for="owner in ownerOptions" :key="owner" :value="owner">{{ personnelDisplayName(owner) }}</option>
           </select>
         </label>
-        <button v-if="accountFilter || ownerFilter" type="button" @click="clearFilters">重置条件</button>
+        <button v-if="accountFilter || ownerFilter" type="button" @click="clearFilters">{{ t('calendar.reset') }}</button>
       </div>
 
       <div class="calendar-legend">
         <span v-for="(meta, key) in typeMeta" :key="key"><i :class="meta.className" />{{ meta.label }}</span>
       </div>
 
-      <div v-if="loading" class="calendar-state">正在同步个人安排…</div>
+      <div v-if="loading" class="calendar-state">{{ t('calendar.loading') }}</div>
       <div v-else-if="error" class="calendar-state error">{{ error }}</div>
       <div v-else class="calendar-layout">
         <div class="calendar-main">
           <div v-if="view === 'month'" class="month-view">
-            <div v-for="label in ['一','二','三','四','五','六','日']" :key="label" class="weekday">周{{ label }}</div>
+            <div v-for="label in monthWeekdayLabels" :key="label" class="weekday">{{ locale === 'zh-CN' ? `周${label}` : label }}</div>
             <div v-for="day in monthDays" :key="iso(day)" class="day-cell" :class="{ muted: day.getMonth() !== cursor.getMonth(), today: iso(day) === today }">
               <time>{{ day.getDate() }}</time>
               <button v-for="event in eventsOn(day).slice(0, 3)" :key="event.id" type="button" class="calendar-event" :class="[typeMeta[event.type].className, { selected: selected?.id === event.id }]" :title="`${event.title} · ${event.account}`" @click="choose(event)">
                 <span>{{ event.title }}</span><small>{{ personnelDisplayName(event.owner) }}</small>
               </button>
-              <button v-if="eventsOn(day).length > 3" type="button" class="more-events" @click="showDay(day)">+{{ eventsOn(day).length - 3 }} 项 · 查看</button>
+              <button v-if="eventsOn(day).length > 3" type="button" class="more-events" @click="showDay(day)">{{ t('calendar.more', { count: eventsOn(day).length - 3 }) }}</button>
             </div>
           </div>
           <div v-else class="week-view">
             <article v-for="day in weekDays" :key="iso(day)" class="week-day" :class="{ today: iso(day) === today }">
-              <header><span>{{ ['日','一','二','三','四','五','六'][day.getDay()] }}</span><strong>{{ day.getDate() }}</strong></header>
+              <header><span>{{ weekdayLabels[day.getDay()] }}</span><strong>{{ day.getDate() }}</strong></header>
               <div class="week-events">
                 <button v-for="event in eventsOn(day)" :key="event.id" type="button" class="week-event" :class="[typeMeta[event.type].className, { selected: selected?.id === event.id }]" @click="choose(event)">
                   <small>{{ typeMeta[event.type].label }}</small><strong>{{ event.title }}</strong><span>{{ event.account }}</span><em>{{ personnelDisplayName(event.owner) }}</em>
                 </button>
-                <p v-if="!eventsOn(day).length">暂无安排</p>
+                <p v-if="!eventsOn(day).length">{{ t('calendar.noSchedule') }}</p>
               </div>
             </article>
           </div>
@@ -294,8 +313,8 @@ watch([cursor, view], () => { void load() })
         <aside class="event-detail">
           <template v-if="selectedDate">
             <header class="day-agenda-header">
-              <div><small>DAY OVERVIEW</small><strong>{{ selectedDate }}</strong><span>{{ dayEvents.length }} 项安排</span></div>
-              <button type="button" aria-label="关闭当天安排" @click="selectedDate = ''">×</button>
+              <div><small>{{ t('calendar.dayOverview') }}</small><strong>{{ selectedDate }}</strong><span>{{ t('calendar.dayMatches', { count: dayEvents.length }) }}</span></div>
+              <button type="button" :aria-label="t('calendar.closeDay')" @click="selectedDate = ''">×</button>
             </header>
             <div v-if="dayEvents.length" class="day-agenda-list">
               <button
@@ -310,13 +329,13 @@ watch([cursor, view], () => { void load() })
                 <span>{{ event.account }} · {{ personnelDisplayName(event.owner) }}</span>
               </button>
             </div>
-            <div v-else class="empty-detail"><Clock3 :size="23" /><span>当天暂无符合分类条件的安排</span></div>
+            <div v-else class="empty-detail"><Clock3 :size="23" /><span>{{ t('calendar.noDayMatches') }}</span></div>
             <section v-if="selected" class="day-agenda-detail">
               <strong>{{ selected.title }}</strong>
               <p><MapPin :size="13" />{{ selected.account }}</p>
               <p><UserRound :size="13" />{{ personnelDisplayName(selected.owner) }}</p>
               <span>{{ selected.detail }}</span>
-              <button class="secondary-button" type="button" data-calendar-detail @click="openDetail(selected)">查看详情</button>
+              <button class="secondary-button" type="button" data-calendar-detail @click="openDetail(selected)">{{ t('calendar.details') }}</button>
             </section>
           </template>
           <template v-else-if="selected">
@@ -325,11 +344,11 @@ watch([cursor, view], () => { void load() })
             <p><CalendarDays :size="14" />{{ formatDisplayDate(selected.date) }}</p>
             <p><MapPin :size="14" />{{ selected.account }}</p>
             <p><UserRound :size="14" />{{ personnelDisplayName(selected.owner) }}</p>
-            <div><strong>安排说明</strong><span>{{ selected.detail }}</span></div>
-            <small>该日期来自上游业务模块，修改后会重新同步到 Calendar。</small>
-            <button class="secondary-button" type="button" data-calendar-detail @click="openDetail(selected)">查看详情</button>
+            <div><strong>{{ t('calendar.scheduleDetails') }}</strong><span>{{ selected.detail }}</span></div>
+            <small>{{ t('calendar.syncNote') }}</small>
+            <button class="secondary-button" type="button" data-calendar-detail @click="openDetail(selected)">{{ t('calendar.details') }}</button>
           </template>
-          <div v-else class="empty-detail"><Clock3 :size="23" /><span>当前视角暂无安排</span></div>
+          <div v-else class="empty-detail"><Clock3 :size="23" /><span>{{ t('calendar.noCurrentSchedule') }}</span></div>
         </aside>
       </div>
     </section>

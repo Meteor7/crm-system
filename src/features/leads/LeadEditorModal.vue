@@ -5,9 +5,12 @@ import ModalShell from '@/design-system/ModalShell.vue'
 import RequiredMark from '@/design-system/RequiredMark.vue'
 import PersonnelSelect from '@/design-system/PersonnelSelect.vue'
 import { preferredPersonnelId } from '@/demo/personnel'
+import { useI18n } from '@/i18n'
+import { salesEnumLabel } from '@/features/shared/sales-i18n'
 
 const props = defineProps<{ lead?: LeadDto | null; busy?: boolean; error?: string }>()
 const emit = defineEmits<{ close: []; submit: [payload: CreateLeadInput] }>()
+const { t, locale } = useI18n()
 
 const form = reactive({
   name: '',
@@ -58,21 +61,21 @@ function submit() {
 </script>
 
 <template>
-  <ModalShell :title="lead ? '编辑 Lead' : '新增 Lead'" eyebrow="LEAD QUALIFICATION" :busy="busy" @close="emit('close')" @submit="submit">
+  <ModalShell :title="lead ? t('leadEditor.edit') : t('leadEditor.new')" eyebrow="LEAD QUALIFICATION" :busy="busy" @close="emit('close')" @submit="submit">
     <p v-if="error" class="form-error">{{ error }}</p>
     <div class="lead-form">
-      <label><span>姓名<RequiredMark :show="!lead" /></span><input v-model="form.name" aria-label="Lead 姓名" required /></label>
-      <label><span>公司<RequiredMark :show="!lead" /></span><input v-model="form.company" aria-label="Lead 公司" required /></label>
-      <label><span>职位<RequiredMark :show="!lead" /></span><input v-model="form.title" aria-label="Lead 职位" required /></label>
-      <label><span>负责人<RequiredMark :show="!lead" /></span><PersonnelSelect v-model="form.owner" :roles="['Sales']" :ariaLabel="'Lead \u8d1f\u8d23\u4eba'" required /></label>
-      <label><span>电话</span><input v-model="form.phone" aria-label="Lead 电话" /></label>
-      <label><span>邮箱</span><input v-model="form.email" aria-label="Lead 邮箱" type="email" /></label>
-      <label><span>来源</span><select v-model="form.source" aria-label="Lead 来源"><option>Website</option><option>Trade Show</option><option>Partner Referral</option><option>Outbound</option><option>Customer Referral</option><option>Other</option></select></label>
-      <label><span>状态</span><select v-model="form.status" aria-label="Lead 状态"><option>New</option><option>Working</option><option>Qualified</option><option>Nurturing</option><option>Disqualified</option></select></label>
-      <label class="wide"><span>初步兴趣</span><input v-model="form.interest" aria-label="Lead 初步兴趣" /></label>
-      <label class="wide"><span>首次联系备注</span><textarea v-model="form.firstContactNote" aria-label="Lead 首次联系备注" rows="3" /></label>
-      <label><span>下一步</span><input v-model="form.nextAction" aria-label="Lead 下一步" /></label>
-      <label><span>到期日</span><input v-model="form.nextActionDue" aria-label="Lead 到期日" type="date" /></label>
+      <label><span>{{ t('leadEditor.name') }}<RequiredMark :show="!lead" /></span><input v-model="form.name" :aria-label="t('leadEditor.name')" required /></label>
+      <label><span>{{ t('leadEditor.company') }}<RequiredMark :show="!lead" /></span><input v-model="form.company" :aria-label="t('leadEditor.company')" required /></label>
+      <label><span>{{ t('leadEditor.title') }}<RequiredMark :show="!lead" /></span><input v-model="form.title" :aria-label="t('leadEditor.title')" required /></label>
+       <label><span>{{ t('leadEditor.owner') }}<RequiredMark :show="!lead" /></span><PersonnelSelect v-model="form.owner" :roles="['Sales']" :ariaLabel="t('leadEditor.owner')" required /></label>
+      <label><span>{{ t('leadEditor.phone') }}</span><input v-model="form.phone" :aria-label="t('leadEditor.phone')" /></label>
+      <label><span>{{ t('leadEditor.email') }}</span><input v-model="form.email" :aria-label="t('leadEditor.email')" type="email" /></label>
+       <label><span>{{ t('leadEditor.source') }}</span><select v-model="form.source" :aria-label="t('leadEditor.source')"><option v-for="item in ['Website', 'Trade Show', 'Partner Referral', 'Outbound', 'Customer Referral', 'Other']" :key="item" :value="item">{{ salesEnumLabel(item, locale) }}</option></select></label>
+       <label><span>{{ t('leadEditor.status') }}</span><select v-model="form.status" :aria-label="t('leadEditor.status')"><option v-for="item in ['New', 'Working', 'Qualified', 'Nurturing', 'Disqualified']" :key="item" :value="item">{{ salesEnumLabel(item, locale) }}</option></select></label>
+      <label class="wide"><span>{{ t('leadEditor.interest') }}</span><input v-model="form.interest" :aria-label="t('leadEditor.interest')" /></label>
+      <label class="wide"><span>{{ t('leadEditor.firstContact') }}</span><textarea v-model="form.firstContactNote" :aria-label="t('leadEditor.firstContact')" rows="3" /></label>
+      <label><span>{{ t('leadEditor.nextAction') }}</span><input v-model="form.nextAction" :aria-label="t('leadEditor.nextAction')" /></label>
+      <label><span>{{ t('leadEditor.dueDate') }}</span><input v-model="form.nextActionDue" :aria-label="t('leadEditor.dueDate')" type="date" /></label>
     </div>
   </ModalShell>
 </template>

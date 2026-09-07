@@ -1,3 +1,5 @@
+import { requestErrorMessage } from '@/api/request-state'
+import { resolveLocaleMessage, localeMessage, type LocaleMessage } from '@/i18n'
 import { defineStore } from 'pinia'
 import { markRaw } from 'vue'
 import { api, notificationDelivery, usingMock } from '@/api'
@@ -28,9 +30,12 @@ export const useAppStore = defineStore('app', {
     notificationPage: 1,
     notificationPageSize: 50,
     loading: false,
-    error: '',
+    errorSource: '' as LocaleMessage,
     bootstrapPromise: null as Promise<void> | null,
   }),
+  getters: {
+    error: (state) => resolveLocaleMessage(state.errorSource),
+  },
   actions: {
     can(capability: Capability) {
       return hasCapability(this.bootstrap, capability)
@@ -50,7 +55,7 @@ export const useAppStore = defineStore('app', {
       this.activeApi = connectedApi
       const revision = ++this.sessionRequestRevision
       this.loading = true
-      this.error = ''
+      this.errorSource = ''
       const request = (async () => {
         try {
           const result = await connectedApi.getBootstrap()
@@ -77,7 +82,7 @@ export const useAppStore = defineStore('app', {
           }
         } catch (error) {
           if (revision !== this.sessionRequestRevision) return
-          this.error = error instanceof Error ? error.message : '无法读取当前用户信息'
+          this.errorSource = requestErrorMessage(error, localeMessage('Unable to load the current user.', '无法读取当前用户信息'))
         } finally {
           if (revision === this.sessionRequestRevision) this.loading = false
         }
@@ -112,7 +117,7 @@ export const useAppStore = defineStore('app', {
       if (!usingMock) throw new Error('真实后端身份由 Frappe 会话管理，不能在浏览器内切换。')
       const revision = ++this.sessionRequestRevision
       this.loading = true
-      this.error = ''
+      this.errorSource = ''
       try {
         const { createDemoIdentityApi } = await import('@/api/identity-switch')
         const { api: nextApi, identity } = createDemoIdentityApi(identityId)
@@ -130,7 +135,7 @@ export const useAppStore = defineStore('app', {
         this.identityRevision += 1
       } catch (error) {
         if (revision !== this.sessionRequestRevision) return
-        this.error = error instanceof Error ? error.message : 'Demo 身份切换失败'
+        this.errorSource = requestErrorMessage(error, localeMessage('Demo identity switch failed.', 'Demo 身份切换失败'))
         throw error
       } finally {
         if (revision === this.sessionRequestRevision) this.loading = false

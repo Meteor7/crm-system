@@ -1,3 +1,4 @@
+import { setLocale } from '@/i18n'
 import { createPinia } from 'pinia'
 import { flushPromises, mount } from '@vue/test-utils'
 import { describe, expect, it, vi } from 'vitest'
@@ -56,7 +57,7 @@ describe('AccountProfile request identity', () => {
     const wrapper = mount(AccountProfile, { props: { accountId: 'ACC-001', apiClient }, global: { plugins: [createPinia()] } })
     await flushPromises()
     expect(wrapper.text()).toContain('示例企业014')
-    expect(wrapper.text()).toContain('Demo / Wafer Test')
+    expect(wrapper.text()).toContain('Demo / 晶圆测试')
     expect(wrapper.text()).toContain('合同')
     expect(wrapper.text()).not.toContain('采购需求与行动')
     expect(wrapper.findAll('.profile-grid > .profile-section > header strong').map((item) => item.text())).toEqual([
@@ -64,7 +65,7 @@ describe('AccountProfile request identity', () => {
       '关键人与组织关系',
     ])
     expect(wrapper.findAll('.project-section > header strong').map((item) => item.text())).toEqual([
-      '商机与 Booking', '合同', '拜访与下一步', 'Demo / Wafer Test',
+      '商机与 Booking', '合同', '拜访与下一步', 'Demo / 晶圆测试',
     ])
     const projectFilter = wrapper.get('[data-testid="account-project-filter"]')
     expect(projectFilter.findAll('option').map((option) => option.attributes('value'))).toEqual([
@@ -105,7 +106,7 @@ describe('AccountProfile request identity', () => {
     const wrapper = mount(AccountProfile, { props: { accountId: 'ACC-001', apiClient }, global: { plugins: [createPinia()] } })
     await flushPromises()
 
-    expect(wrapper.text()).toContain('PARTIAL / STALE')
+    expect(wrapper.text()).toContain('部分结果 / 已过期')
     expect(wrapper.text()).toContain('客户详情为缓存快照')
     expect(wrapper.text()).toContain('示例企业014')
   })
@@ -151,4 +152,22 @@ describe('AccountProfile request identity', () => {
     expect(contractSection.findAll('article')).toHaveLength(1)
     expect(contractSection.text()).toContain('Q-2026-0006')
   })
+})
+
+it('translates loaded Account 360 stages without modifying its snapshot or refetching', async () => {
+  const apiClient = createMockApi({ latency: 0 })
+  const snapshot = await apiClient.getAccount360('ACC-001')
+  snapshot.data.opportunities[0].stage = '需求发现'
+  const raw = JSON.stringify(snapshot)
+  const read = vi.spyOn(apiClient, 'getAccount360').mockResolvedValue(snapshot)
+  const wrapper = mount(AccountProfile, { props: { accountId: 'ACC-001', apiClient }, global: { plugins: [createPinia()] } })
+  await flushPromises()
+  expect(wrapper.get('.project-section').text()).toContain('需求发现')
+  setLocale('en-US')
+  await flushPromises()
+  expect(wrapper.get('.project-section').text()).toContain('Discovery')
+  expect(wrapper.get('.project-section').text()).not.toContain('需求发现')
+  expect(read).toHaveBeenCalledTimes(1)
+  expect(JSON.stringify(snapshot)).toBe(raw)
+  wrapper.unmount()
 })

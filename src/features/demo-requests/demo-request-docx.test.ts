@@ -1,6 +1,8 @@
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
+import { requestErrorMessage } from '@/api/request-state'
+import { resolveLocaleMessage, setLocale } from '@/i18n'
 import { demoRequests } from '@/api/mock-data'
 import { createEmptyDemoRequestFormData } from '@/domain/demo-request-form'
 import type { DemoRequestDto } from '@/types/crm'
@@ -9,6 +11,7 @@ import {
   buildDemoRequestDocxArtifact,
   demoRequestFileName,
   extractDemoRequestLogo,
+  loadDemoRequestTemplate,
 } from './demo-request-docx'
 
 function readStoredFiles(bytes: Uint8Array) {
@@ -144,4 +147,22 @@ describe('Demo Request DOCX', () => {
     expect(artifact.blob.type).toBe('application/vnd.openxmlformats-officedocument.wordprocessingml.document')
     expect(new Uint8Array(await artifact.blob.arrayBuffer()).slice(0, 4)).toEqual(new Uint8Array([0x50, 0x4b, 0x03, 0x04]))
   })
+})
+
+
+it('keeps local DOCX failure feedback translatable after it is captured', () => {
+  let failure: unknown
+  try { buildDemoRequestDocx(requestWithTwentySixWafers(), new Uint8Array([1, 2, 3])) } catch (error) { failure = error }
+  const message = requestErrorMessage(failure)
+  expect(resolveLocaleMessage(message)).toBe('Word 模板不是有效的 ZIP 文件')
+  setLocale('en-US')
+  expect(resolveLocaleMessage(message)).toBe('The Word template is not a valid ZIP file.')
+})
+
+it('localizes template download failures', async () => {
+  const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue({ ok: false } as Response)
+  try {
+    setLocale('en-US')
+    await expect(loadDemoRequestTemplate()).rejects.toThrow('The Word template could not be loaded. Please try again.')
+  } finally { fetchMock.mockRestore() }
 })

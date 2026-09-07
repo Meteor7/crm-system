@@ -1,3 +1,4 @@
+import type { EChartsOption } from 'echarts'
 import { describe, expect, it } from 'vitest'
 import { buildAccountContributionOption, buildBookingOption, buildCountBreakdownOption, buildFunnelOption, buildOwnerPerformanceOption, buildPipelineMixOption, buildValueDistributionOption } from './options'
 
@@ -47,7 +48,7 @@ describe('chart option builders', () => {
     ])
     const series = Array.isArray(option.series) ? option.series : [option.series]
 
-    expect(series.map((item) => item?.name)).toEqual(['Pipeline', '加权 Pipeline', 'Booking'])
+    expect(series.map((item) => item?.name)).toEqual(['销售管道', '加权销售管道', '已确认订单'])
   })
 
   it('uses the approved semantic colors for dashboard data series', () => {
@@ -78,7 +79,7 @@ describe('chart option builders', () => {
     const count = buildCountBreakdownOption([{ label: 'Planned', count: 2 }])
 
     expect((booking.xAxis as { data: string[] }).data).toEqual(['2026-07'])
-    expect((Array.isArray(distribution.series) ? distribution.series : []).map((item) => item?.name)).toEqual(['Pipeline', 'Booking'])
+    expect((Array.isArray(distribution.series) ? distribution.series : []).map((item) => item?.name)).toEqual(['销售管道', '已确认订单'])
     expect((count.yAxis as { data: string[] }).data).toEqual(['Planned'])
   })
 
@@ -94,7 +95,7 @@ describe('chart option builders', () => {
       { name: 'Frontend', value: 70_000_000 },
       { name: 'Advanced Packaging', value: 30_000_000 },
     ])
-    expect(option.title).toMatchObject({ text: '¥1.0亿', subtext: 'Open Pipeline' })
+    expect(option.title).toMatchObject({ text: '¥1.0亿', subtext: '开放销售管道' })
   })
 
   it('uses a horizontal axis for long customer names', () => {
@@ -109,7 +110,43 @@ describe('chart option builders', () => {
       type: 'category',
       data: ['示例企业044有限公司', '示例企业014有限公司'],
     })
-    expect(series.map((item) => item?.name)).toEqual(['Pipeline', 'Booking'])
+    expect(series.map((item) => item?.name)).toEqual(['销售管道', '已确认订单'])
+  })
+
+  it('localizes generated labels while retaining raw dimensions and tooltip escaping', () => {
+    const row = { stage: "<Acme & Co's>", currency: 'CNY', amount: '8000000.00', weightedAmount: '2400000.00', count: 3 }
+    const zh = buildFunnelOption([row], 'zh-CN')
+    const en = buildFunnelOption([row], 'en-US')
+    const ownerEn = buildOwnerPerformanceOption([{ owner: 'Customer owner', currency: 'CNY', pipeline: '100.00', weightedPipeline: '70.00', booking: '20.00' }], 'en-US')
+    const bookingEn = buildBookingOption([{ label: '2026-07', amount: 20, count: 1 }], 'en-US')
+    const distributionEn = buildValueDistributionOption([{ label: 'Raw region', pipeline: 100, booking: 20 }], 'en-US')
+    const contributionEn = buildAccountContributionOption([{ label: 'Raw account', pipeline: 100, booking: 20 }], 'en-US')
+    const mixEn = buildPipelineMixOption([{ label: 'Raw segment', currency: 'CNY', pipeline: '100.00', booking: '20.00' }], 'en-US')
+    const countEn = buildCountBreakdownOption([{ label: 'Planned', count: 1 }], 'en-US')
+    const series = (option: { series?: unknown }) => (Array.isArray(option.series) ? option.series : [option.series]) as Array<{ name?: string }>
+    const axisFormatter = (option: EChartsOption) => ((option.xAxis as { axisLabel?: { formatter?: (value: number) => string } }).axisLabel?.formatter)
+    const tooltipFormatter = (option: EChartsOption) => (option.tooltip as { formatter?: (params: never) => string }).formatter
+    const valueFormatter = (option: EChartsOption) => (option.tooltip as { valueFormatter?: (value: unknown) => string }).valueFormatter
+
+    expect(series(ownerEn).map((item) => item.name)).toEqual(['Pipeline', 'Weighted pipeline', 'Booking'])
+    expect(series(bookingEn).map((item) => item.name)).toEqual(['Amount'])
+    expect(series(distributionEn).map((item) => item.name)).toEqual(['Pipeline', 'Booking'])
+    expect(series(contributionEn).map((item) => item.name)).toEqual(['Pipeline', 'Booking'])
+    expect(series(mixEn).map((item) => item.name)).toEqual(['Open pipeline'])
+    expect(mixEn.title).toMatchObject({ subtext: 'Open pipeline' })
+    expect(series(countEn).map((item) => item.name)).toEqual(['Count'])
+    expect(axisFormatter(zh)?.(5000000)).toBe('5百万')
+    expect(axisFormatter(en)?.(5000000)).toBe('5M')
+    expect(valueFormatter(ownerEn)?.(8000000)).toBe('¥8.0M')
+
+    const tooltip = tooltipFormatter(en)?.([{ data: row }] as never)
+    expect(tooltip).toContain('&lt;Acme &amp; Co&#39;s&gt;')
+    expect(tooltip).toContain('Stage amount ¥8.0M')
+    expect(tooltip).toContain('Opportunities 3 opportunities')
+
+    const dataset = (en.dataset as { source?: unknown }).source
+    expect(dataset).toEqual([row])
+    expect((series(zh)[0] as { name?: string }).name).toBe('销售管道')
   })
 
 })

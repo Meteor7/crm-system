@@ -14,17 +14,20 @@ import { useAppStore } from '@/stores/app'
 import type { AccountSummaryDto, Tone } from '@/types/crm'
 import type { StrategyOpportunityDto } from '@/types/workspaces'
 import type { QuotationApprovalStatus, QuotationStatus, QuotationSummaryDto, QuotationType } from '@/features/quotations/types'
+import { localeMessage, useI18n, useLocaleMessage } from '@/i18n'
 
 const props = withDefaults(defineProps<{ apiClient?: CrmApi }>(), { apiClient: () => defaultApi })
 const route = useRoute()
 const router = useRouter()
 const app = useAppStore()
+const { locale, t } = useI18n()
+const ui = (english: string, chinese: string) => localeMessage(english, chinese)[locale.value]
 const rows = ref<QuotationSummaryDto[]>([])
 const opportunities = ref<StrategyOpportunityDto[]>([])
 const accounts = ref<AccountSummaryDto[]>([])
 const loading = ref(false)
 const denied = ref(false)
-const error = ref('')
+const error = useLocaleMessage()
 const requestId = ref('')
 const total = ref(0)
 const status = ref<QuotationStatus | 'All'>('All')
@@ -32,7 +35,7 @@ const approvalStatus = ref<QuotationApprovalStatus | 'All'>('All')
 const quotationType = ref<QuotationType | 'All'>('All')
 const modalOpen = ref(false)
 const modalBusy = ref(false)
-const modalError = ref('')
+const modalError = useLocaleMessage()
 const selectedOpportunityId = ref('')
 const selectedAccountId = ref('')
 const createType = ref<QuotationType>('Device')
@@ -67,6 +70,22 @@ const canCreate = computed(() => createSource.value === 'Opportunity'
   ? availableOpportunities.value.some((item) => item.id === selectedOpportunityId.value)
   : writableAccountIds.value.has(selectedAccountId.value))
 
+function quotationStatusLabel(value: QuotationStatus) {
+  return ({
+    Draft: ui('Draft', '草稿'), Published: ui('Published', '已发布'), Accepted: ui('Accepted', '已接受'),
+    Rejected: ui('Rejected', '已驳回'), Expired: ui('Expired', '已过期'), Superseded: ui('Superseded', '已被替代'),
+  } satisfies Record<QuotationStatus, string>)[value]
+}
+function approvalStatusLabel(value: QuotationApprovalStatus) {
+  return ({
+    'Not Submitted': ui('Not submitted', '未提交'), Pending: ui('Pending', '待审批'), Approved: ui('Approved', '已批准'),
+    Rejected: ui('Rejected', '已驳回'), 'Not Required': ui('Not required', '无需审批'),
+  } satisfies Record<QuotationApprovalStatus, string>)[value]
+}
+function quotationTypeLabel(value: QuotationType) {
+  return value === 'Device' ? ui('Device', '设备') : ui('Service', '服务')
+}
+
 async function load() {
   const sequence = ++loadSequence
   loading.value = true
@@ -81,7 +100,7 @@ async function load() {
   } catch (cause) {
     if (sequence !== loadSequence) return
     const mapped = mapRequestError(cause)
-    error.value = mapped.message
+    error.value = mapped.localizedMessage ?? mapped.message
     requestId.value = mapped.requestId
     denied.value = mapped.denied
     rows.value = []
@@ -175,7 +194,8 @@ async function openCreate(opportunityId = '') {
     selectedOpportunityId.value = availableOpportunities.value.some((item) => item.id === opportunityId) ? opportunityId : ''
     modalOpen.value = true
   } catch (cause) {
-    modalError.value = mapRequestError(cause).message
+    const mapped = mapRequestError(cause)
+    modalError.value = mapped.localizedMessage ?? mapped.message
   }
 }
 
@@ -190,7 +210,8 @@ async function createQuotation() {
     modalOpen.value = false
     await router.push(`/quotations/${result.data.quotation.id}`)
   } catch (cause) {
-    modalError.value = mapRequestError(cause).message
+    const mapped = mapRequestError(cause)
+    modalError.value = mapped.localizedMessage ?? mapped.message
   } finally {
     modalBusy.value = false
   }
@@ -215,26 +236,26 @@ onMounted(async () => {
 
 <template>
   <div class="quotations-page">
-    <PageHeader eyebrow="SALES QUOTATION" title="Quotation" description="管理 Device、Service 报价及其正式版本与审批历史。">
+    <PageHeader :eyebrow="ui('SALES QUOTATION', '销售报价')" :title="t('quotations.title')" :description="t('quotations.description')">
       <button v-if="app.can('quotation:write')" class="primary-button" data-testid="new-quotation" type="button" @click="openCreate()">
-        <FilePlus2 :size="15" />新建报价单
+        <FilePlus2 :size="15" />{{ t('quotations.new') }}
       </button>
     </PageHeader>
 
-    <FilterBar :result-label="`${total} 份报价单`" @reset="resetFilters">
-      <select v-model="status" class="filter-control" aria-label="报价状态">
-        <option value="All">全部状态</option>
-        <option>Draft</option>
-        <option>Published</option>
-        <option>Accepted</option>
-        <option>Rejected</option>
-        <option>Expired</option>
+    <FilterBar :result-label="t('quotations.result', { count: total })" @reset="resetFilters">
+      <select v-model="status" class="filter-control" :aria-label="locale === 'en-US' ? 'Quotation status' : '报价状态'">
+        <option value="All">{{ t('quotations.allStatuses') }}</option>
+        <option value="Draft">{{ quotationStatusLabel('Draft') }}</option>
+        <option value="Published">{{ quotationStatusLabel('Published') }}</option>
+        <option value="Accepted">{{ quotationStatusLabel('Accepted') }}</option>
+        <option value="Rejected">{{ quotationStatusLabel('Rejected') }}</option>
+        <option value="Expired">{{ quotationStatusLabel('Expired') }}</option>
       </select>
-      <select v-model="approvalStatus" class="filter-control" aria-label="审批状态">
-        <option value="All">全部审批状态</option><option>Not Submitted</option><option>Pending</option><option>Approved</option><option>Rejected</option><option>Not Required</option>
+      <select v-model="approvalStatus" class="filter-control" :aria-label="locale === 'en-US' ? 'Approval status' : '审批状态'">
+        <option value="All">{{ t('quotations.allApprovalStatuses') }}</option><option value="Not Submitted">{{ approvalStatusLabel('Not Submitted') }}</option><option value="Pending">{{ approvalStatusLabel('Pending') }}</option><option value="Approved">{{ approvalStatusLabel('Approved') }}</option><option value="Rejected">{{ approvalStatusLabel('Rejected') }}</option><option value="Not Required">{{ approvalStatusLabel('Not Required') }}</option>
       </select>
-      <select v-model="quotationType" class="filter-control" aria-label="报价类型">
-        <option value="All">全部类型</option><option>Device</option><option>Service</option>
+      <select v-model="quotationType" class="filter-control" :aria-label="locale === 'en-US' ? 'Quotation type' : '报价类型'">
+        <option value="All">{{ t('quotations.allTypes') }}</option><option value="Device">{{ quotationTypeLabel('Device') }}</option><option value="Service">{{ quotationTypeLabel('Service') }}</option>
       </select>
     </FilterBar>
 
@@ -244,41 +265,41 @@ onMounted(async () => {
       <DataState v-else-if="error" type="error" :message="error" :request-id="requestId" @retry="load" />
       <div v-else-if="rows.length" class="table-scroll">
         <table class="crm-table quotation-table is-responsive">
-          <thead><tr><th>Name</th><th>Type</th><th>Opportunity</th><th>上一次修改日期</th><th>Status</th><th>Approval</th></tr></thead>
+          <thead><tr><th>{{ (locale === 'en-US' ? 'Name' : '报价单') }}</th><th>{{ (locale === 'en-US' ? 'Type' : '类型') }}</th><th>{{ (locale === 'en-US' ? 'Opportunity' : '关联商机') }}</th><th>{{ (locale === 'en-US' ? 'Last modified' : '上一次修改日期') }}</th><th>{{ (locale === 'en-US' ? 'Status' : '状态') }}</th><th>{{ (locale === 'en-US' ? 'Approval' : '审批') }}</th></tr></thead>
           <tbody>
             <tr v-for="row in rows" :key="row.id" class="quotation-row" tabindex="0" @click="openDetail(row)" @keydown.enter="openDetail(row)">
-              <td data-label="报价单">
+              <td :data-label="(locale === 'en-US' ? 'Quotation' : '报价单')">
                 <button class="quotation-link record-name-link" type="button" :data-quotation-id="row.id" @click.stop="openDetail(row)">
                   <span class="quotation-link__mark"><FileText :size="14" /></span>
                   <span class="quotation-link__copy"><strong>{{ row.refNo }}</strong><small>{{ row.accountName }}</small></span>
                 </button>
               </td>
-              <td data-label="类型"><strong>{{ row.quotationType }}</strong></td>
-              <td data-label="关联商机"><strong>{{ row.opportunityTitle || 'Others' }}</strong><small>{{ row.opportunityId || row.accountId }} · V{{ row.latestVersion }}</small></td>
-              <td data-label="修改日期">{{ formatDisplayDate(row.modified) }}</td>
-              <td data-label="状态"><StatusBadge :label="row.status" :tone="statusTones[row.status]" /></td>
-              <td data-label="审批"><StatusBadge :label="row.approvalStatus" :tone="approvalTones[row.approvalStatus]" /></td>
+              <td :data-label="(locale === 'en-US' ? 'Type' : '类型')"><strong>{{ quotationTypeLabel(row.quotationType) }}</strong></td>
+              <td :data-label="(locale === 'en-US' ? 'Opportunity' : '关联商机')"><strong>{{ row.opportunityTitle || ui('Others', '其他') }}</strong><small>{{ row.opportunityId || row.accountId }} · V{{ row.latestVersion }}</small></td>
+              <td :data-label="(locale === 'en-US' ? 'Last modified' : '修改日期')">{{ formatDisplayDate(row.modified) }}</td>
+              <td :data-label="(locale === 'en-US' ? 'Status' : '状态')"><StatusBadge :label="quotationStatusLabel(row.status)" :tone="statusTones[row.status]" /></td>
+              <td :data-label="(locale === 'en-US' ? 'Approval' : '审批')"><StatusBadge :label="approvalStatusLabel(row.approvalStatus)" :tone="approvalTones[row.approvalStatus]" /></td>
             </tr>
           </tbody>
         </table>
       </div>
-      <DataState v-else type="empty" title="暂无报价单" message="可从这里或 Opportunity 详情页创建草稿报价。" />
+      <DataState v-else type="empty" :title="t('quotations.emptyTitle')" :message="t('quotations.emptyMessage')" />
 
-      <nav v-if="totalPages > 1" class="quotation-pager" aria-label="报价分页">
-        <button class="secondary-button" type="button" :disabled="page <= 1" @click="changePage(page - 1)">上一页</button>
-        <span>共 {{ total }} 条 · 第 {{ page }} / {{ totalPages }} 页</span><label>每页<select :value="pageSize" aria-label="报价每页数量" @change="changePageSize(Number(($event.target as HTMLSelectElement).value))"><option :value="10">10</option><option :value="25">25</option><option :value="50">50</option></select></label>
-        <button class="secondary-button" data-testid="quotation-next" type="button" :disabled="page >= totalPages" @click="changePage(page + 1)">下一页</button>
+      <nav v-if="totalPages > 1" class="quotation-pager" :aria-label="(locale === 'en-US' ? 'Quotation pagination' : '报价分页')">
+        <button class="secondary-button" type="button" :disabled="page <= 1" @click="changePage(page - 1)">{{ (locale === 'en-US' ? 'Previous' : '上一页') }}</button>
+        <span>{{ (locale === 'en-US' ? `${total} records · Page ${page} / ${totalPages}` : `共 ${total} 条 · 第 ${page} / ${totalPages} 页`) }}</span><label>{{ (locale === 'en-US' ? 'Per page' : '每页') }}<select :value="pageSize" :aria-label="(locale === 'en-US' ? 'Quotations per page' : '报价每页数量')" @change="changePageSize(Number(($event.target as HTMLSelectElement).value))"><option :value="10">10</option><option :value="25">25</option><option :value="50">50</option></select></label>
+        <button class="secondary-button" data-testid="quotation-next" type="button" :disabled="page >= totalPages" @click="changePage(page + 1)">{{ (locale === 'en-US' ? 'Next' : '下一页') }}</button>
       </nav>
     </section>
 
-    <ModalShell v-if="modalOpen" title="新建报价单" eyebrow="QUOTATION" :busy="modalBusy" :submit-disabled="!canCreate" @close="modalOpen = false" @submit="createQuotation">
+    <ModalShell v-if="modalOpen" :title="t('quotations.new')" :eyebrow="ui('QUOTATION', '报价单')" :busy="modalBusy" :submit-disabled="!canCreate" @close="modalOpen = false" @submit="createQuotation">
       <p v-if="modalError" class="form-error">{{ modalError }}</p>
-      <p v-if="createSource === 'Opportunity' && !availableOpportunities.length" class="form-hint">当前没有可新建报价的 Opportunity；可选择 Others 直接关联 Account。</p>
+      <p v-if="createSource === 'Opportunity' && !availableOpportunities.length" class="form-hint">{{ t('quotations.noOpportunities') }}</p>
       <div class="form-grid">
-        <label><span>Quotation Type</span><select v-model="createType" data-testid="quotation-type" aria-label="报价类型"><option>Device</option><option>Service</option></select></label>
-        <label><span>Source</span><select v-model="createSource" data-testid="quotation-source" aria-label="报价来源"><option>Opportunity</option><option>Others</option></select></label>
-        <label v-if="createSource === 'Opportunity'"><span>Opportunity</span><select v-model="selectedOpportunityId" aria-label="选择 Opportunity" required><option value="">请选择 Opportunity</option><option v-for="item in availableOpportunities" :key="item.id" :value="item.id">{{ item.title }} · {{ opportunityAccount(item) }}</option></select></label>
-        <label v-else><span>Account</span><select v-model="selectedAccountId" data-testid="quotation-account" aria-label="选择 Account" required><option value="">请选择 Account</option><option v-for="item in writableAccounts" :key="item.id" :value="item.id">{{ item.name }}</option></select></label>
+        <label><span>{{ t('quotations.type') }}</span><select v-model="createType" data-testid="quotation-type" :aria-label="t('quotations.type')"><option value="Device">{{ quotationTypeLabel('Device') }}</option><option value="Service">{{ quotationTypeLabel('Service') }}</option></select></label>
+        <label><span>{{ t('quotations.source') }}</span><select v-model="createSource" data-testid="quotation-source" :aria-label="t('quotations.source')"><option value="Opportunity">{{ ui('Opportunity', '商机') }}</option><option value="Others">{{ ui('Others', '其他') }}</option></select></label>
+        <label v-if="createSource === 'Opportunity'"><span>{{ ui('Opportunity', '商机') }}</span><select v-model="selectedOpportunityId" :aria-label="t('quotations.selectOpportunity')" required><option value="">{{ t('quotations.selectOpportunity') }}</option><option v-for="item in availableOpportunities" :key="item.id" :value="item.id">{{ item.title }} · {{ opportunityAccount(item) }}</option></select></label>
+        <label v-else><span>{{ (locale === 'en-US' ? 'Account' : '客户') }}</span><select v-model="selectedAccountId" data-testid="quotation-account" :aria-label="t('quotations.selectAccount')" required><option value="">{{ t('quotations.selectAccount') }}</option><option v-for="item in writableAccounts" :key="item.id" :value="item.id">{{ item.name }}</option></select></label>
       </div>
     </ModalShell>
   </div>

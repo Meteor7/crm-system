@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ArrowRight } from '@lucide/vue'
+import { useI18n } from '@/i18n'
 
 export type DemoRequestView = 'overview' | 'sales' | 'engineer' | 'manager'
 
@@ -7,14 +8,16 @@ defineProps<{ modelValue: DemoRequestView }>()
 defineEmits<{ 'update:modelValue': [view: DemoRequestView] }>()
 
 const flow = [
-  { key: 'sales', label: 'Sales Preparation' },
-  { key: 'engineer', label: 'Engineer Review' },
-  { key: 'manager', label: 'Manager Approval' },
+  { key: 'sales', en: 'Sales Preparation', zh: 'Sales 准备' },
+  { key: 'engineer', en: 'Engineer Review', zh: '工程评估' },
+  { key: 'manager', en: 'Manager Approval', zh: '经理审批' },
 ] as const
+const { locale } = useI18n()
+const copy = (english: string, chinese: string) => locale.value === 'en-US' ? english : chinese
 </script>
 
 <template>
-  <nav class="request-workspace-nav" aria-label="Demo Request 工作区">
+  <nav class="request-workspace-nav" :aria-label="locale === 'en-US' ? 'Demo Request workspace' : 'Demo Request 工作区'">
     <button
       type="button"
       data-demo-view="overview"
@@ -22,10 +25,10 @@ const flow = [
       :aria-current="modelValue === 'overview' ? 'page' : undefined"
       @click="$emit('update:modelValue', 'overview')"
     >
-      Demo Request
+      {{ copy('Demo Request', 'Demo Request') }}
     </button>
     <span class="nav-divider" aria-hidden="true" />
-    <span class="flow-label">处理流程</span>
+    <span class="flow-label">{{ locale === 'en-US' ? 'Workflow' : '处理流程' }}</span>
     <div class="flow-nodes">
       <template v-for="(item, index) in flow" :key="item.key">
         <ArrowRight v-if="index" data-demo-flow-arrow :size="17" aria-hidden="true" />
@@ -36,7 +39,7 @@ const flow = [
           :aria-current="modelValue === item.key ? 'page' : undefined"
           @click="$emit('update:modelValue', item.key)"
         >
-          {{ item.label }}
+          {{ copy(item.en, item.zh) }}
         </button>
       </template>
     </div>

@@ -27,10 +27,10 @@ describe('InstalledToolPipelineBoard', () => {
     const wrapper = mount(InstalledToolPipelineBoard, { props: { items: [current, waiting, done], selectedId: current.id } })
 
     expect(wrapper.findAll('[data-pipeline-board] .segment').map((node) => node.text()))
-      .toEqual(['FAT0', 'Shipment1', 'Installation1', 'SAT0', 'Warranty1'])
-    expect(wrapper.get('[aria-label="Shipment"]').text()).toContain('SN-WAITING')
-    expect(wrapper.get('[aria-label="Installation"]').text()).toContain('SN-CURRENT')
-    expect(wrapper.get('[aria-label="Warranty"]').text()).toContain('SN-DONE')
+      .toEqual(['FAT0', '发运1', '安装1', 'SAT0', '质保1'])
+    expect(wrapper.get('[aria-label="发运"]').text()).toContain('SN-WAITING')
+    expect(wrapper.get('[aria-label="安装"]').text()).toContain('SN-CURRENT')
+    expect(wrapper.get('[aria-label="质保"]').text()).toContain('SN-DONE')
     expect(wrapper.get('[data-installed-tool-id="CURRENT"]').text()).toContain('2/5 已完成')
     expect(wrapper.get('[data-installed-tool-id="DONE"]').text()).toContain('5/5 已完成')
 

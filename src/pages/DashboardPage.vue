@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { requestErrorMessage } from '@/api/request-state'
 import { personnelDisplayName } from '@/demo/personnel'
 import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
@@ -33,11 +34,13 @@ import {
 import { formatMoney } from '@/domain/money'
 import { formatDisplayDate } from '@/domain/time'
 import { readAllPages } from '@/features/shared/read-all-pages'
+import { useI18n, useLocaleMessage } from '@/i18n'
 
 const props = withDefaults(defineProps<{ apiClient?: CrmApi }>(), { apiClient: () => defaultApi })
 const store = useDashboardStore()
 const app = useAppStore()
 const router = useRouter()
+const { t, message, locale } = useI18n()
 const showMoreAnalysis = ref(false)
 type ReminderType = '拜访' | '客户预期' | 'Demo Test DDL' | 'Booking DDL' | '行动截止'
 interface DeadlineReminder {
@@ -47,13 +50,13 @@ interface DeadlineReminder {
   title: string
   account: string
   owner: string
-  detail: string
+  detail: string | ReturnType<typeof message>
   path: string
   demoRequestId?: string
   evaluationId?: string
 }
 const reminderLoading = ref(false)
-const reminderError = ref('')
+const reminderError = useLocaleMessage()
 const reminders = ref<DeadlineReminder[]>([])
 const selectedScheduleId = ref('')
 type DashboardChartGroup = 'core' | 'customer' | 'process'
@@ -76,111 +79,146 @@ interface ProcessDashboardChart {
   option: EChartsOption
   label: string
 }
+type ProcessDimension = 'requirements' | 'budget' | 'actions' | 'timeliness' | 'demo' | 'priority' | 'evaluation' | 'run-results' | 'visits' | 'risk'
+const PROCESS_DIMENSION_LABELS: Record<ProcessDimension, Record<string, [string, string]>> = {
+  requirements: {
+    '需求识别': ['需求识别', 'Need identified'], '技术确认': ['技术确认', 'Technical confirmation'], 'Demo验证': ['Demo验证', 'Demo validation'],
+    '预算审批': ['预算审批', 'Budget approval'], '采购计划': ['采购计划', 'Procurement planning'], '已确认': ['已确认', 'Confirmed'],
+  },
+  budget: { Confirmed: ['已确认', 'Confirmed'], 'In Review': ['审核中', 'In review'], Unknown: ['未知', 'Unknown'] },
+  actions: {
+    Requirement: ['需求', 'Requirement'], Visit: ['拜访', 'Visit'], Deal: ['商机', 'Deal'], 'Demo Request': ['Demo Request', 'Demo request'],
+    Evaluation: ['评估', 'Evaluation'], Contract: ['合同', 'Contract'],
+  },
+  timeliness: { '已逾期': ['已逾期', 'Overdue'], '未逾期': ['未逾期', 'On time'] },
+  demo: {
+    Draft: ['草稿', 'Draft'], 'Engineer Review': ['工程审核', 'Engineer review'], 'Engineer Returned': ['工程退回', 'Returned by engineering'],
+    'Manager Approval': ['经理审批', 'Manager approval'], 'Manager Rejected': ['经理拒绝', 'Rejected by manager'], Converted: ['已转 Demo', 'Converted to Demo'], Cancelled: ['已取消', 'Cancelled'],
+  },
+  priority: { Critical: ['紧急', 'Critical'], High: ['高', 'High'], Medium: ['中', 'Medium'], Low: ['低', 'Low'] },
+  evaluation: {
+    Requested: ['已申请', 'Requested'], 'Scope Confirmed': ['范围已确认', 'Scope confirmed'], 'Sample Received': ['已收到样品', 'Sample received'],
+    Scheduled: ['已排期', 'Scheduled'], Testing: ['测试中', 'Testing'], Analysis: ['分析中', 'Analysis'], 'Internal Review': ['内部审核', 'Internal review'],
+    'Customer Review': ['客户审核', 'Customer review'], Accepted: ['已接受', 'Accepted'], Rejected: ['已拒绝', 'Rejected'],
+  },
+  'run-results': { Planned: ['计划中', 'Planned'], Completed: ['已完成', 'Completed'] },
+  visits: {
+    Planned: ['待提交拜访记录', 'Minutes pending'], Visited: ['已完成', 'Completed'], 'Minutes Submitted': ['拜访记录已提交', 'Minutes submitted'],
+    'Manager Reviewed': ['管理者已审核', 'Manager reviewed'],
+  },
+  risk: { 稳健: ['稳健', 'Steady'], 关注: ['关注', 'Watch'], 高风险: ['高风险', 'High risk'] },
+}
+function processRows<T extends { label: string }>(rows: T[], dimension?: ProcessDimension) {
+  if (!dimension) return rows
+  const labels = PROCESS_DIMENSION_LABELS[dimension]
+  const index = locale.value === 'en-US' ? 1 : 0
+  return rows.map((item) => labels[item.label] ? { ...item, label: labels[item.label][index] } : item)
+}
 const subscriptionGroups = ref<DashboardSubscriptionGroups>(
   DEFAULT_BOSS_DASHBOARD_SUBSCRIPTION_GROUPS.map((group) => [...group]),
 )
 const draftSubscriptionGroups = ref<DashboardSubscriptionGroups>([])
 const activeSubscriptionGroupIndex = ref(0)
 const subscriptionOpen = ref(false)
-const subscriptionStorageWarning = ref('')
+const subscriptionStorageWarning = ref(false)
 
 const managementView = computed(() => app.bootstrap?.user.role === 'Manager')
 const activeCurrency = computed(() => store.data?.kpis.moneyByCurrency[0]?.currency ?? 'CNY')
 const activeMoney = computed(() => store.data?.kpis.moneyByCurrency.find((item) => item.currency === activeCurrency.value))
-const bookingOption = computed(() => buildBookingOption((store.data?.bookingByMonth ?? []).filter((item) => item.currency === activeCurrency.value).map((item) => ({ ...item, amount: Number(item.amount) }))))
-const evaluationOption = computed(() => buildCountBreakdownOption(store.data?.process.evaluationByStatus ?? []))
-const accountOption = computed(() => buildAccountContributionOption((store.data?.topAccounts ?? []).filter((item) => item.currency === activeCurrency.value).slice(0, 6).map((item) => ({ label: item.accountName, pipeline: Number(item.pipeline), booking: Number(item.booking) }))))
-const regionOption = computed(() => buildValueDistributionOption((store.data?.regionDistribution ?? []).filter((item) => item.currency === activeCurrency.value).map((item) => ({ ...item, pipeline: Number(item.pipeline), booking: Number(item.booking) }))))
-const tierOption = computed(() => buildCountBreakdownOption(store.data?.tierDistribution ?? []))
-const riskOption = computed(() => buildCountBreakdownOption(store.data?.riskDistribution ?? []))
+const bookingOption = computed(() => buildBookingOption((store.data?.bookingByMonth ?? []).filter((item) => item.currency === activeCurrency.value).map((item) => ({ ...item, amount: Number(item.amount) })), locale.value))
+const evaluationOption = computed(() => buildCountBreakdownOption(processRows(store.data?.process.evaluationByStatus ?? [], 'evaluation'), locale.value))
+const accountOption = computed(() => buildAccountContributionOption((store.data?.topAccounts ?? []).filter((item) => item.currency === activeCurrency.value).slice(0, 6).map((item) => ({ label: item.accountName, pipeline: Number(item.pipeline), booking: Number(item.booking) })), locale.value))
+const regionOption = computed(() => buildValueDistributionOption((store.data?.regionDistribution ?? []).filter((item) => item.currency === activeCurrency.value).map((item) => ({ ...item, pipeline: Number(item.pipeline), booking: Number(item.booking) })), locale.value))
+const tierOption = computed(() => buildCountBreakdownOption(store.data?.tierDistribution ?? [], locale.value))
+const riskOption = computed(() => buildCountBreakdownOption(processRows(store.data?.riskDistribution ?? [], 'risk'), locale.value))
 
 const processCharts = computed<ProcessDashboardChart[]>(() => {
   const process = store.data?.process
   return [
-    { key: 'requirements', title: 'Requirement Status', eyebrow: 'REQUIREMENTS', rows: process?.requirementsByStatus ?? [], option: buildBookingOption(process?.requirementsByStatus ?? []), label: 'Purchase requirement status and budget value' },
-    { key: 'budget', title: 'Budget Status', eyebrow: 'BUDGET', rows: process?.budgetByStatus ?? [], option: buildBookingOption(process?.budgetByStatus ?? []), label: 'Budget status and requirement value' },
-    { key: 'actions', title: 'Action Sources', eyebrow: 'OPEN ACTIONS', rows: process?.actionsBySource ?? [], option: buildCountBreakdownOption(process?.actionsBySource ?? []), label: 'Open actions by source' },
-    { key: 'action-timeliness', title: 'Action Timeliness', eyebrow: 'ACTION TIMELINESS', rows: process?.actionsByTimeliness ?? [], option: buildCountBreakdownOption(process?.actionsByTimeliness ?? []), label: 'Open actions by due status' },
-    { key: 'demo', title: 'Demo Request Status', eyebrow: 'DEMO REQUEST', rows: process?.demoByStatus ?? [], option: buildCountBreakdownOption(process?.demoByStatus ?? []), label: 'Demo Requests by status' },
-    { key: 'demo-priority', title: 'Demo Priority', eyebrow: 'DEMO PRIORITY', rows: process?.demoByPriority ?? [], option: buildCountBreakdownOption(process?.demoByPriority ?? []), label: 'Demo Requests by priority' },
-    { key: 'evaluation-runs', title: 'Test Run Results', eyebrow: 'TEST RUNS', rows: process?.evaluationRunResults ?? [], option: buildCountBreakdownOption(process?.evaluationRunResults ?? []), label: 'Test run plans and results' },
-    { key: 'visits', title: 'Visit Status', eyebrow: 'VISITS', rows: process?.visitsByStatus ?? [], option: buildCountBreakdownOption(process?.visitsByStatus ?? []), label: 'Customer visits by status' },
-    { key: 'visit-owner', title: 'Visit Owners', eyebrow: 'VISIT OWNER', rows: process?.visitsByOwner ?? [], option: buildCountBreakdownOption(process?.visitsByOwner ?? []), label: 'Customer visits by owner' },
+    { key: 'requirements', title: (locale.value === 'en-US' ? 'Requirement Status' : '需求状态'), eyebrow: (locale.value === 'en-US' ? 'REQUIREMENTS' : '采购需求'), rows: process?.requirementsByStatus ?? [], option: buildBookingOption(processRows(process?.requirementsByStatus ?? [], 'requirements'), locale.value), label: (locale.value === 'en-US' ? 'Purchase requirement status and budget value' : '采购需求状态与预算金额') },
+    { key: 'budget', title: (locale.value === 'en-US' ? 'Budget Status' : '预算状态'), eyebrow: (locale.value === 'en-US' ? 'BUDGET' : '预算'), rows: process?.budgetByStatus ?? [], option: buildBookingOption(processRows(process?.budgetByStatus ?? [], 'budget'), locale.value), label: (locale.value === 'en-US' ? 'Budget status and requirement value' : '预算状态与需求金额') },
+    { key: 'actions', title: (locale.value === 'en-US' ? 'Action Sources' : '行动来源'), eyebrow: (locale.value === 'en-US' ? 'OPEN ACTIONS' : '待办行动'), rows: process?.actionsBySource ?? [], option: buildCountBreakdownOption(processRows(process?.actionsBySource ?? [], 'actions'), locale.value), label: (locale.value === 'en-US' ? 'Open actions by source' : '按来源统计待办行动') },
+    { key: 'action-timeliness', title: (locale.value === 'en-US' ? 'Action Timeliness' : '行动时效'), eyebrow: (locale.value === 'en-US' ? 'ACTION TIMELINESS' : '行动时效'), rows: process?.actionsByTimeliness ?? [], option: buildCountBreakdownOption(processRows(process?.actionsByTimeliness ?? [], 'timeliness'), locale.value), label: (locale.value === 'en-US' ? 'Open actions by due status' : '按到期状态统计待办行动') },
+    { key: 'demo', title: (locale.value === 'en-US' ? 'Demo Request Status' : 'Demo 申请状态'), eyebrow: (locale.value === 'en-US' ? 'DEMO REQUEST' : 'Demo 申请'), rows: process?.demoByStatus ?? [], option: buildCountBreakdownOption(processRows(process?.demoByStatus ?? [], 'demo'), locale.value), label: (locale.value === 'en-US' ? 'Demo Requests by status' : '按状态统计 Demo 申请') },
+    { key: 'demo-priority', title: (locale.value === 'en-US' ? 'Demo Priority' : 'Demo 优先级'), eyebrow: (locale.value === 'en-US' ? 'DEMO PRIORITY' : 'Demo 优先级'), rows: process?.demoByPriority ?? [], option: buildCountBreakdownOption(processRows(process?.demoByPriority ?? [], 'priority'), locale.value), label: (locale.value === 'en-US' ? 'Demo Requests by priority' : '按优先级统计 Demo 申请') },
+    { key: 'evaluation-runs', title: (locale.value === 'en-US' ? 'Test Run Results' : '测试执行结果'), eyebrow: (locale.value === 'en-US' ? 'TEST RUNS' : '测试执行'), rows: process?.evaluationRunResults ?? [], option: buildCountBreakdownOption(processRows(process?.evaluationRunResults ?? [], 'run-results'), locale.value), label: (locale.value === 'en-US' ? 'Test run plans and results' : '测试执行计划与结果') },
+    { key: 'visits', title: (locale.value === 'en-US' ? 'Visit Status' : '拜访状态'), eyebrow: (locale.value === 'en-US' ? 'VISITS' : '拜访'), rows: process?.visitsByStatus ?? [], option: buildCountBreakdownOption(processRows(process?.visitsByStatus ?? [], 'visits'), locale.value), label: (locale.value === 'en-US' ? 'Customer visits by status' : '按状态统计客户拜访') },
+    { key: 'visit-owner', title: (locale.value === 'en-US' ? 'Visit Owners' : '拜访负责人'), eyebrow: (locale.value === 'en-US' ? 'VISIT OWNER' : '拜访负责人'), rows: process?.visitsByOwner ?? [], option: buildCountBreakdownOption(process?.visitsByOwner ?? [], locale.value), label: (locale.value === 'en-US' ? 'Customer visits by owner' : '按负责人统计客户拜访') },
   ]
 })
 
-const dashboardGroupMeta: Record<DashboardChartGroup, { eyebrow: string; title: string; description: string }> = {
-  core: { eyebrow: 'CORE ANALYSIS', title: 'Commercial Performance', description: 'Demo, Booking, and key-account performance.' },
-  customer: { eyebrow: 'CUSTOMER ANALYSIS', title: 'Account Mix & Risk', description: 'Review account distribution by region, tier, and risk.' },
-  process: { eyebrow: 'PROCESS ANALYSIS', title: 'Process & Execution', description: 'Charts use current requirements, actions, demos, evaluations, and visit records.' },
-}
+const dashboardGroupMeta = computed<Record<DashboardChartGroup, { eyebrow: string; title: string; description: string }>>(() => ({
+  core: { eyebrow: (locale.value === 'en-US' ? 'CORE ANALYSIS' : '核心分析'), title: (locale.value === 'en-US' ? 'Commercial Performance' : '业务表现'), description: (locale.value === 'en-US' ? 'Demo, Booking, and key-account performance.' : 'Demo、订单和重点客户表现。') },
+  customer: { eyebrow: (locale.value === 'en-US' ? 'CUSTOMER ANALYSIS' : '客户分析'), title: (locale.value === 'en-US' ? 'Account Mix & Risk' : '客户分布与风险'), description: (locale.value === 'en-US' ? 'Review account distribution by region, tier, and risk.' : '按区域、等级和风险查看客户分布。') },
+  process: { eyebrow: (locale.value === 'en-US' ? 'PROCESS ANALYSIS' : '流程分析'), title: (locale.value === 'en-US' ? 'Process & Execution' : '流程与执行'), description: (locale.value === 'en-US' ? 'Charts use current requirements, actions, demos, evaluations, and visit records.' : '图表基于当前需求、行动、Demo、评估和拜访记录。') },
+}))
 
 const visualDashboardCatalog = computed<DashboardChartItem[]>(() => [
   {
     id: 'evaluation-status',
     group: 'core',
-    title: 'Demo / Wafer Test 状态',
+    title: t('dashboard.chart.evaluationTitle'),
     eyebrow: 'EVALUATION',
-    description: '按当前 Demo 与 Wafer Test 记录汇总各执行状态。',
+    description: t('dashboard.chart.evaluationDescription'),
     option: evaluationOption.value,
     hasData: Boolean(store.data?.process.evaluationByStatus.length),
-    emptyTitle: '暂无 Demo / Wafer Test 状态记录',
-    label: 'Demo 与 Wafer Test 状态分布图',
+    emptyTitle: t('dashboard.chart.evaluationEmpty'),
+    label: t('dashboard.chart.evaluationTitle'),
   },
   {
     id: 'booking-month',
     group: 'core',
-    title: '实际 Booking 月度分布',
+    title: t('dashboard.chart.bookingTitle'),
     eyebrow: 'BOOKING BY MONTH',
-    description: '仅使用 Confirmed Booking 的真实 bookingDate，不补造趋势。',
+    description: t('dashboard.chart.bookingDescription'),
     option: bookingOption.value,
     hasData: Boolean(store.data?.bookingByMonth.length),
-    emptyTitle: '暂无 Confirmed Booking',
-    label: '实际 Booking 月度金额图',
+    emptyTitle: t('dashboard.chart.bookingEmpty'),
+    label: t('dashboard.chart.bookingTitle'),
   },
   {
     id: 'top-accounts',
     group: 'core',
-    title: '重点客户金额贡献',
+    title: t('dashboard.chart.topAccountsTitle'),
     eyebrow: 'TOP ACCOUNTS',
-    description: '按客户汇总开放 Pipeline 与 Confirmed Booking。',
+    description: t('dashboard.chart.topAccountsDescription'),
     option: accountOption.value,
     hasData: Boolean(store.data?.topAccounts.length),
-    emptyTitle: '暂无客户金额记录',
-    label: '重点客户金额贡献图',
+    emptyTitle: t('dashboard.chart.topAccountsEmpty'),
+    label: t('dashboard.chart.topAccountsTitle'),
   },
   {
     id: 'region',
     group: 'customer',
-    title: '区域分布',
+    title: t('dashboard.chart.regionTitle'),
     eyebrow: 'REGION',
-    description: '按区域查看客户 Pipeline 与 Booking 金额。',
+    description: t('dashboard.chart.regionDescription'),
     option: regionOption.value,
     hasData: Boolean(store.data?.regionDistribution.length),
-    emptyTitle: '暂无区域金额',
-    label: '区域金额分布图',
+    emptyTitle: t('dashboard.chart.regionEmpty'),
+    label: t('dashboard.chart.regionTitle'),
   },
   {
     id: 'tier',
     group: 'customer',
-    title: '客户等级',
+    title: t('dashboard.chart.tierTitle'),
     eyebrow: 'TIER',
-    description: '查看当前客户等级数量构成。',
+    description: t('dashboard.chart.tierDescription'),
     option: tierOption.value,
     hasData: Boolean(store.data?.tierDistribution.length),
-    emptyTitle: '暂无客户等级',
-    label: '客户等级数量图',
+    emptyTitle: t('dashboard.chart.tierEmpty'),
+    label: t('dashboard.chart.tierTitle'),
   },
   {
     id: 'risk',
     group: 'customer',
-    title: '客户风险',
+    title: t('dashboard.chart.riskTitle'),
     eyebrow: 'RISK',
-    description: '查看当前客户风险数量构成。',
+    description: t('dashboard.chart.riskDescription'),
     option: riskOption.value,
     hasData: Boolean(store.data?.riskDistribution.length),
-    emptyTitle: '暂无客户风险',
-    label: '客户风险数量图',
+    emptyTitle: t('dashboard.chart.riskEmpty'),
+    label: t('dashboard.chart.riskTitle'),
   },
   ...processCharts.value.map((chart) => ({
     id: chart.key,
@@ -190,7 +228,7 @@ const visualDashboardCatalog = computed<DashboardChartItem[]>(() => [
     description: chart.label,
     option: chart.option,
     hasData: chart.rows.length > 0,
-    emptyTitle: `${chart.title}暂无记录`,
+    emptyTitle: t('dashboard.chartNoRecords', { title: chart.title }),
     label: chart.label,
   })),
 ])
@@ -210,7 +248,7 @@ const unsubscribedDashboardGroups = computed(() => {
   return (['core', 'customer', 'process'] as const)
     .map((group) => ({
       id: group,
-      ...dashboardGroupMeta[group],
+      ...dashboardGroupMeta.value[group],
       charts: visualDashboardCatalog.value.filter((chart) => chart.group === group && !selected.has(chart.id)),
     }))
     .filter((group) => group.charts.length > 0)
@@ -218,7 +256,7 @@ const unsubscribedDashboardGroups = computed(() => {
 
 const subscriptionCatalogGroups = computed(() => (['core', 'customer', 'process'] as const).map((group) => ({
   id: group,
-  ...dashboardGroupMeta[group],
+  ...dashboardGroupMeta.value[group],
   charts: visualDashboardCatalog.value.filter((chart) => chart.group === group),
 })))
 
@@ -272,9 +310,9 @@ function isDraftSubscriptionOptionDisabled(id: DashboardChartId) {
 
 function draftSubscriptionOptionLabel(id: DashboardChartId) {
   const owner = draftSubscriptionOwner(id)
-  if (owner === activeSubscriptionGroupIndex.value) return '已订阅'
-  if (owner >= 0) return `第 ${owner + 1} 排已订阅`
-  return '选择'
+  if (owner === activeSubscriptionGroupIndex.value) return t('dashboard.subscribed')
+  if (owner >= 0) return t('dashboard.rowSubscribed', { row: owner + 1 })
+  return t('dashboard.select')
 }
 
 function toggleDraftSubscription(id: DashboardChartId) {
@@ -310,7 +348,7 @@ function saveSubscriptions() {
     subscriptionUserId(),
     subscriptionGroups.value,
   )
-  subscriptionStorageWarning.value = saved ? '' : '当前浏览器无法保存订阅；本次页面选择仍然有效。'
+  subscriptionStorageWarning.value = !saved
   subscriptionOpen.value = false
 }
 
@@ -330,7 +368,17 @@ function daysUntil(date: string) {
 }
 function dueLabel(date: string) {
   const days = daysUntil(date)
-  return days === 0 ? '今天到期' : `剩余 ${days} 天`
+  return days === 0 ? t('dashboard.dueToday') : t('dashboard.daysRemaining', { days })
+}
+function reminderDetail(item: DeadlineReminder) {
+  return typeof item.detail === 'string' ? item.detail : item.detail[locale.value]
+}
+function reminderTypeLabel(type: ReminderType) {
+  if (type === '拜访') return t('dashboard.reminder.visit')
+  if (type === '客户预期') return t('dashboard.reminder.customer')
+  if (type === 'Demo Test DDL') return t('dashboard.reminder.test')
+  if (type === 'Booking DDL') return t('dashboard.reminder.booking')
+  return t('dashboard.reminder.action')
 }
 const reminderWindow = computed(() => {
   const start = new Date()
@@ -357,12 +405,12 @@ const demoTimingRelation = computed(() => {
   const test = relatedScheduleItems.value.find((item) => item.type === 'Demo Test DDL')
   if (!request || !test) return ''
   const gap = daysUntil(test.date) - daysUntil(request.date)
-  if (gap === 0) return 'Test DDL 与客户预期同日对齐'
-  return gap < 0 ? `Test DDL 提前客户预期 ${Math.abs(gap)} 天` : `Test DDL 晚于客户预期 ${gap} 天`
+  if (gap === 0) return t('dashboard.demoAligned')
+  return gap < 0 ? t('dashboard.demoEarly', { days: Math.abs(gap) }) : t('dashboard.demoLate', { days: gap })
 })
 const scheduleCounts = computed(() => [
-  { type: '拜访', label: 'Sales 拜访', count: reminders.value.filter((item) => item.type === '拜访').length },
-  { type: '客户预期', label: '客户预期', count: reminders.value.filter((item) => item.type === '客户预期').length },
+  { type: '拜访', label: t('calendar.event.visit'), count: reminders.value.filter((item) => item.type === '拜访').length },
+  { type: '客户预期', label: t('calendar.event.demoRequest'), count: reminders.value.filter((item) => item.type === '客户预期').length },
   { type: 'Demo Test DDL', label: 'Test DDL', count: reminders.value.filter((item) => item.type === 'Demo Test DDL').length },
   { type: 'Booking DDL', label: 'Booking DDL', count: reminders.value.filter((item) => item.type === 'Booking DDL').length },
 ])
@@ -397,14 +445,14 @@ async function loadReminders() {
         return {
           id: `test-${item.id}`, type: 'Demo Test DDL' as const, date: item.testRunDeadline,
           title: `${item.id} · ${item.title}`, account: item.accountName, owner: item.owner,
-          detail: item.criteria || 'Demo Test 截止提醒', path: '/evaluations',
+          detail: item.criteria || message('dashboard.demoTestDue'), path: '/evaluations',
           demoRequestId: item.demoRequestId || linkedRequest?.id, evaluationId: item.id,
         }
       }),
       ...pipeline.data.bookings.filter((item) => item.status !== 'Cancelled' && item.ddl).map((item) => ({
         id: `booking-${item.id}`, type: 'Booking DDL' as const, date: item.ddl,
         title: `${item.id} · ${item.equipment}`, account: item.accountName, owner: item.owner,
-        detail: `${item.quantity} 台 · ${item.status}`, path: '/booking',
+        detail: message('dashboard.quantityStatus', { quantity: item.quantity, status: item.status }), path: '/booking',
       })),
       ...(store.data?.weeklyActions ?? []).filter((item) => item.status !== 'Completed').map((item) => ({
         id: `action-${item.id}`, type: '行动截止' as const, date: item.due,
@@ -419,7 +467,7 @@ async function loadReminders() {
       })
       .sort((a, b) => a.date.localeCompare(b.date) || a.title.localeCompare(b.title))
   } catch (reason) {
-    reminderError.value = reason instanceof Error ? reason.message : '提醒数据加载失败'
+    reminderError.value = requestErrorMessage(reason, message('dashboard.reminderLoadFailed'))
   } finally {
     reminderLoading.value = false
   }
@@ -440,13 +488,13 @@ onMounted(async () => {
 <template>
   <div class="dashboard-page dashboard-readable-type">
     <PageHeader
-      :eyebrow="managementView ? 'MANAGEMENT INFORMATION CENTER' : 'REMINDER CENTER'"
-      title="信息中心"
-      :description="managementView ? 'Boss 可查阅公司经营数据看板；指标来自商机、Booking、客户、需求、Demo 和拜访记录。' : '仅展示当前权限范围内未来 15 天即将到期的业务活动，不展示公司经营看板。'"
+      :eyebrow="managementView ? t('dashboard.managementEyebrow') : t('dashboard.reminderEyebrow')"
+      :title="t('dashboard.title')"
+      :description="managementView ? t('dashboard.managementDescription') : t('dashboard.reminderDescription')"
       :updated-at="store.data?.asOf"
     >
-      <StatusBadge v-if="managementView" label="管理者权限 · 公司季度 · 只读" tone="info" />
-      <StatusBadge v-else label="个人提醒 · 未来 15 天" tone="neutral" />
+      <StatusBadge v-if="managementView" :label="t('dashboard.managerBadge')" tone="info" />
+      <StatusBadge v-else :label="t('dashboard.reminderBadge')" tone="neutral" />
     </PageHeader>
 
     <DataState v-if="store.loading && !store.data" type="loading" />
@@ -455,44 +503,45 @@ onMounted(async () => {
 
     <template v-else-if="store.data">
       <DataNotice v-if="store.stale" :message="store.staleMessage" :request-id="store.requestId" @refresh="load" />
-      <p v-if="managementView" class="source-note">数据口径：开放 Pipeline 排除 Won / Lost；加权值按商机金额 × 赢率；Booking 仅统计 Confirmed；累计成交取 Won 商机。</p>
 
-      <section v-if="managementView" class="kpi-grid" aria-label="关键经营指标">
-        <KpiCard class="kpi-value-pipeline" label="Open Pipeline" :value="formatMoney(activeMoney?.openPipeline ?? '0.00', activeCurrency)" detail="当前币种未关闭商机金额" :icon="BriefcaseBusiness" tone="navy" />
-        <KpiCard class="kpi-value-weighted" label="Weighted Pipeline" :value="formatMoney(activeMoney?.weightedPipeline ?? '0.00', activeCurrency)" detail="当前币种开放商机按赢率加权" :icon="Scale" tone="teal" />
-        <KpiCard class="kpi-value-booking" label="Confirmed Booking" :value="formatMoney(activeMoney?.confirmedBooking ?? '0.00', activeCurrency)" detail="当前币种真实 Booking" :icon="Banknote" tone="lime" />
-        <KpiCard class="kpi-value-won" label="累计 Closed Won" :value="formatMoney(activeMoney?.cumulativeWon ?? '0.00', activeCurrency)" detail="当前币种已成交商机总额" :icon="CircleDollarSign" tone="amber" />
+      <p v-if="managementView" class="source-note">{{ t('dashboard.sourceNote') }}</p>
+
+      <section v-if="managementView" class="kpi-grid" :aria-label="t('dashboard.kpiLabel')">
+        <KpiCard class="kpi-value-pipeline" label="Open Pipeline" :value="formatMoney(activeMoney?.openPipeline ?? '0.00', activeCurrency)" :detail="t('dashboard.openPipelineDetail')" :icon="BriefcaseBusiness" tone="navy" />
+        <KpiCard class="kpi-value-weighted" label="Weighted Pipeline" :value="formatMoney(activeMoney?.weightedPipeline ?? '0.00', activeCurrency)" :detail="t('dashboard.weightedPipelineDetail')" :icon="Scale" tone="teal" />
+        <KpiCard class="kpi-value-booking" label="Confirmed Booking" :value="formatMoney(activeMoney?.confirmedBooking ?? '0.00', activeCurrency)" :detail="t('dashboard.confirmedBookingDetail')" :icon="Banknote" tone="lime" />
+        <KpiCard class="kpi-value-won" :label="t('dashboard.closedWon')" :value="formatMoney(activeMoney?.cumulativeWon ?? '0.00', activeCurrency)" :detail="t('dashboard.closedWonDetail')" :icon="CircleDollarSign" tone="amber" />
       </section>
 
       <template v-if="managementView">
         <section class="management-primary-grid">
-          <SectionCard title="重点事项与执行提醒" eyebrow="TEAM CALENDAR" description="按日期汇总全员 Calendar 中的拜访、客户预期、Demo Test 与 Booking 截止安排。">
-            <template #action><button class="text-button" type="button" @click="router.push('/calendar')">查看完整日历 →</button></template>
+          <SectionCard :title="t('dashboard.teamHighlights')" eyebrow="TEAM CALENDAR" :description="t('dashboard.teamHighlightsDescription')">
+            <template #action><button class="text-button" type="button" @click="router.push('/calendar')">{{ t('dashboard.viewCalendar') }}</button></template>
             <DataState v-if="reminderLoading" type="loading" />
             <DataState v-else-if="reminderError" type="error" :message="reminderError" @retry="loadReminders" />
-            <div v-else-if="teamSchedule.length" class="team-schedule-list" aria-label="全员近期安排">
+            <div v-else-if="teamSchedule.length" class="team-schedule-list" :aria-label="t('dashboard.teamSchedule')">
               <button v-for="item in teamSchedule" :key="item.id" type="button" :class="{ active: selectedTeamSchedule?.id === item.id }" @click="selectedScheduleId = item.id">
                 <time>{{ formatDisplayDate(item.date) }}</time>
                 <span class="schedule-owner">{{ personnelDisplayName(item.owner).slice(0, 1) }}</span>
                 <div>
-                  <p><b class="schedule-type" :class="{ request: item.type === '客户预期', test: item.type === 'Demo Test DDL', booking: item.type === 'Booking DDL' }">{{ item.type }}</b><strong>{{ item.title }}</strong></p>
-                  <small>{{ item.account }} · {{ item.detail }}</small>
+                  <p><b class="schedule-type" :class="{ request: item.type === '客户预期', test: item.type === 'Demo Test DDL', booking: item.type === 'Booking DDL' }">{{ reminderTypeLabel(item.type) }}</b><strong>{{ item.title }}</strong></p>
+                  <small>{{ item.account }} · {{ reminderDetail(item) }}</small>
                 </div>
                 <span class="schedule-person"><UserRound :size="12" />{{ personnelDisplayName(item.owner) }}</span>
               </button>
             </div>
-            <DataState v-else type="empty" title="暂无后续全员安排" message="Calendar 上游模块新增日期后会自动显示在这里。" />
+            <DataState v-else type="empty" :title="t('dashboard.noTeamSchedule')" :message="t('dashboard.scheduleAutoSync')" />
             <footer class="schedule-footer">
-              <span><CalendarDays :size="13" />即日起 · 与 Calendar 同步</span>
-              <b>显示最近 {{ teamSchedule.length }} 项</b>
+              <span><CalendarDays :size="13" />{{ t('dashboard.calendarSync') }}</span>
+              <b>{{ t('dashboard.showRecent', { count: teamSchedule.length }) }}</b>
             </footer>
           </SectionCard>
 
-          <SectionCard title="相关事项速览" eyebrow="RELATED SCHEDULE" description="联动展示同一 Demo 项目的客户预期与 Test DDL。">
+          <SectionCard :title="t('dashboard.relatedPreview')" eyebrow="RELATED SCHEDULE" :description="t('dashboard.relatedPreviewDescription')">
             <div v-if="selectedTeamSchedule" class="schedule-snapshot">
               <header>
                 <time>{{ formatDisplayDate(selectedTeamSchedule.date) }}</time>
-                <div><b class="schedule-type" :class="{ request: selectedTeamSchedule.type === '客户预期', test: selectedTeamSchedule.type === 'Demo Test DDL', booking: selectedTeamSchedule.type === 'Booking DDL' }">{{ selectedTeamSchedule.type }}</b></div>
+                <div><b class="schedule-type" :class="{ request: selectedTeamSchedule.type === '客户预期', test: selectedTeamSchedule.type === 'Demo Test DDL', booking: selectedTeamSchedule.type === 'Booking DDL' }">{{ reminderTypeLabel(selectedTeamSchedule.type) }}</b></div>
               </header>
               <div class="snapshot-body">
                 <strong>{{ selectedTeamSchedule.account }}</strong>
@@ -502,11 +551,11 @@ onMounted(async () => {
                   <article v-for="(item, index) in relatedScheduleItems" :key="item.id" :class="{ linked: relatedScheduleItems.length > 1 }">
                     <span class="relation-node">{{ index + 1 }}</span>
                     <div>
-                      <header><b>{{ item.type }}</b><time>{{ formatDisplayDate(item.date) }}</time></header>
+                      <header><b>{{ reminderTypeLabel(item.type) }}</b><time>{{ formatDisplayDate(item.date) }}</time></header>
                       <strong>{{ item.title }}</strong>
-                      <small><UserRound :size="11" />{{ personnelDisplayName(item.owner) }} · {{ item.detail }}</small>
+                      <small><UserRound :size="11" />{{ personnelDisplayName(item.owner) }} · {{ reminderDetail(item) }}</small>
                     </div>
-                    <button type="button" @click="router.push(item.path)">查看</button>
+                    <button type="button" @click="router.push(item.path)">{{ t('dashboard.view') }}</button>
                   </article>
                 </div>
               </div>
@@ -514,16 +563,16 @@ onMounted(async () => {
                 <div v-for="item in scheduleCounts" :key="item.type"><strong>{{ item.count }}</strong><span>{{ item.label }}</span></div>
               </footer>
             </div>
-            <DataState v-else type="empty" title="暂无安排可预览" />
+            <DataState v-else type="empty" :title="t('dashboard.noPreview')" />
           </SectionCard>
         </section>
 
         <section class="subscription-section" data-dashboard-subscriptions>
           <header class="subscription-heading">
-            <div><span>MY SUBSCRIPTIONS</span><h2>我的订阅看板</h2><p>每排展示 3 张最关注的可视化看板；其余内容保留在下方“展开全部”。</p></div>
-            <button data-testid="manage-dashboard-subscriptions" type="button" @click="openSubscriptionManager">管理订阅 · {{ subscribedDashboardCount }} 张</button>
+            <div><span>MY SUBSCRIPTIONS</span><h2>{{ t('dashboard.mySubscriptions') }}</h2><p>{{ t('dashboard.subscriptionDescription') }}</p></div>
+            <button data-testid="manage-dashboard-subscriptions" type="button" @click="openSubscriptionManager">{{ t('dashboard.manageSubscriptions', { count: subscribedDashboardCount }) }}</button>
           </header>
-          <p v-if="subscriptionStorageWarning" class="subscription-storage-warning" role="status">{{ subscriptionStorageWarning }}</p>
+          <p v-if="subscriptionStorageWarning" class="subscription-storage-warning" role="status">{{ t('dashboard.subscriptionSaveFailed') }}</p>
           <div
             v-for="(charts, rowIndex) in subscribedDashboardGroups"
             :key="rowIndex"
@@ -555,8 +604,8 @@ onMounted(async () => {
             :aria-expanded="showMoreAnalysis"
             @click="showMoreAnalysis = !showMoreAnalysis"
           >
-            <span><b>{{ showMoreAnalysis ? '收起更多分析' : '查看更多分析' }}</b><small>客户 / 流程 / 执行</small></span>
-            <span class="toggle-state">{{ showMoreAnalysis ? '收起' : '展开全部' }} <b aria-hidden="true">{{ showMoreAnalysis ? '↑' : '↓' }}</b></span>
+            <span><b>{{ showMoreAnalysis ? t('dashboard.collapseMore') : t('dashboard.viewMore') }}</b><small>{{ t('dashboard.customerProcessExecution') }}</small></span>
+            <span class="toggle-state">{{ showMoreAnalysis ? t('dashboard.collapse') : t('dashboard.expandAll') }} <b aria-hidden="true">{{ showMoreAnalysis ? '↑' : '↓' }}</b></span>
           </button>
 
           <div v-if="showMoreAnalysis" class="expanded-analysis">
@@ -574,7 +623,7 @@ onMounted(async () => {
                   :data-dashboard-id="chart.id"
                 >
                   <CrmChart v-if="chart.hasData" :option="chart.option" :height="230" :label="chart.label" />
-                  <DataState v-else type="empty" :title="chart.emptyTitle" message="这里不会用推测数据补齐。" />
+                  <DataState v-else type="empty" :title="chart.emptyTitle" :message="t('dashboard.noSyntheticData')" />
                 </SectionCard>
               </section>
             </template>
@@ -584,17 +633,17 @@ onMounted(async () => {
         <ModalShell
           v-if="subscriptionOpen"
           class="dashboard-subscription-modal"
-          title="管理订阅看板"
+          :title="t('dashboard.subscriptionModal')"
           eyebrow="BOSS DASHBOARD"
           wide
           :submit-disabled="!draftSubscriptionGroupsValid"
-          submit-label="保存订阅"
+          :submit-label="t('dashboard.saveSubscriptions')"
           @close="subscriptionOpen = false"
           @submit="saveSubscriptions"
         >
           <div class="subscription-manager">
             <div class="subscription-row-manager">
-              <div class="subscription-row-tabs" aria-label="订阅排">
+              <div class="subscription-row-tabs" :aria-label="t('dashboard.subscriptionRows')">
                 <button
                   v-for="(group, rowIndex) in draftSubscriptionGroups"
                   :key="rowIndex"
@@ -605,7 +654,7 @@ onMounted(async () => {
                   :aria-pressed="activeSubscriptionGroupIndex === rowIndex"
                   @click="activeSubscriptionGroupIndex = rowIndex"
                 >
-                  <span>第 {{ rowIndex + 1 }} 排</span>
+                  <span>{{ t('dashboard.row', { row: rowIndex + 1 }) }}</span>
                   <b :class="{ complete: group.length === 3 }">{{ group.length }}/3</b>
                 </button>
                 <button
@@ -615,7 +664,7 @@ onMounted(async () => {
                   :disabled="!canAddSubscriptionGroup"
                   @click="addSubscriptionGroup"
                 >
-                  ＋ 增加一排
+                  ＋ {{ t('dashboard.addRow') }}
                 </button>
               </div>
               <button
@@ -625,11 +674,11 @@ onMounted(async () => {
                 data-testid="delete-subscription-row"
                 @click="deleteActiveSubscriptionGroup"
               >
-                删除此排
+                {{ t('dashboard.deleteRow') }}
               </button>
             </div>
             <div class="subscription-manager-summary">
-              <div><strong>为第 {{ activeSubscriptionGroupIndex + 1 }} 排选择 3 张看板</strong><p>其他排已使用的看板不能重复选择；设置仅保存在当前浏览器。</p></div>
+              <div><strong>{{ t('dashboard.chooseCharts', { row: activeSubscriptionGroupIndex + 1 }) }}</strong><p>{{ t('dashboard.noDuplicateCharts') }}</p></div>
               <b :class="{ complete: activeDraftSubscriptionGroup.length === 3 }">{{ activeDraftSubscriptionGroup.length }}/3</b>
             </div>
             <section v-for="group in subscriptionCatalogGroups" :key="group.id" class="subscription-group">
@@ -658,10 +707,10 @@ onMounted(async () => {
         </ModalShell>
       </template>
 
-      <section v-else class="reminder-center" aria-label="未来15天提醒中心">
+      <section v-else class="reminder-center" :aria-label="t('dashboard.reminderCenter')">
         <header>
-          <div><span class="reminder-icon"><BellRing :size="18" /></span><div><h2>未来 15 天提醒</h2><p>{{ reminderWindow }} · 共 {{ reminders.length }} 项</p></div></div>
-          <button type="button" @click="router.push('/calendar')"><CalendarDays :size="14" />打开 Calendar</button>
+          <div><span class="reminder-icon"><BellRing :size="18" /></span><div><h2>{{ t('dashboard.next15Days') }}</h2><p>{{ reminderWindow }} · {{ t('dashboard.reminderCount', { count: reminders.length }) }}</p></div></div>
+          <button type="button" @click="router.push('/calendar')"><CalendarDays :size="14" />{{ t('dashboard.openCalendar') }}</button>
         </header>
         <DataState v-if="reminderLoading" type="loading" />
         <DataState v-else-if="reminderError" type="error" :message="reminderError" @retry="loadReminders" />
@@ -669,16 +718,16 @@ onMounted(async () => {
           <button v-for="item in reminders" :key="item.id" type="button" :data-reminder-id="item.id" @click="router.push(item.path)">
             <time>{{ formatDisplayDate(item.date) }}</time>
             <i />
-            <div><span class="reminder-type">{{ item.type }}</span><strong>{{ item.title }}</strong><small>{{ item.account }} · {{ item.detail }}</small></div>
+            <div><span class="reminder-type">{{ reminderTypeLabel(item.type) }}</span><strong>{{ item.title }}</strong><small>{{ item.account }} · {{ reminderDetail(item) }}</small></div>
             <p><UserRound :size="13" />{{ personnelDisplayName(item.owner) }}</p>
           </button>
         </div>
-        <DataState v-else type="empty" title="未来 15 天暂无即将到期活动" message="新的拜访、客户预期或 Demo Test DDL 会自动同步到这里。" />
+        <DataState v-else type="empty" :title="t('dashboard.noUpcoming')" :message="t('dashboard.reminderSync')" />
       </section>
 
     </template>
 
-    <DataState v-else type="empty" title="经营数据还没有记录" message="记录建立后会自动汇总到这里。" />
+    <DataState v-else type="empty" :title="t('dashboard.noBusinessData')" :message="t('dashboard.noBusinessDataHint')" />
   </div>
 </template>
 

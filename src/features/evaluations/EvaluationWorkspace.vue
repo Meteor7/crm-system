@@ -7,6 +7,7 @@ import { evaluationGroup, evaluationPreparationStatus, evaluationStatusOptions, 
 import { formatDisplayDate } from '@/domain/time'
 import StatusBadge from '@/design-system/StatusBadge.vue'
 import type { EvaluationView } from './EvaluationWorkspaceNav.vue'
+import { useI18n } from '@/i18n'
 
 const props = withDefaults(defineProps<{
   view: EvaluationView
@@ -21,6 +22,14 @@ const props = withDefaults(defineProps<{
   canWrite: false,
   canReport: false,
 })
+const { locale } = useI18n()
+const copy = (english: string, chinese: string) => locale.value === 'en-US' ? english : chinese
+const statusLabel: Record<string, string> = {
+  Requested: '已申请', 'Scope Confirmed': '范围已确认', 'Sample Received': '样品已收到', Scheduled: '已排期',
+  Testing: '测试中', Analysis: '分析中', 'Internal Review': '内部评审', 'Customer Review': '客户评审', Accepted: '已接受', Rejected: '已拒绝',
+}
+const preparationLabel: Record<string, string> = { Pending: '待完成', Completed: '已完成' }
+const eventLabel: Record<string, string> = { Created: '已创建', Status: '状态变更', Preparation: '准备完成', 'Test Run': '测试运行', Deadline: '截止日期', Report: '测试报告' }
 
 const emit = defineEmits<{
   select: [id: string]
@@ -65,24 +74,28 @@ const showAdvance = computed(() => {
   if (selected.value.status === 'Scheduled') return preparationComplete.value
   return ['Testing', 'Analysis', 'Internal Review', 'Customer Review'].includes(selected.value.status)
 })
-const advanceLabel = computed(() => (nextStatus.value ? ({
-  Testing: '进入 Test Execution',
-  'Internal Review': '完成 Test Execution',
-  'Customer Review': '提交 Customer Review',
-  Accepted: 'Accept Demo',
-} as Partial<Record<EvaluationStatus, string>>)[nextStatus.value] ?? `推进至 ${nextStatus.value}` : ''))
-const viewLabel = computed(() => ({
-  overview: '全部 Demo Test',
-  wafer: 'Wafer Preparation',
-  preparation: 'Test Preparation',
-  execution: 'Test Execution',
-  internal: 'Internal Review',
-  customer: 'Customer Review',
-}[props.view]))
+const advanceLabel = computed(() => {
+  if (!nextStatus.value) return ''
+  const labels = locale.value === 'en-US'
+    ? { Testing: 'Enter Test Execution', 'Internal Review': 'Complete Test Execution', 'Customer Review': 'Submit Customer Review', Accepted: 'Accept Demo' }
+    : { Testing: '进入 Test Execution', 'Internal Review': '完成 Test Execution', 'Customer Review': '提交 Customer Review', Accepted: 'Accept Demo' }
+  return labels[nextStatus.value as keyof typeof labels] ?? (locale.value === 'en-US' ? `Advance to ${nextStatus.value}` : `推进至 ${nextStatus.value}`)
+})
+const viewLabel = computed(() => (locale.value === 'en-US' ? ({
+  overview: 'All Demo Tests', wafer: 'Wafer Preparation', preparation: 'Test Preparation', execution: 'Test Execution', internal: 'Internal Review', customer: 'Customer Review',
+}[props.view]) : ({
+  overview: '全部 Demo Test', wafer: 'Wafer Preparation', preparation: 'Test Preparation', execution: 'Test Execution', internal: 'Internal Review', customer: 'Customer Review',
+}[props.view])))
 function displayStage(evaluation: EvaluationDto) {
-  if (props.view === 'wafer') return `Wafer Preparation · ${evaluationPreparationStatus(evaluation, 'wafer')}`
-  if (props.view === 'preparation') return `Test Preparation · ${evaluationPreparationStatus(evaluation, 'test')}`
-  return evaluation.status
+  if (props.view === 'wafer') return `${copy('Wafer Preparation', 'Wafer 准备')} · ${copy(evaluationPreparationStatus(evaluation, 'wafer'), preparationLabel[evaluationPreparationStatus(evaluation, 'wafer')] || evaluationPreparationStatus(evaluation, 'wafer'))}`
+  if (props.view === 'preparation') return `${copy('Test Preparation', '测试准备')} · ${copy(evaluationPreparationStatus(evaluation, 'test'), preparationLabel[evaluationPreparationStatus(evaluation, 'test')] || evaluationPreparationStatus(evaluation, 'test'))}`
+  return copy(evaluation.status, statusLabel[evaluation.status] || evaluation.status)
+}
+function reportStatusLabel(status: EvaluationDto['reportStatus']) {
+  return copy(status, status === 'Ready' ? '已就绪' : '未就绪')
+}
+function historyEventLabel(type: string) {
+  return copy(type, eventLabel[type] || type)
 }
 const tone = (status: EvaluationStatus): Tone => status === 'Accepted'
   ? 'positive'
@@ -100,9 +113,9 @@ watch(accountId, () => emit('customer-change'))
     <div class="workspace-main">
       <div class="toolbar">
         <label>
-          客户
-          <select v-model="accountId" aria-label="Evaluation 客户">
-            <option value="All">全部客户</option>
+          {{ locale === 'en-US' ? 'Account' : '客户' }}
+          <select v-model="accountId" :aria-label="locale === 'en-US' ? 'Evaluation account' : 'Evaluation 客户'">
+            <option value="All">{{ locale === 'en-US' ? 'All accounts' : '全部客户' }}</option>
             <option v-for="account in accounts" :key="account[0]" :value="account[0]">{{ account[1] }}</option>
           </select>
         </label>
@@ -113,12 +126,12 @@ watch(accountId, () => emit('customer-change'))
         <table class="evaluation-table" data-evaluation-table>
           <thead>
             <tr>
-              <th>Test / 项目</th>
-              <th>客户</th>
-              <th>来源 Request</th>
+              <th>{{ locale === 'en-US' ? 'Test / Project' : 'Test / 项目' }}</th>
+              <th>{{ locale === 'en-US' ? 'Account' : '客户' }}</th>
+              <th>{{ locale === 'en-US' ? 'Source request' : '来源 Request' }}</th>
               <th>Engineer</th>
-              <th>阶段</th>
-              <th>计划完成</th>
+              <th>{{ locale === 'en-US' ? 'Stage' : '阶段' }}</th>
+              <th>{{ locale === 'en-US' ? 'Planned completion' : '计划完成' }}</th>
             </tr>
           </thead>
           <tbody>
@@ -129,7 +142,7 @@ watch(accountId, () => emit('customer-change'))
               :data-evaluation="item.id"
               @click="emit('select', item.id)"
             >
-              <td data-label="Test / 项目">
+              <td :data-label="locale === 'en-US' ? 'Test / Project' : 'Test / 项目'">
                 <button
                   class="evaluation-link record-name-link"
                   type="button"
@@ -140,29 +153,29 @@ watch(accountId, () => emit('customer-change'))
                   <strong>{{ item.title }}</strong>
                 </button>
               </td>
-              <td data-label="客户">{{ item.accountName }}</td>
-              <td data-label="来源 Request">{{ item.demoRequestId || '—' }}</td>
+              <td :data-label="locale === 'en-US' ? 'Account' : '客户'">{{ item.accountName }}</td>
+              <td :data-label="locale === 'en-US' ? 'Source request' : '来源 Request'">{{ item.demoRequestId || '—' }}</td>
               <td data-label="Engineer">{{ personnelDisplayName(item.owner) }}</td>
-              <td data-label="阶段"><StatusBadge :label="displayStage(item)" :tone="tone(item.status)" /></td>
-              <td data-label="计划完成">{{ item.plannedEnd }}</td>
+              <td :data-label="locale === 'en-US' ? 'Stage' : '阶段'"><StatusBadge :label="displayStage(item)" :tone="tone(item.status)" /></td>
+              <td :data-label="locale === 'en-US' ? 'Planned completion' : '计划完成'">{{ item.plannedEnd }}</td>
             </tr>
           </tbody>
         </table>
-        <p v-if="!scopedRows.length" class="empty-copy">当前分类暂无 Demo Test</p>
+        <p v-if="!scopedRows.length" class="empty-copy">{{ locale === 'en-US' ? 'No Demo Tests in this view' : '当前分类暂无 Demo Test' }}</p>
       </div>
     </div>
 
     <aside class="action-panel" data-evaluation-actions>
       <template v-if="selected">
-        <span class="panel-kicker"><UserRoundCog :size="15" />相关人员操作</span>
+        <span class="panel-kicker"><UserRoundCog :size="15" />{{ locale === 'en-US' ? 'Owner actions' : '相关人员操作' }}</span>
         <b>{{ selected.id }}</b>
         <h2>{{ selected.title }}</h2>
         <p>{{ selected.accountName }}</p>
 
         <dl>
           <div><dt>Engineer</dt><dd>{{ personnelDisplayName(selected.owner) }}</dd></div>
-          <div><dt>来源 Request</dt><dd>{{ selected.demoRequestId || '—' }}</dd></div>
-          <div><dt>当前阶段</dt><dd>{{ displayStage(selected) }}</dd></div>
+          <div><dt>{{ locale === 'en-US' ? 'Source request' : '来源 Request' }}</dt><dd>{{ selected.demoRequestId || '—' }}</dd></div>
+          <div><dt>{{ locale === 'en-US' ? 'Current stage' : '当前阶段' }}</dt><dd>{{ displayStage(selected) }}</dd></div>
         </dl>
 
         <button
@@ -171,7 +184,7 @@ watch(accountId, () => emit('customer-change'))
           :data-open-demo-detail="`${selected.id}-panel`"
           @click="emit('open-detail', selected)"
         >
-          <ExternalLink :size="14" />查看详细信息
+          <ExternalLink :size="14" />{{ locale === 'en-US' ? 'View details' : '查看详细信息' }}
         </button>
 
         <section
@@ -179,10 +192,10 @@ watch(accountId, () => emit('customer-change'))
           class="test-report-card"
           data-test-report-card
         >
-          <header><FileText :size="15" /><strong>Test Report</strong><span>{{ selected.reportStatus }}</span></header>
-          <div v-if="selected.internalReportArtifact" class="report-file"><strong>Internal</strong><b>{{ selected.internalReportArtifact.fileName }}</b><small>v{{ selected.internalReportArtifact.version }} · {{ personnelDisplayName(selected.internalReportArtifact.createdBy) }} · {{ formatDisplayDate(selected.internalReportArtifact.createdAt) }}</small></div>
-          <div v-if="selected.externalReportArtifact" class="report-file"><strong>External</strong><b>{{ selected.externalReportArtifact.fileName }}</b><small>v{{ selected.externalReportArtifact.version }} · {{ personnelDisplayName(selected.externalReportArtifact.createdBy) }} · {{ formatDisplayDate(selected.externalReportArtifact.createdAt) }}</small></div>
-          <p v-if="!selected.internalReportArtifact || !selected.externalReportArtifact">Internal 和 External 两份报告均上传后才可进入 Internal Review。</p>
+           <header><FileText :size="15" /><strong>{{ copy('Test Report', '测试报告') }}</strong><span>{{ reportStatusLabel(selected.reportStatus) }}</span></header>
+           <div v-if="selected.internalReportArtifact" class="report-file"><strong>{{ copy('Internal', '内部') }}</strong><b>{{ selected.internalReportArtifact.fileName }}</b><small>v{{ selected.internalReportArtifact.version }} · {{ personnelDisplayName(selected.internalReportArtifact.createdBy) }} · {{ formatDisplayDate(selected.internalReportArtifact.createdAt) }}</small></div>
+           <div v-if="selected.externalReportArtifact" class="report-file"><strong>{{ copy('External', '外部') }}</strong><b>{{ selected.externalReportArtifact.fileName }}</b><small>v{{ selected.externalReportArtifact.version }} · {{ personnelDisplayName(selected.externalReportArtifact.createdBy) }} · {{ formatDisplayDate(selected.externalReportArtifact.createdAt) }}</small></div>
+          <p v-if="!selected.internalReportArtifact || !selected.externalReportArtifact">{{ locale === 'en-US' ? 'Upload both Internal and External reports before entering Internal Review.' : 'Internal 和 External 两份报告均上传后才可进入 Internal Review。' }}</p>
           <button
             v-if="canWrite"
             type="button"
@@ -191,7 +204,7 @@ watch(accountId, () => emit('customer-change'))
             :disabled="processing === selected.id"
             @click="emit('report', selected)"
           >
-            <FileText :size="14" />{{ selected.reportStatus === 'Ready' ? '上传新版本' : '上传两份 Test Report' }}
+            <FileText :size="14" />{{ selected.reportStatus === 'Ready' ? (locale === 'en-US' ? 'Upload new version' : '上传新版本') : (locale === 'en-US' ? 'Upload both Test Reports' : '上传两份 Test Report') }}
           </button>
         </section>
 
@@ -202,7 +215,7 @@ watch(accountId, () => emit('customer-change'))
           data-complete-preparation="wafer"
           :disabled="processing === selected.id"
           @click="emit('prepare', selected, 'wafer')"
-        >完成 Wafer Preparation</button>
+        >{{ locale === 'en-US' ? 'Complete Wafer Preparation' : '完成 Wafer Preparation' }}</button>
         <button
           v-if="canWrite && selectedIsPreparation && evaluationPreparationStatus(selected, 'test') === 'Pending' && (view === 'overview' || view === 'preparation')"
           type="button"
@@ -210,7 +223,7 @@ watch(accountId, () => emit('customer-change'))
           data-complete-preparation="test"
           :disabled="processing === selected.id"
           @click="emit('prepare', selected, 'test')"
-        >完成 Test Preparation</button>
+        >{{ locale === 'en-US' ? 'Complete Test Preparation' : '完成 Test Preparation' }}</button>
 
         <button
           v-if="canWrite && selectedIsPreparation && (view === 'overview' || view === 'preparation')"
@@ -220,7 +233,7 @@ watch(accountId, () => emit('customer-change'))
           :disabled="processing === selected.id"
           @click="emit('deadline', selected)"
         >
-          <CalendarClock :size="14" />设置 Test Run DDL
+          <CalendarClock :size="14" />{{ locale === 'en-US' ? 'Set Test Run DDL' : '设置 Test Run DDL' }}
         </button>
         <button
           v-if="canWrite && selected.status === 'Testing' && (view === 'overview' || view === 'execution')"
@@ -231,7 +244,7 @@ watch(accountId, () => emit('customer-change'))
           :disabled="processing === selected.id"
           @click="emit('run', selected)"
         >
-          <Plus :size="14" />新增 Test Run
+          <Plus :size="14" />{{ locale === 'en-US' ? 'New Test Run' : '新增 Test Run' }}
         </button>
         <button
           v-if="canWrite && showAdvance"
@@ -241,7 +254,7 @@ watch(accountId, () => emit('customer-change'))
           :disabled="processing === selected.id || internalReviewBlocked"
           @click="emit('status', selected.id, nextStatus!)"
         >{{ advanceLabel }}</button>
-        <p v-if="canWrite && internalReviewBlocked" class="action-hint" data-test-run-review-gate>请先上传 Internal 和 External Test Report以及完成Test Run。</p>
+        <p v-if="canWrite && internalReviewBlocked" class="action-hint" data-test-run-review-gate>{{ locale === 'en-US' ? 'Upload both Test Reports and complete a Test Run first.' : '请先上传 Internal 和 External Test Report以及完成Test Run。' }}</p>
         <button
           v-if="canWrite && !['Accepted', 'Rejected'].includes(selected.status)"
           type="button"
@@ -249,23 +262,23 @@ watch(accountId, () => emit('customer-change'))
           data-reject-evaluation
           :disabled="processing === selected.id"
           @click="emit('status', selected.id, 'Rejected')"
-        >Reject Demo</button>
+        >{{ locale === 'en-US' ? 'Reject Demo' : 'Reject Demo' }}</button>
         <div class="owner-note">
           <FlaskConical :size="14" />
-          <span>操作区域只保留当前负责人可执行动作；详细测试信息请进入内页。</span>
+          <span>{{ locale === 'en-US' ? 'Only the current owner can act here. Open the detail view for full test information.' : '操作区域只保留当前负责人可执行动作；详细测试信息请进入内页。' }}</span>
         </div>
-        <section v-if="selected.history?.length" class="evaluation-history" aria-label="Evaluation history">
-          <header><History :size="14" /><strong>Tracking History</strong></header>
+        <section v-if="selected.history?.length" class="evaluation-history" :aria-label="locale === 'en-US' ? 'Evaluation history' : '评估历史记录'">
+          <header><History :size="14" /><strong>{{ locale === 'en-US' ? 'Tracking history' : '操作历史' }}</strong></header>
           <ol>
             <li v-for="event in selected.history.slice(0, 6)" :key="event.id">
-              <span>{{ event.eventType }}</span>
+               <span>{{ historyEventLabel(event.eventType) }}</span>
               <strong>{{ event.summary }}</strong>
               <small>{{ personnelDisplayName(event.actor) }} · {{ formatDisplayDate(event.at) }}</small>
             </li>
           </ol>
         </section>
       </template>
-      <p v-else>请先选择一条 Demo Test。</p>
+      <p v-else>{{ locale === 'en-US' ? 'Select a Demo Test first.' : '请先选择一条 Demo Test。' }}</p>
     </aside>
   </section>
 </template>

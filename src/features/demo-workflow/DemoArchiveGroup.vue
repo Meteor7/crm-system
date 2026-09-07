@@ -1,7 +1,9 @@
 <script setup lang="ts">
+import { salesEnumLabel } from '@/features/shared/sales-i18n'
 import type { DemoArchiveGroup } from '@/domain/demo-archive'
 import type { DemoWorkflowDto } from '@/types/workspaces'
 import { personnelDisplayName } from '@/demo/personnel'
+import { useI18n } from '@/i18n'
 
 defineProps<{
   group: DemoArchiveGroup
@@ -9,12 +11,15 @@ defineProps<{
   groupBy: 'customer' | 'equipment'
 }>()
 defineEmits<{ open: [item: DemoWorkflowDto] }>()
+const { locale } = useI18n()
+const copy = (english: string, chinese: string) => locale.value === 'en-US' ? english : chinese
+const groupLabel = (value: string) => value === '未指定设备' ? copy('Unspecified equipment', value) : value
 </script>
 
 <template>
   <section class="archive-group" data-demo-archive-group>
     <header>
-      <strong>{{ group.label }}</strong>
+      <strong>{{ groupLabel(group.label) }}</strong>
       <span>{{ group.count }}</span>
     </header>
     <button
@@ -28,11 +33,11 @@ defineEmits<{ open: [item: DemoWorkflowDto] }>()
     >
       <span class="archive-card-head">
         <strong>{{ item.id }}</strong>
-        <i :class="item.status.toLowerCase()">{{ item.status }}</i>
+        <i :class="item.status.toLowerCase()">{{ salesEnumLabel(item.status, locale) }}</i>
       </span>
       <b>{{ item.title }}</b>
       <small>{{ groupBy === 'customer' ? item.equipment : item.account }}</small>
-      <small>Sales {{ personnelDisplayName(item.salesOwner) }} · Engineer {{ personnelDisplayName(item.engineerOwner) }}</small>
+      <small>{{ copy('Sales', '销售') }} {{ personnelDisplayName(item.salesOwner) }} · {{ copy('Engineer', '工程师') }} {{ personnelDisplayName(item.engineerOwner) }}</small>
     </button>
   </section>
 </template>

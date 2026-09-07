@@ -1,8 +1,10 @@
 <script setup lang="ts">
 import { computed } from 'vue'
+import { useI18n } from '@/i18n'
 
 const props = defineProps<{ page: number; pageSize: number; total: number }>()
 const emit = defineEmits<{ change: [page: number]; 'page-size-change': [pageSize: number] }>()
+const { t, locale } = useI18n()
 const totalPages = computed(() => Math.max(1, Math.ceil(props.total / props.pageSize)))
 const pageSizeOptions = computed(() => [...new Set([props.pageSize, 10, 25, 50])].sort((left, right) => left - right))
 function move(target: number) {
@@ -15,12 +17,12 @@ function changePageSize(event: Event) {
 </script>
 
 <template>
-  <nav class="pagination-controls" aria-label="列表分页">
-    <button type="button" data-page-previous :disabled="page <= 1" @click="move(page - 1)">上一页</button>
-    <span>第 {{ page }} / {{ totalPages }} 页</span>
-    <small>共 {{ total }} 条</small>
-    <label>每页<select :value="pageSize" aria-label="每页数量" @change="changePageSize"><option v-for="size in pageSizeOptions" :key="size" :value="size">{{ size }}</option></select></label>
-    <button type="button" data-page-next :disabled="page >= totalPages" @click="move(page + 1)">下一页</button>
+  <nav class="pagination-controls" :aria-label="t('common.page', { page, total: totalPages })">
+    <button type="button" data-page-previous :disabled="page <= 1" @click="move(page - 1)">{{ t('common.previous') }}</button>
+    <span>{{ t('common.page', { page, total: totalPages }) }}</span>
+    <small>{{ t('common.total', { count: total }) }}</small>
+    <label>{{ t('common.perPage') }}<select :value="pageSize" :aria-label="locale === 'en-US' ? 'Items per page' : '每页数量'" @change="changePageSize"><option v-for="size in pageSizeOptions" :key="size" :value="size">{{ size }}</option></select></label>
+    <button type="button" data-page-next :disabled="page >= totalPages" @click="move(page + 1)">{{ t('common.next') }}</button>
   </nav>
 </template>
 

@@ -29,6 +29,39 @@ export const DEMO_REQUEST_HINTS = {
   resultFileProvided: 'e.g. Customer will provide reference defect map and KLARF baseline.',
 } as const
 
+const DEMO_REQUEST_HINTS_EN = {
+  companyName: 'Enter the full customer company name',
+  contactPerson: 'Name, title, email, phone',
+  industry: 'e.g. Semiconductor Frontend Fab',
+  salesContact: 'Sales contact for this demo',
+  demoOwner: 'R&D or applications engineer responsible',
+  waferCount: 'Calculated from the Wafer Details below',
+  sizeShape: 'e.g. 300 mm round wafer, 775 um thickness, standard notch',
+  material: 'e.g. Bare silicon wafer, Si(100)',
+  specificRequest: 'e.g. Frontside inspection with 3 mm edge exclusion; non-contact handling required.',
+  detectMeasure: 'e.g. Detect frontside particles, scratches, and surface defects above 1 um.',
+  expectedResults: 'e.g. Defect map, defect images, CSV data, and PDF summary report.',
+  otherTools: 'e.g. KLA Surfscan comparison; enter N/A when none',
+  primaryTool: 'e.g. Aconca FS Edge',
+  complementaryTool: 'e.g. Nansi',
+  timing: 'Select a date',
+  keySuccessFactors: 'e.g. Capture rate >= 95%, false-positive rate <= 5%, complete defect map output.',
+  internalQuestions: 'e.g. Confirm recipe preparation and machine availability.',
+  customerQuestions: 'e.g. Confirm sample delivery date and required report format.',
+  slotId: 'e.g. 1',
+  wid: 'e.g. DEMO-ACONCA-001',
+  waferSpecificity: 'e.g. 300 mm bare Si(100), 775 um thickness',
+  notchFlat: "e.g. Standard notch, notch at 6 o'clock",
+  doiMetrologyItems: 'e.g. Particles, scratches, and surface defects above 1 um',
+  resultFileProvided: 'e.g. Customer will provide a reference defect map and KLARF baseline.',
+} as const
+
+export type DemoRequestLocale = 'zh-CN' | 'en-US'
+
+export function getDemoRequestHints(locale: DemoRequestLocale = 'zh-CN') {
+  return locale === 'en-US' ? DEMO_REQUEST_HINTS_EN : DEMO_REQUEST_HINTS
+}
+
 export function createEmptyDemoWafer(): DemoWaferDetailDto {
   return { slotId: '', wid: '', waferSpecificity: '', notchFlat: '', doiMetrologyItems: '', resultFileProvided: '' }
 }
@@ -128,10 +161,12 @@ export function countDemoWafers(form: DemoRequestFormData) {
 
 export function validateDemoRequestFormData(
   form: DemoRequestFormData,
-  options: { requireCustomerInformation?: boolean } = {},
+  options: { requireCustomerInformation?: boolean; locale?: DemoRequestLocale } = {},
 ) {
   const errors: Record<string, string> = {}
   const requireCustomerInformation = options.requireCustomerInformation ?? true
+  const currentLocale = options.locale ?? 'zh-CN'
+  const localized = (english: string, chinese: string) => currentLocale === 'en-US' ? english : chinese
   const fields: Array<[keyof Omit<DemoRequestFormData, 'wafers' | 'complementaryTool'>, string]> = [
     ['salesContact', 'Sales Contact'],
     ['demoOwner', 'Demo Owner'],
@@ -149,16 +184,16 @@ export function validateDemoRequestFormData(
   ]
   if (requireCustomerInformation) fields.unshift(['industry', 'Industry'])
   fields.forEach(([key, label]) => {
-    if (!form[key].trim()) errors[key] = `请填写 ${label}`
+    if (!form[key].trim()) errors[key] = localized(`Enter ${label}`, `请填写 ${label}`)
   })
   if (form.salesContact.trim() && !isDemoSalesOwner(form.salesContact.trim())) {
-    errors.salesContact = '请选择有效的 Sales Owner'
+    errors.salesContact = localized('Select a valid Sales owner', '请选择有效的 Sales Owner')
   }
   if (form.demoOwner.trim() && !isDemoEngineerOwner(form.demoOwner.trim())) {
-    errors.demoOwner = '请选择有效的 Engineer Owner'
+    errors.demoOwner = localized('Select a valid Engineer owner', '请选择有效的 Engineer Owner')
   }
   const active = form.wafers.map((wafer, index) => ({ wafer, index })).filter(({ wafer }) => hasWaferContent(wafer))
-  if (!active.length) errors.wafers = '请至少填写一条 Wafer Details'
+  if (!active.length) errors.wafers = localized('Add at least one Wafer Details row', '请至少填写一条 Wafer Details')
   active.forEach(({ wafer, index }) => {
     const waferFields: Array<[keyof DemoWaferDetailDto, string]> = [
       ['slotId', 'Slot ID'],
@@ -169,7 +204,7 @@ export function validateDemoRequestFormData(
       ['resultFileProvided', 'Result File Provided'],
     ]
     waferFields.forEach(([key, label]) => {
-      if (!wafer[key].trim()) errors[`wafers.${index}.${key}`] = `请填写 ${label}`
+      if (!wafer[key].trim()) errors[`wafers.${index}.${key}`] = localized(`Enter ${label}`, `请填写 ${label}`)
     })
   })
   return errors

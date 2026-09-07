@@ -4,20 +4,23 @@ import type { CreateTestRunInput, EvaluationDto } from '@/types/crm'
 import ModalShell from '@/design-system/ModalShell.vue'
 import RequiredMark from '@/design-system/RequiredMark.vue'
 import { shanghaiDate } from '@/domain/time'
+import { useI18n, useLocaleMessage } from '@/i18n'
 
 const props = defineProps<{ evaluation: EvaluationDto; busy?: boolean }>()
 const emit = defineEmits<{ close: []; submit: [input: CreateTestRunInput] }>()
 const form = reactive({ date: shanghaiDate(), lot: '', wafers: 1, capture: '' as number | '', falsePositive: '' as number | '', wph: '' as number | '', summary: '' })
-const validationError = ref('')
+const validationError = useLocaleMessage()
+const { locale, t, message } = useI18n()
+const copy = (english: string, chinese: string) => locale.value === 'en-US' ? english : chinese
 function submit() {
   const metrics = [form.capture, form.falsePositive, form.wph]
   const metricCount = metrics.filter((value) => value !== '').length
   if (metricCount > 0 && metricCount < metrics.length) {
-    validationError.value = '填写测试指标时，缺陷捕获率、误报率和 Throughput WPH 必须完整填写'
+    validationError.value = message('testRun.metricsRequired')
     return
   }
   if (metricCount === metrics.length && !form.summary.trim()) {
-    validationError.value = '完成 Test Run 时必须填写结果摘要'
+    validationError.value = message('testRun.summaryRequired')
     return
   }
   validationError.value = ''
@@ -26,7 +29,7 @@ function submit() {
 </script>
 
 <template>
-  <ModalShell title="新增 Wafer Test Run" eyebrow="WAFER TEST" :busy="busy" @close="$emit('close')" @submit="submit"><div class="run-grid"><label><span>测试日期<RequiredMark /></span><input v-model="form.date" type="date" required /></label><label><span>Wafer Lot<RequiredMark /></span><input v-model="form.lot" aria-label="Wafer Lot" required /></label><label><span>Wafer 数量<RequiredMark /></span><input v-model.number="form.wafers" aria-label="Wafer 数量" type="number" min="1" required /></label><label>缺陷捕获率 %<input v-model.number="form.capture" aria-label="缺陷捕获率" type="number" min="0" max="100" step=".1" /></label><label>误报率 %<input v-model.number="form.falsePositive" aria-label="误报率" type="number" min="0" max="100" step=".1" /></label><label>Throughput WPH<input v-model.number="form.wph" aria-label="Throughput WPH" type="number" min="0" step=".1" /></label><label class="full">结果摘要<textarea v-model="form.summary" aria-label="结果摘要" /></label><p v-if="validationError" class="validation-error full" role="alert">{{ validationError }}</p></div></ModalShell>
+  <ModalShell :title="t('testRun.newTitle')" :eyebrow="copy('WAFER TEST', '晶圆测试')" :busy="busy" @close="$emit('close')" @submit="submit"><div class="run-grid"><label><span>{{ t('testRun.date') }}<RequiredMark /></span><input v-model="form.date" type="date" required /></label><label><span>{{ copy('Wafer Lot', '晶圆批次') }}<RequiredMark /></span><input v-model="form.lot" :aria-label="copy('Wafer Lot', '晶圆批次')" required /></label><label><span>{{ t('testRun.wafers') }}<RequiredMark /></span><input v-model.number="form.wafers" :aria-label="t('testRun.wafers')" type="number" min="1" required /></label><label>{{ t('testRun.capture') }} %<input v-model.number="form.capture" :aria-label="t('testRun.capture')" type="number" min="0" max="100" step=".1" /></label><label>{{ t('testRun.falsePositive') }} %<input v-model.number="form.falsePositive" :aria-label="t('testRun.falsePositive')" type="number" min="0" max="100" step=".1" /></label><label>{{ copy('Throughput WPH', '吞吐量 WPH') }}<input v-model.number="form.wph" :aria-label="copy('Throughput WPH', '吞吐量 WPH')" type="number" min="0" step=".1" /></label><label class="full">{{ t('testRun.summary') }}<textarea v-model="form.summary" :aria-label="t('testRun.summary')" /></label><p v-if="validationError" class="validation-error full" role="alert">{{ validationError }}</p></div></ModalShell>
 </template>
 
 <style scoped>

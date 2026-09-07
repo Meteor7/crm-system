@@ -203,11 +203,11 @@ describe('delivery workflow pages', () => {
     expect(wrapper.findAll('[data-evaluation-view]')).toHaveLength(6)
     await wrapper.get('[data-evaluation-view="execution"]').trigger('click')
     await wrapper.get('[data-add-run="EVAL-103"]').trigger('click')
-    await wrapper.get('[aria-label="Wafer Lot"]').setValue('LOT-NEW')
+    await wrapper.get('[aria-label="晶圆批次"]').setValue('LOT-NEW')
     await wrapper.get('[aria-label="Wafer 数量"]').setValue('4')
     await wrapper.get('[aria-label="缺陷捕获率"]').setValue('97')
     await wrapper.get('[aria-label="误报率"]').setValue('2.1')
-    await wrapper.get('[aria-label="Throughput WPH"]').setValue('35')
+    await wrapper.get('[aria-label="吞吐量 WPH"]').setValue('35')
     await wrapper.get('[aria-label="结果摘要"]').setValue('指标达到验收标准')
     await wrapper.get('.modal-card form').trigger('submit')
     await flushPromises()
@@ -275,7 +275,7 @@ describe('delivery workflow pages', () => {
     await wrapper.get('[data-reject-evaluation]').trigger('click')
 
     expect(updateStatus).not.toHaveBeenCalled()
-    expect(wrapper.get('[aria-label="Reject Demo"]').attributes('aria-modal')).toBe('true')
+    expect(wrapper.get('[aria-label="拒绝 Demo 测试"]').attributes('aria-modal')).toBe('true')
     expect(wrapper.get('[data-modal-submit]').attributes('disabled')).toBeDefined()
 
     await wrapper.get('[aria-label="Demo 拒绝原因"]').setValue('Test result does not meet acceptance criteria')
@@ -304,7 +304,7 @@ describe('delivery workflow pages', () => {
     await flushPromises()
 
     expect(complete).toHaveBeenCalledWith('EVAL-101', 'test', '2026-08-06T04:00:00.000000Z')
-    expect(wrapper.get('[data-evaluation="EVAL-101"]').text()).toContain('Test Preparation · Completed')
+    expect(wrapper.get('[data-evaluation="EVAL-101"]').text()).toContain('测试准备 · 已完成')
   })
 
   it('keeps loaded Demo Test data visible when a non-permission status write fails', async () => {
@@ -341,10 +341,10 @@ describe('delivery workflow pages', () => {
 
     await wrapper.get('[data-evaluation-view="execution"]').trigger('click')
     await wrapper.get('[data-add-run="EVAL-103"]').trigger('click')
-    await wrapper.get('[aria-label="Wafer Lot"]').setValue('LOT-NO-SUMMARY')
+    await wrapper.get('[aria-label="晶圆批次"]').setValue('LOT-NO-SUMMARY')
     await wrapper.get('[aria-label="缺陷捕获率"]').setValue('97')
     await wrapper.get('[aria-label="误报率"]').setValue('2.1')
-    await wrapper.get('[aria-label="Throughput WPH"]').setValue('35')
+    await wrapper.get('[aria-label="吞吐量 WPH"]').setValue('35')
     await wrapper.get('.modal-card form').trigger('submit')
 
     expect(wrapper.get('[role="alert"]').text()).toContain('结果摘要')
@@ -407,9 +407,9 @@ describe('delivery workflow pages', () => {
     const wrapper = mount(ContractsPage, { props: { apiClient: createMockApi({ latency: 0 }) }, global: await globals('/contracts') })
     await flushPromises()
 
-    expect(wrapper.text()).toContain('Evaluation Agreement')
+    expect(wrapper.text()).toContain('评估协议')
     expect(wrapper.text()).toMatch(/\d+ 天内/)
-    expect(wrapper.text()).toContain('Unsigned')
+    expect(wrapper.text()).toContain('未签署')
     expect(wrapper.text()).toContain('¥68万')
   })
   it('downloads a saved Demo Request and keeps cards visible after a generation error', async () => {
@@ -432,7 +432,7 @@ describe('delivery workflow pages', () => {
     docxMocks.generateDemoRequestDocxArtifact.mockRejectedValueOnce(new Error('generation failed'))
     await wrapper.get('[data-demo-download="DR-101"]').trigger('click')
     await flushPromises()
-    expect(wrapper.text()).toContain('Word 文档生成失败，请检查申请内容后重试')
+    expect(wrapper.text()).toContain('generation failed')
     expect(wrapper.find('[data-demo-request="DR-101"]').exists()).toBe(true)
   })
   it('downloads Word for management and engineering roles even when Artifact saving is denied', async () => {

@@ -9,6 +9,7 @@ import SectionCard from '@/design-system/SectionCard.vue'
 import { downloadBlob } from '@/features/shared/download-blob'
 import { readAllPages } from '@/features/shared/read-all-pages'
 import { formatDisplayDate } from '@/domain/time'
+import { useI18n, useLocaleMessage, localeMessage } from '@/i18n'
 
 const MAX_FILE_SIZE = 100 * 1024 * 1024
 const ACCEPTED_FILE_PATTERN = /\.(pdf|doc|docx|xls|xlsx|ppt|pptx|txt|csv|png|jpe?g)$/i
@@ -24,6 +25,7 @@ const props = withDefaults(defineProps<{
   canDelete: false,
   apiClient: () => defaultApi,
 })
+const { locale } = useI18n()
 
 const files = ref<ContactFileMetaDto[]>([])
 const input = ref<HTMLInputElement | null>(null)
@@ -31,7 +33,7 @@ const loading = ref(true)
 const uploading = ref(false)
 const activeFileId = ref('')
 const dragging = ref(false)
-const error = ref('')
+const error = useLocaleMessage()
 let loadSequence = 0
 
 function getFileApi(): CrmApi | undefined {
@@ -57,7 +59,7 @@ async function loadFiles() {
   error.value = ''
   const apiClient = getFileApi()
   if (!apiClient) {
-    error.value = '联系人文件接口尚未加载，请刷新页面后重试。'
+    error.value = localeMessage('Contact file service is not ready. Refresh and try again.', '联系人文件接口尚未加载，请刷新页面后重试。')
     loading.value = false
     return
   }
@@ -66,7 +68,7 @@ async function loadFiles() {
       apiClient.listContactFiles(props.contactId, { page, pageSize }))
     if (sequence === loadSequence) files.value = allFiles
   } catch (reason) {
-    if (sequence === loadSequence) error.value = mapRequestError(reason).message
+    if (sequence === loadSequence) { const mapped = mapRequestError(reason); error.value = mapped.localizedMessage ?? mapped.message }
   } finally {
     if (sequence === loadSequence) loading.value = false
   }
@@ -81,23 +83,23 @@ async function uploadFiles(fileList: FileList | null) {
   error.value = ''
   const apiClient = getFileApi()
   if (!apiClient) {
-    error.value = '联系人文件接口尚未加载，请刷新页面后重试。'
+    error.value = localeMessage('Contact file service is not ready. Refresh and try again.', '联系人文件接口尚未加载，请刷新页面后重试。')
     return
   }
   const selected = Array.from(fileList)
   const invalidType = selected.find((file) => !ACCEPTED_FILE_PATTERN.test(file.name))
   if (invalidType) {
-    error.value = `不支持“${invalidType.name}”的文件类型`
+    error.value = localeMessage(`File type is not supported: “${invalidType.name}”`, `不支持“${invalidType.name}”的文件类型`)
     return
   }
   const oversized = selected.find((file) => file.size > MAX_FILE_SIZE)
   if (oversized) {
-    error.value = `“${oversized.name}”超过 100 MiB`
+    error.value = localeMessage(`“${oversized.name}” exceeds 100 MiB`, `“${oversized.name}”超过 100 MiB`)
     return
   }
   const empty = selected.find((file) => file.size === 0)
   if (empty) {
-    error.value = `“${empty.name}”为空文件`
+    error.value = localeMessage(`“${empty.name}” is empty`, `“${empty.name}”为空文件`)
     return
   }
 
@@ -112,7 +114,7 @@ async function uploadFiles(fileList: FileList | null) {
     await apiClient.uploadContactFiles(props.contactId, uploads)
     await loadFiles()
   } catch (reason) {
-    error.value = mapRequestError(reason).message
+    { const mapped = mapRequestError(reason); error.value = mapped.localizedMessage ?? mapped.message }
   } finally {
     uploading.value = false
   }
@@ -134,7 +136,7 @@ async function downloadFile(file: ContactFileMetaDto) {
   error.value = ''
   const apiClient = getFileApi()
   if (!apiClient) {
-    error.value = '联系人文件接口尚未加载，请刷新页面后重试。'
+    error.value = localeMessage('Contact file service is not ready. Refresh and try again.', '联系人文件接口尚未加载，请刷新页面后重试。')
     activeFileId.value = ''
     return
   }
@@ -142,7 +144,7 @@ async function downloadFile(file: ContactFileMetaDto) {
     const result = await apiClient.getContactFile(file.id)
     downloadBlob(result.blob, result.fileName)
   } catch (reason) {
-    error.value = mapRequestError(reason).message
+    { const mapped = mapRequestError(reason); error.value = mapped.localizedMessage ?? mapped.message }
   } finally {
     activeFileId.value = ''
   }
@@ -154,7 +156,7 @@ async function deleteFile(file: ContactFileMetaDto) {
   error.value = ''
   const apiClient = getFileApi()
   if (!apiClient) {
-    error.value = '联系人文件接口尚未加载，请刷新页面后重试。'
+    error.value = localeMessage('Contact file service is not ready. Refresh and try again.', '联系人文件接口尚未加载，请刷新页面后重试。')
     activeFileId.value = ''
     return
   }
@@ -162,7 +164,7 @@ async function deleteFile(file: ContactFileMetaDto) {
     await apiClient.deleteContactFile(file.id)
     files.value = files.value.filter((item) => item.id !== file.id)
   } catch (reason) {
-    error.value = mapRequestError(reason).message
+    { const mapped = mapRequestError(reason); error.value = mapped.localizedMessage ?? mapped.message }
   } finally {
     activeFileId.value = ''
   }
@@ -173,14 +175,15 @@ onMounted(loadFiles)
 </script>
 
 <template>
-  <SectionCard :title="`文件 (${files.length})`" eyebrow="FILES">
-    <input v-if="canWrite" ref="input" class="file-input" type="file" multiple :accept="ACCEPT" @change="onInputChange">
+  <SectionCard :title="locale === 'en-US' ? `Files (${files.length})` : `文件 (${files.length})`" eyebrow="FILES">
+    <input v-if="canWrite" ref="input" class="file-input" type="file" multiple :accept="ACCEPT" :aria-label="locale === 'en-US' ? 'Choose contact files' : '选择联系人文件'" @change="onInputChange">
     <div
       v-if="canWrite"
       class="upload-zone"
       :class="{ dragging }"
       tabindex="0"
       role="button"
+      :aria-label="locale === 'en-US' ? 'Upload contact files' : '上传联系人文件'"
       data-testid="contact-file-dropzone"
       @click="openPicker"
       @keydown.enter.prevent="openPicker"
@@ -194,13 +197,13 @@ onMounted(loadFiles)
       <button class="upload-button" type="button" :disabled="uploading" data-testid="upload-contact-files" @click.stop="openPicker">
         <LoaderCircle v-if="uploading" class="spin" :size="14" />
         <UploadCloud v-else :size="14" />
-        {{ uploading ? '正在上传…' : '上传文件' }}
+        {{ uploading ? (locale === 'en-US' ? 'Uploading…' : '正在上传…') : (locale === 'en-US' ? 'Upload files' : '上传文件') }}
       </button>
-      <small>或拖放文件到此处 · 单个最大 100 MiB</small>
+      <small>{{ locale === 'en-US' ? 'Or drop files here · 100 MiB per file' : '或拖放文件到此处 · 单个最大 100 MiB' }}</small>
     </div>
 
     <p v-if="error" class="file-error" role="alert">{{ error }}</p>
-    <div v-if="loading" class="file-state"><LoaderCircle class="spin" :size="16" />正在读取文件…</div>
+    <div v-if="loading" class="file-state"><LoaderCircle class="spin" :size="16" />{{ locale === 'en-US' ? 'Reading files…' : '正在读取文件…' }}</div>
     <div v-else-if="files.length" class="file-list" data-testid="contact-file-list">
       <article v-for="file in files" :key="file.id" class="file-row" :data-file-id="file.id">
         <span class="file-icon"><FileText :size="16" /></span>
@@ -209,12 +212,12 @@ onMounted(loadFiles)
           <small>{{ formatSize(file.size) }} · {{ formatDisplayDate(file.uploadedAt) }}</small>
         </div>
         <nav>
-          <button type="button" :aria-label="`下载 ${file.fileName}`" :disabled="activeFileId === file.id" @click="downloadFile(file)"><Download :size="14" /></button>
-          <button v-if="canDelete" class="remove-file" type="button" :aria-label="`删除 ${file.fileName}`" :disabled="activeFileId === file.id" @click="deleteFile(file)"><Trash2 :size="14" /></button>
+          <button type="button" :aria-label="locale === 'en-US' ? `Download ${file.fileName}` : `下载 ${file.fileName}`" :disabled="activeFileId === file.id" @click="downloadFile(file)"><Download :size="14" /></button>
+          <button v-if="canDelete" class="remove-file" type="button" :aria-label="locale === 'en-US' ? `Delete ${file.fileName}` : `删除 ${file.fileName}`" :disabled="activeFileId === file.id" @click="deleteFile(file)"><Trash2 :size="14" /></button>
         </nav>
       </article>
     </div>
-    <p v-else-if="!error" class="file-empty">尚未上传联系人文件</p>
+    <p v-else-if="!error" class="file-empty">{{ locale === 'en-US' ? 'No contact files uploaded' : '尚未上传联系人文件' }}</p>
   </SectionCard>
 </template>
 

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { systemValueLabel } from '@/features/shared/system-labels'
 import { personnelDisplayName } from '@/demo/personnel'
 import { computed, onMounted, ref, watch } from 'vue'
 import { ArrowLeft, Building2, Check, CircleDollarSign, FileText, PackageCheck, Pencil, Plus, Target, Trash2, Users } from '@lucide/vue'
@@ -7,7 +8,6 @@ import { api as defaultApi, CrmApiError, type CrmApi } from '@/api'
 import { mapRequestError } from '@/api/request-state'
 import DataState from '@/design-system/DataState.vue'
 import ModalShell from '@/design-system/ModalShell.vue'
-import { opportunityProbabilityExplanation } from '@/domain/opportunity-probability'
 import ContactModal from '@/features/contacts/ContactModal.vue'
 import ActionEditorModal from '@/features/opportunities/ActionEditorModal.vue'
 import OpportunityEditorModal from '@/features/opportunities/OpportunityEditorModal.vue'
@@ -18,11 +18,15 @@ import type { AccountSummaryDto, BookingDto, ContactSummaryDto, CreateContactInp
 import { STRATEGY_OPPORTUNITY_STAGES, type CreateOpportunityActionInput, type CreateOpportunityStakeholderInput, type CreateStrategyOpportunityInput, type OpportunityActionDto, type OpportunityStakeholderDto, type OpportunityStakeholderStance, type StrategyOpportunityDto } from '@/types/workspaces'
 import { formatMoney } from '@/domain/money'
 import { formatDisplayDate } from '@/domain/time'
+import { getOpportunityStageBaseProbability } from '@/domain/opportunity-probability'
 import { readAllPages } from '@/features/shared/read-all-pages'
+import { useI18n, useLocaleMessage, localeMessage } from '@/i18n'
+import { salesEnumLabel } from '@/features/shared/sales-i18n'
 
 const OPPORTUNITY_STAGES = STRATEGY_OPPORTUNITY_STAGES
 
 const props = withDefaults(defineProps<{ apiClient?: CrmApi }>(), { apiClient: () => defaultApi })
+const { locale, t } = useI18n()
 const app = useAppStore()
 const route = useRoute()
 const router = useRouter()
@@ -35,12 +39,12 @@ const accounts = ref<AccountSummaryDto[]>([])
 const contacts = ref<ContactSummaryDto[]>([])
 const sitesByAccount = ref<Record<string, SiteDto[]>>({})
 const loading = ref(true)
-const error = ref('')
+const error = useLocaleMessage()
 const requestId = ref('')
 const denied = ref(false)
 const notFound = ref(false)
 const busy = ref(false)
-const modalError = ref('')
+const modalError = useLocaleMessage()
 const opportunityModal = ref(false)
 const stakeholderModal = ref(false)
 const actionModal = ref(false)
@@ -52,7 +56,7 @@ const rollbackModal = ref(false)
 const rollbackReason = ref('')
 const rollbackTarget = ref('')
 const rollbackErrors = ref<Record<string, string>>({})
-const deleting = ref(false), deleteError = ref(''), deleteRequestId = ref('')
+const deleting = ref(false), deleteError = useLocaleMessage(), deleteRequestId = ref('')
 const editingStakeholder = ref<OpportunityStakeholderDto | null>(null)
 const editingAction = ref<OpportunityActionDto | null>(null)
 const selectedContactId = ref('')
@@ -63,10 +67,10 @@ const canWrite = computed(() => app.can('deal:write'))
 const canMutateOpportunity = computed(() => canWrite.value && !selected.value?.siteRestricted)
 const canDelete = computed(() => app.bootstrap?.user.role === 'Manager')
 const canMarkLost = computed(() => canMutateOpportunity.value && Boolean(selected.value) && !['Won', 'Lost'].includes(selected.value?.stage ?? ''))
-const siteDisplay = computed(() => selected.value?.siteRestricted ? '仅客户负责人可见' : (selected.value?.site || '未指定'))
+const siteDisplay = computed(() => selected.value?.siteRestricted ? t('contacts.ownerOnly') : (selected.value?.site || t('detail.notSpecified')))
 const lostHistory = computed(() => selected.value?.history.find((item) => item.field === 'stage' && item.to === 'Lost'))
 async function deleteOpportunity() {
-  if (!selected.value || deleting.value || !window.confirm(`确认删除 Opportunity ${selected.value.title}？`)) return
+  if (!selected.value || deleting.value || !window.confirm(t('detail.confirmDeleteOpportunity', { title: selected.value.title }))) return
   deleting.value = true
   deleteError.value = ''
   deleteRequestId.value = ''
@@ -75,7 +79,7 @@ async function deleteOpportunity() {
     await router.push({ name: 'opportunities' })
   } catch (reason) {
     const mapped = mapRequestError(reason)
-    deleteError.value = mapped.message
+    deleteError.value = mapped.localizedMessage ?? mapped.message
     deleteRequestId.value = mapped.requestId
   } finally {
     deleting.value = false
@@ -101,9 +105,19 @@ const rollbackTargets = computed(() => OPPORTUNITY_STAGES
   .filter((stage) => stage !== 'Won' && stage !== 'Lost'))
 const canRollback = computed(() => app.can('deal:rollback') && rollbackTargets.value.length > 0)
 const nextAction = computed(() => selected.value?.actions.find((item) => item.status === 'Open'))
-const probabilityExplanation = computed(() => selected.value
-  ? opportunityProbabilityExplanation(selected.value.stage, selected.value.score)
-  : '')
+function stageLabel(value: string) {
+  const key: Record<string, string> = {
+    '需求发现': 'opportunities.stage.discovery',
+    'Wafer Demo确认': 'opportunities.stage.waferDemo',
+    '预算审批': 'opportunities.stage.budget',
+    '设备规格确认': 'opportunities.stage.specification',
+    '报价': 'opportunities.stage.quotation',
+    '采购流程': 'opportunities.stage.procurement',
+    Won: 'opportunities.stage.won',
+    Lost: 'opportunities.stage.lost',
+  }
+  return t(key[value] || value)
+}
 const existingBooking = computed(() =>
   bookings.value.find((booking) => booking.sourceOpportunityId === selected.value?.id && booking.status !== 'Cancelled'),
 )
@@ -152,7 +166,7 @@ async function loadOpportunity() {
     requestId.value = mapped.requestId
     denied.value = mapped.denied
     notFound.value = reason instanceof CrmApiError && reason.code === 'NOT_FOUND'
-    if (!notFound.value) error.value = mapped.message
+    if (!notFound.value) error.value = mapped.localizedMessage ?? mapped.message
   } finally {
     if (currentRequest === opportunityRequest) loading.value = false
   }
@@ -185,7 +199,7 @@ async function saveBooking(input: UpsertBookingInput) {
     bookingModal.value = false
     await loadReferences()
   } catch (reason) {
-    modalError.value = mapRequestError(reason).message
+    { const mapped = mapRequestError(reason); modalError.value = mapped.localizedMessage ?? mapped.message }
   } finally {
     busy.value = false
   }
@@ -199,7 +213,7 @@ async function saveOpportunity(input: CreateStrategyOpportunityInput) {
     opportunityModal.value = false
     await loadOpportunity()
   } catch (reason) {
-    modalError.value = mapRequestError(reason).message
+    { const mapped = mapRequestError(reason); modalError.value = mapped.localizedMessage ?? mapped.message }
   } finally {
     busy.value = false
   }
@@ -213,7 +227,7 @@ async function markLost() {
   if (!selected.value) return
   const reason = lostReason.value.trim()
   if (!reason) {
-    modalError.value = '请填写 Lost Reason'
+    modalError.value = localeMessage('Enter a lost reason', '请填写 Lost Reason')
     return
   }
   busy.value = true
@@ -223,7 +237,7 @@ async function markLost() {
     lostModal.value = false
     await loadOpportunity()
   } catch (reason) {
-    modalError.value = mapRequestError(reason).message
+    { const mapped = mapRequestError(reason); modalError.value = mapped.localizedMessage ?? mapped.message }
   } finally {
     busy.value = false
   }
@@ -236,7 +250,7 @@ async function advanceStage() {
     await props.apiClient.updateStrategyOpportunity(selected.value.id, { stage: nextStage.value as typeof OPPORTUNITY_STAGES[number] }, selected.value.modified)
     await loadOpportunity()
   } catch (reason) {
-    error.value = mapRequestError(reason).message
+    { const mapped = mapRequestError(reason); error.value = mapped.localizedMessage ?? mapped.message }
   } finally {
     busy.value = false
   }
@@ -252,8 +266,8 @@ async function rollbackStage() {
   if (!selected.value || busy.value) return
   rollbackErrors.value = {}
   const reason = rollbackReason.value.trim()
-  if (!rollbackTarget.value) rollbackErrors.value.rollbackTarget = '请选择回退阶段'
-  if (!reason) rollbackErrors.value.rollbackReason = '请填写阶段回退原因'
+  if (!rollbackTarget.value) rollbackErrors.value.rollbackTarget = locale.value === 'en-US' ? 'Select a rollback stage' : '请选择回退阶段'
+  if (!reason) rollbackErrors.value.rollbackReason = locale.value === 'en-US' ? 'Enter a rollback reason' : '请填写阶段回退原因'
   if (Object.keys(rollbackErrors.value).length) return
   busy.value = true
   modalError.value = ''
@@ -266,7 +280,7 @@ async function rollbackStage() {
     await loadOpportunity()
   } catch (reason) {
     const mapped = mapRequestError(reason)
-    modalError.value = mapped.requestId ? `${mapped.message}（Request ID: ${mapped.requestId}）` : mapped.message
+    modalError.value = mapped.localizedMessage ?? mapped.message
   } finally {
     busy.value = false
   }
@@ -290,7 +304,7 @@ async function saveStakeholder(input: CreateOpportunityStakeholderInput) {
     stakeholderModal.value = false
     await loadOpportunity()
   } catch (reason) {
-    modalError.value = mapRequestError(reason).message
+    { const mapped = mapRequestError(reason); modalError.value = mapped.localizedMessage ?? mapped.message }
   } finally {
     busy.value = false
   }
@@ -302,7 +316,7 @@ async function removeStakeholder(stakeholder: OpportunityStakeholderDto) {
     await props.apiClient.deleteOpportunityStakeholder(selected.value.id, stakeholder.id)
     await loadOpportunity()
   } catch (reason) {
-    error.value = mapRequestError(reason).message
+    { const mapped = mapRequestError(reason); error.value = mapped.localizedMessage ?? mapped.message }
   } finally {
     busy.value = false
   }
@@ -322,7 +336,7 @@ async function saveAction(input: CreateOpportunityActionInput) {
     actionModal.value = false
     await loadOpportunity()
   } catch (reason) {
-    modalError.value = mapRequestError(reason).message
+    { const mapped = mapRequestError(reason); modalError.value = mapped.localizedMessage ?? mapped.message }
   } finally {
     busy.value = false
   }
@@ -334,7 +348,7 @@ async function removeAction(action: OpportunityActionDto) {
     await props.apiClient.deleteOpportunityAction(selected.value.id, action.id)
     await loadOpportunity()
   } catch (reason) {
-    error.value = mapRequestError(reason).message
+    { const mapped = mapRequestError(reason); error.value = mapped.localizedMessage ?? mapped.message }
   } finally {
     busy.value = false
   }
@@ -367,7 +381,7 @@ async function saveContact(input: CreateContactInput) {
     await loadReferences()
     contactModal.value = false
   } catch (reason) {
-    modalError.value = mapRequestError(reason).message
+    { const mapped = mapRequestError(reason); modalError.value = mapped.localizedMessage ?? mapped.message }
   } finally {
     busy.value = false
   }
@@ -383,7 +397,7 @@ onMounted(async () => {
     await Promise.all([loadOpportunity(), loadReferences()])
   } catch (reason) {
     const mapped = mapRequestError(reason)
-    error.value = mapped.message
+    error.value = mapped.localizedMessage ?? mapped.message
     requestId.value = mapped.requestId
     denied.value = mapped.denied
     loading.value = false
@@ -393,34 +407,34 @@ onMounted(async () => {
 
 <template>
   <div class="opportunity-detail-page">
-    <DataState v-if="loading" type="loading" title="正在读取 Opportunity" />
-    <section v-else-if="notFound" class="detail-state">未找到指定 Opportunity。</section>
+    <DataState v-if="loading" type="loading" :title="locale === 'en-US' ? 'Loading Opportunity' : '正在读取 Opportunity'" />
+    <section v-else-if="notFound" class="detail-state">{{ locale === 'en-US' ? 'Opportunity not found.' : '未找到指定 Opportunity。' }}</section>
     <DataState v-else-if="denied" type="denied" :message="error" :request-id="requestId" />
     <DataState v-else-if="error && !selected" type="error" :message="error" :request-id="requestId" @retry="loadOpportunity" />
-    <section v-else-if="!selected" class="detail-state">未找到指定 Opportunity。</section>
+    <section v-else-if="!selected" class="detail-state">{{ locale === 'en-US' ? 'Opportunity not found.' : '未找到指定 Opportunity。' }}</section>
     <template v-else>
       <header class="opportunity-record-header">
-        <RouterLink class="back-opportunities detail-back-button" data-testid="back-opportunities" :to="{ name: 'opportunities' }"><ArrowLeft :size="15" />返回 Opportunities</RouterLink>
+        <RouterLink class="back-opportunities detail-back-button" data-testid="back-opportunities" :to="{ name: 'opportunities' }"><ArrowLeft :size="15" />{{ t('detail.backOpportunities') }}</RouterLink>
         <div class="record-identity">
           <span><Target :size="22" /></span>
           <div><small>Opportunity · {{ selected.id }}</small><h1>{{ selected.title }}</h1><p>{{ selected.account }} · {{ siteDisplay }}</p></div>
         </div>
         <div class="record-actions">
-          <RouterLink v-if="quotationId" class="secondary-button" data-testid="opportunity-quotation-link" :to="{ name: 'quotation-detail', params: { quotationId } }"><FileText :size="14" />查看 Quotation</RouterLink>
-          <RouterLink v-else-if="app.can('quotation:write') && canMutateOpportunity && selected.stage === '报价'" class="secondary-button" data-testid="create-quotation-from-opportunity" :to="{ name: 'quotations', query: { opportunityId: selected.id } }"><FileText :size="14" />新建 Quotation</RouterLink>
-          <RouterLink v-if="rfqId" class="secondary-button" data-testid="opportunity-rfq-link" :to="{ name: 'rfq-detail', params: { rfqId } }"><FileText :size="14" />RFQ · {{ rfqStatus }}</RouterLink>
-          <RouterLink v-else-if="app.can('rfq:view') && selected.stage === '设备规格确认'" class="secondary-button" data-testid="opportunity-rfq-center-link" :to="{ name: 'rfqs', query: { opportunityId: selected.id } }"><FileText :size="14" />RFQ 未创建</RouterLink>
+          <RouterLink v-if="quotationId" class="secondary-button" data-testid="opportunity-quotation-link" :to="{ name: 'quotation-detail', params: { quotationId } }"><FileText :size="14" />{{ t('detail.viewQuotation') }}</RouterLink>
+          <RouterLink v-else-if="app.can('quotation:write') && canMutateOpportunity && selected.stage === '报价'" class="secondary-button" data-testid="create-quotation-from-opportunity" :to="{ name: 'quotations', query: { opportunityId: selected.id } }"><FileText :size="14" />{{ t('detail.newQuotation') }}</RouterLink>
+          <RouterLink v-if="rfqId" class="secondary-button" data-testid="opportunity-rfq-link" :to="{ name: 'rfq-detail', params: { rfqId } }"><FileText :size="14" />RFQ · {{ salesEnumLabel(rfqStatus, locale) }}</RouterLink>
+          <RouterLink v-else-if="app.can('rfq:view') && selected.stage === '设备规格确认'" class="secondary-button" data-testid="opportunity-rfq-center-link" :to="{ name: 'rfqs', query: { opportunityId: selected.id } }"><FileText :size="14" />{{ t('detail.rfqNotCreated') }}</RouterLink>
           <RouterLink v-if="existingBooking" class="secondary-button" data-testid="opportunity-booking-link" :to="{ name: 'booking' }"><PackageCheck :size="14" />Booking · {{ existingBooking.id }}</RouterLink>
-          <button v-else-if="canMutateOpportunity && selected.stage === 'Won'" class="primary-button" type="button" data-testid="create-booking-from-opportunity" @click="openBooking"><PackageCheck :size="14" />生成 Booking</button>
-          <button v-if="canWrite" class="secondary-button" type="button" data-testid="new-opportunity-action" @click="openAction()"><Plus :size="14" />新增 Action</button>
-          <button v-if="canMutateOpportunity" class="primary-button" type="button" data-testid="edit-opportunity" @click="opportunityModal = true"><Pencil :size="14" />编辑</button>
-          <button v-if="canMarkLost" class="secondary-button lost-action-button" type="button" data-testid="mark-opportunity-lost" @click="openLostModal">标记为 Lost</button>
-          <button v-if="canDelete" class="secondary-button" type="button" data-delete-opportunity :disabled="deleting" @click="deleteOpportunity">删除</button>
+          <button v-else-if="canMutateOpportunity && selected.stage === 'Won'" class="primary-button" type="button" data-testid="create-booking-from-opportunity" @click="openBooking"><PackageCheck :size="14" />{{ t('detail.generateBooking') }}</button>
+          <button v-if="canWrite" class="secondary-button" type="button" data-testid="new-opportunity-action" @click="openAction()"><Plus :size="14" />{{ t('detail.newAction') }}</button>
+          <button v-if="canMutateOpportunity" class="primary-button" type="button" data-testid="edit-opportunity" @click="opportunityModal = true"><Pencil :size="14" />{{ t('detail.edit') }}</button>
+          <button v-if="canMarkLost" class="secondary-button lost-action-button" type="button" data-testid="mark-opportunity-lost" @click="openLostModal">{{ t('detail.markLost') }}</button>
+          <button v-if="canDelete" class="secondary-button" type="button" data-delete-opportunity :disabled="deleting" @click="deleteOpportunity">{{ t('detail.delete') }}</button>
         </div>
       </header>
-      <p v-if="deleteError" class="inline-error" data-delete-error>{{ deleteError }}<small v-if="deleteRequestId">Request ID {{ deleteRequestId }}</small></p>
+      <p v-if="deleteError" class="inline-error" data-delete-error>{{ deleteError }}<small v-if="deleteRequestId">{{ locale === 'en-US' ? 'Request ID' : '请求编号' }} {{ deleteRequestId }}</small></p>
 
-      <section class="opportunity-path" aria-label="Opportunity Stage Path">
+      <section class="opportunity-path" :aria-label="locale === 'en-US' ? 'Opportunity stage path' : '商机阶段路径'">
         <div class="path-scroll">
           <ol>
             <li
@@ -430,27 +444,27 @@ onMounted(async () => {
               :class="{ 'is-complete': index < currentStageIndex, 'is-current': index === currentStageIndex }"
             >
               <Check v-if="index < currentStageIndex" :size="14" />
-              <span>{{ item }}</span>
+              <span>{{ stageLabel(item) }}</span>
             </li>
           </ol>
         </div>
-        <div class="opportunity-outcomes" aria-label="Opportunity Result">
+        <div class="opportunity-outcomes" :aria-label="locale === 'en-US' ? 'Opportunity result' : '商机结果'">
           <div v-for="item in OPPORTUNITY_STAGES.slice(6)" :key="item" class="opportunity-outcome">
-            <span class="outcome-label">{{ item }}</span>
+            <span class="outcome-label">{{ stageLabel(item) }}</span>
             <span
               :data-stage-path="item"
               :class="['outcome-node', { 'is-current': selected.stage === item }]"
             >
               <Check v-if="selected.stage === item" :size="14" />
-              <span>{{ item }}</span>
+              <span>{{ stageLabel(item) }}</span>
             </span>
           </div>
         </div>
         <button v-if="canAdvanceManually" type="button" data-testid="advance-opportunity-stage" :disabled="busy" @click="advanceStage">
-          <Check :size="14" />{{ nextStage ? `推进到 ${nextStage}` : selected.stage === 'Won' ? '已赢单' : '阶段已关闭' }}
+          <Check :size="14" />{{ nextStage ? (locale === 'en-US' ? `Advance to ${stageLabel(nextStage)}` : `推进到 ${stageLabel(nextStage)}`) : selected.stage === 'Won' ? (locale === 'en-US' ? 'Won' : '已赢单') : (locale === 'en-US' ? 'Stage closed' : '阶段已关闭') }}
         </button>
         <button v-if="canRollback" type="button" data-testid="rollback-opportunity-stage" :disabled="busy" @click="openRollback">
-          阶段回退
+          {{ t('detail.stageRollback') }}
         </button>
       </section>
 
@@ -459,92 +473,92 @@ onMounted(async () => {
       <main class="opportunity-detail-grid" data-testid="selected-opportunity">
         <div class="detail-column detail-left">
           <section class="detail-card">
-            <header><Building2 :size="16" /><h2>About</h2></header>
+            <header><Building2 :size="16" /><h2>{{ t('detail.about') }}</h2></header>
             <dl class="field-list">
-              <div><dt>Opportunity Name</dt><dd>{{ selected.title }}</dd></div>
-              <div><dt>Account Name</dt><dd>{{ selected.account }}</dd></div>
-              <div><dt>Site</dt><dd>{{ siteDisplay }}</dd></div>
-              <div><dt>Close Date</dt><dd>{{ formatDisplayDate(selected.poDate) }}</dd></div>
-              <div><dt>Amount</dt><dd>{{ formatMoney(selected.amount, selected.currency) }}</dd></div>
-              <div><dt>Opportunity Owner</dt><dd>{{ personnelDisplayName(selected.owner) }}</dd></div>
-              <div><dt>Tool / Sale Type</dt><dd>{{ selected.toolType }} · {{ selected.saleType }}</dd></div>
+              <div><dt>{{ t('detail.opportunityName') }}</dt><dd>{{ selected.title }}</dd></div>
+              <div><dt>{{ t('detail.accountNameField') }}</dt><dd>{{ selected.account }}</dd></div>
+              <div><dt>{{ t('detail.site') }}</dt><dd>{{ siteDisplay }}</dd></div>
+              <div><dt>{{ t('detail.closeDate') }}</dt><dd>{{ formatDisplayDate(selected.poDate) }}</dd></div>
+              <div><dt>{{ t('detail.amount') }}</dt><dd>{{ formatMoney(selected.amount, selected.currency) }}</dd></div>
+              <div><dt>{{ t('detail.opportunityOwner') }}</dt><dd>{{ personnelDisplayName(selected.owner) }}</dd></div>
+              <div><dt>{{ t('detail.toolSaleType') }}</dt><dd>{{ systemValueLabel(selected.toolType, locale) }} · {{ salesEnumLabel(selected.saleType, locale) }}</dd></div>
             </dl>
           </section>
 
           <section class="detail-card">
-            <header><Target :size="16" /><h2>Status</h2></header>
+            <header><Target :size="16" /><h2>{{ t('detail.status') }}</h2></header>
             <dl class="field-list">
-              <div><dt>Stage</dt><dd>{{ selected.stage }}</dd></div>
-              <div><dt>成交概率</dt><dd data-testid="opportunity-probability">{{ selected.probability }}%</dd></div>
-              <div><dt>Forecast Category</dt><dd>{{ selected.forecast }}</dd></div>
-              <div><dt>购买意愿</dt><dd data-testid="opportunity-intent">{{ selected.score }}/100</dd></div>
-              <div><dt>Next Step</dt><dd>{{ nextAction?.title || '暂无开放 Action' }}</dd></div>
-              <div><dt>Updated</dt><dd>{{ formatDisplayDate(selected.updated) }}</dd></div>
+              <div><dt>{{ t('oppEditor.stage') }}</dt><dd>{{ stageLabel(selected.stage) }}</dd></div>
+              <div><dt>{{ locale === 'en-US' ? 'Win probability' : '成交概率' }}</dt><dd data-testid="opportunity-probability">{{ selected.probability }}%</dd></div>
+              <div><dt>{{ t('oppEditor.forecast') }}</dt><dd>{{ salesEnumLabel(selected.forecast, locale) }}</dd></div>
+              <div><dt>{{ t('detail.purchaseIntent') }}</dt><dd data-testid="opportunity-intent">{{ selected.score }}/100</dd></div>
+              <div><dt>{{ t('detail.nextStep') }}</dt><dd>{{ nextAction?.title || t('detail.noOpenAction') }}</dd></div>
+              <div><dt>{{ t('detail.updated') }}</dt><dd>{{ formatDisplayDate(selected.updated) }}</dd></div>
             </dl>
-            <p class="probability-explanation" data-testid="opportunity-probability-explanation">{{ probabilityExplanation }}</p>
+            <p class="probability-explanation" data-testid="opportunity-probability-explanation">{{ t('opportunities.probabilityExplanation', { base: getOpportunityStageBaseProbability(selected.stage), intent: selected.score }) }}</p>
           </section>
         </div>
 
         <div class="detail-column detail-center">
           <section class="detail-card action-card">
-            <header><div><CircleDollarSign :size="16" /><h2>Action Plan</h2></div><button v-if="canWrite" type="button" @click="openAction()"><Plus :size="13" />新增</button></header>
+            <header><div><CircleDollarSign :size="16" /><h2>{{ t('detail.actionPlan') }}</h2></div><button v-if="canWrite" type="button" @click="openAction()"><Plus :size="13" />{{ t('detail.new') }}</button></header>
             <div v-if="selected.actions.length" class="activity-list">
               <article v-for="action in selected.actions" :key="action.id" :data-action-title="action.title">
                 <i :class="{ done: action.status === 'Done' }"></i>
-                <div><strong>{{ action.title }}</strong><span>{{ personnelDisplayName(action.owner) }} · Due {{ formatDisplayDate(action.due) }}</span></div>
-                <b :class="{ done: action.status === 'Done' }">{{ action.status }}</b>
-                <div v-if="canWrite" class="compact-actions"><button type="button" data-action="edit" aria-label="编辑 Action" @click="openAction(action)"><Pencil :size="12" /></button><button type="button" data-action="delete" aria-label="删除 Action" @click="removeAction(action)"><Trash2 :size="12" /></button></div>
+                <div><strong>{{ action.title }}</strong><span>{{ personnelDisplayName(action.owner) }} · {{ t('actionEditor.dueDate') }} {{ formatDisplayDate(action.due) }}</span></div>
+                <b :class="{ done: action.status === 'Done' }">{{ salesEnumLabel(action.status, locale) }}</b>
+                <div v-if="canWrite" class="compact-actions"><button type="button" data-action="edit" :aria-label="locale === 'en-US' ? 'Edit action' : '编辑 Action'" @click="openAction(action)"><Pencil :size="12" /></button><button type="button" data-action="delete" :aria-label="locale === 'en-US' ? 'Delete action' : '删除 Action'" @click="removeAction(action)"><Trash2 :size="12" /></button></div>
               </article>
             </div>
-            <p v-else class="empty-copy">暂无活动，创建 Action 记录下一步工作。</p>
+            <p v-else class="empty-copy">{{ t('detail.noActivity') }}</p>
           </section>
 
           <section class="detail-card commercial-card">
-            <header><CircleDollarSign :size="16" /><h2>Commercial Forecast</h2></header>
+            <header><CircleDollarSign :size="16" /><h2>{{ t('detail.commercialForecast') }}</h2></header>
             <div class="commercial-grid">
-              <div><small>Currency / Original Amount</small><strong>{{ formatMoney(selected.originalAmount, selected.currency) }}</strong></div>
-              <div><small>Shipment / FAT</small><strong>{{ formatDisplayDate(selected.shipmentDate) }} · {{ formatDisplayDate(selected.fatDate) }}</strong></div>
-              <div><small>Payment Milestones</small><strong>{{ selected.paymentMilestones.join(' · ') }}</strong></div>
-              <div><small>Competition</small><strong>{{ selected.competition }}</strong></div>
-              <div v-if="selected.stage === 'Lost'" class="wide lost-reason-field"><small>Lost Reason</small><strong>{{ selected.lostReason || '未填写 Lost Reason' }}</strong></div>
-              <div v-else class="wide"><small>Win Reason</small><strong>{{ selected.winReason || 'Pending confirmation' }}</strong></div>
+              <div><small>{{ t('oppEditor.currency') }} / {{ t('oppEditor.originalAmount') }}</small><strong>{{ formatMoney(selected.originalAmount, selected.currency) }}</strong></div>
+              <div><small>{{ t('oppEditor.shipmentDate') }} / {{ t('oppEditor.fatDate') }}</small><strong>{{ formatDisplayDate(selected.shipmentDate) }} · {{ formatDisplayDate(selected.fatDate) }}</strong></div>
+              <div><small>{{ t('oppEditor.payment') }}</small><strong>{{ selected.paymentMilestones.join(' · ') }}</strong></div>
+              <div><small>{{ t('oppEditor.competition') }}</small><strong>{{ selected.competition }}</strong></div>
+              <div v-if="selected.stage === 'Lost'" class="wide lost-reason-field"><small>{{ t('detail.lostReason') }}</small><strong>{{ selected.lostReason || (locale === 'en-US' ? 'Not provided' : '未填写') }}</strong></div>
+              <div v-else class="wide"><small>{{ locale === 'en-US' ? 'Win reason' : '赢单原因' }}</small><strong>{{ selected.winReason || (locale === 'en-US' ? 'Pending confirmation' : '待确认') }}</strong></div>
             </div>
           </section>
           <section v-if="selected.stage === 'Lost'" class="detail-card lost-detail-card" data-testid="lost-detail">
-            <header><h2>Lost 信息</h2><span>已关闭</span></header>
+            <header><h2>{{ t('detail.lostInfo') }}</h2><span>{{ t('detail.closed') }}</span></header>
             <dl class="field-list">
-              <div><dt>Lost Reason</dt><dd>{{ selected.lostReason || '未填写' }}</dd></div>
-              <div><dt>设置人</dt><dd>{{ lostHistory ? personnelDisplayName(lostHistory.actor) : '历史记录不可用' }}</dd></div>
-              <div><dt>设置时间</dt><dd>{{ lostHistory ? formatDisplayDate(lostHistory.at) : '历史记录不可用' }}</dd></div>
+              <div><dt>{{ t('detail.lostReason') }}</dt><dd>{{ selected.lostReason || (locale === 'en-US' ? 'Not provided' : '未填写') }}</dd></div>
+              <div><dt>{{ t('detail.setBy') }}</dt><dd>{{ lostHistory ? personnelDisplayName(lostHistory.actor) : (locale === 'en-US' ? 'History unavailable' : '历史记录不可用') }}</dd></div>
+              <div><dt>{{ t('detail.setAt') }}</dt><dd>{{ lostHistory ? formatDisplayDate(lostHistory.at) : (locale === 'en-US' ? 'History unavailable' : '历史记录不可用') }}</dd></div>
             </dl>
           </section>
         </div>
 
         <aside class="detail-column detail-right">
           <section class="detail-card influence-card">
-            <header><div><Users :size="16" /><h2>Buying Influence</h2></div><button v-if="canWrite" type="button" data-testid="new-opportunity-stakeholder" @click="openStakeholder()"><Plus :size="13" />新增</button></header>
+            <header><div><Users :size="16" /><h2>{{ t('detail.buyingInfluence') }}</h2></div><button v-if="canWrite" type="button" data-testid="new-opportunity-stakeholder" @click="openStakeholder()"><Plus :size="13" />{{ t('detail.new') }}</button></header>
             <div class="influence-list">
               <article v-for="person in selected.stakeholders" :key="person.id" :data-stakeholder-name="person.name">
                 <RouterLink class="record-link" :to="{ name: 'contact-detail', params: { contactId: person.contactId } }"><strong>{{ person.name }}</strong><span>{{ person.title }}</span></RouterLink>
-                <small>{{ person.role }} · {{ person.influence }}</small>
-                <b :class="stanceClass(person.stance)">{{ person.stance }}</b>
-                <p>{{ person.coverage }}</p>
-                <div v-if="canWrite" class="compact-actions"><button type="button" data-action="edit" aria-label="编辑关键人" @click="openStakeholder(person)"><Pencil :size="12" /></button><button type="button" data-action="delete" aria-label="删除关键人" @click="removeStakeholder(person)"><Trash2 :size="12" /></button></div>
+                <small>{{ salesEnumLabel(person.role, locale) }} · {{ salesEnumLabel(person.influence, locale) }}</small>
+                <b :class="stanceClass(person.stance)">{{ salesEnumLabel(person.stance, locale) }}</b>
+                <p>{{ systemValueLabel(person.coverage, locale) }}</p>
+                <div v-if="canWrite" class="compact-actions"><button type="button" data-action="edit" :aria-label="locale === 'en-US' ? 'Edit stakeholder' : '编辑关键人'" @click="openStakeholder(person)"><Pencil :size="12" /></button><button type="button" data-action="delete" :aria-label="locale === 'en-US' ? 'Delete stakeholder' : '删除关键人'" @click="removeStakeholder(person)"><Trash2 :size="12" /></button></div>
               </article>
-              <p v-if="!selected.stakeholders.length" class="empty-copy">尚未添加机会关键人。</p>
+              <p v-if="!selected.stakeholders.length" class="empty-copy">{{ t('detail.noStakeholders') }}</p>
             </div>
           </section>
 
           <section class="detail-card evidence-card strength-card">
-            <header><h2>Strength</h2><span>{{ selected.strengths.length }}</span></header>
+            <header><h2>{{ t('oppEditor.strength') }}</h2><span>{{ selected.strengths.length }}</span></header>
             <ul><li v-for="item in selected.strengths" :key="item">{{ item }}</li></ul>
           </section>
           <section class="detail-card evidence-card risk-card">
-            <header><h2>Red Flag</h2><span>{{ selected.redFlags.length }}</span></header>
+            <header><h2>{{ t('oppEditor.redFlag') }}</h2><span>{{ selected.redFlags.length }}</span></header>
             <ul><li v-for="item in selected.redFlags" :key="item">{{ item }}</li></ul>
           </section>
           <section class="detail-card evidence-card information-card">
-            <header><h2>Information Needed</h2><span>{{ selected.informationNeeded.length }}</span></header>
+            <header><h2>{{ t('oppEditor.infoNeeded') }}</h2><span>{{ selected.informationNeeded.length }}</span></header>
             <ul><li v-for="item in selected.informationNeeded" :key="item">{{ item }}</li></ul>
           </section>
         </aside>
@@ -568,24 +582,24 @@ onMounted(async () => {
         @create-contact="openBookingContact"
         @submit="saveBooking"
       />
-      <ModalShell v-if="lostModal" title="标记为 Lost" eyebrow="OPPORTUNITY RESULT" :busy="busy" @close="lostModal = false" @submit="markLost">
+      <ModalShell v-if="lostModal" :title="t('detail.markLostTitle')" eyebrow="OPPORTUNITY RESULT" :busy="busy" @close="lostModal = false" @submit="markLost">
         <p v-if="modalError" class="form-error">{{ modalError }}</p>
         <div class="lost-form">
-          <p>当前账号：{{ app.bootstrap?.user.name || app.bootstrap?.user.id || '当前登录用户' }}（{{ app.bootstrap?.user.role || '未知角色' }}）</p>
-          <label><span>Lost Reason</span><textarea v-model="lostReason" aria-label="Lost Reason" rows="4" required placeholder="请填写客户未成交的主要原因" /></label>
+          <p>{{ locale === 'en-US' ? 'Current account: ' : '当前账号：' }}{{ app.bootstrap?.user.name || app.bootstrap?.user.id || (locale === 'en-US' ? 'Current user' : '当前登录用户') }}{{ locale === 'en-US' ? ' (' : '（' }}{{ app.bootstrap?.user.role || (locale === 'en-US' ? 'Unknown role' : '未知角色') }}{{ locale === 'en-US' ? ')' : '）' }}</p>
+          <label><span>{{ t('detail.lostReason') }}</span><textarea v-model="lostReason" :aria-label="t('detail.lostReason')" rows="4" required :placeholder="locale === 'en-US' ? 'Enter the main reason the customer did not close' : '请填写客户未成交的主要原因'" /></label>
         </div>
       </ModalShell>
-      <ModalShell v-if="rollbackModal" title="回退 Opportunity 阶段" eyebrow="MANAGER CONTROL" :busy="busy" @close="rollbackModal = false" @submit="rollbackStage">
+      <ModalShell v-if="rollbackModal" :title="t('detail.rollbackOpportunity')" eyebrow="MANAGER CONTROL" :busy="busy" @close="rollbackModal = false" @submit="rollbackStage">
         <p v-if="modalError" class="form-error">{{ modalError }}</p>
         <div class="rollback-form">
-          <label>目标阶段
-            <select v-model="rollbackTarget" aria-label="阶段回退目标">
-              <option v-for="stage in rollbackTargets" :key="stage" :value="stage">{{ stage }}</option>
+          <label>{{ t('detail.targetStage') }}
+            <select v-model="rollbackTarget" :aria-label="locale === 'en-US' ? 'Rollback stage' : '阶段回退目标'">
+              <option v-for="stage in rollbackTargets" :key="stage" :value="stage">{{ stageLabel(stage) }}</option>
             </select>
             <small v-if="rollbackErrors.rollbackTarget" data-field-error="rollbackTarget">{{ rollbackErrors.rollbackTarget }}</small>
           </label>
-          <label>回退原因
-            <textarea v-model="rollbackReason" aria-label="阶段回退原因" rows="4" />
+          <label>{{ t('detail.rollbackReason') }}
+            <textarea v-model="rollbackReason" :aria-label="locale === 'en-US' ? 'Rollback reason' : '阶段回退原因'" rows="4" />
             <small v-if="rollbackErrors.rollbackReason" data-field-error="rollbackReason">{{ rollbackErrors.rollbackReason }}</small>
           </label>
         </div>

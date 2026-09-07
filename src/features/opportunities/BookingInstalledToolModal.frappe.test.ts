@@ -51,7 +51,7 @@ describe('Booking Installed Tool Frappe engineer directory', () => {
     expect(options.map((option) => option.attributes('value'))).toEqual([
       'person011@staff.example.invalid',
     ])
-    expect(options.map((option) => option.text())).toEqual(['演示员工224 · Engineer'])
+    expect(options.map((option) => option.text())).toEqual(['演示员工224 · 工程师'])
   })
 
   it('refreshes the dropdown when Bootstrap engineers arrive after the modal opens', async () => {
@@ -87,6 +87,6 @@ describe('Booking Installed Tool Frappe engineer directory', () => {
     } as unknown as Partial<{ engineers: PersonnelIdentity[] }>)
 
     expect(wrapper.get('select[aria-label="负责工程师"]').findAll('option').map((option) => option.text()))
-      .toEqual(['演示员工224 · Engineer'])
+      .toEqual(['演示员工224 · 工程师'])
   })
 })

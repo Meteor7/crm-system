@@ -43,7 +43,7 @@ describe('EvaluationWorkspace', () => {
     expect(wrapper.find('[data-evaluation-detail-inline]').exists()).toBe(false)
     const actionPanelChildren = [...wrapper.get('[data-evaluation-actions]').element.children]
     expect(actionPanelChildren.indexOf(wrapper.get('[data-add-test-run]').element))
-      .toBeLessThan(actionPanelChildren.indexOf(wrapper.get('[aria-label="Evaluation history"]').element))
+      .toBeLessThan(actionPanelChildren.indexOf(wrapper.get('[aria-label="评估历史记录"]').element))
 
     await wrapper.get('[data-open-demo-detail="EVAL-103"]').trigger('click')
     expect(wrapper.emitted('open-detail')?.[0]).toEqual([
@@ -92,12 +92,12 @@ describe('EvaluationWorkspace', () => {
     })
 
     expect(wrapper.find('[aria-label="Evaluation 状态"]').exists()).toBe(false)
-    expect(wrapper.get('[data-evaluation="EVAL-101"]').text()).toContain('Wafer Preparation · Pending')
+    expect(wrapper.get('[data-evaluation="EVAL-101"]').text()).toContain('Wafer 准备 · 待完成')
     expect(wrapper.find('[data-complete-preparation="wafer"]').exists()).toBe(true)
     expect(wrapper.find('[data-complete-preparation="test"]').exists()).toBe(false)
 
     await wrapper.setProps({ view: 'preparation' })
-    expect(wrapper.get('[data-evaluation="EVAL-101"]').text()).toContain('Test Preparation · Pending')
+    expect(wrapper.get('[data-evaluation="EVAL-101"]').text()).toContain('测试准备 · 待完成')
     expect(wrapper.find('[data-complete-preparation="wafer"]').exists()).toBe(false)
     expect(wrapper.find('[data-complete-preparation="test"]').exists()).toBe(true)
     expect(wrapper.find('[data-set-ddl="EVAL-101"]').exists()).toBe(true)

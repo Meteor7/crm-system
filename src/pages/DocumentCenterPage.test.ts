@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { createMockApi } from '@/api/mock-adapter'
 import type { UserRole } from '@/types/crm'
 import { createAppRouter } from '@/app/router'
+import { setLocale } from '@/i18n'
 import DocumentCenterPage from './DocumentCenterPage.vue'
 
 async function mountPage(role: UserRole, seedRequest = false) {
@@ -109,6 +110,12 @@ describe('DocumentCenterPage', () => {
     await flushPromises()
 
     expect(wrapper.find('[data-upload-document]').exists()).toBe(true)
+    expect(wrapper.get('[data-document-library-empty] h2').text()).toBe('暂无已发布文档')
+    setLocale('en-US')
+    await flushPromises()
+    expect(wrapper.get('[data-document-library-empty] h2').text()).toBe('No published documents')
+    expect(apiClient.listControlledDocuments).toHaveBeenCalledTimes(1)
+    wrapper.unmount()
   })
 
   it('shows Sales only the Aconca and Nansi controlled presentations', async () => {
@@ -134,7 +141,7 @@ describe('DocumentCenterPage', () => {
     await flushPromises()
 
     expect(requestAccess).toHaveBeenCalledWith('DOC-NANSI-0610-0610-V1', reason)
-    expect(wrapper.get('[data-access-request-status]').text()).toContain('Manager Review')
+    expect(wrapper.get('[data-access-request-status]').text()).toContain('经理审核')
     expect(wrapper.find('[data-document-preview="locked"]').exists()).toBe(true)
   })
 

@@ -1,9 +1,10 @@
 import { createPinia } from 'pinia'
 import { flushPromises, mount } from '@vue/test-utils'
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { CrmApi } from '@/api'
 import { createAppRouter } from '@/app/router'
 import { useAppStore } from '@/stores/app'
+import { setLocale } from '@/i18n'
 import QuotationsPage from './QuotationsPage.vue'
 
 function quotationApi(): CrmApi {
@@ -22,6 +23,26 @@ function quotationApi(): CrmApi {
 }
 
 describe('QuotationsPage', () => {
+  beforeEach(() => setLocale('zh-CN'))
+  afterEach(() => setLocale('zh-CN'))
+
+  it('localizes quotation enum displays while preserving filter values and avoiding a refetch', async () => {
+    const api = quotationApi(); const pinia = createPinia(); useAppStore(pinia).bootstrap = (await api.getBootstrap()).data
+    const router = createAppRouter(); await router.push('/quotations'); await router.isReady()
+    const wrapper = mount(QuotationsPage, { props: { apiClient: api }, global: { plugins: [pinia, router] } })
+    await flushPromises()
+
+    expect(wrapper.findAll('.filter-control')[0]!.findAll('option').map((option) => option.text())).toEqual(['全部状态', '草稿', '已发布', '已接受', '已驳回', '已过期'])
+    expect(wrapper.get('.quotation-table tbody tr td:nth-child(5) .status-badge').text()).toBe('草稿')
+    setLocale('en-US')
+    await flushPromises()
+    expect(wrapper.findAll('.filter-control')[0]!.findAll('option').map((option) => option.text())).toEqual(['All statuses', 'Draft', 'Published', 'Accepted', 'Rejected', 'Expired'])
+    expect(wrapper.get('.quotation-table tbody tr td:nth-child(5) .status-badge').text()).toBe('Draft')
+    expect(wrapper.findAll('.filter-control')[0]!.findAll('option')[1]!.attributes('value')).toBe('Draft')
+    expect(api.listQuotations).toHaveBeenCalledTimes(1)
+    wrapper.unmount()
+  })
+
   it('reuses the CRM table with four key columns and row navigation', async () => {
     const api = quotationApi(); const pinia = createPinia(); useAppStore(pinia).bootstrap = (await api.getBootstrap()).data
     const router = createAppRouter(); await router.push('/quotations'); await router.isReady()
@@ -29,7 +50,7 @@ describe('QuotationsPage', () => {
     await flushPromises()
     const headers = wrapper.findAll('thead th').map((node) => node.text())
     expect(headers).toHaveLength(6)
-    expect([headers[0], headers[1], headers[2], headers[4], headers[5]]).toEqual(['Name', 'Type', 'Opportunity', 'Status', 'Approval'])
+    expect([headers[0], headers[1], headers[2], headers[4], headers[5]]).toEqual(['报价单', '类型', '关联商机', '状态', '审批'])
     expect(wrapper.text()).toContain('PK20260810-A1')
     expect(wrapper.text()).toContain('Planck Fab')
     expect(wrapper.get('[data-quotation-id="CRM-QTN-00001"]').classes()).toContain('record-name-link')

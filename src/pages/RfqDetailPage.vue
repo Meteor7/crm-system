@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { systemValueLabel } from '@/features/shared/system-labels'
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { ArrowLeft, Check, Download, FileText, MessageSquareText, RotateCcw, ShieldCheck, Upload } from '@lucide/vue'
 import { useRoute } from 'vue-router'
@@ -12,18 +13,21 @@ import { formatDisplayDate } from '@/domain/time'
 import { useAppStore } from '@/stores/app'
 import type { Tone } from '@/types/crm'
 import type { RfqDetailDto, RfqStatus, RfqVersionDto } from '@/features/rfqs/types'
+import { useI18n, useLocaleMessage, localeMessage } from '@/i18n'
 
 const props = withDefaults(defineProps<{ apiClient?: CrmApi }>(), { apiClient: () => defaultApi })
 const route = useRoute()
 const app = useAppStore()
+const { locale, t } = useI18n()
+const ui = (english: string, chinese: string) => localeMessage(english, chinese)[locale.value]
 const detail = ref<RfqDetailDto | null>(null)
 const loading = ref(true)
-const error = ref('')
+const error = useLocaleMessage()
 const denied = ref(false)
 const requestId = ref('')
 const busy = ref(false)
-const actionError = ref('')
-const notice = ref('')
+const actionError = useLocaleMessage()
+const notice = useLocaleMessage()
 const engineerComment = ref('')
 const managerComment = ref('')
 const revisionFile = ref<File | null>(null)
@@ -31,10 +35,9 @@ const selectedVersionId = ref('')
 const previewUrl = ref('')
 const previewMime = ref('')
 const previewLoading = ref(false)
-const previewError = ref('')
+const previewError = useLocaleMessage()
 let previewSequence = 0
 const TIPRAY_HEADER = new TextEncoder().encode('%TSD-Header-###%')
-const TIPRAY_UPLOAD_CONFIRM = '天锐绿盾加密文件无法生成在线预览，但下载后仍可正常浏览，确定上传吗？'
 
 const role = computed(() => app.bootstrap?.user.role)
 const selectedVersion = computed(() => detail.value?.versions.find((item) => item.id === selectedVersionId.value) ?? detail.value?.currentVersion)
@@ -42,11 +45,28 @@ const canDownload = computed(() => role.value === 'Sales' || role.value === 'Man
 const steps = computed(() => {
   const status = detail.value?.status
   return [
-    { label: 'Sales Upload', done: Boolean(detail.value), active: false },
-    { label: 'Engineer Comment', done: ['Manager Approval', 'Approved'].includes(status ?? ''), active: status === 'Engineer Review' },
-    { label: 'Manager Approve', done: status === 'Approved', active: status === 'Manager Approval' },
+    { label: ui('Sales upload', '销售上传'), done: Boolean(detail.value), active: false },
+    { label: ui('Engineer comment', '工程师意见'), done: ['Manager Approval', 'Approved'].includes(status ?? ''), active: status === 'Engineer Review' },
+    { label: ui('Manager approval', '经理审批'), done: status === 'Approved', active: status === 'Manager Approval' },
   ]
 })
+
+function statusLabel(value: RfqStatus | RfqVersionDto['status']) {
+  return ({
+    'Engineer Review': ui('Engineer review', '工程师评审'), 'Manager Approval': ui('Manager approval', '经理审批'),
+    'Sales Revision': ui('Sales revision', '销售修订'), Returned: ui('Returned', '已退回'), Approved: ui('Approved', '已批准'),
+  } satisfies Record<RfqStatus | RfqVersionDto['status'], string>)[value]
+}
+function decisionLabel(value: 'Approved' | 'Returned') {
+  return value === 'Approved' ? ui('Approved', '已批准') : ui('Returned', '已退回')
+}
+function opportunityStageLabel(value: string) {
+  const keys: Record<string, string> = {
+    '需求发现': 'opportunities.stage.discovery', 'Wafer Demo确认': 'opportunities.stage.waferDemo', '预算审批': 'opportunities.stage.budget',
+    '设备规格确认': 'opportunities.stage.specification', '报价': 'opportunities.stage.quotation', '采购流程': 'opportunities.stage.procurement', Won: 'opportunities.stage.won', Lost: 'opportunities.stage.lost',
+  }
+  return keys[value] ? t(keys[value]) : value
+}
 
 function statusTone(value: RfqStatus): Tone {
   if (value === 'Approved') return 'positive'
@@ -72,7 +92,10 @@ async function loadPreview() {
     previewMime.value = file.mimeType
     previewUrl.value = URL.createObjectURL(file.blob)
   } catch (cause) {
-    if (current === previewSequence) previewError.value = mapRequestError(cause).message
+    if (current === previewSequence) {
+      const mapped = mapRequestError(cause)
+      previewError.value = mapped.localizedMessage ?? mapped.message
+    }
   } finally {
     if (current === previewSequence) previewLoading.value = false
   }
@@ -87,7 +110,7 @@ async function load() {
     selectedVersionId.value = result.data.currentVersionId
   } catch (cause) {
     const mapped = mapRequestError(cause)
-    error.value = mapped.message
+    error.value = mapped.localizedMessage ?? mapped.message
     denied.value = mapped.denied
     requestId.value = mapped.requestId
   } finally {
@@ -105,7 +128,7 @@ function applyResult(result: RfqDetailDto) {
 
 async function submitEngineerComment() {
   if (!detail.value || !engineerComment.value.trim()) {
-    actionError.value = 'Engineer Comment 不能为空。'
+    actionError.value = localeMessage('Engineer Comment is required.', 'Engineer Comment 不能为空。')
     return
   }
   busy.value = true
@@ -113,9 +136,10 @@ async function submitEngineerComment() {
   try {
     const result = await props.apiClient.submitRfqEngineerComment(detail.value.id, engineerComment.value, detail.value.modified)
     applyResult(result.data)
-    notice.value = 'Engineer Comment 已提交，等待 Manager Approve。'
+    notice.value = localeMessage('Engineer Comment submitted. Waiting for Manager approval.', 'Engineer Comment 已提交，等待 Manager Approve。')
   } catch (cause) {
-    actionError.value = mapRequestError(cause).message
+    const mapped = mapRequestError(cause)
+    actionError.value = mapped.localizedMessage ?? mapped.message
   } finally {
     busy.value = false
   }
@@ -124,7 +148,7 @@ async function submitEngineerComment() {
 async function review(decision: 'Approved' | 'Returned') {
   if (!detail.value) return
   if (decision === 'Returned' && !managerComment.value.trim()) {
-    actionError.value = '退回时必须填写原因。'
+    actionError.value = localeMessage('A reason is required when returning.', '退回时必须填写原因。')
     return
   }
   busy.value = true
@@ -132,9 +156,10 @@ async function review(decision: 'Approved' | 'Returned') {
   try {
     const result = await props.apiClient.reviewRfq(detail.value.id, { decision, comment: managerComment.value }, detail.value.modified)
     applyResult(result.data)
-    notice.value = decision === 'Approved' ? 'RFQ 已批准。' : 'RFQ 已退回 Sales 修改。'
+    notice.value = decision === 'Approved' ? (localeMessage('RFQ approved.', 'RFQ 已批准。')) : (localeMessage('RFQ returned to Sales for revision.', 'RFQ 已退回 Sales 修改。'))
   } catch (cause) {
-    actionError.value = mapRequestError(cause).message
+    const mapped = mapRequestError(cause)
+    actionError.value = mapped.localizedMessage ?? mapped.message
   } finally {
     busy.value = false
   }
@@ -151,20 +176,21 @@ async function isTipRayProtected(selected: File) {
 
 async function revise() {
   if (!detail.value || !revisionFile.value) {
-    actionError.value = '请选择新的 RFQ 文件。'
+    actionError.value = localeMessage('Select a new RFQ file.', '请选择新的 RFQ 文件。')
     return
   }
   busy.value = true
   actionError.value = ''
   try {
     const file = revisionFile.value
-    if (await isTipRayProtected(file) && !window.confirm(TIPRAY_UPLOAD_CONFIRM)) return
+    if (await isTipRayProtected(file) && !window.confirm(t('rfqs.tipRayConfirm'))) return
     const part: MultipartFilePart = { blob: file, fileName: file.name, mimeType: file.type, size: file.size }
     const result = await props.apiClient.reviseRfq(detail.value.id, part, detail.value.modified)
     applyResult(result.data)
-    notice.value = '新版本已上传，重新等待 Engineer Comment。'
+    notice.value = localeMessage('New version uploaded. Waiting for Engineer Comment again.', '新版本已上传，重新等待 Engineer Comment。')
   } catch (cause) {
-    actionError.value = mapRequestError(cause).message
+    const mapped = mapRequestError(cause)
+    actionError.value = mapped.localizedMessage ?? mapped.message
   } finally {
     busy.value = false
   }
@@ -176,7 +202,8 @@ async function downloadOriginal() {
     const file = await props.apiClient.downloadRfqFile(detail.value.id, selectedVersion.value.id)
     downloadBlob(file.blob, file.fileName)
   } catch (cause) {
-    actionError.value = mapRequestError(cause).message
+    const mapped = mapRequestError(cause)
+    actionError.value = mapped.localizedMessage ?? mapped.message
   }
 }
 
@@ -193,73 +220,73 @@ onBeforeUnmount(() => {
 
 <template>
   <div class="rfq-detail-page">
-    <RouterLink class="back-link" :to="{ name: 'rfqs' }"><ArrowLeft :size="14" />返回 RFQ Center</RouterLink>
+    <RouterLink class="back-link" :to="{ name: 'rfqs' }"><ArrowLeft :size="14" />{{ (locale === 'en-US' ? 'Back to RFQ Center' : '返回 RFQ Center') }}</RouterLink>
     <DataState v-if="loading" type="loading" />
     <DataState v-else-if="denied" type="denied" :message="error" :request-id="requestId" />
-    <DataState v-else-if="error || !detail" type="error" :message="error || 'RFQ 不存在'" :request-id="requestId" @retry="load" />
+    <DataState v-else-if="error || !detail" type="error" :message="error || (locale === 'en-US' ? 'RFQ not found' : 'RFQ 不存在')" :request-id="requestId" @retry="load" />
     <template v-else>
       <header class="detail-header">
-        <div><span>REQUEST FOR QUOTATION</span><h1>{{ detail.id }}</h1><p>{{ detail.opportunity.title }} · {{ detail.opportunity.id }}</p></div>
-        <StatusBadge :label="detail.status" :tone="statusTone(detail.status)" />
+        <div><span>{{ ui('REQUEST FOR QUOTATION', '报价请求') }}</span><h1>{{ detail.id }}</h1><p>{{ detail.opportunity.title }} · {{ detail.opportunity.id }}</p></div>
+        <StatusBadge :label="statusLabel(detail.status)" :tone="statusTone(detail.status)" />
       </header>
 
       <div class="detail-layout">
         <aside class="project-sidebar">
           <section>
-            <span class="eyebrow">OPPORTUNITY</span>
+            <span class="eyebrow">{{ ui('OPPORTUNITY', '商机') }}</span>
             <RouterLink v-if="role !== 'Engineer'" class="record-link" :to="{ name: 'opportunity-detail', params: { opportunityId: detail.opportunity.id } }"><strong>{{ detail.opportunity.title }}</strong></RouterLink>
             <strong v-else>{{ detail.opportunity.title }}</strong>
             <dl>
-              <div><dt>Account</dt><dd>{{ detail.opportunity.account }}</dd></div>
-              <div><dt>Site</dt><dd>{{ detail.opportunity.site }}</dd></div>
-              <div><dt>Stage</dt><dd>{{ detail.opportunity.stage }}</dd></div>
-              <div><dt>Tool Type</dt><dd>{{ detail.opportunity.toolType }}</dd></div>
-              <div><dt>Sales</dt><dd>{{ detail.salesOwnerName }}</dd></div>
-              <div><dt>Engineer</dt><dd>{{ detail.engineerOwnerName }}</dd></div>
+              <div><dt>{{ ui('Account', '客户') }}</dt><dd>{{ detail.opportunity.account }}</dd></div>
+              <div><dt>{{ ui('Site', '厂区') }}</dt><dd>{{ detail.opportunity.site }}</dd></div>
+              <div><dt>{{ ui('Stage', '阶段') }}</dt><dd>{{ opportunityStageLabel(detail.opportunity.stage) }}</dd></div>
+              <div><dt>{{ ui('Tool Type', '设备类型') }}</dt><dd>{{ systemValueLabel(detail.opportunity.toolType, locale) }}</dd></div>
+              <div><dt>{{ ui('Sales', '销售') }}</dt><dd>{{ detail.salesOwnerName }}</dd></div>
+              <div><dt>{{ ui('Engineer', '工程师') }}</dt><dd>{{ detail.engineerOwnerName }}</dd></div>
             </dl>
           </section>
           <section>
-            <span class="eyebrow">WORKFLOW</span>
+            <span class="eyebrow">{{ ui('WORKFLOW', '工作流') }}</span>
             <ol class="workflow-steps">
               <li v-for="step in steps" :key="step.label" :class="{ done: step.done, active: step.active }">
-                <span><Check v-if="step.done" :size="13" /><i v-else /></span><div><strong>{{ step.label }}</strong><small>{{ step.done ? 'Completed' : step.active ? 'Current' : 'Waiting' }}</small></div>
+                <span><Check v-if="step.done" :size="13" /><i v-else /></span><div><strong>{{ step.label }}</strong><small>{{ step.done ? ui('Completed', '已完成') : step.active ? ui('Current', '当前') : ui('Waiting', '等待中') }}</small></div>
               </li>
             </ol>
           </section>
-          <section v-if="detail.note"><span class="eyebrow">NOTE</span><p>{{ detail.note }}</p></section>
+          <section v-if="detail.note"><span class="eyebrow">{{ ui('NOTE', '备注') }}</span><p>{{ detail.note }}</p></section>
         </aside>
 
         <main class="preview-workspace">
-          <header><div><span class="eyebrow">FILE PREVIEW</span><h2>{{ selectedVersion?.fileName }}</h2></div><button v-if="canDownload" class="secondary-button" type="button" @click="downloadOriginal"><Download :size="14" />下载原件</button></header>
+          <header><div><span class="eyebrow">{{ ui('FILE PREVIEW', '文件预览') }}</span><h2>{{ selectedVersion?.fileName }}</h2></div><button v-if="canDownload" class="secondary-button" type="button" @click="downloadOriginal"><Download :size="14" />{{ (locale === 'en-US' ? 'Download original' : '下载原件') }}</button></header>
           <div class="preview-surface">
             <DataState v-if="previewLoading" type="loading" />
             <DataState v-else-if="previewError" type="error" :message="previewError" @retry="loadPreview" />
-            <iframe v-else-if="previewUrl && previewMime === 'application/pdf'" :src="previewUrl" title="RFQ PDF 预览" />
-            <img v-else-if="previewUrl && previewMime.startsWith('image/')" :src="previewUrl" alt="RFQ 文件预览" />
-            <DataState v-else type="empty" title="暂无预览" message="当前版本没有可用预览。" />
+            <iframe v-else-if="previewUrl && previewMime === 'application/pdf'" :src="previewUrl" :title="(locale === 'en-US' ? 'RFQ PDF preview' : 'RFQ PDF 预览')" />
+            <img v-else-if="previewUrl && previewMime.startsWith('image/')" :src="previewUrl" :alt="(locale === 'en-US' ? 'RFQ file preview' : 'RFQ 文件预览')" />
+            <DataState v-else type="empty" :title="(locale === 'en-US' ? 'No preview' : '暂无预览')" :message="(locale === 'en-US' ? 'No preview is available for this version.' : '当前版本没有可用预览。')" />
           </div>
         </main>
 
         <aside class="action-sidebar">
           <section v-if="role === 'Engineer' && detail.status === 'Engineer Review'" class="action-panel">
-            <MessageSquareText :size="18" /><h2>Engineer Comment</h2><textarea v-model="engineerComment" rows="7" placeholder="填写规格与技术意见" /><button class="primary-button" type="button" :disabled="busy" @click="submitEngineerComment">提交 Comment</button>
+            <MessageSquareText :size="18" /><h2>{{ ui('Engineer comment', '工程师意见') }}</h2><textarea v-model="engineerComment" rows="7" :placeholder="(locale === 'en-US' ? 'Enter specifications and technical comments' : '填写规格与技术意见')" /><button class="primary-button" type="button" :disabled="busy" @click="submitEngineerComment">{{ ui('Submit comment', '提交意见') }}</button>
           </section>
           <section v-else-if="role === 'Manager' && detail.status === 'Manager Approval'" class="action-panel">
-            <ShieldCheck :size="18" /><h2>Manager Approve</h2><textarea v-model="managerComment" rows="6" placeholder="批准意见可选；退回原因必填" /><div class="decision-buttons"><button class="secondary-button danger" type="button" :disabled="busy" @click="review('Returned')"><RotateCcw :size="13" />退回</button><button class="primary-button" type="button" :disabled="busy" @click="review('Approved')"><Check :size="13" />批准</button></div>
+            <ShieldCheck :size="18" /><h2>{{ ui('Manager approval', '经理审批') }}</h2><textarea v-model="managerComment" rows="6" :placeholder="(locale === 'en-US' ? 'Approval note optional; return reason required' : '批准意见可选；退回原因必填')" /><div class="decision-buttons"><button class="secondary-button danger" type="button" :disabled="busy" @click="review('Returned')"><RotateCcw :size="13" />{{ (locale === 'en-US' ? 'Return' : '退回') }}</button><button class="primary-button" type="button" :disabled="busy" @click="review('Approved')"><Check :size="13" />{{ (locale === 'en-US' ? 'Approve' : '批准') }}</button></div>
           </section>
           <section v-else-if="(role === 'Sales' || role === 'Manager') && detail.status === 'Sales Revision'" class="action-panel">
-            <Upload :size="18" /><h2>Sales Revision</h2><p>当前 RFQ 需要修订。替换文件后将重新进入 Engineer Review。</p><input type="file" accept=".pdf,.png,.jpg,.jpeg,.docx,.xlsx,.pptx" @change="selectRevision" /><button class="primary-button" type="button" :disabled="busy" @click="revise">上传新版本</button>
+            <Upload :size="18" /><h2>{{ ui('Sales revision', '销售修订') }}</h2><p>{{ ui('This RFQ needs revision. Replacing the file will return it to Engineer review.', '当前 RFQ 需要修订。替换文件后将重新进入工程师评审。') }}</p><input type="file" :aria-label="ui('New RFQ file', '新的 RFQ 文件')" accept=".pdf,.png,.jpg,.jpeg,.docx,.xlsx,.pptx" @change="selectRevision" /><button class="primary-button" type="button" :disabled="busy" @click="revise">{{ (locale === 'en-US' ? 'Upload new version' : '上传新版本') }}</button>
           </section>
-          <section v-else class="action-panel readonly"><FileText :size="18" /><h2>Current Status</h2><StatusBadge :label="detail.status" :tone="statusTone(detail.status)" /><p v-if="detail.status === 'Approved'">当前 RFQ 已锁定并满足 Opportunity 报价阶段门禁。</p><p v-else>等待当前责任人完成下一步。</p></section>
+           <section v-else class="action-panel readonly"><FileText :size="18" /><h2>{{ ui('Current status', '当前状态') }}</h2><StatusBadge :label="statusLabel(detail.status)" :tone="statusTone(detail.status)" /><p v-if="detail.status === 'Approved'">{{ (locale === 'en-US' ? 'This RFQ is locked and satisfies the Opportunity quotation gate.' : '当前 RFQ 已锁定并满足 Opportunity 报价阶段门禁。') }}</p><p v-else>{{ (locale === 'en-US' ? 'Waiting for the current owner to complete the next step.' : '等待当前责任人完成下一步。') }}</p></section>
           <p v-if="actionError" class="action-error">{{ actionError }}</p><p v-if="notice" class="action-notice">{{ notice }}</p>
 
           <section class="history-panel">
-            <header><span class="eyebrow">VERSION HISTORY</span><strong>{{ detail.versions.length }}</strong></header>
+             <header><span class="eyebrow">{{ ui('VERSION HISTORY', '版本历史') }}</span><strong>{{ detail.versions.length }}</strong></header>
             <button v-for="version in detail.versions" :key="version.id" type="button" :class="{ selected: selectedVersionId === version.id }" @click="selectedVersionId = version.id">
-              <span>V{{ version.version }}</span><div><strong>{{ version.fileName }}</strong><small>{{ version.status }} · {{ formatDisplayDate(version.uploadedAt) }}</small></div>
+               <span>V{{ version.version }}</span><div><strong>{{ version.fileName }}</strong><small>{{ statusLabel(version.status) }} · {{ formatDisplayDate(version.uploadedAt) }}</small></div>
             </button>
-            <article v-if="selectedVersion?.engineerComment"><strong>Engineer Comment</strong><p>{{ selectedVersion.engineerComment }}</p><small>{{ selectedVersion.engineerCommentedByName }} · {{ formatDisplayDate(selectedVersion.engineerCommentedAt) }}</small></article>
-            <article v-if="selectedVersion?.managerDecision"><strong>Manager {{ selectedVersion.managerDecision }}</strong><p>{{ selectedVersion.managerComment || 'No comment' }}</p><small>{{ selectedVersion.managerDecidedByName }} · {{ formatDisplayDate(selectedVersion.managerDecidedAt) }}</small></article>
+             <article v-if="selectedVersion?.engineerComment"><strong>{{ ui('Engineer comment', '工程师意见') }}</strong><p>{{ selectedVersion.engineerComment }}</p><small>{{ selectedVersion.engineerCommentedByName }} · {{ formatDisplayDate(selectedVersion.engineerCommentedAt) }}</small></article>
+             <article v-if="selectedVersion?.managerDecision"><strong>{{ ui('Manager', '经理') }} {{ decisionLabel(selectedVersion.managerDecision) }}</strong><p>{{ selectedVersion.managerComment || ui('No comment', '无意见') }}</p><small>{{ selectedVersion.managerDecidedByName }} · {{ formatDisplayDate(selectedVersion.managerDecidedAt) }}</small></article>
           </section>
         </aside>
       </div>

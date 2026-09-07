@@ -4,8 +4,11 @@ import { Download, Eye, FileText } from '@lucide/vue'
 import SectionCard from '@/design-system/SectionCard.vue'
 import type { DemoWorkflowDto } from '@/types/workspaces'
 import { formatDisplayDate } from '@/domain/time'
+import { useI18n } from '@/i18n'
 
 const props = defineProps<{ artifacts: NonNullable<DemoWorkflowDto['artifacts']> }>()
+const { locale } = useI18n()
+const copy = (english: string, chinese: string) => locale.value === 'en-US' ? english : chinese
 const emit = defineEmits<{ preview: [id: string]; download: [id: string] }>()
 const reports = computed(() => props.artifacts.filter((item) => item.type === 'Test Report'))
 const requests = computed(() => props.artifacts.filter((item) => item.type === 'Demo Request DOCX'))
@@ -13,10 +16,10 @@ const previewable = (mime = '') => mime === 'application/pdf' || mime.startsWith
 </script>
 
 <template>
-  <SectionCard title="Article" subtitle="Test Reports / Demo Request Forms" data-demo-article>
+  <SectionCard :title="copy('Artifacts', '归档资料')" :subtitle="copy('Test Reports / Demo Request Forms', '测试报告 / Demo Request 表单')" data-demo-article>
     <div class="groups">
-      <section><header><FileText :size="15" /><strong>Test Reports</strong><span>{{ reports.length }}</span></header><p v-if="!reports.length">暂无 Test Report。</p><article v-for="item in reports" :key="item.id"><div><em>{{ item.visibility === 'Customer Review' ? 'External' : 'Internal' }}</em><strong>{{ item.fileName }}</strong><small>v{{ item.version }} · {{ item.createdBy || '—' }} · {{ formatDisplayDate(item.createdAt) }}</small></div><button v-if="previewable(item.mimeType)" type="button" :data-preview-artifact="item.id" @click="emit('preview', item.id)"><Eye :size="14" />预览</button><button type="button" :data-download-artifact="item.id" @click="emit('download', item.id)"><Download :size="14" />下载</button></article></section>
-      <section><header><FileText :size="15" /><strong>Demo Request Forms</strong><span>{{ requests.length }}</span></header><p v-if="!requests.length">暂无 Demo Request Form。</p><article v-for="item in requests" :key="item.id"><div><strong>{{ item.fileName }}</strong><small>v{{ item.version }} · {{ item.createdBy || '—' }} · {{ formatDisplayDate(item.createdAt) }}</small></div><button v-if="previewable(item.mimeType)" type="button" :data-preview-artifact="item.id" @click="emit('preview', item.id)"><Eye :size="14" />预览</button><button type="button" :data-download-artifact="item.id" @click="emit('download', item.id)"><Download :size="14" />下载</button></article></section>
+      <section><header><FileText :size="15" /><strong>{{ copy('Test Reports', '测试报告') }}</strong><span>{{ reports.length }}</span></header><p v-if="!reports.length">{{ copy('No Test Reports.', '暂无测试报告。') }}</p><article v-for="item in reports" :key="item.id"><div><em>{{ item.visibility === 'Customer Review' ? copy('External', '外部') : copy('Internal', '内部') }}</em><strong>{{ item.fileName }}</strong><small>v{{ item.version }} · {{ item.createdBy || '—' }} · {{ formatDisplayDate(item.createdAt) }}</small></div><button v-if="previewable(item.mimeType)" type="button" :data-preview-artifact="item.id" @click="emit('preview', item.id)"><Eye :size="14" />{{ copy('Preview', '预览') }}</button><button type="button" :data-download-artifact="item.id" @click="emit('download', item.id)"><Download :size="14" />{{ copy('Download', '下载') }}</button></article></section>
+      <section><header><FileText :size="15" /><strong>{{ copy('Demo Request Forms', 'Demo Request 表单') }}</strong><span>{{ requests.length }}</span></header><p v-if="!requests.length">{{ copy('No Demo Request Forms.', '暂无 Demo Request 表单。') }}</p><article v-for="item in requests" :key="item.id"><div><strong>{{ item.fileName }}</strong><small>v{{ item.version }} · {{ item.createdBy || '—' }} · {{ formatDisplayDate(item.createdAt) }}</small></div><button v-if="previewable(item.mimeType)" type="button" :data-preview-artifact="item.id" @click="emit('preview', item.id)"><Eye :size="14" />{{ copy('Preview', '预览') }}</button><button type="button" :data-download-artifact="item.id" @click="emit('download', item.id)"><Download :size="14" />{{ copy('Download', '下载') }}</button></article></section>
     </div>
   </SectionCard>
 </template>

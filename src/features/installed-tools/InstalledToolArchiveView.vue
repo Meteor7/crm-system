@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { systemValueLabel } from '@/features/shared/system-labels'
 import { computed, ref, watch } from 'vue'
 import {
   AlertTriangle,
@@ -14,6 +15,7 @@ import {
 } from '@lucide/vue'
 import { personnelDisplayName } from '@/demo/personnel'
 import { formatDisplayDate } from '@/domain/time'
+import { useI18n } from '@/i18n'
 import type { InstalledToolDetailDto, InstalledToolDto, InstalledToolLifecycleHistoryDto } from '@/types/workspaces'
 
 const props = withDefaults(defineProps<{
@@ -32,6 +34,12 @@ const emit = defineEmits<{
   service: []
   document: [name: string]
 }>()
+const { locale, t } = useI18n()
+const copy = (english: string, chinese: string) => locale.value === 'en-US' ? english : chinese
+const stageLabel = (stage: string) => copy(stage, ({ FAT: 'FAT', Shipment: '发运', Installation: '安装', SAT: 'SAT', Warranty: '质保', Completed: '已完成' } as Record<string, string>)[stage] || stage)
+const statusLabel = (status: string) => copy(status, ({ Production: '生产中', 'Upgrade Due': '待升级', Installation: '安装中', Active: '启用', Pending: '待确认', Completed: '已完成', Retired: '已退役', Decommissioned: '已停用' } as Record<string, string>)[status] || status)
+const serviceTypeLabel = (type: string) => t(`installed.type.${type}`)
+const changeTypeLabel = (type: string) => t(`installed.change.${type}`)
 
 const activeSection = ref<'lifecycle' | 'configuration' | 'warranty'>('lifecycle')
 const expandedStage = ref('')
@@ -44,6 +52,7 @@ const openIssueCount = computed(() => resolvedDetail.value?.lifecycleHistory.fil
 function currentStageFor(tool: InstalledToolDto) {
   return tool.lifecycleStage ?? tool.milestones.find((stage) => stage.state === 'Current')?.label ?? 'Completed'
 }
+function displayStage(stage: string) { return stageLabel(stage) }
 function historyFor(stage: { label: string }): InstalledToolLifecycleHistoryDto | undefined {
   return resolvedDetail.value?.lifecycleHistory.find((item) => item.fromStage === stage.label)
 }
@@ -68,10 +77,10 @@ watch(resolvedDetail, (detail) => {
 
 <template>
   <section class="archive-view" data-installed-tool-archive>
-    <section v-if="!selected" class="workspace-panel workspace-panel-body">没有匹配筛选条件的 Installed Tool。</section>
-    <section v-else class="tool-layout">
+    <section v-if="!selected" class="workspace-panel workspace-panel-body">{{ t('installed.noFilterMatch') }}</section>
+     <section v-else class="tool-layout">
       <aside class="workspace-panel tool-list-panel">
-        <header><div><span class="eyebrow">INSTALLED BASE</span><h2>设备台账</h2></div><span>{{ items.length }} 台</span></header>
+        <header><div><span class="eyebrow">INSTALLED BASE</span><h2>{{ t('installed.archiveTitle') }}</h2></div><span>{{ t('installed.count', { count: items.length }) }}</span></header>
         <div class="workspace-panel-body workspace-list">
           <button
             v-for="tool in items"
@@ -82,72 +91,72 @@ watch(resolvedDetail, (detail) => {
             :data-installed-tool-archive-id="tool.id"
             @click="emit('select', tool)"
           >
-            <div class="row"><span class="workspace-badge" :class="statusTone(tool.status)">{{ tool.status }}</span><b>{{ tool.id }}</b></div>
+             <div class="row"><span class="workspace-badge" :class="statusTone(tool.status)">{{ statusLabel(tool.status) }}</span><b>{{ tool.id }}</b></div>
             <strong>{{ tool.model }} · {{ tool.serial }}</strong>
             <small>{{ tool.account }}</small>
-            <small>{{ tool.site }} · {{ tool.location || '位置待确认' }}</small>
-            <small>{{ personnelDisplayName(tool.engineerOwner) || '工程师待确认' }}</small>
-            <div class="row foot"><span>当前：{{ currentStageFor(tool) }}</span><b>SW {{ tool.software || '—' }}</b></div>
+            <small>{{ tool.site }} · {{ systemValueLabel(tool.location, locale) || t('installed.locationPending') }}</small>
+            <small>{{ personnelDisplayName(tool.engineerOwner) || t('installed.engineerPending') }}</small>
+             <div class="row foot"><span>{{ t('installed.currentStage', { stage: displayStage(currentStageFor(tool)) }) }}</span><b>SW {{ systemValueLabel(tool.software, locale) || '—' }}</b></div>
           </button>
         </div>
       </aside>
 
       <div class="tool-main">
-        <section v-if="detailLoading" class="workspace-panel workspace-panel-body detail-state">正在读取设备档案…</section>
+        <section v-if="detailLoading" class="workspace-panel workspace-panel-body detail-state">{{ t('installed.readingArchive') }}</section>
         <section v-else-if="detailError" class="workspace-panel workspace-panel-body detail-state error">{{ detailError }}</section>
-        <section v-else-if="!resolvedDetail" class="workspace-panel workspace-panel-body detail-state">暂无该设备的详细档案。</section>
+        <section v-else-if="!resolvedDetail" class="workspace-panel workspace-panel-body detail-state">{{ t('installed.noDetail') }}</section>
 
         <template v-else>
           <section class="workspace-panel tool-header" data-testid="installed-tool-hero" :data-stage="currentStage">
             <header>
-              <div class="tool-title"><span class="eyebrow">{{ resolvedDetail.id }} · {{ resolvedDetail.serial }}</span><h2>{{ resolvedDetail.model }} 设备交付档案</h2><small>{{ resolvedDetail.account }} · {{ resolvedDetail.site }}</small></div>
+              <div class="tool-title"><span class="eyebrow">{{ resolvedDetail.id }} · {{ resolvedDetail.serial }}</span><h2>{{ resolvedDetail.model }} {{ t('installed.deliveryArchive') }}</h2><small>{{ resolvedDetail.account }} · {{ resolvedDetail.site }}</small></div>
               <div class="tool-header-actions">
-                <span class="workspace-badge" :class="statusTone(resolvedDetail.status)">{{ resolvedDetail.status }}</span>
-                <button v-if="resolvedDetail.canOperate && !resolvedDetail.lifecycleCompleted" class="primary-button" type="button" data-testid="advance-installed-tool" @click="emit('advance')"><CheckCircle2 :size="13" />完成 {{ currentStage }}</button>
-                <button v-if="resolvedDetail.canOperate" class="secondary-button" type="button" data-testid="add-installed-tool-version" @click="emit('version')"><History :size="13" />新增版本记录</button>
-                <button v-if="resolvedDetail.canOperate" class="secondary-button" type="button" data-testid="add-installed-tool-service" @click="emit('service')"><Wrench :size="13" />新增服务记录</button>
-                <button v-if="resolvedDetail.canOperate" class="secondary-button" type="button" data-testid="edit-installed-tool" @click="emit('edit')"><Pencil :size="13" />编辑主数据</button>
+                 <span class="workspace-badge" :class="statusTone(resolvedDetail.status)">{{ statusLabel(resolvedDetail.status) }}</span>
+                <button v-if="resolvedDetail.canOperate && !resolvedDetail.lifecycleCompleted" class="primary-button" type="button" data-testid="advance-installed-tool" @click="emit('advance')"><CheckCircle2 :size="13" />{{ t('installed.completeStage', { stage: currentStage }) }}</button>
+                <button v-if="resolvedDetail.canOperate" class="secondary-button" type="button" data-testid="add-installed-tool-version" @click="emit('version')"><History :size="13" />{{ t('installed.addVersion') }}</button>
+                <button v-if="resolvedDetail.canOperate" class="secondary-button" type="button" data-testid="add-installed-tool-service" @click="emit('service')"><Wrench :size="13" />{{ t('installed.addService') }}</button>
+                <button v-if="resolvedDetail.canOperate" class="secondary-button" type="button" data-testid="edit-installed-tool" @click="emit('edit')"><Pencil :size="13" />{{ t('installed.editMaster') }}</button>
               </div>
             </header>
             <div class="record-summary hero-summary">
-              <div><small>Customer / Site</small><strong>{{ resolvedDetail.account }}</strong><span>{{ resolvedDetail.site }} · {{ resolvedDetail.location || '位置待确认' }}</span></div>
-              <div><small>当前生命周期阶段</small><strong>{{ currentStage }}</strong><span>{{ completedStages }}/5 节点已完成</span></div>
-              <div><small>Software / OS</small><strong>{{ resolvedDetail.software || '—' }}</strong><span>{{ resolvedDetail.operatingSystem || '—' }}</span></div>
-              <div><small>Warranty End</small><strong>{{ resolvedDetail.warrantyEnd || '待确认' }}</strong><span>{{ resolvedDetail.serviceContract || '服务等级待确认' }}</span></div>
+               <div><small>{{ copy('Customer / Site', '客户 / 厂区') }}</small><strong>{{ resolvedDetail.account }}</strong><span>{{ resolvedDetail.site }} · {{ systemValueLabel(resolvedDetail.location, locale) || t('installed.locationPending') }}</span></div>
+              <div><small>{{ t('installed.lifecycleStage') }}</small><strong>{{ currentStage }}</strong><span>{{ t('installed.completedNodes', { done: completedStages }) }}</span></div>
+               <div><small>{{ copy('Software / OS', '软件 / 操作系统') }}</small><strong>{{ systemValueLabel(resolvedDetail.software, locale) || '—' }}</strong><span>{{ systemValueLabel(resolvedDetail.operatingSystem, locale) || '—' }}</span></div>
+               <div><small>{{ copy('Warranty End', '质保结束') }}</small><strong>{{ systemValueLabel(resolvedDetail.warrantyEnd, locale) || t('installed.pending') }}</strong><span>{{ systemValueLabel(resolvedDetail.serviceContract, locale) || t('installed.serviceLevelPending') }}</span></div>
             </div>
           </section>
 
           <section class="workspace-panel master-data-panel" data-testid="installed-tool-master-data">
-            <header><div><span class="eyebrow">MASTER DATA</span><h2>设备主数据</h2></div><span>一机一档 · 数据来自当前设备接口</span></header>
+            <header><div><span class="eyebrow">MASTER DATA</span><h2>{{ t('installed.masterData') }}</h2></div><span>{{ t('installed.masterDataHint') }}</span></header>
             <div class="master-data-grid">
-              <div data-master-tone="identity"><small>Serial Number</small><strong>{{ resolvedDetail.serial || '—' }}</strong></div>
-              <div data-master-tone="identity"><small>Model</small><strong>{{ resolvedDetail.model || '—' }}</strong></div>
-              <div data-master-tone="identity"><small>Customer</small><strong>{{ resolvedDetail.account || '—' }}</strong><span>{{ resolvedDetail.accountId }}</span></div>
-              <div data-master-tone="identity"><small>Site / Location</small><strong>{{ resolvedDetail.site || '—' }}</strong><span>{{ resolvedDetail.location || '位置待确认' }}</span></div>
-              <div data-master-tone="ownership"><small>Engineer Owner</small><strong>{{ personnelDisplayName(resolvedDetail.engineerOwner) || '—' }}</strong></div>
-              <div data-master-tone="ownership"><small>Sales Owner</small><strong>{{ personnelDisplayName(resolvedDetail.salesOwner) || '—' }}</strong></div>
-              <div data-master-tone="ownership"><small>Sales Order</small><strong>{{ resolvedDetail.salesOrder || '—' }}</strong></div>
-              <div data-master-tone="ownership"><small>Contract</small><strong>{{ resolvedDetail.contract || '—' }}</strong></div>
-              <div data-master-tone="ownership"><small>Ownership</small><strong>{{ resolvedDetail.ownershipType || '—' }}</strong></div>
-              <div data-master-tone="ownership"><small>Source Booking</small><strong>{{ resolvedDetail.sourceBookingId || '—' }}</strong></div>
-              <div data-master-tone="ownership"><small>Source Opportunity</small><strong>{{ resolvedDetail.sourceOpportunityId || '—' }}</strong></div>
-              <div data-master-tone="configuration"><small>Software / Firmware</small><strong>{{ resolvedDetail.software || '—' }} / {{ resolvedDetail.firmware || '—' }}</strong></div>
-              <div data-master-tone="configuration"><small>Operating System</small><strong>{{ resolvedDetail.operatingSystem || '—' }}</strong></div>
-              <div data-master-tone="configuration"><small>Configuration</small><strong>{{ resolvedDetail.configuration || '—' }}</strong></div>
-              <div data-master-tone="service"><small>Warranty</small><strong>{{ resolvedDetail.warrantyStart || '待确认' }} → {{ resolvedDetail.warrantyEnd || '待确认' }}</strong></div>
-              <div data-master-tone="service"><small>Service Contract / PM</small><strong>{{ resolvedDetail.serviceContract || '—' }}</strong><span>{{ resolvedDetail.pmCycle || 'PM 周期待确认' }}</span></div>
-              <div data-master-tone="service"><small>Last Service</small><strong>{{ resolvedDetail.lastService || '—' }}</strong></div>
+               <div data-master-tone="identity"><small>{{ copy('Serial Number', '序列号') }}</small><strong>{{ resolvedDetail.serial || '—' }}</strong></div>
+               <div data-master-tone="identity"><small>{{ copy('Model', '设备型号') }}</small><strong>{{ resolvedDetail.model || '—' }}</strong></div>
+               <div data-master-tone="identity"><small>{{ copy('Customer', '客户') }}</small><strong>{{ resolvedDetail.account || '—' }}</strong><span>{{ resolvedDetail.accountId }}</span></div>
+               <div data-master-tone="identity"><small>{{ copy('Site / Location', '厂区 / 位置') }}</small><strong>{{ resolvedDetail.site || '—' }}</strong><span>{{ systemValueLabel(resolvedDetail.location, locale) || t('installed.locationPending') }}</span></div>
+               <div data-master-tone="ownership"><small>{{ copy('Engineer Owner', '工程师负责人') }}</small><strong>{{ personnelDisplayName(resolvedDetail.engineerOwner) || '—' }}</strong></div>
+               <div data-master-tone="ownership"><small>{{ copy('Sales Owner', '销售负责人') }}</small><strong>{{ personnelDisplayName(resolvedDetail.salesOwner) || '—' }}</strong></div>
+               <div data-master-tone="ownership"><small>{{ copy('Sales Order', '销售订单') }}</small><strong>{{ systemValueLabel(resolvedDetail.salesOrder, locale) || '—' }}</strong></div>
+               <div data-master-tone="ownership"><small>{{ copy('Contract', '合同') }}</small><strong>{{ systemValueLabel(resolvedDetail.contract, locale) || '—' }}</strong></div>
+               <div data-master-tone="ownership"><small>{{ copy('Ownership', '归属') }}</small><strong>{{ systemValueLabel(resolvedDetail.ownershipType, locale) || '—' }}</strong></div>
+               <div data-master-tone="ownership"><small>{{ copy('Source Booking', '来源 Booking') }}</small><strong>{{ resolvedDetail.sourceBookingId || '—' }}</strong></div>
+               <div data-master-tone="ownership"><small>{{ copy('Source Opportunity', '来源 Opportunity') }}</small><strong>{{ resolvedDetail.sourceOpportunityId || '—' }}</strong></div>
+               <div data-master-tone="configuration"><small>{{ copy('Software / Firmware', '软件 / 固件') }}</small><strong>{{ systemValueLabel(resolvedDetail.software, locale) || '—' }} / {{ systemValueLabel(resolvedDetail.firmware, locale) || '—' }}</strong></div>
+               <div data-master-tone="configuration"><small>{{ copy('Operating System', '操作系统') }}</small><strong>{{ systemValueLabel(resolvedDetail.operatingSystem, locale) || '—' }}</strong></div>
+               <div data-master-tone="configuration"><small>{{ copy('Configuration', '配置') }}</small><strong>{{ systemValueLabel(resolvedDetail.configuration, locale) || '—' }}</strong></div>
+               <div data-master-tone="service"><small>{{ copy('Warranty', '质保') }}</small><strong>{{ systemValueLabel(resolvedDetail.warrantyStart, locale) || t('installed.pending') }} → {{ systemValueLabel(resolvedDetail.warrantyEnd, locale) || t('installed.pending') }}</strong></div>
+               <div data-master-tone="service"><small>{{ copy('Service Contract / PM', '服务合同 / PM') }}</small><strong>{{ systemValueLabel(resolvedDetail.serviceContract, locale) || '—' }}</strong><span>{{ systemValueLabel(resolvedDetail.pmCycle, locale) || t('installed.pmCycle') }}</span></div>
+               <div data-master-tone="service"><small>{{ copy('Last Service', '最近服务') }}</small><strong>{{ systemValueLabel(resolvedDetail.lastService, locale) || '—' }}</strong></div>
             </div>
           </section>
 
-          <nav class="detail-tabs" aria-label="设备档案分区">
-            <button type="button" :class="{ active: activeSection === 'lifecycle' }" @click="activeSection = 'lifecycle'"><PackageCheck :size="14" />交付生命周期</button>
-            <button type="button" :class="{ active: activeSection === 'configuration' }" @click="activeSection = 'configuration'"><History :size="14" />版本与配置</button>
-            <button type="button" :class="{ active: activeSection === 'warranty' }" @click="activeSection = 'warranty'"><ShieldCheck :size="14" />质保与服务</button>
+          <nav class="detail-tabs" :aria-label="t('installed.archiveSections')">
+            <button type="button" :class="{ active: activeSection === 'lifecycle' }" @click="activeSection = 'lifecycle'"><PackageCheck :size="14" />{{ t('installed.deliveryLifecycle') }}</button>
+            <button type="button" :class="{ active: activeSection === 'configuration' }" @click="activeSection = 'configuration'"><History :size="14" />{{ t('installed.versionConfig') }}</button>
+            <button type="button" :class="{ active: activeSection === 'warranty' }" @click="activeSection = 'warranty'"><ShieldCheck :size="14" />{{ t('installed.warrantyService') }}</button>
           </nav>
 
           <section v-if="activeSection === 'lifecycle'" class="workspace-panel lifecycle-panel">
-            <header><div><span class="eyebrow">DELIVERY TRACK</span><h2>Delivery & Acceptance Lifecycle</h2><small>FAT → Shipment → Installation → SAT → Warranty</small></div><span :class="['issue-chip', { clear: openIssueCount === 0 }]"><AlertTriangle :size="12" />{{ openIssueCount }} 项记录含遗留问题</span></header>
+             <header><div><span class="eyebrow">{{ copy('DELIVERY TRACK', '交付跟踪') }}</span><h2>{{ copy('Delivery & Acceptance Lifecycle', '交付与验收生命周期') }}</h2><small>FAT → Shipment → Installation → SAT → Warranty</small></div><span :class="['issue-chip', { clear: openIssueCount === 0 }]"><AlertTriangle :size="12" />{{ t('installed.issueCount', { count: openIssueCount }) }}</span></header>
             <div class="lifecycle-overview">
               <button
                 v-for="(stage, index) in resolvedDetail.milestones"
@@ -159,27 +168,27 @@ watch(resolvedDetail, (detail) => {
                 @click="expandedStage = stage.label"
               >
                 <span class="step-number"><CheckCircle2 v-if="stage.state === 'Done'" :size="14" /><template v-else>{{ index + 1 }}</template></span>
-                <span><b>{{ stage.label }}</b><small>{{ stage.date || '日期待确认' }}</small></span>
+                 <span><b>{{ displayStage(stage.label) }}</b><small>{{ systemValueLabel(stage.date, locale) || t('installed.datePending') }}</small></span>
               </button>
             </div>
             <div class="stage-records">
               <article v-for="stage in resolvedDetail.milestones" :key="stage.label" :class="{ open: expandedStage === stage.label }">
                 <button type="button" class="stage-record-head" @click="expandedStage = expandedStage === stage.label ? '' : stage.label">
                   <span :class="['stage-state-dot', `is-${stage.state.toLowerCase()}`]" />
-                  <span><strong>{{ stage.label }}</strong><small>{{ historyFor(stage)?.comment || '暂无补充说明' }}</small></span>
-                  <span><small>完成日期</small><b>{{ historyFor(stage)?.completedAt || '—' }}</b></span>
-                  <span class="workspace-badge" :class="stageTone(stage.state)">{{ stage.state === 'Done' ? '已完成' : stage.state === 'Current' ? '进行中' : '待开始' }}</span>
+                   <span><strong>{{ displayStage(stage.label) }}</strong><small>{{ historyFor(stage)?.comment || t('installed.noComment') }}</small></span>
+                  <span><small>{{ t('installed.completedDate') }}</small><b>{{ historyFor(stage)?.completedAt || '—' }}</b></span>
+                  <span class="workspace-badge" :class="stageTone(stage.state)">{{ stage.state === 'Done' ? t('installed.status.done') : stage.state === 'Current' ? t('installed.status.current') : t('installed.status.waiting') }}</span>
                   <ChevronDown :size="14" />
                 </button>
                 <div v-if="expandedStage === stage.label" class="stage-record-detail">
                   <template v-if="historyFor(stage)">
-                    <div><small>操作人</small><strong>{{ personnelDisplayName(historyFor(stage)?.actor || '') || historyFor(stage)?.actor }}</strong></div>
-                    <div><small>验收结果</small><strong>{{ historyFor(stage)?.result || '—' }}</strong></div>
-                    <div><small>遗留问题</small><strong>{{ historyFor(stage)?.openIssues || '无' }}</strong></div>
-                    <div><small>客户确认</small><strong>{{ historyFor(stage)?.customerSignoff || '—' }}</strong></div>
-                    <div class="evidence"><small>证据记录</small><div><span v-for="file in historyFor(stage)?.evidence" :key="file">{{ file }}</span></div><span v-if="!historyFor(stage)?.evidence.length">当前节点暂无证据记录</span></div>
+                    <div><small>{{ t('installed.operator') }}</small><strong>{{ personnelDisplayName(historyFor(stage)?.actor || '') || historyFor(stage)?.actor }}</strong></div>
+                     <div><small>{{ t('installed.acceptanceResult') }}</small><strong>{{ historyFor(stage)?.result || '—' }}</strong></div>
+                    <div><small>{{ t('installed.openIssues') }}</small><strong>{{ systemValueLabel(historyFor(stage)?.openIssues, locale) || t('common.none') }}</strong></div>
+                    <div><small>{{ t('installed.customerSignoff') }}</small><strong>{{ historyFor(stage)?.customerSignoff || '—' }}</strong></div>
+                    <div class="evidence"><small>{{ t('installed.evidence') }}</small><div><span v-for="file in historyFor(stage)?.evidence" :key="file">{{ file }}</span></div><span v-if="!historyFor(stage)?.evidence.length">{{ t('installed.noEvidence') }}</span></div>
                   </template>
-                  <p v-else class="empty-record">该节点尚无完成记录。</p>
+                  <p v-else class="empty-record">{{ t('installed.noStageRecord') }}</p>
                 </div>
               </article>
             </div>
@@ -187,60 +196,60 @@ watch(resolvedDetail, (detail) => {
 
           <template v-else-if="activeSection === 'configuration'">
             <section class="workspace-panel configuration-panel">
-              <header><div><span class="eyebrow">CURRENT BASELINE</span><h2>当前版本与现场配置</h2></div><span class="workspace-badge info">{{ resolvedDetail.ownershipType || '归属待确认' }}</span></header>
+               <header><div><span class="eyebrow">{{ copy('CURRENT BASELINE', '当前基线') }}</span><h2>{{ t('installed.currentBaseline') }}</h2></div><span class="workspace-badge info">{{ systemValueLabel(resolvedDetail.ownershipType, locale) || t('installed.unassigned') }}</span></header>
               <div class="record-summary configuration-summary">
-                <div><small>Current Software</small><strong>{{ resolvedDetail.software || '—' }}</strong></div>
-                <div><small>Current Firmware</small><strong>{{ resolvedDetail.firmware || '—' }}</strong></div>
-                <div><small>Operating System</small><strong>{{ resolvedDetail.operatingSystem || '—' }}</strong></div>
-                <div><small>Configuration</small><strong>{{ resolvedDetail.configuration || '—' }}</strong></div>
+                 <div><small>{{ copy('Current Software', '当前软件') }}</small><strong>{{ systemValueLabel(resolvedDetail.software, locale) || '—' }}</strong></div>
+                 <div><small>{{ copy('Current Firmware', '当前固件') }}</small><strong>{{ systemValueLabel(resolvedDetail.firmware, locale) || '—' }}</strong></div>
+                 <div><small>{{ copy('Operating System', '操作系统') }}</small><strong>{{ systemValueLabel(resolvedDetail.operatingSystem, locale) || '—' }}</strong></div>
+                 <div><small>{{ copy('Configuration', '配置') }}</small><strong>{{ systemValueLabel(resolvedDetail.configuration, locale) || '—' }}</strong></div>
               </div>
             </section>
             <section class="workspace-panel">
-              <header><div><span class="eyebrow">CHANGE LOG</span><h2>软件 / 固件 / 操作系统 / 配置变更历史</h2></div><span class="workspace-badge info">{{ resolvedDetail.versionHistory.length }} 条记录</span></header>
+               <header><div><span class="eyebrow">{{ copy('CHANGE LOG', '变更记录') }}</span><h2>{{ t('installed.changeHistory') }}</h2></div><span class="workspace-badge info">{{ t('installed.recordCount', { count: resolvedDetail.versionHistory.length }) }}</span></header>
               <div v-if="resolvedDetail.versionHistory.length" class="table-wrap">
                 <table class="record-table">
-                  <thead><tr><th>日期</th><th>类型</th><th>原值</th><th>新值</th><th>操作人</th><th>原因</th></tr></thead>
+                 <thead><tr><th>{{ t('installed.changeDate') }}</th><th>{{ t('installed.changeType') }}</th><th>{{ copy('From', '原值') }}</th><th>{{ t('installed.newValue') }}</th><th>{{ t('installed.operator') }}</th><th>{{ t('installed.changeReason') }}</th></tr></thead>
                   <tbody>
                     <tr v-for="item in resolvedDetail.versionHistory" :key="item.id">
-                      <td>{{ formatDisplayDate(item.changeDate) }}</td><td><b>{{ item.changeType }}</b></td><td>{{ item.fromValue || '—' }}</td><td><strong>{{ item.toValue }}</strong></td><td>{{ personnelDisplayName(item.actor) || item.actor }}</td><td>{{ item.reason }}<small v-if="item.comment">{{ item.comment }}</small></td>
+                       <td>{{ formatDisplayDate(item.changeDate) }}</td><td><b>{{ changeTypeLabel(item.changeType) }}</b></td><td>{{ systemValueLabel(item.fromValue, locale) || '—' }}</td><td><strong>{{ systemValueLabel(item.toValue, locale) }}</strong></td><td>{{ personnelDisplayName(item.actor) || item.actor }}</td><td>{{ item.reason }}<small v-if="item.comment">{{ item.comment }}</small></td>
                     </tr>
                   </tbody>
                 </table>
               </div>
-              <p v-else class="empty-record padded">暂无版本或配置变更记录。</p>
+              <p v-else class="empty-record padded">{{ t('installed.noVersionHistory') }}</p>
             </section>
           </template>
 
           <template v-else>
             <section class="warranty-grid">
               <article class="workspace-panel warranty-panel">
-                <header><div><span class="eyebrow">COVERAGE</span><h2>质保状态</h2></div><span class="workspace-badge positive">{{ resolvedDetail.serviceContract || '服务等级待确认' }}</span></header>
+                 <header><div><span class="eyebrow">{{ copy('COVERAGE', '质保覆盖') }}</span><h2>{{ t('installed.coverage') }}</h2></div><span class="workspace-badge positive">{{ systemValueLabel(resolvedDetail.serviceContract, locale) || t('installed.serviceLevelPending') }}</span></header>
                 <div class="warranty-body">
-                  <div class="health-score" :style="{ '--health': `${resolvedDetail.completeness}%` }" :aria-label="`设备档案完整度 ${resolvedDetail.completeness}%`"><strong>{{ resolvedDetail.completeness }}%</strong><span>档案完整度</span></div>
+                  <div class="health-score" :style="{ '--health': `${resolvedDetail.completeness}%` }" :aria-label="t('installed.completenessLabel', { value: resolvedDetail.completeness })"><strong>{{ resolvedDetail.completeness }}%</strong><span>{{ t('installed.profileCompleteness') }}</span></div>
                   <div>
-                    <p><span>质保开始</span><b>{{ resolvedDetail.warrantyStart || '待确认' }}</b></p>
-                    <p><span>质保结束</span><b>{{ resolvedDetail.warrantyEnd || '待确认' }}</b></p>
-                    <p><span>PM 周期</span><b>{{ resolvedDetail.pmCycle || '待确认' }}</b></p>
+                    <p><span>{{ t('installed.warrantyStart') }}</span><b>{{ systemValueLabel(resolvedDetail.warrantyStart, locale) || t('installed.pending') }}</b></p>
+                    <p><span>{{ t('installed.warrantyEnd') }}</span><b>{{ systemValueLabel(resolvedDetail.warrantyEnd, locale) || t('installed.pending') }}</b></p>
+                    <p><span>{{ t('installed.pmCycle') }}</span><b>{{ systemValueLabel(resolvedDetail.pmCycle, locale) || t('installed.pending') }}</b></p>
                   </div>
                 </div>
               </article>
               <article class="workspace-panel document-panel">
-                <header><div><span class="eyebrow">DOCUMENTS</span><h2>适用文档</h2></div><span class="workspace-badge info">{{ resolvedDetail.documents.length }} 份</span></header>
-                <ul class="document-links"><li v-for="document in resolvedDetail.documents" :key="document"><FileCheck2 :size="15" /><span>{{ document }}</span><button type="button" @click="emit('document', document)"><Download :size="12" />查看</button></li></ul><p v-if="!resolvedDetail.documents.length" class="empty-record padded">暂无适用文档。</p>
+                 <header><div><span class="eyebrow">{{ copy('DOCUMENTS', '适用文档') }}</span><h2>{{ t('installed.documents') }}</h2></div><span class="workspace-badge info">{{ t('installed.documentCount', { count: resolvedDetail.documents.length }) }}</span></header>
+                <ul class="document-links"><li v-for="document in resolvedDetail.documents" :key="document"><FileCheck2 :size="15" /><span>{{ document }}</span><button type="button" @click="emit('document', document)"><Download :size="12" />{{ t('installed.view') }}</button></li></ul><p v-if="!resolvedDetail.documents.length" class="empty-record padded">{{ t('installed.noDocuments') }}</p>
               </article>
             </section>
             <section class="workspace-panel service-panel">
-              <header><div><span class="eyebrow">SERVICE HISTORY</span><h2>质保维修与服务记录</h2></div><span class="workspace-badge info">Last service {{ resolvedDetail.lastService || '—' }}</span></header>
+               <header><div><span class="eyebrow">{{ copy('SERVICE HISTORY', '服务历史') }}</span><h2>{{ t('installed.serviceHistory') }}</h2></div><span class="workspace-badge info">{{ t('installed.lastService') }} {{ systemValueLabel(resolvedDetail.lastService, locale) || '—' }}</span></header>
               <div v-if="resolvedDetail.serviceHistory.length" class="service-list">
                 <article v-for="item in resolvedDetail.serviceHistory" :key="item.id">
                   <Wrench :size="15" />
-                  <div><strong>{{ item.serviceType }}</strong><small>{{ formatDisplayDate(item.serviceDate) }} · {{ personnelDisplayName(item.actor) || item.actor }}</small></div>
+                   <div><strong>{{ serviceTypeLabel(item.serviceType) }}</strong><small>{{ formatDisplayDate(item.serviceDate) }} · {{ personnelDisplayName(item.actor) || item.actor }}</small></div>
                   <span>{{ item.result }}</span>
-                  <small v-if="item.openIssues" class="service-alert">遗留：{{ item.openIssues }}</small>
-                  <small v-if="item.nextAction" class="service-next">下一步：{{ item.nextAction }} · {{ personnelDisplayName(item.actionOwner) || item.actionOwner }} · {{ item.due }}</small>
+                  <small v-if="item.openIssues" class="service-alert">{{ t('installed.issuePrefix') }}{{ systemValueLabel(item.openIssues, locale) }}</small>
+                  <small v-if="item.nextAction" class="service-next">{{ t('installed.nextActionPrefix') }}{{ item.nextAction }} · {{ personnelDisplayName(item.actionOwner) || item.actionOwner }} · {{ item.due }}</small>
                 </article>
               </div>
-              <p v-else class="empty-record padded">暂无质保或服务记录。</p>
+              <p v-else class="empty-record padded">{{ t('installed.noServiceHistory') }}</p>
             </section>
           </template>
         </template>

@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { useLocalizedInput } from '@/i18n/localized-input'
+import { systemValueLabel } from '@/features/shared/system-labels'
 import { computed, reactive, watch } from 'vue'
 import type { AccountSummaryDto, ContactSummaryDto, LeadConversionInput, LeadDto, SiteDto } from '@/types/crm'
 import ModalShell from '@/design-system/ModalShell.vue'
@@ -6,6 +8,7 @@ import RequiredMark from '@/design-system/RequiredMark.vue'
 import PersonnelSelect from '@/design-system/PersonnelSelect.vue'
 import AccountSegmentSelect from '@/features/accounts/AccountSegmentSelect.vue'
 import { useAppStore } from '@/stores/app'
+import { useI18n } from '@/i18n'
 
 const props = defineProps<{
   lead: LeadDto
@@ -18,6 +21,7 @@ const props = defineProps<{
 }>()
 const emit = defineEmits<{ close: []; submit: [payload: LeadConversionInput] }>()
 const app = useAppStore()
+const { t, locale } = useI18n()
 const form = reactive({
   accountId: '',
   contactId: '',
@@ -97,7 +101,7 @@ function submit() {
         name: form.siteName,
         city: form.siteCity,
         type: form.siteType,
-        process: form.siteProcess,
+        process: siteProcessInput.value,
         status: form.siteStatus,
       },
     } : {}),
@@ -113,50 +117,54 @@ function submit() {
         status: 'Active' as const,
       },
     } : {}),
-    opportunityTitle: form.opportunityTitle,
+    opportunityTitle: opportunityTitleInput.value,
     opportunityAmount: String(form.opportunityAmount),
     opportunityCloseDate: form.opportunityCloseDate,
     opportunityOwner: form.opportunityOwner,
-    toolType: form.toolType,
+    toolType: toolTypeInput.value,
   })
 }
+
+const toolTypeInput = useLocalizedInput(() => form.toolType, (value) => { form.toolType = value }, (value) => systemValueLabel(value, locale.value), () => props.lead)
+const siteProcessInput = useLocalizedInput(() => form.siteProcess, (value) => { form.siteProcess = value }, (value) => systemValueLabel(value, locale.value), () => props.lead)
+const opportunityTitleInput = useLocalizedInput(() => form.opportunityTitle, (value) => { form.opportunityTitle = value }, (value) => !props.lead.interest && value === `${props.lead.company} · 新项目` && locale.value === 'en-US' ? `${props.lead.company} · New project` : value, () => props.lead)
 </script>
 
 <template>
-  <ModalShell title="转换 Lead" eyebrow="QUALIFIED → BUSINESS RECORDS" :busy="busy" @close="emit('close')" @submit="submit">
-    <p class="conversion-note">可复用现有 Account、Contact 与厂区；未选择时系统会根据 Lead 自动创建业务记录。转换只执行一次。</p>
+  <ModalShell :title="t('leadConvert.title')" eyebrow="QUALIFIED → BUSINESS RECORDS" :busy="busy" @close="emit('close')" @submit="submit">
+    <p class="conversion-note">{{ t('leadConvert.note') }}</p>
     <p v-if="error" class="form-error">{{ error }}</p>
     <div class="convert-form">
-      <label><span>复用 Account</span><select v-model="form.accountId" aria-label="复用 Account"><option value="">创建新 Account：{{ lead.company }}</option><option v-for="account in accounts" :key="account.id" :value="account.id">{{ account.name }}</option></select></label>
-      <label><span>复用 Contact</span><select v-model="form.contactId" aria-label="复用 Contact" :disabled="!form.accountId"><option value="">创建新 Contact：{{ lead.name }}</option><option v-for="contact in accountContacts" :key="contact.id" :value="contact.id">{{ contact.name }} · {{ contact.title }}</option></select></label>
+      <label><span>{{ t('leadConvert.reuseAccount') }}</span><select v-model="form.accountId" :aria-label="t('leadConvert.reuseAccount')"><option value="">{{ t('leadConvert.newAccount') }}: {{ lead.company }}</option><option v-for="account in accounts" :key="account.id" :value="account.id">{{ account.name }}</option></select></label>
+      <label><span>{{ t('leadConvert.reuseContact') }}</span><select v-model="form.contactId" :aria-label="t('leadConvert.reuseContact')" :disabled="!form.accountId"><option value="">{{ t('leadConvert.newContact') }}: {{ lead.name }}</option><option v-for="contact in accountContacts" :key="contact.id" :value="contact.id">{{ contact.name }} · {{ contact.title }}</option></select></label>
       <template v-if="!form.accountId">
-        <label><span>客户全称<RequiredMark /></span><input v-model="form.accountName" aria-label="新客户全称" required /></label>
-        <label><span>客户简称<RequiredMark /></span><input v-model="form.accountShortName" aria-label="新客户简称" required /></label>
-        <label><span>业务领域<RequiredMark /></span><AccountSegmentSelect v-model="form.accountSegment" :segments="segments" label="新客户业务领域" required /></label>
-        <label><span>客户等级</span><select v-model="form.accountTier" aria-label="新客户等级"><option>S</option><option>A</option><option>B</option></select></label>
-        <label><span>城市<RequiredMark /></span><input v-model="form.accountCity" aria-label="新客户城市" required /></label>
-        <label><span>区域<RequiredMark /></span><input v-model="form.accountRegion" aria-label="新客户区域" required /></label>
-        <label><span>客户负责人<RequiredMark /></span><PersonnelSelect v-model="form.accountOwner" :roles="['Sales']" :ariaLabel="'\u65b0\u5ba2\u6237\u8d1f\u8d23\u4eba'" required /></label>
-        <label><span>厂区名称<RequiredMark /></span><input v-model="form.siteName" aria-label="新厂区名称" required /></label>
-        <label><span>厂区城市<RequiredMark /></span><input v-model="form.siteCity" aria-label="新厂区城市" required /></label>
-        <label><span>厂区类型<RequiredMark /></span><input v-model="form.siteType" aria-label="新厂区类型" required /></label>
-        <label><span>制程<RequiredMark /></span><input v-model="form.siteProcess" aria-label="新厂区制程" required /></label>
-        <label><span>厂区状态</span><select v-model="form.siteStatus" aria-label="新厂区状态"><option>量产</option><option>建设中</option><option>规划中</option></select></label>
+        <label><span>{{ t('detail.accountName') }}<RequiredMark /></span><input v-model="form.accountName" :aria-label="t('detail.accountName')" required /></label>
+        <label><span>{{ t('detail.accountShortName') }}<RequiredMark /></span><input v-model="form.accountShortName" :aria-label="t('detail.accountShortName')" required /></label>
+        <label><span>{{ t('detail.businessArea') }}<RequiredMark /></span><AccountSegmentSelect v-model="form.accountSegment" :segments="segments" :label="t('detail.businessArea')" required /></label>
+        <label><span>{{ t('detail.accountTier') }}</span><select v-model="form.accountTier" :aria-label="t('detail.accountTier')"><option>S</option><option>A</option><option>B</option></select></label>
+        <label><span>{{ t('detail.city') }}<RequiredMark /></span><input v-model="form.accountCity" :aria-label="t('detail.city')" required /></label>
+        <label><span>{{ t('detail.region') }}<RequiredMark /></span><input v-model="form.accountRegion" :aria-label="t('detail.region')" required /></label>
+        <label><span>{{ t('detail.owner') }}<RequiredMark /></span><PersonnelSelect v-model="form.accountOwner" :roles="['Sales']" :ariaLabel="t('detail.owner')" required /></label>
+        <label><span>{{ t('detail.siteName') }}<RequiredMark /></span><input v-model="form.siteName" :aria-label="t('detail.siteName')" required /></label>
+        <label><span>{{ t('detail.city') }}<RequiredMark /></span><input v-model="form.siteCity" :aria-label="t('detail.city')" required /></label>
+        <label><span>{{ t('detail.siteType') }}<RequiredMark /></span><input v-model="form.siteType" :aria-label="t('detail.siteType')" required /></label>
+        <label><span>{{ t('detail.process') }}<RequiredMark /></span><input v-model="siteProcessInput" :aria-label="t('detail.process')" required /></label>
+        <label><span>{{ t('detail.status') }}</span><select v-model="form.siteStatus" :aria-label="t('detail.status')"><option value="量产">{{ t('site.status.production') }}</option><option value="建设中">{{ t('site.status.construction') }}</option><option value="规划中">{{ t('site.status.planning') }}</option></select></label>
       </template>
-      <label v-else><span>厂区<RequiredMark /></span><select v-model="form.siteId" aria-label="Opportunity 厂区" required><option v-for="site in accountSites" :key="site.id" :value="site.id">{{ site.name }}</option></select></label>
+      <label v-else><span>{{ t('detail.site') }}<RequiredMark /></span><select v-model="form.siteId" :aria-label="t('detail.site')" required><option v-for="site in accountSites" :key="site.id" :value="site.id">{{ site.name }}</option></select></label>
       <template v-if="!form.contactId">
-        <label><span>联系人姓名<RequiredMark /></span><input v-model="form.contactName" aria-label="新联系人姓名" required /></label>
-        <label><span>联系人职位<RequiredMark /></span><input v-model="form.contactTitle" aria-label="新联系人职位" required /></label>
-        <label><span>联系人部门<RequiredMark /></span><input v-model="form.contactDepartment" aria-label="新联系人部门" required /></label>
-        <label><span>联系人电话</span><input v-model="form.contactPhone" aria-label="新联系人电话" /></label>
-        <label><span>联系人邮箱</span><input v-model="form.contactEmail" aria-label="新联系人邮箱" type="email" /></label>
-        <label><span>联系人负责人<RequiredMark /></span><PersonnelSelect v-model="form.contactOwner" :roles="['Sales']" :ariaLabel="'\u65b0\u8054\u7cfb\u4eba\u8d1f\u8d23\u4eba'" required /></label>
+        <label><span>{{ t('detail.contact') }}{{ t('detail.nameSuffix') }}<RequiredMark /></span><input v-model="form.contactName" :aria-label="t('leadConvert.contactName')" required /></label>
+        <label><span>{{ t('detail.contact') }}{{ t('detail.titleSuffix') }}<RequiredMark /></span><input v-model="form.contactTitle" :aria-label="t('leadConvert.contactTitle')" required /></label>
+        <label><span>{{ t('detail.contact') }}{{ t('detail.departmentSuffix') }}<RequiredMark /></span><input v-model="form.contactDepartment" :aria-label="t('leadConvert.contactDepartment')" required /></label>
+        <label><span>{{ t('detail.contact') }}{{ t('detail.phoneSuffix') }}</span><input v-model="form.contactPhone" :aria-label="t('detail.phone')" /></label>
+        <label><span>{{ t('detail.contact') }}{{ t('detail.emailSuffix') }}</span><input v-model="form.contactEmail" :aria-label="t('detail.email')" type="email" /></label>
+        <label><span>{{ t('detail.contact') }}{{ t('detail.ownerSuffix') }}<RequiredMark /></span><PersonnelSelect v-model="form.contactOwner" :roles="['Sales']" :ariaLabel="t('detail.owner')" required /></label>
       </template>
-      <label><span>Opportunity 名称<RequiredMark /></span><input v-model="form.opportunityTitle" aria-label="Opportunity 名称" required /></label>
-      <label><span>Opportunity 金额<RequiredMark /></span><input v-model="form.opportunityAmount" aria-label="Opportunity 金额" type="number" min="0.01" step="0.01" required /></label>
-      <label><span>预计成交日期<RequiredMark /></span><input v-model="form.opportunityCloseDate" aria-label="Opportunity 预计成交日期" type="date" required /></label>
-      <label><span>负责人<RequiredMark /></span><PersonnelSelect v-model="form.opportunityOwner" :roles="app.bootstrap?.user.role === 'Manager' ? ['Sales', 'Manager'] : ['Sales']" :ariaLabel="'Opportunity \u8d1f\u8d23\u4eba'" required /></label>
-      <label><span>产品 / 设备<RequiredMark /></span><input v-model="form.toolType" aria-label="Opportunity 产品" required /></label>
+      <label><span>{{ t('oppEditor.name') }}<RequiredMark /></span><input v-model="opportunityTitleInput" :aria-label="t('oppEditor.name')" required /></label>
+      <label><span>{{ t('oppEditor.amount') }}<RequiredMark /></span><input v-model="form.opportunityAmount" :aria-label="t('oppEditor.amount')" type="number" min="0.01" step="0.01" required /></label>
+      <label><span>{{ t('oppEditor.poDate') }}<RequiredMark /></span><input v-model="form.opportunityCloseDate" :aria-label="t('oppEditor.poDate')" type="date" required /></label>
+      <label><span>{{ t('detail.owner') }}<RequiredMark /></span><PersonnelSelect v-model="form.opportunityOwner" :roles="app.bootstrap?.user.role === 'Manager' ? ['Sales', 'Manager'] : ['Sales']" :ariaLabel="t('detail.owner')" required /></label>
+      <label><span>{{ t('oppEditor.toolType') }}<RequiredMark /></span><input v-model="toolTypeInput" :aria-label="t('oppEditor.toolType')" required /></label>
     </div>
   </ModalShell>
 </template>

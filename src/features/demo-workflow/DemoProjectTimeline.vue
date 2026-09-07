@@ -10,6 +10,7 @@ import type {
 } from '@/types/workspaces'
 import { personnelDisplayName } from '@/demo/personnel'
 import { formatDisplayDate } from '@/domain/time'
+import { useI18n } from '@/i18n'
 
 const props = withDefaults(defineProps<{
   item: DemoWorkflowDto
@@ -19,6 +20,13 @@ const props = withDefaults(defineProps<{
   scope?: 'full' | 'request' | 'test'
   tone?: 'default' | 'request' | 'test' | 'critical' | 'complete'
 }>(), { scope: 'full', tone: 'default' })
+const { locale } = useI18n()
+const copy = (english: string, chinese: string) => locale.value === 'en-US' ? english : chinese
+const stageCopy: Record<string, string> = {
+  'Sales Preparation': 'Sales 准备', 'Engineer Review': '工程评估', 'Manager Approval': '经理审批',
+  'Wafer Preparation': 'Wafer 准备', 'Test Preparation': '测试准备', 'Test Execution': '测试执行',
+  'Internal Review': '内部评审', 'Customer Review': '客户评审',
+}
 const steps = computed(() => {
   const timeline = buildDemoProjectTimeline(props.item)
   if (props.scope === 'request') return timeline.slice(0, 3)
@@ -35,7 +43,7 @@ const timelineGroups = computed(() => {
         candidate.key === 'wafer-preparation' || candidate.key === 'test-preparation')
       return [{
         key: 'wafer-test-preparation',
-        label: 'Wafer & Test Preparation',
+        label: copy('Wafer & Test Preparation', 'Wafer 与测试准备'),
         state: preparationGateState(preparationSteps),
         steps: preparationSteps,
         parallel: true,
@@ -43,7 +51,7 @@ const timelineGroups = computed(() => {
     }
     return [{
       key: step.key,
-      label: step.label,
+      label: copy(step.label, stageCopy[step.label] || step.label),
       state: step.state,
       steps: [step],
       parallel: false,
@@ -63,17 +71,17 @@ function preparationValue(
   }).filter(Boolean))]
   if (values.length) return values.join(' / ')
   if (key === 'date') {
-    if (steps.every((step) => step.state === 'Done')) return '已完成（时间未记录）'
-    if (steps.some((step) => step.state === 'Current')) return '进行中'
+    if (steps.every((step) => step.state === 'Done')) return locale.value === 'en-US' ? 'Completed (date not recorded)' : '已完成（时间未记录）'
+    if (steps.some((step) => step.state === 'Current')) return locale.value === 'en-US' ? 'In progress' : '进行中'
   }
   return fallback
 }
 
 function timelineDate(step: DemoProjectTimelineStepDto): string {
   if (step.date) return formatDisplayDate(step.date)
-  if (step.state === 'Done') return '已完成（时间未记录）'
-  if (step.state === 'Current') return '进行中'
-  return '待排期'
+  if (step.state === 'Done') return locale.value === 'en-US' ? 'Completed (date not recorded)' : '已完成（时间未记录）'
+  if (step.state === 'Current') return locale.value === 'en-US' ? 'In progress' : '进行中'
+  return locale.value === 'en-US' ? 'To be scheduled' : '待排期'
 }
 </script>
 
@@ -90,7 +98,7 @@ function timelineDate(step: DemoProjectTimelineStepDto): string {
     }"
     :style="{ '--timeline-columns': timelineGroups.length }"
     data-project-timeline
-    :aria-label="`${item.id} 项目时间链`"
+    :aria-label="locale === 'en-US' ? `${item.id} project timeline` : `${item.id} 项目时间链`"
   >
     <div v-if="!hideContext" class="timeline-context">
       <span>{{ item.id }}</span>
@@ -107,7 +115,7 @@ function timelineDate(step: DemoProjectTimelineStepDto): string {
         >
           <template v-if="group.parallel">
             <span class="timeline-label">{{ group.label }}</span>
-            <span class="parallel-branch" aria-label="Wafer 与 Test 并行准备">
+            <span class="parallel-branch" :aria-label="locale === 'en-US' ? 'Wafer and Test preparation in parallel' : 'Wafer 与 Test 并行准备'">
               <span
                 v-for="step in group.steps"
                 :key="step.key"
@@ -115,21 +123,21 @@ function timelineDate(step: DemoProjectTimelineStepDto): string {
                 :class="step.state.toLocaleLowerCase()"
                 data-parallel-lane
                 :data-parallel-stage="step.key"
-                :data-tooltip="step.label"
-                :title="step.label"
+                :data-tooltip="copy(step.label, stageCopy[step.label] || step.label)"
+                :title="copy(step.label, stageCopy[step.label] || step.label)"
               >
                 <span class="parallel-wire" aria-hidden="true"></span>
                 <i aria-hidden="true"></i>
               </span>
             </span>
-            <time>{{ preparationValue(group.steps, 'date', '待排期') }}</time>
-            <small>{{ preparationValue(group.steps, 'actor', '待确认') }}</small>
+            <time>{{ preparationValue(group.steps, 'date', locale === 'en-US' ? 'To be scheduled' : '待排期') }}</time>
+            <small>{{ preparationValue(group.steps, 'actor', locale === 'en-US' ? 'To be confirmed' : '待确认') }}</small>
           </template>
           <template v-else>
             <span class="timeline-label">{{ group.label }}</span>
             <span class="single-node"><i aria-hidden="true"></i></span>
             <time>{{ timelineDate(group.steps[0]) }}</time>
-            <small>{{ group.steps[0].actor ? personnelDisplayName(group.steps[0].actor) : (group.state === 'Waiting' ? '待确认' : '客户节点') }}</small>
+            <small>{{ group.steps[0].actor ? personnelDisplayName(group.steps[0].actor) : (group.state === 'Waiting' ? (locale === 'en-US' ? 'To be confirmed' : '待确认') : (locale === 'en-US' ? 'Customer milestone' : '客户节点')) }}</small>
           </template>
         </li>
       </ol>

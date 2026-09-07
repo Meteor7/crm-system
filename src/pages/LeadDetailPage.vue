@@ -15,11 +15,14 @@ import LeadEditorModal from '@/features/leads/LeadEditorModal.vue'
 import LeadConvertModal from '@/features/leads/LeadConvertModal.vue'
 import { readAllPages } from '@/features/shared/read-all-pages'
 import { formatDisplayDate } from '@/domain/time'
+import { useI18n, useLocaleMessage } from '@/i18n'
+import { salesEnumLabel } from '@/features/shared/sales-i18n'
 
 const props = withDefaults(defineProps<{ apiClient?: CrmApi }>(), { apiClient: () => defaultApi })
 const route = useRoute()
 const router = useRouter()
 const app = useAppStore()
+const { locale, t, message } = useI18n()
 const lead = ref<LeadDto | null>(null)
 const accounts = ref<AccountSummaryDto[]>([])
 const segments = ref<string[]>(['Frontend', 'Advanced Packaging'])
@@ -27,14 +30,14 @@ const contacts = ref<ContactSummaryDto[]>([])
 const sites = ref<Array<SiteDto & { accountId: string }>>([])
 const loading = ref(false)
 const denied = ref(false)
-const error = ref('')
+const error = useLocaleMessage()
 const requestId = ref('')
 const editOpen = ref(false)
 const convertOpen = ref(false)
 const busy = ref(false)
-const actionError = ref('')
-const deleting = ref(false), deleteError = ref(''), deleteRequestId = ref('')
-const referencesMessage = ref('')
+const actionError = useLocaleMessage()
+const deleting = ref(false), deleteError = useLocaleMessage(), deleteRequestId = ref('')
+const referencesMessage = useLocaleMessage()
 const conversion = ref<LeadConversionResult | null>(null)
 const qualificationOpen = ref(false)
 const qualificationNote = ref('')
@@ -45,7 +48,7 @@ const arrangementDue = ref('')
 const canWrite = computed(() => app.can('deal:write'))
 const canDelete = computed(() => app.bootstrap?.user.role === 'Manager')
 async function deleteLead() {
-  if (!lead.value || deleting.value || !window.confirm(`确认删除 Lead ${lead.value.name}？`)) return
+  if (!lead.value || deleting.value || !window.confirm(t('leadDetail.deleteConfirm', { name: lead.value.name }))) return
   deleting.value = true
   deleteError.value = ''
   deleteRequestId.value = ''
@@ -54,7 +57,7 @@ async function deleteLead() {
     await router.push({ name: 'leads' })
   } catch (reason) {
     const mapped = mapRequestError(reason)
-    deleteError.value = mapped.message
+    deleteError.value = mapped.localizedMessage ?? mapped.message
     deleteRequestId.value = mapped.requestId
   } finally {
     deleting.value = false
@@ -120,7 +123,7 @@ async function load() {
   } catch (reason) {
     if (current !== sequence) return
     const mapped = mapRequestError(reason)
-    error.value = mapped.message
+    error.value = mapped.localizedMessage ?? mapped.message
     requestId.value = mapped.requestId
     denied.value = mapped.denied
   } finally {
@@ -130,7 +133,7 @@ async function load() {
   try {
     await loadReferences()
   } catch {
-    referencesMessage.value = 'Account、Contact 与厂区选项暂时无法加载；Lead 详情仍可查看。'
+    referencesMessage.value = message('leadDetail.referencesFailed')
   }
 }
 async function saveLead(payload: CreateLeadInput) {
@@ -142,7 +145,7 @@ async function saveLead(payload: CreateLeadInput) {
     editOpen.value = false
     return true
   } catch (reason) {
-    actionError.value = mapRequestError(reason).message
+    const mapped = mapRequestError(reason); actionError.value = mapped.localizedMessage ?? mapped.message
     return false
   } finally {
     busy.value = false
@@ -214,7 +217,7 @@ async function convertLead(payload: LeadConversionInput) {
     conversion.value = result.data
     convertOpen.value = false
   } catch (reason) {
-    actionError.value = mapRequestError(reason).message
+    const mapped = mapRequestError(reason); actionError.value = mapped.localizedMessage ?? mapped.message
   } finally {
     busy.value = false
   }
@@ -231,74 +234,74 @@ onMounted(async () => {
   <div class="lead-detail-page">
     <DataState v-if="loading && !lead" type="loading" />
     <DataState v-else-if="denied" type="denied" :message="error" :request-id="requestId" />
-    <DataState v-else-if="error || !lead" type="error" :message="error || '未找到 Lead'" :request-id="requestId" @retry="load" />
+    <DataState v-else-if="error || !lead" type="error" :message="error || (locale === 'en-US' ? 'Lead not found' : '未找到 Lead')" :request-id="requestId" @retry="load" />
     <template v-else>
-      <RouterLink class="back-link detail-back-button" :to="{ name: 'leads' }"><ArrowLeft :size="14" />返回 Leads</RouterLink>
+      <RouterLink class="back-link detail-back-button" :to="{ name: 'leads' }"><ArrowLeft :size="14" />{{ locale === 'en-US' ? 'Back to Leads' : '返回 Leads' }}</RouterLink>
       <PageHeader eyebrow="LEAD 360" :title="lead.name" :description="`${lead.company} · ${lead.title} · ${personnelDisplayName(lead.owner)}`">
-        <button v-if="canDelete" class="danger-button" type="button" data-delete-lead :disabled="deleting" @click="deleteLead">删除 Lead</button>
-        <button v-if="canConvert" class="primary-button" type="button" data-testid="convert-lead" @click="actionError = ''; convertOpen = true"><CheckCircle2 :size="14" />转换 Lead</button>
-        <button v-if="canWrite && lead.status !== 'Converted'" class="secondary-button" type="button" data-testid="edit-lead" @click="actionError = ''; editOpen = true"><Edit3 :size="14" />编辑 Lead</button>
+        <button v-if="canDelete" class="danger-button" type="button" data-delete-lead :disabled="deleting" @click="deleteLead">{{ locale === 'en-US' ? 'Delete lead' : '删除 Lead' }}</button>
+        <button v-if="canConvert" class="primary-button" type="button" data-testid="convert-lead" @click="actionError = ''; convertOpen = true"><CheckCircle2 :size="14" />{{ locale === 'en-US' ? 'Convert lead' : '转换 Lead' }}</button>
+        <button v-if="canWrite && lead.status !== 'Converted'" class="secondary-button" type="button" data-testid="edit-lead" @click="actionError = ''; editOpen = true"><Edit3 :size="14" />{{ locale === 'en-US' ? 'Edit lead' : '编辑 Lead' }}</button>
       </PageHeader>
       <p v-if="deleteError" class="inline-error" data-delete-error>{{ deleteError }}<small v-if="deleteRequestId">Request ID {{ deleteRequestId }}</small></p>
 
       <div class="lead-summary">
         <span class="avatar"><UserRoundSearch :size="24" /></span>
-        <div><small>Lead 状态</small><StatusBadge :label="lead.status" :tone="statusTone" /></div>
-        <div><small>线索来源</small><strong>{{ lead.source }}</strong></div>
-        <div><small>负责人</small><strong>{{ personnelDisplayName(lead.owner) }}</strong></div>
-        <div><small>最近更新</small><strong>{{ formatDisplayDate(lead.updatedAt) }}</strong></div>
+         <div><small>{{ locale === 'en-US' ? 'Lead status' : 'Lead 状态' }}</small><StatusBadge :label="salesEnumLabel(lead.status, locale)" :tone="statusTone" /></div>
+        <div><small>{{ locale === 'en-US' ? 'Source' : '线索来源' }}</small><strong>{{ salesEnumLabel(lead.source, locale) }}</strong></div>
+        <div><small>{{ locale === 'en-US' ? 'Owner' : '负责人' }}</small><strong>{{ personnelDisplayName(lead.owner) }}</strong></div>
+        <div><small>{{ locale === 'en-US' ? 'Updated' : '最近更新' }}</small><strong>{{ formatDisplayDate(lead.updatedAt) }}</strong></div>
       </div>
       <p v-if="referencesMessage" class="reference-note">{{ referencesMessage }}</p>
 
       <section v-if="conversion" class="conversion-result" data-testid="conversion-result">
         <CheckCircle2 :size="20" />
-        <div><strong>转换已完成</strong><p>Lead 已从潜在线索转为正式业务记录，重复提交不会再次创建。</p></div>
+        <div><strong>{{ locale === 'en-US' ? 'Conversion complete' : '转换已完成' }}</strong><p>{{ locale === 'en-US' ? 'This lead is now a formal business record. Re-submitting will not create duplicates.' : 'Lead 已从潜在线索转为正式业务记录，重复提交不会再次创建。' }}</p></div>
         <RouterLink :to="{ name: 'account-detail', params: { accountId: conversion.accountId } }">Account · {{ conversion.accountId }}</RouterLink>
         <RouterLink :to="{ name: 'contact-detail', params: { contactId: conversion.contactId } }">Contact · {{ conversion.contactId }}</RouterLink>
         <RouterLink :to="{ name: 'opportunities', query: { opportunityId: conversion.opportunityId } }">Opportunity · {{ conversion.opportunityId }}</RouterLink>
       </section>
 
       <div class="detail-grid">
-        <SectionCard title="线索资料" eyebrow="LEAD PROFILE">
+        <SectionCard :title="locale === 'en-US' ? 'Lead profile' : '线索资料'" eyebrow="LEAD PROFILE">
           <dl class="profile-list">
-            <div><dt>公司</dt><dd><Building2 :size="13" />{{ lead.company }}</dd></div>
-            <div><dt>职位</dt><dd>{{ lead.title }}</dd></div>
-            <div><dt>电话</dt><dd><a v-if="lead.phone" :href="`tel:${lead.phone}`"><Phone :size="13" />{{ lead.phone }}</a><span v-else>—</span></dd></div>
-            <div><dt>邮箱</dt><dd><a v-if="lead.email" :href="`mailto:${lead.email}`"><Mail :size="13" />{{ lead.email }}</a><span v-else>—</span></dd></div>
-            <div><dt>初步兴趣</dt><dd>{{ lead.interest || '未记录' }}</dd></div>
-            <div><dt>下一步</dt><dd>{{ lead.nextAction || '未设置' }}<span v-if="lead.nextActionDue">· {{ lead.nextActionDue }}</span></dd></div>
+            <div><dt>{{ locale === 'en-US' ? 'Company' : '公司' }}</dt><dd><Building2 :size="13" />{{ lead.company }}</dd></div>
+            <div><dt>{{ locale === 'en-US' ? 'Title' : '职位' }}</dt><dd>{{ lead.title }}</dd></div>
+            <div><dt>{{ locale === 'en-US' ? 'Phone' : '电话' }}</dt><dd><a v-if="lead.phone" :href="`tel:${lead.phone}`"><Phone :size="13" />{{ lead.phone }}</a><span v-else>—</span></dd></div>
+            <div><dt>{{ locale === 'en-US' ? 'Email' : '邮箱' }}</dt><dd><a v-if="lead.email" :href="`mailto:${lead.email}`"><Mail :size="13" />{{ lead.email }}</a><span v-else>—</span></dd></div>
+            <div><dt>{{ locale === 'en-US' ? 'Initial interest' : '初步兴趣' }}</dt><dd>{{ lead.interest || (locale === 'en-US' ? 'Not recorded' : '未记录') }}</dd></div>
+            <div><dt>{{ locale === 'en-US' ? 'Next step' : '下一步' }}</dt><dd>{{ lead.nextAction || (locale === 'en-US' ? 'Not set' : '未设置') }}<span v-if="lead.nextActionDue">· {{ lead.nextActionDue }}</span></dd></div>
           </dl>
         </SectionCard>
-        <SectionCard title="首次联系与判断" eyebrow="QUALIFICATION">
+        <SectionCard :title="locale === 'en-US' ? 'First contact & qualification' : '首次联系与判断'" eyebrow="QUALIFICATION">
           <template v-if="canWrite && lead.status !== 'Converted'" #action>
-            <button class="card-action" type="button" data-testid="edit-qualification" @click="startQualificationEdit"><Edit3 :size="13" />更改</button>
+            <button class="card-action" type="button" data-testid="edit-qualification" @click="startQualificationEdit"><Edit3 :size="13" />{{ locale === 'en-US' ? 'Edit' : '更改' }}</button>
           </template>
           <form v-if="qualificationOpen" class="inline-form" @submit.prevent="saveQualification">
-            <label><span>首次联系与判断</span><textarea v-model="qualificationNote" aria-label="首次联系与判断" rows="4" required /></label>
-            <label><span>判断结果</span><select v-model="qualificationStatus" aria-label="判断结果"><option>New</option><option>Working</option><option>Qualified</option><option>Nurturing</option><option>Disqualified</option></select></label>
+            <label><span>{{ locale === 'en-US' ? 'First contact & qualification' : '首次联系与判断' }}</span><textarea v-model="qualificationNote" :aria-label="locale === 'en-US' ? 'First contact and qualification' : '首次联系与判断'" rows="4" required /></label>
+             <label><span>{{ locale === 'en-US' ? 'Qualification result' : '判断结果' }}</span><select v-model="qualificationStatus" :aria-label="locale === 'en-US' ? 'Qualification result' : '判断结果'"><option v-for="item in ['New', 'Working', 'Qualified', 'Nurturing', 'Disqualified']" :key="item" :value="item">{{ salesEnumLabel(item, locale) }}</option></select></label>
             <p v-if="actionError" class="inline-error">{{ actionError }}</p>
-            <div class="inline-actions"><button class="text-button" type="button" @click="qualificationOpen = false">取消</button><button class="primary-button compact" type="submit" data-testid="save-qualification" :disabled="busy">保存判断</button></div>
+            <div class="inline-actions"><button class="text-button" type="button" @click="qualificationOpen = false">{{ locale === 'en-US' ? 'Cancel' : '取消' }}</button><button class="primary-button compact" type="submit" data-testid="save-qualification" :disabled="busy">{{ locale === 'en-US' ? 'Save qualification' : '保存判断' }}</button></div>
           </form>
           <template v-else>
-            <div class="note-card"><small>FIRST CONTACT NOTE</small><p>{{ lead.firstContactNote || '尚未记录首次联系结果。' }}</p></div>
-            <div class="qualification-copy"><strong>Lead 回答“这个人值不值得跟进”</strong><p>判断结果用于安排跟进策略，不限制是否可以转换为 Opportunity。</p></div>
+            <div class="note-card"><small>FIRST CONTACT NOTE</small><p>{{ lead.firstContactNote || (locale === 'en-US' ? 'No first-contact outcome recorded.' : '尚未记录首次联系结果。') }}</p></div>
+            <div class="qualification-copy"><strong>{{ locale === 'en-US' ? 'Does this lead deserve follow-up?' : 'Lead 回答“这个人值不值得跟进”' }}</strong><p>{{ locale === 'en-US' ? 'The result guides follow-up strategy; it does not block conversion to an opportunity.' : '判断结果用于安排跟进策略，不限制是否可以转换为 Opportunity。' }}</p></div>
           </template>
         </SectionCard>
-        <SectionCard title="活动时间线" eyebrow="ACTIVITY TIMELINE">
+        <SectionCard :title="locale === 'en-US' ? 'Activity timeline' : '活动时间线'" eyebrow="ACTIVITY TIMELINE">
           <template v-if="canWrite && lead.status !== 'Converted'" #action>
-            <button class="card-action" type="button" data-testid="add-arrangement" @click="startArrangement"><Plus :size="13" />增添安排</button>
+            <button class="card-action" type="button" data-testid="add-arrangement" @click="startArrangement"><Plus :size="13" />{{ locale === 'en-US' ? 'Add activity' : '增添安排' }}</button>
           </template>
           <form v-if="arrangementOpen" class="inline-form arrangement-form" @submit.prevent="saveArrangement">
-            <label><span>后续安排</span><input v-model="arrangementAction" aria-label="后续安排" required /></label>
-            <label><span>安排日期</span><input v-model="arrangementDue" aria-label="安排日期" type="date" required /></label>
+            <label><span>{{ locale === 'en-US' ? 'Next action' : '后续安排' }}</span><input v-model="arrangementAction" :aria-label="locale === 'en-US' ? 'Next action' : '后续安排'" required /></label>
+            <label><span>{{ locale === 'en-US' ? 'Due date' : '安排日期' }}</span><input v-model="arrangementDue" :aria-label="locale === 'en-US' ? 'Due date' : '安排日期'" type="date" required /></label>
             <p v-if="actionError" class="inline-error">{{ actionError }}</p>
-            <div class="inline-actions"><button class="text-button" type="button" @click="arrangementOpen = false">取消</button><button class="primary-button compact" type="submit" data-testid="save-arrangement" :disabled="busy">保存安排</button></div>
+            <div class="inline-actions"><button class="text-button" type="button" @click="arrangementOpen = false">{{ locale === 'en-US' ? 'Cancel' : '取消' }}</button><button class="primary-button compact" type="submit" data-testid="save-arrangement" :disabled="busy">{{ locale === 'en-US' ? 'Save activity' : '保存安排' }}</button></div>
           </form>
           <div class="timeline">
-            <article><span></span><div><small>{{ formatDisplayDate(lead.createdAt) }}</small><strong>Lead 创建</strong><p>来源：{{ lead.source }}</p></div></article>
-            <article v-for="activity in timelineActivities" :key="activity.id"><span></span><div><small>{{ formatDisplayDate(activity.dueDate || lead.updatedAt) }}</small><strong>后续安排</strong><p>{{ activity.action }}</p></div></article>
-            <article v-if="!timelineActivities.length"><span></span><div><small>{{ formatDisplayDate(lead.updatedAt) }}</small><strong>后续安排</strong><p>暂无下一步任务</p></div></article>
-            <article v-if="lead.convertedAt"><span></span><div><small>{{ lead.convertedAt }}</small><strong>转换为正式业务记录</strong><p>{{ lead.convertedOpportunityId }}</p></div></article>
+            <article><span></span><div><small>{{ formatDisplayDate(lead.createdAt) }}</small><strong>{{ locale === 'en-US' ? 'Lead created' : 'Lead 创建' }}</strong><p>{{ locale === 'en-US' ? 'Source: ' : '来源：' }}{{ salesEnumLabel(lead.source, locale) }}</p></div></article>
+            <article v-for="activity in timelineActivities" :key="activity.id"><span></span><div><small>{{ formatDisplayDate(activity.dueDate || lead.updatedAt) }}</small><strong>{{ locale === 'en-US' ? 'Next action' : '后续安排' }}</strong><p>{{ activity.action }}</p></div></article>
+            <article v-if="!timelineActivities.length"><span></span><div><small>{{ formatDisplayDate(lead.updatedAt) }}</small><strong>{{ locale === 'en-US' ? 'Next action' : '后续安排' }}</strong><p>{{ locale === 'en-US' ? 'No next action' : '暂无下一步任务' }}</p></div></article>
+            <article v-if="lead.convertedAt"><span></span><div><small>{{ lead.convertedAt }}</small><strong>{{ locale === 'en-US' ? 'Converted to business record' : '转换为正式业务记录' }}</strong><p>{{ lead.convertedOpportunityId }}</p></div></article>
           </div>
         </SectionCard>
       </div>

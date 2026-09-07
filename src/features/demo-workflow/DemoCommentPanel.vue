@@ -1,9 +1,11 @@
 <script setup lang="ts">
+import { participantRoleLabel } from '@/features/shared/sales-i18n'
 import { computed, ref } from 'vue'
 import { AtSign, MessageSquareText, Send } from '@lucide/vue'
 import type { DemoCommentDto } from '@/types/workspaces'
 import { personnelDisplayName } from '@/demo/personnel'
 import { formatDisplayDate } from '@/domain/time'
+import { useI18n } from '@/i18n'
 
 const props = withDefaults(defineProps<{
   comments: DemoCommentDto[]
@@ -19,6 +21,7 @@ const props = withDefaults(defineProps<{
 const emit = defineEmits<{ submit: [payload: { body: string; mentions: string[] }] }>()
 const draft = ref('')
 const mentions = ref<string[]>([])
+const { locale } = useI18n()
 const canSubmit = computed(() => Boolean(draft.value.trim()) && !props.busy)
 
 function submit() {
@@ -46,9 +49,9 @@ function commentMentions(comment: DemoCommentDto) {
     <form class="comment-composer" data-publish-demo-comment @submit.prevent="submit">
       <span class="composer-icon"><MessageSquareText :size="18" /></span>
       <label>
-        <span>项目协作 Comment</span>
-        <fieldset class="mention-picker" aria-label="选择要提及的成员">
-          <legend><AtSign :size="14" />提及成员（可多选）</legend>
+        <span>{{ locale === 'en-US' ? 'Project collaboration comment' : '项目协作 Comment' }}</span>
+        <fieldset class="mention-picker" :aria-label="locale === 'en-US' ? 'Select members to mention' : '选择要提及的成员'">
+          <legend><AtSign :size="14" />{{ locale === 'en-US' ? 'Mention members (multi-select)' : '提及成员（可多选）' }}</legend>
           <label v-for="person in participants" :key="person.id" :class="{ selected: mentions.includes(person.id) }">
             <input v-model="mentions" type="checkbox" :value="person.id" />@{{ person.name }}
           </label>
@@ -56,13 +59,13 @@ function commentMentions(comment: DemoCommentDto) {
         <textarea
           v-model="draft"
           data-demo-comment-input
-          aria-label="项目 Comment"
-          placeholder="分享进展、风险或需要其他人员确认的事项…"
+          :aria-label="locale === 'en-US' ? 'Project comment' : '项目 Comment'"
+          :placeholder="locale === 'en-US' ? 'Share progress, risks, or items needing confirmation…' : '分享进展、风险或需要其他人员确认的事项…'"
           rows="3"
         />
       </label>
       <button class="primary-button" type="submit" :disabled="!canSubmit">
-        <Send :size="14" />{{ busy ? '发布中…' : '发布 Comment' }}
+        <Send :size="14" />{{ busy ? (locale === 'en-US' ? 'Publishing…' : '发布中…') : (locale === 'en-US' ? 'Publish comment' : '发布 Comment') }}
       </button>
     </form>
     <p v-if="error" class="comment-error" role="alert">{{ error }}</p>
@@ -73,10 +76,10 @@ function commentMentions(comment: DemoCommentDto) {
         <div>
           <header>
             <strong>{{ personnelDisplayName(comment.author) }}</strong>
-            <small>{{ comment.role }}</small>
+            <small>{{ participantRoleLabel(comment.role, locale) }}</small>
             <time>{{ formatDisplayDate(comment.createdAt) }}</time>
           </header>
-          <div v-if="commentMentions(comment).length" class="comment-mentions" aria-label="提及成员">
+          <div v-if="commentMentions(comment).length" class="comment-mentions" :aria-label="locale === 'en-US' ? 'Mentioned members' : '提及成员'">
             <span v-for="person in commentMentions(comment)" :key="person.id">@{{ person.name }}</span>
           </div>
           <p>{{ comment.body }}</p>
@@ -85,8 +88,8 @@ function commentMentions(comment: DemoCommentDto) {
     </div>
     <div v-else class="comment-empty">
       <MessageSquareText :size="24" />
-      <strong>暂无 Comment</strong>
-      <span>发布第一条项目协作记录。</span>
+      <strong>{{ locale === 'en-US' ? 'No comments yet' : '暂无 Comment' }}</strong>
+      <span>{{ locale === 'en-US' ? 'Publish the first project collaboration update.' : '发布第一条项目协作记录。' }}</span>
     </div>
   </section>
 </template>

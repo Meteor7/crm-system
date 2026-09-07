@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { meetingParseMessage } from '@/features/visits/meeting-messages'
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { ArrowLeft, Download, FileUp, Pencil, Save, X } from '@lucide/vue'
 import { useRoute } from 'vue-router'
@@ -7,24 +8,34 @@ import { mapRequestError } from '@/api/request-state'
 import { downloadBlob } from '@/features/shared/download-blob'
 import { personnelDisplayName } from '@/demo/personnel'
 import { formatDisplayDate } from '@/domain/time'
+import { useI18n, useLocaleMessage } from '@/i18n'
 import { useAppStore } from '@/stores/app'
 import type { MeetingRecordParseStatus, VisitDetailDto, VisitMeetingRecordInput, VisitStatus } from '@/types/crm'
 import DataState from '@/design-system/DataState.vue'
 import PageHeader from '@/design-system/PageHeader.vue'
 import SectionCard from '@/design-system/SectionCard.vue'
 import StatusBadge from '@/design-system/StatusBadge.vue'
+import { meetingRecordParseLabel, salesEnumLabel } from '@/features/shared/sales-i18n'
 
 const props = withDefaults(defineProps<{ apiClient?: CrmApi }>(), { apiClient: () => defaultApi })
+const { locale, t } = useI18n()
 const route = useRoute()
 const app = useAppStore()
 const detail = ref<VisitDetailDto | null>(null)
-const loading = ref(true), busy = ref(false), error = ref(''), requestId = ref(''), editing = ref(false)
+const loading = ref(true), busy = ref(false), error = useLocaleMessage(), requestId = ref(''), editing = ref(false)
 const form = reactive<VisitMeetingRecordInput>({ meetingStart: '', meetingEnd: '', purpose: '', attendees: '', agenda: '', summary: '', conclusion: '', followup: '' })
 const visitId = computed(() => typeof route.params.visitId === 'string' ? route.params.visitId : '')
 const canWrite = computed(() => app.can('visit:write'))
-const parseLabel: Record<MeetingRecordParseStatus, string> = { Parsed: '已解析', NeedsManualReview: '待人工检查', ArchiveOnly: '仅归档', Failed: '解析失败' }
 const parseTone: Record<MeetingRecordParseStatus, 'positive' | 'warning' | 'neutral' | 'danger'> = { Parsed: 'positive', NeedsManualReview: 'warning', ArchiveOnly: 'neutral', Failed: 'danger' }
-const visitStatusLabel: Record<VisitStatus, string> = { Planned: '\u5f85\u63d0\u4ea4\u62dc\u8bbf\u8bb0\u5f55', Visited: '\u5df2\u5b8c\u6210', 'Minutes Submitted': '\u62dc\u8bbf\u8bb0\u5f55\u5df2\u63d0\u4ea4', 'Manager Reviewed': '\u7ba1\u7406\u8005\u5df2\u5ba1\u6838' }
+const visitStatusLabel: Record<VisitStatus, string> = { Planned: '待提交拜访记录', Visited: '已完成', 'Minutes Submitted': '拜访记录已提交', 'Manager Reviewed': '管理者已审核' }
+function statusText(status: VisitStatus) {
+  if (locale.value !== 'en-US') return visitStatusLabel[status]
+  return ({ Planned: 'Minutes pending', Visited: 'Completed', 'Minutes Submitted': 'Minutes submitted', 'Manager Reviewed': 'Manager reviewed' } as Record<VisitStatus, string>)[status]
+}
+function parseText(status: MeetingRecordParseStatus) {
+  return meetingRecordParseLabel(status, locale.value)
+}
+const notRecognized = computed(() => locale.value === 'en-US' ? 'Not recognized' : '未识别')
 
 function fillForm() {
   const record = detail.value?.meetingRecord
@@ -34,7 +45,7 @@ function fillForm() {
 async function load() {
   loading.value = true; error.value = ''
   try { detail.value = (await props.apiClient.getVisitDetail(visitId.value)).data; fillForm() }
-  catch (reason) { const mapped = mapRequestError(reason); error.value = mapped.message; requestId.value = mapped.requestId }
+  catch (reason) { const mapped = mapRequestError(reason); error.value = mapped.localizedMessage ?? mapped.message; requestId.value = mapped.requestId }
   finally { loading.value = false }
 }
 
@@ -44,7 +55,7 @@ async function save() {
     await props.apiClient.updateVisitMeetingRecord(visitId.value, { ...form }, detail.value?.meetingRecord?.modified)
     editing.value = false
     await load()
-  } catch (reason) { const mapped = mapRequestError(reason); error.value = mapped.message; requestId.value = mapped.requestId }
+  } catch (reason) { const mapped = mapRequestError(reason); error.value = mapped.localizedMessage ?? mapped.message; requestId.value = mapped.requestId }
   finally { busy.value = false }
 }
 
@@ -56,14 +67,14 @@ async function upload(event: Event) {
   try {
     detail.value = (await props.apiClient.submitVisitRecord(visitId.value, { blob: file, fileName: file.name, mimeType: file.type || 'application/octet-stream', size: file.size })).data
     fillForm()
-  } catch (reason) { const mapped = mapRequestError(reason); error.value = mapped.message; requestId.value = mapped.requestId }
+  } catch (reason) { const mapped = mapRequestError(reason); error.value = mapped.localizedMessage ?? mapped.message; requestId.value = mapped.requestId }
   finally { busy.value = false; input.value = '' }
 }
 
 async function download(fileId: string) {
   busy.value = true; error.value = ''
   try { const file = await props.apiClient.getVisitAttachment(fileId); downloadBlob(file.blob, file.fileName) }
-  catch (reason) { const mapped = mapRequestError(reason); error.value = mapped.message; requestId.value = mapped.requestId }
+  catch (reason) { const mapped = mapRequestError(reason); error.value = mapped.localizedMessage ?? mapped.message; requestId.value = mapped.requestId }
   finally { busy.value = false }
 }
 
@@ -74,63 +85,63 @@ watch(visitId, () => { void load() })
 
 <template>
   <div class="visit-detail-page">
-    <RouterLink class="back-link" :to="{ name: 'visits' }"><ArrowLeft :size="14" />返回拜访管理</RouterLink>
-    <p v-if="error" class="form-error">{{ error }}<small v-if="requestId">Request ID {{ requestId }}</small></p>
+    <RouterLink class="back-link" :to="{ name: 'visits' }"><ArrowLeft :size="14" />{{ t('detail.backVisits') }}</RouterLink>
+    <p v-if="error" class="form-error">{{ error }}<small v-if="requestId">{{ locale === 'en-US' ? 'Request ID' : '请求编号' }} {{ requestId }}</small></p>
     <DataState v-if="loading" type="loading" />
     <template v-else-if="detail">
-      <PageHeader eyebrow="VISIT RECORD" :title="detail.subject" :description="`${detail.accountName} · ${formatDisplayDate(detail.date)} · ${detail.type}`" />
+      <PageHeader eyebrow="VISIT RECORD" :title="detail.subject" :description="`${detail.accountName} · ${formatDisplayDate(detail.date)} · ${salesEnumLabel(detail.type, locale)}`" />
 
       <section class="visit-facts">
-        <div><small>客户</small><strong>{{ detail.accountName }}</strong></div>
-        <div><small>拜访负责人</small><strong>{{ personnelDisplayName(detail.owner) }}</strong></div>
-        <div><small>主要联系人</small><strong>{{ detail.primaryContact?.name || '未关联' }}</strong></div>
-        <div><small>拜访状态</small><strong>{{ visitStatusLabel[detail.status] }}</strong></div>
+        <div><small>{{ t('detail.account') }}</small><strong>{{ detail.accountName }}</strong></div>
+        <div><small>{{ t('detail.visitOwner') }}</small><strong>{{ personnelDisplayName(detail.owner) }}</strong></div>
+        <div><small>{{ t('detail.primaryContactLabel') }}</small><strong>{{ detail.primaryContact?.name || t('detail.notLinked') }}</strong></div>
+        <div><small>{{ t('detail.visitStatus') }}</small><strong>{{ statusText(detail.status) }}</strong></div>
       </section>
 
       <div class="detail-grid">
         <main>
-          <SectionCard title="&#x62DC;&#x8BBF;&#x8BB0;&#x5F55;" eyebrow="VISIT RECORD" :description="detail.meetingRecord?.parseMessage || '\u5c1a\u672a\u63d0\u4ea4\u62dc\u8bbf\u8bb0\u5f55\uff0c\u53ef\u63d0\u4ea4\u6587\u4ef6\u6216\u624b\u52a8\u8865\u5f55\u3002'">
+          <SectionCard :title="t('detail.visitRecord')" eyebrow="VISIT RECORD" :description="meetingParseMessage(detail.meetingRecord?.parseMessage || '', locale) || (locale === 'en-US' ? 'No visit record submitted yet. Upload a file or enter it manually.' : '尚未提交拜访记录，可提交文件或手动补录。')">
             <template #action>
               <div class="record-actions">
-                <StatusBadge v-if="detail.meetingRecord" :label="parseLabel[detail.meetingRecord.parseStatus]" :tone="parseTone[detail.meetingRecord.parseStatus]" />
-                <label v-if="canWrite && !editing && detail.status !== 'Manager Reviewed'" class="secondary-button upload-record-button" :class="{ disabled: busy }"><FileUp :size="13" />上传解析<input type="file" :disabled="busy" aria-label="上传解析拜访记录" @change="upload" /></label>
-                <button v-if="canWrite && !editing && detail.status !== 'Manager Reviewed'" class="secondary-button" type="button" @click="editing = true"><Pencil :size="13" />{{ detail.meetingRecord ? '编辑记录' : '手动补录' }}</button>
+                <StatusBadge v-if="detail.meetingRecord" :label="parseText(detail.meetingRecord.parseStatus)" :tone="parseTone[detail.meetingRecord.parseStatus]" />
+                <label v-if="canWrite && !editing && detail.status !== 'Manager Reviewed'" class="secondary-button upload-record-button" :class="{ disabled: busy }"><FileUp :size="13" />{{ t('detail.uploadParsed') }}<input type="file" :disabled="busy" :aria-label="t('detail.uploadParsed')" @change="upload" /></label>
+                <button v-if="canWrite && !editing && detail.status !== 'Manager Reviewed'" class="secondary-button" type="button" @click="editing = true"><Pencil :size="13" />{{ detail.meetingRecord ? t('detail.editRecord') : t('detail.manualEntry') }}</button>
               </div>
             </template>
 
             <form v-if="editing" class="record-form" @submit.prevent="save">
-              <label><span>开始时间</span><input v-model="form.meetingStart" /></label>
-              <label><span>结束时间</span><input v-model="form.meetingEnd" /></label>
-              <label class="wide"><span>Meeting Purpose</span><textarea v-model="form.purpose" required /></label>
-              <label class="wide"><span>Attendees</span><textarea v-model="form.attendees" required /></label>
-              <label class="wide"><span>Agenda</span><textarea v-model="form.agenda" required /></label>
-              <label class="wide"><span>Summary</span><textarea v-model="form.summary" required /></label>
-              <label class="wide"><span>Conclusion</span><textarea v-model="form.conclusion" required /></label>
-              <label class="wide"><span>Followup</span><textarea v-model="form.followup" required /></label>
-              <div class="wide form-actions"><button class="secondary-button" type="button" :disabled="busy" @click="cancelEdit"><X :size="14" />取消</button><button class="primary-button" type="submit" :disabled="busy"><Save :size="14" />&#x4FDD;&#x5B58;&#x62DC;&#x8BBF;&#x8BB0;&#x5F55;</button></div>
+              <label><span>{{ t('detail.startTime') }}</span><input v-model="form.meetingStart" /></label>
+              <label><span>{{ t('detail.endTime') }}</span><input v-model="form.meetingEnd" /></label>
+              <label class="wide"><span>{{ t('detail.meetingPurpose') }}</span><textarea v-model="form.purpose" required /></label>
+              <label class="wide"><span>{{ t('detail.attendees') }}</span><textarea v-model="form.attendees" required /></label>
+              <label class="wide"><span>{{ t('detail.agenda') }}</span><textarea v-model="form.agenda" required /></label>
+              <label class="wide"><span>{{ t('detail.summary') }}</span><textarea v-model="form.summary" required /></label>
+              <label class="wide"><span>{{ t('detail.conclusion') }}</span><textarea v-model="form.conclusion" required /></label>
+              <label class="wide"><span>{{ t('detail.followup') }}</span><textarea v-model="form.followup" required /></label>
+              <div class="wide form-actions"><button class="secondary-button" type="button" :disabled="busy" @click="cancelEdit"><X :size="14" />{{ t('detail.cancel') }}</button><button class="primary-button" type="submit" :disabled="busy"><Save :size="14" />{{ t('detail.saveVisitRecord') }}</button></div>
             </form>
 
             <dl v-else-if="detail.meetingRecord" class="record-fields">
-              <div><dt>Meeting Time</dt><dd>{{ [detail.meetingRecord.meetingStart, detail.meetingRecord.meetingEnd].filter(Boolean).join(' - ') || '未识别' }}</dd></div>
-              <div><dt>Meeting Purpose</dt><dd>{{ detail.meetingRecord.purpose || '未识别' }}</dd></div>
-              <div><dt>Attendees</dt><dd>{{ detail.meetingRecord.attendees || '未识别' }}</dd></div>
-              <div><dt>Agenda</dt><dd>{{ detail.meetingRecord.agenda || '未识别' }}</dd></div>
-              <div><dt>Summary</dt><dd>{{ detail.meetingRecord.summary || '未识别' }}</dd></div>
-              <div><dt>Conclusion</dt><dd>{{ detail.meetingRecord.conclusion || '未识别' }}</dd></div>
-              <div><dt>Followup</dt><dd>{{ detail.meetingRecord.followup || '未识别' }}</dd></div>
+              <div><dt>{{ locale === 'en-US' ? 'Meeting time' : '会议时间' }}</dt><dd>{{ [detail.meetingRecord.meetingStart, detail.meetingRecord.meetingEnd].filter(Boolean).join(' - ') || notRecognized }}</dd></div>
+              <div><dt>{{ locale === 'en-US' ? 'Meeting purpose' : '会议目的' }}</dt><dd>{{ detail.meetingRecord.purpose || notRecognized }}</dd></div>
+              <div><dt>{{ locale === 'en-US' ? 'Attendees' : '参与人' }}</dt><dd>{{ detail.meetingRecord.attendees || notRecognized }}</dd></div>
+              <div><dt>{{ locale === 'en-US' ? 'Agenda' : '议程' }}</dt><dd>{{ detail.meetingRecord.agenda || notRecognized }}</dd></div>
+              <div><dt>{{ locale === 'en-US' ? 'Summary' : '总结' }}</dt><dd>{{ detail.meetingRecord.summary || notRecognized }}</dd></div>
+              <div><dt>{{ locale === 'en-US' ? 'Conclusion' : '结论' }}</dt><dd>{{ detail.meetingRecord.conclusion || notRecognized }}</dd></div>
+              <div><dt>{{ locale === 'en-US' ? 'Follow-up' : '后续行动' }}</dt><dd>{{ detail.meetingRecord.followup || notRecognized }}</dd></div>
             </dl>
-            <div v-else class="empty-record">尚无会议记录</div>
+            <div v-else class="empty-record">{{ t('detail.noMeetingRecord') }}</div>
           </SectionCard>
         </main>
 
         <aside>
-          <SectionCard title="原始文件" eyebrow="SOURCE FILES">
+          <SectionCard :title="t('detail.sourceFiles')" eyebrow="SOURCE FILES">
             <div v-if="detail.attachments.length" class="file-list">
-              <article v-for="file in detail.attachments" :key="file.id"><div><strong>{{ file.fileName }}</strong><small>{{ Math.max(1, Math.ceil(file.size / 1024)) }} KB · {{ formatDisplayDate(file.uploadedAt) }}</small></div><button type="button" :disabled="busy" title="下载原始文件" @click="download(file.id)"><Download :size="15" /></button></article>
+              <article v-for="file in detail.attachments" :key="file.id"><div><strong>{{ file.fileName }}</strong><small>{{ Math.max(1, Math.ceil(file.size / 1024)) }} KB · {{ formatDisplayDate(file.uploadedAt) }}</small></div><button type="button" :disabled="busy" :title="t('detail.downloadSource')" @click="download(file.id)"><Download :size="15" /></button></article>
             </div>
-            <p v-else class="empty-files">尚未归档文件</p>
+            <p v-else class="empty-files">{{ t('detail.noArchivedFiles') }}</p>
           </SectionCard>
-          <SectionCard title="拜访目标" eyebrow="OBJECTIVE"><p class="objective">{{ detail.objective }}</p></SectionCard>
+          <SectionCard :title="t('detail.visitObjective')" eyebrow="OBJECTIVE"><p class="objective">{{ detail.objective }}</p></SectionCard>
         </aside>
       </div>
     </template>

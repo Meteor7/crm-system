@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { bookingTitle, systemValueLabel } from '@/features/shared/system-labels'
 import { personnelDisplayName } from '@/demo/personnel'
 import { computed, onMounted, ref, watch } from 'vue'
 import { ArrowLeft, Building2, CalendarClock, CircleDollarSign, Cpu, ExternalLink, PackageCheck, UserRound } from '@lucide/vue'
@@ -14,22 +15,26 @@ import StatusBadge from '@/design-system/StatusBadge.vue'
 import { formatMoney } from '@/domain/money'
 import { formatDisplayDate } from '@/domain/time'
 import { useAppStore } from '@/stores/app'
+import { useI18n, useLocaleMessage } from '@/i18n'
+import { salesEnumLabel, salesUnits } from '@/features/shared/sales-i18n'
 
 const props = withDefaults(defineProps<{ apiClient?: CrmApi }>(), { apiClient: () => defaultApi })
 const route = useRoute()
 const router = useRouter()
 const app = useAppStore()
+const { locale, t, message } = useI18n()
 const canDelete = computed(() => app.bootstrap?.user.role === 'Manager')
 const booking = ref<BookingDto | null>(null)
 const tools = ref<InstalledToolDto[]>([])
 const loading = ref(false)
-const error = ref('')
+const error = useLocaleMessage()
 const requestId = ref('')
-const deleting = ref(false), deleteError = ref(''), deleteRequestId = ref('')
-const equipmentWarning = ref('')
+const deleting = ref(false), deleteError = useLocaleMessage(), deleteRequestId = ref('')
+const equipmentWarning = useLocaleMessage()
+const equipmentWarningRequestId = ref('')
 let loadSequence = 0
 async function deleteBooking() {
-  if (!booking.value || deleting.value || !window.confirm(`确认删除 Booking ${booking.value.id}？`)) return
+  if (!booking.value || deleting.value || !window.confirm(t('detail.confirmDeleteBooking', { id: booking.value.id }))) return
   deleting.value = true
   deleteError.value = ''
   deleteRequestId.value = ''
@@ -38,7 +43,7 @@ async function deleteBooking() {
     await router.push({ name: 'booking' })
   } catch (reason) {
     const mapped = mapRequestError(reason)
-    deleteError.value = mapped.message
+    deleteError.value = mapped.localizedMessage ?? mapped.message
     deleteRequestId.value = mapped.requestId
   } finally {
     deleting.value = false
@@ -53,7 +58,7 @@ async function load() {
   loading.value = true
   error.value = ''
   requestId.value = ''
-  equipmentWarning.value = ''
+  equipmentWarning.value = ''; equipmentWarningRequestId.value = ''
   booking.value = null
   tools.value = []
   const pipelineResult = await Promise.resolve(props.apiClient.listPipeline({})).then(
@@ -63,11 +68,11 @@ async function load() {
   if (sequence !== loadSequence) return
   if (pipelineResult.status === 'rejected') {
     const mapped = mapRequestError(pipelineResult.reason)
-    error.value = mapped.message
+    error.value = mapped.localizedMessage ?? mapped.message
     requestId.value = mapped.requestId
   } else {
     booking.value = pipelineResult.value.data.bookings.find((item) => item.id === bookingId.value) ?? null
-    if (!booking.value) error.value = `未找到 Booking ${bookingId.value}`
+    if (!booking.value) error.value = message('detail.notFoundBookingId', { id: bookingId.value })
   }
   if (booking.value?.installedToolId) {
     try {
@@ -77,9 +82,8 @@ async function load() {
     } catch (reason) {
       if (sequence !== loadSequence) return
       const mapped = mapRequestError(reason)
-      equipmentWarning.value = mapped.requestId
-        ? `${mapped.message}（Request ID: ${mapped.requestId}）`
-        : mapped.message
+      equipmentWarning.value = mapped.localizedMessage ?? mapped.message
+      equipmentWarningRequestId.value = mapped.requestId
     }
   }
   if (sequence === loadSequence) loading.value = false
@@ -92,45 +96,45 @@ onMounted(load)
 <template>
   <div class="booking-detail-page">
     <DataState v-if="loading && !booking" type="loading" />
-    <DataState v-else-if="error || !booking" type="error" :message="error || '未找到 Booking'" :request-id="requestId" @retry="load" />
+    <DataState v-else-if="error || !booking" type="error" :message="error || t('detail.notFoundBooking')" :request-id="requestId" @retry="load" />
     <template v-else>
-      <RouterLink class="detail-back-button" :to="{ name: 'booking' }"><ArrowLeft :size="14" />返回 Booking 列表</RouterLink>
-      <PageHeader eyebrow="BOOKING DETAIL" :title="booking.title" :description="`${booking.id} · ${booking.accountName} · Owner ${personnelDisplayName(booking.owner)}`"><button v-if="canDelete" class="danger-button" type="button" data-delete-booking :disabled="deleting" @click="deleteBooking">删除 Booking</button></PageHeader>
-      <p v-if="deleteError" class="form-error" data-delete-error>{{ deleteError }}<small v-if="deleteRequestId">Request ID {{ deleteRequestId }}</small></p>
+      <RouterLink class="detail-back-button" :to="{ name: 'booking' }"><ArrowLeft :size="14" />{{ t('detail.backBookings') }}</RouterLink>
+      <PageHeader eyebrow="BOOKING DETAIL" :title="bookingTitle(booking, locale)" :description="`${booking.id} · ${booking.accountName} · ${t('detail.owner')} ${personnelDisplayName(booking.owner)}`"><button v-if="canDelete" class="danger-button" type="button" data-delete-booking :disabled="deleting" @click="deleteBooking">{{ t('detail.delete') }} Booking</button></PageHeader>
+      <p v-if="deleteError" class="form-error" data-delete-error>{{ deleteError }}<small v-if="deleteRequestId">{{ locale === 'en-US' ? 'Request ID' : '请求编号' }} {{ deleteRequestId }}</small></p>
 
       <section class="booking-summary">
-        <article><span><PackageCheck :size="18" /></span><div><small>当前状态</small><StatusBadge :label="booking.status" :tone="statusTone" /></div></article>
-        <article><span><CircleDollarSign :size="18" /></span><div><small>Booking 金额</small><strong>{{ formatMoney(booking.amount, booking.currency) }}</strong></div></article>
-        <article><span><CalendarClock :size="18" /></span><div><small>客户 DDL</small><strong>{{ formatDisplayDate(booking.ddl) }}</strong></div></article>
-        <article><span><Cpu :size="18" /></span><div><small>设备数量</small><strong>{{ booking.quantity }} 台 / 项</strong></div></article>
+        <article><span><PackageCheck :size="18" /></span><div><small>{{ t('detail.currentStatus') }}</small><StatusBadge :label="salesEnumLabel(booking.status, locale)" :tone="statusTone" /></div></article>
+        <article><span><CircleDollarSign :size="18" /></span><div><small>{{ t('detail.bookingAmount') }}</small><strong>{{ formatMoney(booking.amount, booking.currency) }}</strong></div></article>
+        <article><span><CalendarClock :size="18" /></span><div><small>{{ t('detail.customerDdl') }}</small><strong>{{ formatDisplayDate(booking.ddl) }}</strong></div></article>
+        <article><span><Cpu :size="18" /></span><div><small>{{ t('detail.equipmentQuantity') }}</small><strong>{{ booking.quantity }} {{ salesUnits(locale) }}</strong></div></article>
       </section>
 
       <div class="booking-detail-grid">
         <div class="booking-main">
-          <SectionCard title="Booking 信息" eyebrow="INFORMATION">
+          <SectionCard :title="t('detail.bookingInfo')" eyebrow="INFORMATION">
             <dl class="booking-fields">
-              <div><dt>Booking 编号</dt><dd>{{ booking.id }}</dd></div><div><dt>录入日期</dt><dd>{{ formatDisplayDate(booking.bookingDate) }}</dd></div>
-              <div><dt>设备需求</dt><dd>{{ booking.equipment }}</dd></div><div><dt>数量</dt><dd>{{ booking.quantity }} 台 / 项</dd></div>
-              <div><dt>来源类型</dt><dd><StatusBadge :label="booking.source" :tone="booking.source === 'Opportunity' ? 'info' : 'neutral'" /></dd></div>
-              <div><dt>Owner</dt><dd>{{ personnelDisplayName(booking.owner) }}</dd></div><div class="wide"><dt>备注</dt><dd>{{ booking.note || '—' }}</dd></div>
+              <div><dt>{{ t('detail.bookingNumber') }}</dt><dd>{{ booking.id }}</dd></div><div><dt>{{ t('detail.enteredDate') }}</dt><dd>{{ formatDisplayDate(booking.bookingDate) }}</dd></div>
+              <div><dt>{{ t('detail.equipmentNeed') }}</dt><dd>{{ booking.equipment }}</dd></div><div><dt>{{ t('detail.quantity') }}</dt><dd>{{ booking.quantity }} {{ salesUnits(locale) }}</dd></div>
+              <div><dt>{{ t('detail.sourceType') }}</dt><dd><StatusBadge :label="salesEnumLabel(booking.source, locale)" :tone="booking.source === 'Opportunity' ? 'info' : 'neutral'" /></dd></div>
+              <div><dt>{{ t('detail.owner') }}</dt><dd>{{ personnelDisplayName(booking.owner) }}</dd></div><div class="wide"><dt>{{ t('detail.notes') }}</dt><dd>{{ booking.note || '—' }}</dd></div>
             </dl>
           </SectionCard>
-          <SectionCard title="业务关联" eyebrow="RELATED BUSINESS">
+          <SectionCard :title="t('detail.relatedBusiness')" eyebrow="RELATED BUSINESS">
             <div class="related-links">
-              <RouterLink :to="{ name: 'account-detail', params: { accountId: booking.accountId } }"><span><Building2 :size="15" />客户</span><strong>{{ booking.accountName }}</strong><ExternalLink :size="13" /></RouterLink>
-              <RouterLink v-if="booking.primaryContactId" :to="{ name: 'contact-detail', params: { contactId: booking.primaryContactId } }"><span><UserRound :size="15" />主联系人</span><strong>{{ booking.customerContact }}</strong><ExternalLink :size="13" /></RouterLink>
-              <RouterLink v-if="booking.sourceOpportunityId" :to="{ name: 'opportunity-detail', params: { opportunityId: booking.sourceOpportunityId } }"><span><CircleDollarSign :size="15" />来源 Opportunity</span><strong>{{ booking.sourceOpportunityId }}</strong><ExternalLink :size="13" /></RouterLink>
+              <RouterLink :to="{ name: 'account-detail', params: { accountId: booking.accountId } }"><span><Building2 :size="15" />{{ t('detail.account') }}</span><strong>{{ booking.accountName }}</strong><ExternalLink :size="13" /></RouterLink>
+              <RouterLink v-if="booking.primaryContactId" :to="{ name: 'contact-detail', params: { contactId: booking.primaryContactId } }"><span><UserRound :size="15" />{{ t('detail.primaryContact') }}</span><strong>{{ booking.customerContact }}</strong><ExternalLink :size="13" /></RouterLink>
+              <RouterLink v-if="booking.sourceOpportunityId" :to="{ name: 'opportunity-detail', params: { opportunityId: booking.sourceOpportunityId } }"><span><CircleDollarSign :size="15" />{{ t('detail.sourceOpportunity') }}</span><strong>{{ booking.sourceOpportunityId }}</strong><ExternalLink :size="13" /></RouterLink>
             </div>
           </SectionCard>
         </div>
         <aside>
-          <SectionCard title="设备关联" eyebrow="INSTALLED TOOL">
-            <p v-if="equipmentWarning" class="equipment-note">{{ equipmentWarning }}</p>
+          <SectionCard :title="t('detail.equipmentRelation')" eyebrow="INSTALLED TOOL">
+            <p v-if="equipmentWarning" class="equipment-note">{{ equipmentWarning }}<small v-if="equipmentWarningRequestId">{{ locale === 'en-US' ? 'Request ID' : '请求编号' }}: {{ equipmentWarningRequestId }}</small></p>
             <div v-else-if="relatedTools.length" class="tool-list">
-              <article v-for="tool in relatedTools" :key="tool.id" :data-booking-tool="tool.id"><header><strong>{{ tool.model }}</strong><StatusBadge :label="tool.status" :tone="tool.status === 'Active' ? 'positive' : 'warning'" /></header><b>{{ tool.serial }}</b><p>{{ tool.site }} · {{ tool.location }}</p><small>{{ personnelDisplayName(tool.engineerOwner) }}</small></article>
+              <article v-for="tool in relatedTools" :key="tool.id" :data-booking-tool="tool.id"><header><strong>{{ tool.model }}</strong><StatusBadge :label="salesEnumLabel(tool.status, locale)" :tone="tool.status === 'Active' ? 'positive' : 'warning'" /></header><b>{{ tool.serial }}</b><p>{{ tool.site }} · {{ systemValueLabel(tool.location, locale) }}</p><small>{{ personnelDisplayName(tool.engineerOwner) }}</small></article>
             </div>
-            <p v-else class="equipment-note">该 Booking 尚未转入 Installed Tool。</p>
-            <RouterLink class="installed-link" :to="{ name: 'installed-tools', query: { accountId: booking.accountId } }">查看设备管理<ExternalLink :size="13" /></RouterLink>
+            <p v-else class="equipment-note">{{ t('detail.notConvertedTool') }}</p>
+            <RouterLink class="installed-link" :to="{ name: 'installed-tools', query: { accountId: booking.accountId } }">{{ t('detail.viewEquipment') }}<ExternalLink :size="13" /></RouterLink>
           </SectionCard>
         </aside>
       </div>

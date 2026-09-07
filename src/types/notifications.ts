@@ -15,6 +15,7 @@ export type NotificationCategory =
   | 'Document'
 
 export interface NotificationInput {
+  generatedLocally?: boolean
   category: NotificationCategory
   title: string
   message: string

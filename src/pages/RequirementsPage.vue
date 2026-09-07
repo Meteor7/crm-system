@@ -12,20 +12,26 @@ import DataNotice from '@/design-system/DataNotice.vue'
 import PaginationControls from '@/features/shared/PaginationControls.vue'
 import { mapRequestError, readRequestMeta, type RequestMetaState } from '@/api/request-state'
 import { formatDisplayDate } from '@/domain/time'
+import { localeMessage, useI18n, useLocaleMessage } from '@/i18n'
 
 const props = withDefaults(defineProps<{ apiClient?: CrmApi }>(), { apiClient: () => defaultApi })
+const { t, locale } = useI18n()
+const ui = (english: string, chinese: string) => localeMessage(english, chinese)[locale.value]
 const rows = ref<RequirementDto[]>([])
 const total = ref(0)
 const page = ref(1)
 const pageSize = ref(12)
 const loading = ref(false)
-const error = ref('')
+const error = useLocaleMessage()
 const denied = ref(false)
 const requestId = ref('')
 const meta = ref<RequestMetaState | null>(null)
 const status = ref('All')
 let loadSequence = 0
-const money = (value: number) => `¥${(value / 10000).toFixed(0)}万`
+const money = (value: number) => locale.value === 'en-US' ? new Intl.NumberFormat('en-US', { style: 'currency', currency: 'CNY', notation: 'compact' }).format(value) : `¥${(value / 10000).toFixed(0)}万`
+const statusKeys: Record<RequirementDto['status'], string> = { '需求识别': 'discovery', '技术确认': 'technical', 'Demo验证': 'demo', '预算审批': 'budget', '采购计划': 'procurement', '已确认': 'confirmed' }
+const statusLabel = (value: RequirementDto['status']) => t(`requirements.status.${statusKeys[value]}`)
+const budgetStatusLabel = (value: RequirementDto['budgetStatus']) => ({ Confirmed: ui('Confirmed', '已确认'), 'In Review': ui('In review', '审核中'), Unknown: ui('Unknown', '未知') }[value])
 const statusTone = (value: RequirementDto['status']): Tone => value === '已确认' ? 'positive' : value === '预算审批' || value === '采购计划' ? 'warning' : 'info'
 
 async function load() {
@@ -33,7 +39,7 @@ async function load() {
   loading.value = true; error.value = ''; meta.value = null
   denied.value = false
   try { const result = await props.apiClient.listRequirements({ status: status.value, page: page.value, pageSize: pageSize.value }); if (sequence !== loadSequence) return; rows.value = result.data.items; total.value = result.meta?.total ?? rows.value.length; meta.value = readRequestMeta(result) }
-  catch (reason) { if (sequence !== loadSequence) return; const mapped = mapRequestError(reason); error.value = mapped.message; requestId.value = mapped.requestId; denied.value = mapped.denied; if (mapped.denied) { rows.value = []; total.value = 0 } }
+  catch (reason) { if (sequence !== loadSequence) return; const mapped = mapRequestError(reason); error.value = mapped.localizedMessage ?? mapped.message; requestId.value = mapped.requestId; denied.value = mapped.denied; if (mapped.denied) { rows.value = []; total.value = 0 } }
   finally { if (sequence === loadSequence) loading.value = false }
 }
 function reset() { page.value = 1; status.value = 'All' }
@@ -47,25 +53,25 @@ onBeforeUnmount(() => { loadSequence += 1 })
 
 <template>
   <div>
-    <PageHeader eyebrow="PROCUREMENT SIGNALS" title="采购需求" description="把预算、设备/应用、完整度、负责人和下一步行动放在同一条记录中，避免不完整需求过早进入商机。">
-      <button class="primary-button" type="button" disabled title="接入 Frappe 写接口后启用"><Plus :size="15" />新增需求 · 接入后启用</button>
+    <PageHeader :eyebrow="ui('PROCUREMENT SIGNALS', '采购需求')" :title="t('requirements.title')" :description="t('requirements.description')">
+      <button class="primary-button" type="button" disabled :title="t('requirements.apiPending')"><Plus :size="15" />{{ t('requirements.newPending') }}</button>
     </PageHeader>
     <section v-if="!denied" class="requirement-summary">
-      <div><Wrench :size="18" /><span><small>有效需求</small><strong>{{ total }}</strong></span></div>
-      <div><CircleDollarSign :size="18" /><span><small>预算金额</small><strong>{{ money(rows.reduce((sum,item) => sum + item.budgetAmount, 0)) }}</strong></span></div>
-      <div><FileCheck2 :size="18" /><span><small>完整需求</small><strong>{{ rows.filter(item => item.completeness >= 80).length }}</strong></span></div>
+      <div><Wrench :size="18" /><span><small>{{ t('requirements.valid') }}</small><strong>{{ total }}</strong></span></div>
+      <div><CircleDollarSign :size="18" /><span><small>{{ t('requirements.budget') }}</small><strong>{{ money(rows.reduce((sum,item) => sum + item.budgetAmount, 0)) }}</strong></span></div>
+      <div><FileCheck2 :size="18" /><span><small>{{ t('requirements.complete') }}</small><strong>{{ rows.filter(item => item.completeness >= 80).length }}</strong></span></div>
     </section>
-    <FilterBar :result-label="`${total} 条需求`" @reset="reset">
-      <select v-model="status" class="filter-control" aria-label="需求状态"><option value="All">全部状态</option><option>需求识别</option><option>技术确认</option><option>Demo验证</option><option>预算审批</option><option>采购计划</option><option>已确认</option></select>
+    <FilterBar :result-label="t('requirements.result', { count: total })" @reset="reset">
+      <select v-model="status" class="filter-control" :aria-label="t('requirements.status')"><option value="All">{{ t('requirements.allStatuses') }}</option><option v-for="(_, value) in statusKeys" :key="value" :value="value">{{ statusLabel(value) }}</option></select>
     </FilterBar>
-    <DataNotice v-if="meta?.stale" :message="meta.message" :request-id="meta.requestId" @refresh="load" />
+    <DataNotice v-if="meta?.stale" :message="meta.localizedMessage ?? meta.message" :request-id="meta.requestId" @refresh="load" />
     <section class="table-panel">
       <DataState v-if="loading && !rows.length" type="loading" />
       <DataState v-else-if="denied" type="denied" :message="error" :request-id="requestId" />
       <DataState v-else-if="error" type="error" :message="error" :request-id="requestId" @retry="load" />
-      <DataState v-else-if="!rows.length" type="empty" />
-      <div v-else class="table-scroll"><table class="crm-table requirement-table is-responsive"><thead><tr><th>客户 / 需求</th><th>设备 / 应用</th><th>数量 / 预算</th><th>状态 / 完整度</th><th>Owner / Next Action</th><th>关联业务</th></tr></thead><tbody>
-        <tr v-for="item in rows" :key="item.id"><td data-label="客户 / 需求"><strong>{{ item.accountName }}</strong><small>{{ item.id }} · {{ item.title }}</small></td><td data-label="设备 / 应用"><strong>{{ item.equipment }}</strong><small>{{ item.application }} · {{ item.site }}</small></td><td data-label="数量 / 预算"><b class="money">{{ money(item.budgetAmount) }}</b><small>{{ item.quantity }} 台 · {{ item.budgetStatus }}</small></td><td data-label="状态 / 完整度"><StatusBadge :label="item.status" :tone="statusTone(item.status)" /><div class="completeness"><i><em :style="{ width: `${item.completeness}%` }" /></i><span>{{ item.completeness }}%</span></div></td><td data-label="Next Action"><strong>{{ item.nextAction }}</strong><small>{{ personnelDisplayName(item.owner) }} · {{ formatDisplayDate(item.due) }}</small></td><td data-label="关联业务"><StatusBadge v-if="item.linkedDealId" :label="item.linkedDealId" tone="info" /><StatusBadge v-if="item.linkedEvaluationId" :label="item.linkedEvaluationId" tone="warning" /><small v-if="!item.linkedDealId && !item.linkedEvaluationId">尚未转业务</small></td></tr>
+      <DataState v-else-if="!rows.length" type="empty" :title="t('requirements.emptyTitle')" :message="t('requirements.emptyMessage')" />
+       <div v-else class="table-scroll"><table class="crm-table requirement-table is-responsive"><thead><tr><th>{{ t('requirements.accountNeed') }}</th><th>{{ t('requirements.equipmentApplication') }}</th><th>{{ t('requirements.quantityBudget') }}</th><th>{{ t('requirements.statusCompleteness') }}</th><th>{{ ui('Owner / Next Action', '负责人 / 下一步行动') }}</th><th>{{ t('requirements.relatedBusiness') }}</th></tr></thead><tbody>
+         <tr v-for="item in rows" :key="item.id"><td :data-label="t('requirements.accountNeed')"><strong>{{ item.accountName }}</strong><small>{{ item.id }} · {{ item.title }}</small></td><td :data-label="t('requirements.equipmentApplication')"><strong>{{ item.equipment }}</strong><small>{{ item.application }} · {{ item.site }}</small></td><td :data-label="t('requirements.quantityBudget')"><b class="money">{{ money(item.budgetAmount) }}</b><small>{{ item.quantity }} {{ ui('units', '台') }} · {{ budgetStatusLabel(item.budgetStatus) }}</small></td><td :data-label="t('requirements.statusCompleteness')"><StatusBadge :label="statusLabel(item.status)" :tone="statusTone(item.status)" /><div class="completeness"><i><em :style="{ width: `${item.completeness}%` }" /></i><span>{{ item.completeness }}%</span></div></td><td :data-label="ui('Next Action', '下一步行动')"><strong>{{ item.nextAction }}</strong><small>{{ personnelDisplayName(item.owner) }} · {{ formatDisplayDate(item.due) }}</small></td><td :data-label="t('requirements.relatedBusiness')"><StatusBadge v-if="item.linkedDealId" :label="item.linkedDealId" tone="info" /><StatusBadge v-if="item.linkedEvaluationId" :label="item.linkedEvaluationId" tone="warning" /><small v-if="!item.linkedDealId && !item.linkedEvaluationId">{{ t('requirements.notConverted') }}</small></td></tr>
       </tbody></table></div>
       <PaginationControls v-if="!denied && !error && total > pageSize" :page="page" :page-size="pageSize" :total="total" @change="goPage" @page-size-change="changePageSize" />
     </section>

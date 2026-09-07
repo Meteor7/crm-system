@@ -1,12 +1,16 @@
 <script setup lang="ts">
+import { systemValueLabel } from '@/features/shared/system-labels'
 import { computed, ref, watch } from 'vue'
 import ModalShell from '@/design-system/ModalShell.vue'
 import RequiredMark from '@/design-system/RequiredMark.vue'
 import { shanghaiDate } from '@/domain/time'
 import type { AddInstalledToolVersionRecordInput, InstalledToolDetailDto, InstalledToolVersionChangeType } from '@/types/workspaces'
+import { useI18n } from '@/i18n'
 
 const props = defineProps<{ tool: InstalledToolDetailDto; busy?: boolean; error?: string }>()
 const emit = defineEmits<{ close: []; submit: [value: AddInstalledToolVersionRecordInput] }>()
+const { locale, t } = useI18n()
+const copy = (english: string, chinese: string) => locale.value === 'en-US' ? english : chinese
 const types: InstalledToolVersionChangeType[] = ['Software', 'Firmware', 'Operating System', 'Configuration']
 const form = ref<AddInstalledToolVersionRecordInput>({ changeDate: shanghaiDate(), changeType: 'Software', toValue: '', reason: '', comment: '' })
 const currentValue = computed(() => ({
@@ -23,16 +27,16 @@ function submit() {
 </script>
 
 <template>
-  <ModalShell title="新增版本 / 配置记录" eyebrow="APPEND-ONLY VERSION AUDIT" submit-label="保存变更记录" :busy="busy" :submit-disabled="invalid" @close="emit('close')" @submit="submit">
-    <p class="form-note">原值由服务器读取并写入审计记录，不能由前端指定。</p>
+  <ModalShell :title="t('installed.versionTitle')" :eyebrow="copy('APPEND-ONLY VERSION AUDIT', '仅追加版本审计')" :submit-label="t('installed.saveVersion')" :busy="busy" :submit-disabled="invalid" @close="emit('close')" @submit="submit">
+    <p class="form-note">{{ t('installed.versionAuditHint') }}</p>
     <p v-if="error" class="form-error">{{ error }}</p>
     <div class="form-grid">
-      <label><span>变更日期<RequiredMark /></span><input v-model="form.changeDate" type="date" required /></label>
-      <label><span>变更类型<RequiredMark /></span><select v-model="form.changeType"><option v-for="item in types" :key="item" :value="item">{{ item }}</option></select></label>
-      <label><span>当前值</span><input :value="currentValue || '—'" disabled /></label>
-      <label><span>新值<RequiredMark /></span><input v-model="form.toValue" required /></label>
-      <label class="wide"><span>变更原因<RequiredMark /></span><textarea v-model="form.reason" rows="3" required /></label>
-      <label class="wide"><span>补充说明</span><textarea v-model="form.comment" rows="2" /></label>
+      <label><span>{{ t('installed.changeDate') }}<RequiredMark /></span><input v-model="form.changeDate" type="date" required /></label>
+      <label><span>{{ t('installed.changeType') }}<RequiredMark /></span><select v-model="form.changeType"><option v-for="item in types" :key="item" :value="item">{{ t('installed.change.' + item) }}</option></select></label>
+      <label><span>{{ t('installed.currentValue') }}</span><input :value="systemValueLabel(currentValue, locale) || '—'" disabled /></label>
+      <label><span>{{ t('installed.newValue') }}<RequiredMark /></span><input v-model="form.toValue" required /></label>
+      <label class="wide"><span>{{ t('installed.changeReason') }}<RequiredMark /></span><textarea v-model="form.reason" rows="3" required /></label>
+      <label class="wide"><span>{{ t('installed.additionalNotes') }}</span><textarea v-model="form.comment" rows="2" /></label>
     </div>
   </ModalShell>
 </template>

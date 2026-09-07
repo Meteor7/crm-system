@@ -1,3 +1,5 @@
+import { enableAutoUnmount } from '@vue/test-utils'
+import { afterEach } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import { describe, expect, it, vi } from 'vitest'
@@ -19,6 +21,8 @@ function globals() {
   }
   return { plugins: [pinia, createAppRouter()] }
 }
+
+enableAutoUnmount(afterEach)
 
 describe('customer operations pages', () => {
   it('opens a Contact-scoped Visit and persists the primary Contact link', async () => {
@@ -72,7 +76,7 @@ describe('customer operations pages', () => {
     expect(wrapper.get('table.crm-table.visits-table').element.tagName).toBe('TABLE')
     expect(wrapper.findAll('table.visits-table tbody tr')).toHaveLength(2)
     expect(wrapper.get('[data-visit-id="V-001"]').text()).toContain('南京 Fab Demo 前现场确认')
-    expect(wrapper.get('[data-visit-id="V-001"]').text()).toContain('On-site')
+    expect(wrapper.get('[data-visit-id="V-001"]').text()).toContain('现场拜访')
   })
 
   it('focuses the Visit selected from Calendar without hiding the Visit list', async () => {

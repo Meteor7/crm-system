@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { bookingTitle } from '@/features/shared/system-labels'
 import { personnelDisplayName, personnelForRole } from '@/demo/personnel'
 import { computed, onMounted, ref, watch } from 'vue'
 import { ArrowRight, CalendarClock, CheckCircle2, CircleDollarSign, PackageCheck, Pencil, Plus } from '@lucide/vue'
@@ -18,11 +19,14 @@ import { formatMoney, moneyByCurrency } from '@/domain/money'
 import { formatDisplayDate } from '@/domain/time'
 import { readAllPages } from '@/features/shared/read-all-pages'
 import PaginationControls from '@/features/shared/PaginationControls.vue'
+import { useI18n, useLocaleMessage, localeMessage } from '@/i18n'
+import { salesEnumLabel, salesUnits } from '@/features/shared/sales-i18n'
 
 const props = withDefaults(defineProps<{ apiClient?: CrmApi }>(), { apiClient: () => defaultApi })
 const app = useAppStore()
 const route = useRoute()
 const router = useRouter()
+const { t, locale } = useI18n()
 const rows = ref<BookingDto[]>([])
 const total = ref(0)
 const page = ref(typeof route.query.page === 'string' && Number(route.query.page) > 0 ? Number(route.query.page) : 1)
@@ -32,9 +36,12 @@ const accounts = ref<AccountSummaryDto[]>([])
 const contacts = ref<ContactSummaryDto[]>([])
 const loading = ref(false)
 const denied = ref(false)
-const error = ref('')
+const error = useLocaleMessage()
 const requestId = ref('')
-const referenceWarning = ref('')
+const referencesUnavailable = ref(false)
+const referenceWarning = computed(() => referencesUnavailable.value
+  ? localeMessage('Reference data is temporarily unavailable. The Booking list remains available; create or edit after Account / Contact data recovers.', '参考数据暂时不可用：Booking 列表仍可查看，新建或编辑需待 Account / Contact 恢复。')[locale.value]
+  : '')
 const status = ref<BookingDto['status'] | 'All'>(typeof route.query.status === 'string' ? route.query.status as BookingDto['status'] | 'All' : 'All')
 const bookingSource = ref<BookingSource | 'All'>(typeof route.query.source === 'string' ? route.query.source as BookingSource | 'All' : 'All')
 const modalOpen = ref(false)
@@ -43,12 +50,12 @@ const contactModal = ref(false)
 const contactAccountId = ref('')
 const selectedContactId = ref('')
 const busy = ref(false)
-const modalError = ref('')
+const modalError = useLocaleMessage()
 const transferOpen = ref(false)
 const transferBooking = ref<BookingDto | null>(null)
 const transferSites = ref<SiteDto[]>([])
 const transferBusy = ref(false)
-const transferError = ref('')
+const transferError = useLocaleMessage()
 const canWrite = computed(() => app.can('deal:write'))
 const engineerOptions = computed(() => (app.bootstrap?.personnel ?? personnelForRole('Engineer'))
   .filter((person) => person.role === 'Engineer' && person.availableForAssignment))
@@ -65,9 +72,7 @@ async function loadReferences() {
   ])
   accounts.value = accountResult.status === 'fulfilled' ? accountResult.value : []
   contacts.value = contactResult.status === 'fulfilled' ? contactResult.value : []
-  referenceWarning.value = accountResult.status === 'rejected' || contactResult.status === 'rejected'
-    ? '参考数据暂时不可用：Booking 列表仍可查看，新建或编辑需待 Account / Contact 恢复。'
-    : ''
+  referencesUnavailable.value = accountResult.status === 'rejected' || contactResult.status === 'rejected'
   try { opportunities.value = (await props.apiClient.listPipeline({})).data.opportunities }
   catch { opportunities.value = [] }
 }
@@ -91,7 +96,7 @@ async function load() {
     const mapped = mapRequestError(reason)
     rows.value = []
     opportunities.value = []
-    error.value = mapped.message
+    error.value = mapped.localizedMessage ?? mapped.message
     requestId.value = mapped.requestId
     denied.value = mapped.denied
   } finally {
@@ -124,7 +129,7 @@ async function saveContact(input: CreateContactInput) {
     contacts.value = await readAllPages((page, pageSize) => props.apiClient.listContacts({ contactStatus: 'Active', page, pageSize }))
     contactModal.value = false
   } catch (reason) {
-    modalError.value = mapRequestError(reason).message
+    const mapped = mapRequestError(reason); modalError.value = mapped.localizedMessage ?? mapped.message
   } finally {
     busy.value = false
   }
@@ -140,7 +145,7 @@ async function saveBooking(input: UpsertBookingInput) {
     editing.value = null
     await load()
   } catch (reason) {
-    modalError.value = mapRequestError(reason).message
+    const mapped = mapRequestError(reason); modalError.value = mapped.localizedMessage ?? mapped.message
   } finally {
     busy.value = false
   }
@@ -153,7 +158,7 @@ async function openTransfer(booking: BookingDto) {
   try {
     transferSites.value = (await props.apiClient.getAccount360(booking.accountId)).data.sites
   } catch (reason) {
-    transferError.value = mapRequestError(reason).message
+    const mapped = mapRequestError(reason); transferError.value = mapped.localizedMessage ?? mapped.message
   }
 }
 async function transferToInstalledTool(input: ConvertBookingToInstalledToolInput) {
@@ -166,7 +171,7 @@ async function transferToInstalledTool(input: ConvertBookingToInstalledToolInput
     transferBooking.value = null
     await load()
   } catch (reason) {
-    transferError.value = mapRequestError(reason).message
+    const mapped = mapRequestError(reason); transferError.value = mapped.localizedMessage ?? mapped.message
   } finally {
     transferBusy.value = false
   }
@@ -180,7 +185,7 @@ async function completeService(booking: BookingDto) {
     await load()
   } catch (reason) {
     const mapped = mapRequestError(reason)
-    error.value = mapped.message
+    error.value = mapped.localizedMessage ?? mapped.message
     requestId.value = mapped.requestId
   } finally {
     busy.value = false
@@ -211,46 +216,46 @@ onMounted(async () => {
 
 <template>
   <div class="booking-page">
-    <PageHeader eyebrow="ORDER EXPECTATION" title="Booking" description="统一管理来自 Won Opportunity 或现有客户 Upsell 的设备订单预期。">
-      <button v-if="canWrite" class="primary-button" type="button" data-testid="new-booking" :disabled="!referencesReady" @click="openCreate"><Plus :size="14" />新增 Booking</button>
+    <PageHeader eyebrow="ORDER EXPECTATION" :title="t('booking.title')" :description="t('booking.description')">
+      <button v-if="canWrite" class="primary-button" type="button" data-testid="new-booking" :disabled="!referencesReady" @click="openCreate"><Plus :size="14" />{{ t('bookingEditor.new') }}</button>
     </PageHeader>
 
     <section class="booking-metrics">
-      <article><span><PackageCheck :size="17" /></span><div><small>Booking 总数</small><strong>{{ rows.length }}</strong><p>当前权限范围</p></div></article>
-      <article><span><CircleDollarSign :size="17" /></span><div><small>Confirmed 金额</small><strong v-for="total in confirmedAmounts" :key="total.currency">{{ formatMoney(total.amount, total.currency) }}</strong><p>{{ rows.filter((item) => item.status === 'Confirmed').length }} 条已确认</p></div></article>
-      <article><span><CalendarClock :size="17" /></span><div><small>待确认</small><strong>{{ pendingCount }}</strong><p>等待客户或内部确认</p></div></article>
+      <article><span><PackageCheck :size="17" /></span><div><small>{{ t('booking.total') }}</small><strong>{{ rows.length }}</strong><p>{{ t('booking.scope') }}</p></div></article>
+      <article><span><CircleDollarSign :size="17" /></span><div><small>{{ t('booking.confirmedAmount') }}</small><strong v-for="total in confirmedAmounts" :key="total.currency">{{ formatMoney(total.amount, total.currency) }}</strong><p>{{ t('booking.confirmedCount', { count: rows.filter((item) => item.status === 'Confirmed').length }) }}</p></div></article>
+      <article><span><CalendarClock :size="17" /></span><div><small>{{ t('booking.pending') }}</small><strong>{{ pendingCount }}</strong><p>{{ t('booking.pendingHint') }}</p></div></article>
     </section>
 
     <p v-if="referenceWarning" class="reference-warning">{{ referenceWarning }}</p>
     <section class="booking-card">
       <header class="booking-toolbar">
-        <div><strong>Booking List</strong><small>Opportunity 必须关联 Won Opportunity；Upsell 直接关联现有客户。</small></div>
+        <div><strong>{{ t('booking.list') }}</strong><small>{{ t('booking.listHint') }}</small></div>
         <div class="booking-filters">
-          <select v-model="bookingSource" aria-label="Booking 来源筛选"><option value="All">全部来源</option><option>Opportunity</option><option>Upsell</option></select>
-          <select v-model="status" aria-label="Booking 状态筛选"><option value="All">全部状态</option><option>Pending</option><option>Confirmed</option><option>Completed</option><option>Cancelled</option></select>
+          <select v-model="bookingSource" :aria-label="t('booking.source')"><option value="All">{{ t('booking.allSources') }}</option><option v-for="item in ['Opportunity', 'Upsell']" :key="item" :value="item">{{ salesEnumLabel(item, locale) }}</option></select>
+          <select v-model="status" :aria-label="t('booking.status')"><option value="All">{{ t('booking.allStatuses') }}</option><option v-for="item in ['Pending', 'Confirmed', 'Completed', 'Cancelled']" :key="item" :value="item">{{ salesEnumLabel(item, locale) }}</option></select>
         </div>
       </header>
       <DataState v-if="loading && !rows.length" type="loading" />
       <DataState v-else-if="denied" type="denied" :message="error" :request-id="requestId" />
       <DataState v-else-if="error" type="error" :message="error" :request-id="requestId" @retry="load" />
-      <DataState v-else-if="!visibleRows.length" type="empty" title="没有匹配的 Booking" message="调整筛选条件，或从已赢单 Opportunity 创建设备 Booking。" />
+      <DataState v-else-if="!visibleRows.length" type="empty" :title="t('booking.emptyTitle')" :message="t('booking.emptyMessage')" />
       <div v-else class="table-scroll">
         <table class="crm-table booking-table">
-          <thead><tr><th>Booking / 客户</th><th>来源</th><th>设备需求</th><th>客户 DDL</th><th>金额 / 状态</th><th>Owner</th><th>备注</th><th v-if="canWrite">操作</th></tr></thead>
+          <thead><tr><th>{{ t('booking.bookingAccount') }}</th><th>{{ t('booking.source') }}</th><th>{{ t('booking.equipment') }}</th><th>{{ t('booking.customerDdl') }}</th><th>{{ t('booking.amountStatus') }}</th><th>{{ t('booking.owner') }}</th><th>{{ t('booking.note') }}</th><th v-if="canWrite">{{ locale === 'en-US' ? 'Actions' : '操作' }}</th></tr></thead>
           <tbody>
             <tr v-for="item in visibleRows" :key="item.id" :data-booking-id="item.id">
-              <td><button class="booking-link record-name-link" type="button" :data-open-booking-detail="item.id" @click="openDetail(item)"><span><PackageCheck :size="14" /></span><div><strong>{{ item.id }}</strong><small>{{ item.title }}</small></div></button><small>{{ item.accountName }}</small><RouterLink v-if="item.primaryContactId" :to="{ name: 'contact-detail', params: { contactId: item.primaryContactId } }">{{ item.customerContact }}</RouterLink><span v-else>{{ item.customerContact || '联系人缺失' }}</span></td>
-              <td><StatusBadge :label="item.source" :tone="item.source === 'Opportunity' ? 'info' : 'neutral'" /><RouterLink v-if="item.sourceOpportunityId" :data-booking-source="item.sourceOpportunityId" :to="{ name: 'opportunity-detail', params: { opportunityId: item.sourceOpportunityId } }">{{ item.sourceOpportunityId }}</RouterLink><small v-else>Existing Customer Upsell</small></td>
-              <td><strong>{{ item.equipment }}</strong><small>{{ item.bookingType }} · {{ item.quantity }} 台 / 项</small><small v-if="item.installedToolId" class="installed-tool-link">Installed Tool · {{ item.installedToolId }}</small></td>
-              <td><strong>{{ formatDisplayDate(item.ddl) }}</strong><small>录入 {{ formatDisplayDate(item.bookingDate) }}</small></td>
-              <td><strong>{{ formatMoney(item.amount, item.currency) }}</strong><StatusBadge :label="item.status" :tone="item.status === 'Confirmed' || item.status === 'Completed' ? 'positive' : item.status === 'Cancelled' ? 'danger' : 'warning'" /></td>
+              <td><button class="booking-link record-name-link" type="button" :data-open-booking-detail="item.id" @click="openDetail(item)"><span><PackageCheck :size="14" /></span><div><strong>{{ item.id }}</strong><small>{{ bookingTitle(item, locale) }}</small></div></button><small>{{ item.accountName }}</small><RouterLink v-if="item.primaryContactId" :to="{ name: 'contact-detail', params: { contactId: item.primaryContactId } }">{{ item.customerContact }}</RouterLink><span v-else>{{ item.customerContact || t('booking.missingContact') }}</span></td>
+              <td><StatusBadge :label="salesEnumLabel(item.source ?? '', locale)" :tone="item.source === 'Opportunity' ? 'info' : 'neutral'" /><RouterLink v-if="item.sourceOpportunityId" :data-booking-source="item.sourceOpportunityId" :to="{ name: 'opportunity-detail', params: { opportunityId: item.sourceOpportunityId } }">{{ item.sourceOpportunityId }}</RouterLink><small v-else>{{ salesEnumLabel('Existing Customer Upsell', locale) }}</small></td>
+              <td><strong>{{ item.equipment }}</strong><small>{{ salesEnumLabel(item.bookingType ?? '', locale) }} · {{ item.quantity }} {{ salesUnits(locale) }}</small><small v-if="item.installedToolId" class="installed-tool-link">{{ locale === 'en-US' ? 'Installed tool' : '已安装设备' }} · {{ item.installedToolId }}</small></td>
+              <td><strong>{{ formatDisplayDate(item.ddl) }}</strong><small>{{ t('booking.entered') }} {{ formatDisplayDate(item.bookingDate) }}</small></td>
+              <td><strong>{{ formatMoney(item.amount, item.currency) }}</strong><StatusBadge :label="salesEnumLabel(item.status, locale)" :tone="item.status === 'Confirmed' || item.status === 'Completed' ? 'positive' : item.status === 'Cancelled' ? 'danger' : 'warning'" /></td>
               <td>{{ personnelDisplayName(item.owner) }}</td>
               <td>{{ item.note || '—' }}</td>
               <td v-if="canWrite">
                 <div class="booking-actions">
-                  <button v-if="item.status !== 'Completed'" class="edit-button" type="button" aria-label="编辑 Booking" :disabled="!referencesReady" @click="openEdit(item)"><Pencil :size="13" /></button>
-                  <button v-if="item.status === 'Confirmed' && !item.installedToolId && item.bookingType === 'Equipment'" class="convert-button" type="button" :data-testid="`convert-${item.id}`" @click="openTransfer(item)"><ArrowRight :size="13" />转入 Installed Tool</button>
-                  <button v-if="item.status === 'Confirmed' && !item.installedToolId && item.bookingType === 'Service'" class="convert-button" type="button" :data-testid="`complete-service-${item.id}`" :disabled="busy" @click="completeService(item)"><CheckCircle2 :size="13" />服务完成</button>
+                  <button v-if="item.status !== 'Completed'" class="edit-button" type="button" :aria-label="t('booking.edit')" :disabled="!referencesReady" @click="openEdit(item)"><Pencil :size="13" /></button>
+                  <button v-if="item.status === 'Confirmed' && !item.installedToolId && item.bookingType === 'Equipment'" class="convert-button" type="button" :data-testid="`convert-${item.id}`" @click="openTransfer(item)"><ArrowRight :size="13" />{{ t('booking.convertTool') }}</button>
+                  <button v-if="item.status === 'Confirmed' && !item.installedToolId && item.bookingType === 'Service'" class="convert-button" type="button" :data-testid="`complete-service-${item.id}`" :disabled="busy" @click="completeService(item)"><CheckCircle2 :size="13" />{{ t('booking.serviceComplete') }}</button>
                 </div>
               </td>
             </tr>

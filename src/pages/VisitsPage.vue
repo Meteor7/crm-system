@@ -18,12 +18,15 @@ import VisitModal from '@/features/visits/VisitModal.vue'
 import PaginationControls from '@/features/shared/PaginationControls.vue'
 import { readAllPages } from '@/features/shared/read-all-pages'
 import ContactModal from '@/features/contacts/ContactModal.vue'
+import { useI18n, useLocaleMessage } from '@/i18n'
+import { salesEnumLabel } from '@/features/shared/sales-i18n'
 
 const props = withDefaults(defineProps<{ apiClient?: CrmApi }>(), { apiClient: () => defaultApi })
 const app = useAppStore()
 const route = useRoute()
 const router = useRouter()
-const rows = ref<VisitDto[]>([]), accounts = ref<AccountSummaryDto[]>([]), contacts = ref<ContactSummaryDto[]>([]), loading = ref(false), busy = ref(false), error = ref(''), requestId = ref('')
+const { t, locale } = useI18n()
+const rows = ref<VisitDto[]>([]), accounts = ref<AccountSummaryDto[]>([]), contacts = ref<ContactSummaryDto[]>([]), loading = ref(false), busy = ref(false), error = useLocaleMessage(), requestId = ref('')
 const total = ref(0), page = ref(1)
 const pageSize = ref(10)
 const accountId = ref('All'), status = ref('All'), owner = ref('All')
@@ -33,7 +36,12 @@ const canCreate = computed(() => app.can('visit:create'))
 const canReview = computed(() => app.can('visit:review'))
 const focusedVisitId = computed(() => typeof route.query.focus === 'string' ? route.query.focus : '')
 const owners = computed(() => [...new Set([...accounts.value.map((item) => item.owner), ...rows.value.map((item) => item.owner)])])
-const statusLabel: Record<VisitStatus, string> = { Planned: '\u5f85\u63d0\u4ea4\u62dc\u8bbf\u8bb0\u5f55', Visited: '\u5df2\u5b8c\u6210', 'Minutes Submitted': '\u62dc\u8bbf\u8bb0\u5f55\u5df2\u63d0\u4ea4', 'Manager Reviewed': '\u7ba1\u7406\u8005\u5df2\u5ba1\u6838' }
+const statusLabel = computed<Record<VisitStatus, string>>(() => ({
+  Planned: t('visits.status.planned'),
+  Visited: t('visits.status.visited'),
+  'Minutes Submitted': t('visits.status.minutesSubmitted'),
+  'Manager Reviewed': t('visits.status.managerReviewed'),
+}))
 const statusTone: Record<VisitStatus, Tone> = { Planned: 'neutral', Visited: 'info', 'Minutes Submitted': 'warning', 'Manager Reviewed': 'positive' }
 let sequence = 0
 
@@ -58,7 +66,7 @@ async function load() {
     focusedRow?.scrollIntoView?.({ block: 'center' })
   } catch (reason) {
     if (current !== sequence) return
-    const mapped = mapRequestError(reason); error.value = mapped.message; requestId.value = mapped.requestId
+    const mapped = mapRequestError(reason); error.value = mapped.localizedMessage ?? mapped.message; requestId.value = mapped.requestId
   } finally { if (current === sequence) loading.value = false }
 }
 function reset() { page.value = 1; accountId.value = status.value = owner.value = 'All'; void load() }
@@ -74,7 +82,7 @@ async function saveContact(payload: CreateContactInput) {
     selectedContactId.value = created.data.id
     contacts.value = await readAllPages((referencePage, referencePageSize) => props.apiClient.listContacts({ page: referencePage, pageSize: referencePageSize }))
     contactModal.value = false
-  } catch (reason) { const mapped = mapRequestError(reason); error.value = mapped.message; requestId.value = mapped.requestId }
+  } catch (reason) { const mapped = mapRequestError(reason); error.value = mapped.localizedMessage ?? mapped.message; requestId.value = mapped.requestId }
   finally { busy.value = false }
 }
 async function submit(payload: CreateVisitInput, meetingFile?: MultipartFilePart) {
@@ -92,7 +100,7 @@ async function submit(payload: CreateVisitInput, meetingFile?: MultipartFilePart
     }
     else if (modal.value === 'review' && selected.value) await props.apiClient.reviewVisit(selected.value.id, selected.value.modified)
     modal.value = null; selected.value = null; await load()
-  } catch (reason) { const mapped = mapRequestError(reason); error.value = mapped.message; requestId.value = mapped.requestId }
+  } catch (reason) { const mapped = mapRequestError(reason); error.value = mapped.localizedMessage ?? mapped.message; requestId.value = mapped.requestId }
   finally { busy.value = false }
 }
 onMounted(async () => {
@@ -106,35 +114,35 @@ watch(focusedVisitId, () => { void load() })
 
 <template>
   <div class="visits-page">
-    <PageHeader eyebrow="CUSTOMER ENGAGEMENT" title="拜访管理" description="创建拜访后提交拜访记录即视为完成，管理者可在记录完整后审核。">
-      <button v-if="canCreate" class="primary-button" type="button" data-testid="new-visit" @click="open('create')"><CalendarPlus :size="15" />新建拜访</button>
+    <PageHeader eyebrow="CUSTOMER ENGAGEMENT" :title="t('visits.title')" :description="t('visits.description')">
+      <button v-if="canCreate" class="primary-button" type="button" data-testid="new-visit" @click="open('create')"><CalendarPlus :size="15" />{{ locale === 'en-US' ? 'New visit' : '新建拜访' }}</button>
     </PageHeader>
 
-    <FilterBar :result-label="`${rows.length} 条拜访`" @reset="reset">
-      <select v-model="accountId" class="filter-control" aria-label="拜访客户筛选" @change="changeFilters"><option value="All">全部客户</option><option v-for="account in accounts" :key="account.id" :value="account.id">{{ account.shortName }}</option></select>
-      <select v-model="status" class="filter-control" aria-label="拜访状态筛选" @change="changeFilters"><option value="All">全部状态</option><option v-for="item in VISIT_STATUS_ORDER" :key="item" :value="item">{{ statusLabel[item] }}</option></select>
-      <select v-model="owner" class="filter-control" aria-label="拜访负责人筛选" @change="changeFilters"><option value="All">全部负责人</option><option v-for="item in owners" :key="item" :value="item">{{ personnelDisplayName(item) }}</option></select>
+    <FilterBar :result-label="t('visits.result', { count: rows.length })" @reset="reset">
+      <select v-model="accountId" class="filter-control" :aria-label="t('visits.account')" @change="changeFilters"><option value="All">{{ t('visits.allAccounts') }}</option><option v-for="account in accounts" :key="account.id" :value="account.id">{{ account.shortName }}</option></select>
+      <select v-model="status" class="filter-control" :aria-label="t('visits.status')" @change="changeFilters"><option value="All">{{ t('visits.allStatuses') }}</option><option v-for="item in VISIT_STATUS_ORDER" :key="item" :value="item">{{ statusLabel[item] }}</option></select>
+      <select v-model="owner" class="filter-control" :aria-label="t('visits.owner')" @change="changeFilters"><option value="All">{{ t('visits.allOwners') }}</option><option v-for="item in owners" :key="item" :value="item">{{ personnelDisplayName(item) }}</option></select>
     </FilterBar>
 
-    <p v-if="error" class="form-error" data-delete-error>{{ error }}<small v-if="requestId">Request ID {{ requestId }}</small></p>
+    <p v-if="error" class="form-error" data-delete-error>{{ error }}<small v-if="requestId">{{ locale === 'en-US' ? 'Request ID' : '请求编号' }} {{ requestId }}</small></p>
     <DataState v-if="loading && !rows.length" type="loading" />
-    <DataState v-else-if="!rows.length" type="empty" title="没有匹配的拜访" message="调整筛选条件，或创建新的拜访计划。" />
+    <DataState v-else-if="!rows.length" type="empty" :title="t('visits.emptyTitle')" :message="t('visits.emptyMessage')" />
     <section v-else class="visits-card">
       <div class="table-scroll">
         <table class="crm-table visits-table is-responsive">
-          <thead><tr><th>拜访主题</th><th>客户</th><th>日期 / 方式</th><th>负责人</th><th>拜访目标</th><th>拜访结果</th><th>状态</th><th>操作</th></tr></thead>
+          <thead><tr><th>{{ t('visits.subject') }}</th><th>{{ t('visits.account') }}</th><th>{{ t('visits.dateType') }}</th><th>{{ t('visits.owner') }}</th><th>{{ t('visits.objective') }}</th><th>{{ t('visits.outcome') }}</th><th>{{ t('visits.status') }}</th><th>{{ t('visits.actions') }}</th></tr></thead>
           <tbody>
             <tr v-for="visit in rows" :key="visit.id" :data-visit-id="visit.id" :class="{ focused: visit.id === focusedVisitId }">
-              <td class="visit-subject" data-label="拜访主题"><RouterLink class="record-link" :to="`/visits/${visit.id}`"><strong>{{ visit.subject }}</strong></RouterLink><small>{{ visit.id }}</small></td>
-              <td class="visit-account" data-label="客户"><strong>{{ visit.accountName }}</strong></td>
-              <td class="visit-date" data-label="日期 / 方式"><strong>{{ formatDisplayDate(visit.date) }}</strong><small>{{ visit.type }}</small></td>
-              <td data-label="负责人">{{ personnelDisplayName(visit.owner) }}</td>
-              <td class="visit-text" data-label="拜访目标">{{ visit.objective }}</td>
-              <td class="visit-text" data-label="拜访结果">{{ visit.outcome || '—' }}</td>
-              <td data-label="状态"><StatusBadge :label="statusLabel[visit.status]" :tone="statusTone[visit.status]" /></td>
-              <td data-label="操作">
+              <td class="visit-subject" :data-label="t('visits.subject')"><RouterLink class="record-link" :to="`/visits/${visit.id}`"><strong>{{ visit.subject }}</strong></RouterLink><small>{{ visit.id }}</small></td>
+              <td class="visit-account" :data-label="t('visits.account')"><strong>{{ visit.accountName }}</strong></td>
+              <td class="visit-date" :data-label="t('visits.dateType')"><strong>{{ formatDisplayDate(visit.date) }}</strong><small>{{ salesEnumLabel(visit.type, locale) }}</small></td>
+              <td :data-label="t('visits.owner')">{{ personnelDisplayName(visit.owner) }}</td>
+              <td class="visit-text" :data-label="t('visits.objective')">{{ visit.objective }}</td>
+              <td class="visit-text" :data-label="t('visits.outcome')">{{ visit.outcome || '—' }}</td>
+              <td :data-label="t('visits.status')"><StatusBadge :label="statusLabel[visit.status]" :tone="statusTone[visit.status]" /></td>
+              <td :data-label="t('visits.actions')">
                 <div class="visit-actions">
-                  <button v-if="canReview && visit.status === 'Minutes Submitted'" class="primary-button" type="button" @click="open('review', visit)">经理审核</button>
+                  <button v-if="canReview && visit.status === 'Minutes Submitted'" class="primary-button" type="button" @click="open('review', visit)">{{ t('visits.review') }}</button>
                 </div>
               </td>
             </tr>

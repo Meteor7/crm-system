@@ -1,13 +1,32 @@
 import { createPinia, setActivePinia } from 'pinia'
 import { flushPromises, mount } from '@vue/test-utils'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createMemoryHistory, createRouter } from 'vue-router'
 import { createMockApi } from '@/api/mock-adapter'
 import { createMemorySalesRepository } from '@/demo/sales-repository'
+import { setLocale } from '@/i18n'
 import RfqsPage from './RfqsPage.vue'
 
 describe('RfqsPage', () => {
-  beforeEach(() => setActivePinia(createPinia()))
+  beforeEach(() => { setActivePinia(createPinia()); setLocale('zh-CN') })
+  afterEach(() => setLocale('zh-CN'))
+
+  it('localizes RFQ status options while keeping backend enum values and loaded data stable', async () => {
+    const api = createMockApi({ latency: 0, role: 'Manager' })
+    const read = vi.spyOn(api, 'listRfqs')
+    const router = createRouter({ history: createMemoryHistory(), routes: [{ path: '/rfqs', name: 'rfqs', component: RfqsPage }] })
+    await router.push('/rfqs'); await router.isReady()
+    const wrapper = mount(RfqsPage, { props: { apiClient: api }, global: { plugins: [router] } })
+    await flushPromises()
+    const status = wrapper.get('.toolbar select')
+    expect(status.findAll('option').map((option) => option.text())).toEqual(['全部状态', '工程师评审', '经理审批', '销售修订', '已批准'])
+    setLocale('en-US')
+    await flushPromises()
+    expect(status.findAll('option').map((option) => option.text())).toEqual(['All statuses', 'Engineer review', 'Manager approval', 'Sales revision', 'Approved'])
+    expect(status.findAll('option')[1]!.attributes('value')).toBe('Engineer Review')
+    expect(read).toHaveBeenCalledTimes(1)
+    wrapper.unmount()
+  })
 
   it('lets Sales create one RFQ from the project list', async () => {
     const repository = createMemorySalesRepository()

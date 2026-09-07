@@ -1,5 +1,7 @@
 <script setup lang="ts">
 import { formatDisplayDate } from '@/domain/time'
+import { useI18n } from '@/i18n'
+const { t } = useI18n()
 defineProps<{ eyebrow?: string; title: string; description: string; updatedAt?: string }>()
 </script>
 
@@ -9,7 +11,7 @@ defineProps<{ eyebrow?: string; title: string; description: string; updatedAt?: 
       <span v-if="eyebrow" class="page-eyebrow">{{ eyebrow }}</span>
       <h1>{{ title }}</h1>
       <p>{{ description }}</p>
-      <small v-if="updatedAt">数据截至 {{ formatDisplayDate(updatedAt) }}</small>
+      <small v-if="updatedAt">{{ t('common.dataAsOf', { date: formatDisplayDate(updatedAt) }) }}</small>
     </div>
     <div class="page-actions"><slot /></div>
   </header>

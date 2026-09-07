@@ -1,9 +1,12 @@
 <script setup lang="ts">
+import { useLocalizedInput } from '@/i18n/localized-input'
+import { systemValueLabel } from '@/features/shared/system-labels'
 import { computed, ref } from 'vue'
 import ModalShell from '@/design-system/ModalShell.vue'
 import RequiredMark from '@/design-system/RequiredMark.vue'
 import { shanghaiDate } from '@/domain/time'
 import type { AddInstalledToolServiceRecordInput, InstalledToolDetailDto, InstalledToolServiceType } from '@/types/workspaces'
+import { useI18n } from '@/i18n'
 
 const props = withDefaults(defineProps<{
   tool: InstalledToolDetailDto
@@ -12,6 +15,8 @@ const props = withDefaults(defineProps<{
   error?: string
 }>(), { actionOwners: () => [] })
 const emit = defineEmits<{ close: []; submit: [value: AddInstalledToolServiceRecordInput] }>()
+const { locale, t } = useI18n()
+const copy = (english: string, chinese: string) => locale.value === 'en-US' ? english : chinese
 const types: InstalledToolServiceType[] = ['Warranty Activation', 'Preventive Maintenance', 'Corrective Service', 'Remote Support', 'Installation Support', 'Contract Change']
 const form = ref<AddInstalledToolServiceRecordInput>({
   serviceDate: shanghaiDate(),
@@ -37,7 +42,7 @@ function submit() {
   emit('submit', {
     ...form.value,
     result: form.value.result.trim(),
-    openIssues: form.value.openIssues.trim(),
+    openIssues: openIssuesInput.value.trim(),
     nextAction: optional(form.value.nextAction),
     actionOwner: form.value.nextAction?.trim() ? optional(form.value.actionOwner) : undefined,
     due: form.value.nextAction?.trim() ? optional(form.value.due) : undefined,
@@ -48,24 +53,28 @@ function submit() {
     pmCycle: optional(form.value.pmCycle),
   })
 }
+
+const openIssuesInput = useLocalizedInput(() => form.value.openIssues, (value) => { form.value.openIssues = value }, (value) => systemValueLabel(value, locale.value))
+const serviceContractInput = useLocalizedInput(() => form.value.serviceContract, (value) => { form.value.serviceContract = value }, (value) => systemValueLabel(value, locale.value))
+const pmCycleInput = useLocalizedInput(() => form.value.pmCycle, (value) => { form.value.pmCycle = value }, (value) => systemValueLabel(value, locale.value))
 </script>
 
 <template>
-  <ModalShell title="新增质保 / 服务记录" eyebrow="APPEND-ONLY SERVICE AUDIT" submit-label="保存服务记录" :busy="busy" :submit-disabled="invalid" @close="emit('close')" @submit="submit">
+  <ModalShell :title="t('installed.serviceTitle')" :eyebrow="copy('APPEND-ONLY SERVICE AUDIT', '仅追加服务审计')" :submit-label="t('installed.saveService')" :busy="busy" :submit-disabled="invalid" @close="emit('close')" @submit="submit">
     <p v-if="error" class="form-error">{{ error }}</p>
     <div class="form-grid">
-      <label><span>服务日期<RequiredMark /></span><input v-model="form.serviceDate" type="date" required /></label>
-      <label><span>服务类型<RequiredMark /></span><select v-model="form.serviceType"><option v-for="item in types" :key="item" :value="item">{{ item }}</option></select></label>
-      <label class="wide"><span>处理结果<RequiredMark /></span><textarea v-model="form.result" rows="3" required /></label>
-      <label class="wide"><span>遗留问题<RequiredMark /></span><textarea v-model="form.openIssues" rows="2" required /></label>
-      <label class="wide"><span>下一步行动</span><input v-model="form.nextAction" aria-label="下一步行动" /></label>
-      <label><span>行动负责人<RequiredMark v-if="form.nextAction?.trim()" /></span><select v-model="form.actionOwner" aria-label="行动负责人"><option value="">请选择有效人员</option><option v-for="owner in actionOwners" :key="owner.id" :value="owner.id">{{ owner.name }} · {{ owner.role }}</option></select></label>
-      <label><span>截止日期<RequiredMark v-if="form.nextAction?.trim()" /></span><input v-model="form.due" type="date" aria-label="截止日期" /></label>
-      <label><span>质保开始</span><input v-model="form.warrantyStart" type="date" /></label>
-      <label><span>质保结束</span><input v-model="form.warrantyEnd" type="date" /></label>
-      <label><span>服务合同</span><input v-model="form.serviceContract" /></label>
-      <label><span>PM 周期</span><input v-model="form.pmCycle" /></label>
-      <label class="wide"><span>补充说明</span><textarea v-model="form.comment" rows="2" /></label>
+      <label><span>{{ t('installed.serviceDate') }}<RequiredMark /></span><input v-model="form.serviceDate" type="date" required /></label>
+      <label><span>{{ t('installed.serviceType') }}<RequiredMark /></span><select v-model="form.serviceType"><option v-for="item in types" :key="item" :value="item">{{ t('installed.type.' + item) }}</option></select></label>
+      <label class="wide"><span>{{ t('installed.handlingResult') }}<RequiredMark /></span><textarea v-model="form.result" rows="3" required /></label>
+      <label class="wide"><span>{{ t('installed.openIssues') }}<RequiredMark /></span><textarea v-model="openIssuesInput" rows="2" required /></label>
+      <label class="wide"><span>{{ t('installed.nextAction') }}</span><input v-model="form.nextAction" :aria-label="t('installed.nextAction')" /></label>
+      <label><span>{{ t('installed.actionOwner') }}<RequiredMark v-if="form.nextAction?.trim()" /></span><select v-model="form.actionOwner" :aria-label="t('installed.actionOwner')"><option value="">{{ t('installed.selectValidPerson') }}</option><option v-for="owner in actionOwners" :key="owner.id" :value="owner.id">{{ owner.name }} · {{ owner.role }}</option></select></label>
+      <label><span>{{ t('installed.dueDate') }}<RequiredMark v-if="form.nextAction?.trim()" /></span><input v-model="form.due" type="date" :aria-label="t('installed.dueDate')" /></label>
+      <label><span>{{ t('installed.warrantyStart') }}</span><input v-model="form.warrantyStart" type="date" /></label>
+      <label><span>{{ t('installed.warrantyEnd') }}</span><input v-model="form.warrantyEnd" type="date" /></label>
+      <label><span>{{ t('installed.serviceContract') }}</span><input v-model="serviceContractInput" /></label>
+      <label><span>{{ t('installed.pmCycle') }}</span><input v-model="pmCycleInput" /></label>
+      <label class="wide"><span>{{ t('installed.optionalNotes') }}</span><textarea v-model="form.comment" rows="2" /></label>
     </div>
   </ModalShell>
 </template>

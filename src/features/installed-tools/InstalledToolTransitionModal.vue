@@ -1,13 +1,19 @@
 <script setup lang="ts">
+import { useLocalizedInput } from '@/i18n/localized-input'
+import { systemValueLabel } from '@/features/shared/system-labels'
 import { computed, ref } from 'vue'
 import ModalShell from '@/design-system/ModalShell.vue'
 import RequiredMark from '@/design-system/RequiredMark.vue'
 import { shanghaiDate } from '@/domain/time'
 import type { TransitionInstalledToolInput } from '@/types/workspaces'
+import { useI18n } from '@/i18n'
 
 export type InstalledToolTransitionSubmit = TransitionInstalledToolInput
 defineProps<{ stage: string; busy?: boolean; error?: string }>()
 const emit = defineEmits<{ close: []; submit: [value: InstalledToolTransitionSubmit] }>()
+const { locale, t } = useI18n()
+const copy = (english: string, chinese: string) => locale.value === 'en-US' ? english : chinese
+const stageLabel = (stage: string) => copy(stage, ({ FAT: 'FAT', Shipment: '发运', Installation: '安装', SAT: 'SAT', Warranty: '质保' } as Record<string, string>)[stage] || stage)
 const evidenceText = ref('')
 const form = ref<TransitionInstalledToolInput>({
   completedAt: shanghaiDate(),
@@ -22,25 +28,27 @@ function submit() {
   emit('submit', {
     ...form.value,
     result: form.value.result.trim(),
-    openIssues: form.value.openIssues.trim(),
+    openIssues: openIssuesInput.value.trim(),
     customerSignoff: form.value.customerSignoff.trim(),
     comment: form.value.comment.trim(),
     evidence: evidenceText.value.split(String.fromCharCode(10)).map((item) => item.trim()).filter(Boolean),
   })
 }
+
+const openIssuesInput = useLocalizedInput(() => form.value.openIssues, (value) => { form.value.openIssues = value }, (value) => systemValueLabel(value, locale.value))
 </script>
 
 <template>
-  <ModalShell :title="`完成 ${stage} 节点`" eyebrow="AUDITED LIFECYCLE TRANSITION" submit-label="确认完成并推进" :busy="busy" :submit-disabled="invalid" @close="emit('close')" @submit="submit">
-    <p class="form-note">提交后将生成不可覆盖的生命周期记录，并推进到下一个节点。</p>
+  <ModalShell :title="t('installed.transitionTitle', { stage: stageLabel(stage) })" :eyebrow="copy('AUDITED LIFECYCLE TRANSITION', '已审计生命周期推进')" :submit-label="t('installed.confirmAdvance')" :busy="busy" :submit-disabled="invalid" @close="emit('close')" @submit="submit">
+    <p class="form-note">{{ t('installed.transitionHint') }}</p>
     <p v-if="error" class="form-error">{{ error }}</p>
     <div class="form-grid">
-      <label><span>完成日期<RequiredMark /></span><input v-model="form.completedAt" type="date" required /></label>
-      <label><span>客户确认<RequiredMark /></span><input v-model="form.customerSignoff" placeholder="签字人或确认方式" required /></label>
-      <label class="wide"><span>验收结果<RequiredMark /></span><textarea v-model="form.result" rows="3" required /></label>
-      <label class="wide"><span>遗留问题<RequiredMark /></span><textarea v-model="form.openIssues" rows="2" required /></label>
-      <label class="wide"><span>节点说明<RequiredMark /></span><textarea v-model="form.comment" rows="2" required /></label>
-      <label class="wide"><span>备注</span><textarea v-model="evidenceText" rows="3" /></label>
+      <label><span>{{ t('installed.completedAt') }}<RequiredMark /></span><input v-model="form.completedAt" type="date" required /></label>
+      <label><span>{{ t('installed.customerSignoff') }}<RequiredMark /></span><input v-model="form.customerSignoff" :placeholder="t('installed.signerPlaceholder')" required /></label>
+      <label class="wide"><span>{{ t('installed.result') }}<RequiredMark /></span><textarea v-model="form.result" rows="3" required /></label>
+      <label class="wide"><span>{{ t('installed.openIssues') }}<RequiredMark /></span><textarea v-model="openIssuesInput" rows="2" required /></label>
+      <label class="wide"><span>{{ t('installed.stageNote') }}<RequiredMark /></span><textarea v-model="form.comment" rows="2" required /></label>
+      <label class="wide"><span>{{ t('installed.notes') }}</span><textarea v-model="evidenceText" rows="3" /></label>
     </div>
   </ModalShell>
 </template>

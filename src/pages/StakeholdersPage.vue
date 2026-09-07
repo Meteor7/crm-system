@@ -5,6 +5,7 @@ import { Network, Plus, UserRoundCheck } from '@lucide/vue'
 import { api as defaultApi, type CrmApi } from '@/api'
 import { mapRequestError } from '@/api/request-state'
 import { useAppStore } from '@/stores/app'
+import { useI18n } from '@/i18n'
 import type { AccountSummaryDto, BuyingRole, ContactDto, CreateStakeholderInput, Tone } from '@/types/crm'
 import { buildStakeholderForest, type StakeholderNode } from '@/domain/stakeholders'
 import PageHeader from '@/design-system/PageHeader.vue'
@@ -15,6 +16,7 @@ import StakeholderModal from '@/features/stakeholders/StakeholderModal.vue'
 
 const props = withDefaults(defineProps<{ apiClient?: CrmApi }>(), { apiClient: () => defaultApi })
 const app = useAppStore()
+const { t, locale } = useI18n()
 const accounts = ref<AccountSummaryDto[]>([]), contacts = ref<ContactDto[]>([]), selectedId = ref(''), loading = ref(false), busy = ref(false), error = ref(''), requestId = ref('')
 const modal = ref(false), editing = ref<ContactDto | null>(null)
 const canWrite = computed(() => app.can('stakeholder:write'))
@@ -65,8 +67,8 @@ onMounted(async () => {
 
 <template>
   <div class="stakeholder-page">
-    <PageHeader eyebrow="STAKEHOLDER MAP" title="关键人与组织关系" description="维护购买角色、影响力、关系强度和真实汇报关系；未知信息保持为空。">
-      <button v-if="canWrite && selectedAccount" class="primary-button" type="button" data-testid="new-stakeholder" @click="open()"><Plus :size="15" />新增关键人</button>
+    <PageHeader eyebrow="STAKEHOLDER MAP" :title="t('stakeholders.title')" :description="t('stakeholders.description')">
+      <button v-if="canWrite && selectedAccount" class="primary-button" type="button" data-testid="new-stakeholder" @click="open()"><Plus :size="15" />{{ locale === 'en-US' ? 'New stakeholder' : '新增关键人' }}</button>
     </PageHeader>
 
     <section class="stakeholder-workspace">
@@ -79,22 +81,22 @@ onMounted(async () => {
       <main class="relationship-panel">
         <p v-if="error" class="form-error">{{ error }}<small v-if="requestId">Request ID {{ requestId }}</small></p>
         <template v-if="selectedAccount">
-          <header class="account-heading"><div><span>{{ selectedAccount.segment }} · {{ selectedAccount.region }}</span><h2>{{ selectedAccount.name }}</h2><p>{{ contacts.length }} 位详细关键人 · 详情记录为人数事实来源</p></div><Network :size="32" /></header>
-          <div class="role-coverage"><span v-for="item in roleCoverage" :key="item.role" :class="{ missing: !item.covered }"><UserRoundCheck :size="13" />{{ item.covered ? `${item.role} 已覆盖` : `缺少 ${item.role}` }}</span></div>
+          <header class="account-heading"><div><span>{{ selectedAccount.segment }} · {{ selectedAccount.region }}</span><h2>{{ selectedAccount.name }}</h2><p>{{ locale === 'en-US' ? `${contacts.length} stakeholders · detailed records are the source of truth` : `${contacts.length} 位详细关键人 · 详情记录为人数事实来源` }}</p></div><Network :size="32" /></header>
+          <div class="role-coverage"><span v-for="item in roleCoverage" :key="item.role" :class="{ missing: !item.covered }"><UserRoundCheck :size="13" />{{ item.covered ? (locale === 'en-US' ? `${item.role} covered` : `${item.role} 已覆盖`) : (locale === 'en-US' ? `${item.role} missing` : `缺少 ${item.role}`) }}</span></div>
 
           <DataState v-if="loading && !contacts.length" type="loading" />
           <template v-else>
-            <SectionCard title="组织关系图" eyebrow="REPORTING STRUCTURE" description="只显示已明确维护的汇报线；没有关系的关键人作为根节点。">
-              <DataState v-if="!flatTree.length" type="empty" title="还没有关键人" message="新增后可维护购买角色与组织关系。" />
+            <SectionCard :title="locale === 'en-US' ? 'Reporting structure' : '组织关系图'" eyebrow="REPORTING STRUCTURE" :description="locale === 'en-US' ? 'Only maintained reporting lines are shown; contacts without a relationship are root nodes.' : '只显示已明确维护的汇报线；没有关系的关键人作为根节点。'">
+              <DataState v-if="!flatTree.length" type="empty" :title="locale === 'en-US' ? 'No stakeholders yet' : '还没有关键人'" :message="locale === 'en-US' ? 'Add a stakeholder to maintain buying roles and reporting lines.' : '新增后可维护购买角色与组织关系。'" />
               <div v-else class="org-tree">
                 <button v-for="item in flatTree" :key="item.node.contact.id" type="button" :style="{ '--depth': item.depth }" @click="open(item.node.contact)">
-                  <i>{{ item.node.contact.name.slice(0, 1) }}</i><div><strong>{{ item.node.contact.name }}</strong><small>{{ item.node.contact.title }} · {{ item.node.contact.department }}</small></div><StatusBadge :label="item.node.contact.role ?? 'Unassigned'" tone="info" /><em v-if="item.node.dataQuality">{{ item.node.dataQuality === 'cycle' ? '循环汇报关系' : '上级记录缺失' }}</em>
+                  <i>{{ item.node.contact.name.slice(0, 1) }}</i><div><strong>{{ item.node.contact.name }}</strong><small>{{ item.node.contact.title }} · {{ item.node.contact.department }}</small></div><StatusBadge :label="item.node.contact.role ?? 'Unassigned'" tone="info" /><em v-if="item.node.dataQuality">{{ item.node.dataQuality === 'cycle' ? (locale === 'en-US' ? 'Circular reporting line' : '循环汇报关系') : (locale === 'en-US' ? 'Manager record missing' : '上级记录缺失') }}</em>
                 </button>
               </div>
             </SectionCard>
 
-            <SectionCard class="contact-table-card" title="关键人明细" eyebrow="CONTACT DETAILS" description="邮箱和汇报对象未提供时显示“—”。">
-              <div class="table-scroll"><table class="crm-table stakeholder-table"><thead><tr><th>关键人</th><th>购买角色</th><th>影响力</th><th>关系</th><th>汇报对象</th><th>邮箱</th><th v-if="canWrite">操作</th></tr></thead><tbody><tr v-for="contact in contacts" :key="contact.id"><td><strong>{{ contact.name }}</strong><small>{{ contact.title }} · {{ contact.department }}</small></td><td><StatusBadge :label="contact.role ?? 'Unassigned'" tone="info" /></td><td>{{ contact.influence }}</td><td><StatusBadge :label="contact.relationship" :tone="relationshipTone(contact.relationship)" /></td><td>{{ contacts.find((item) => item.id === contact.reportsTo)?.name || '—' }}</td><td>{{ contact.email || '—' }}</td><td v-if="canWrite"><button class="text-button" type="button" @click="open(contact)">编辑</button></td></tr></tbody></table></div>
+            <SectionCard class="contact-table-card" :title="locale === 'en-US' ? 'Stakeholder details' : '关键人明细'" eyebrow="CONTACT DETAILS" :description="locale === 'en-US' ? 'Shows - when email or manager is not provided.' : '邮箱和汇报对象未提供时显示“—”。'">
+              <div class="table-scroll"><table class="crm-table stakeholder-table"><thead><tr><th>{{ locale === 'en-US' ? 'Stakeholder' : '关键人' }}</th><th>{{ locale === 'en-US' ? 'Buying role' : '购买角色' }}</th><th>{{ locale === 'en-US' ? 'Influence' : '影响力' }}</th><th>{{ locale === 'en-US' ? 'Relationship' : '关系' }}</th><th>{{ locale === 'en-US' ? 'Reports to' : '汇报对象' }}</th><th>Email</th><th v-if="canWrite">{{ locale === 'en-US' ? 'Actions' : '操作' }}</th></tr></thead><tbody><tr v-for="contact in contacts" :key="contact.id"><td><strong>{{ contact.name }}</strong><small>{{ contact.title }} · {{ contact.department }}</small></td><td><StatusBadge :label="contact.role ?? 'Unassigned'" tone="info" /></td><td>{{ contact.influence }}</td><td><StatusBadge :label="contact.relationship" :tone="relationshipTone(contact.relationship)" /></td><td>{{ contacts.find((item) => item.id === contact.reportsTo)?.name || '—' }}</td><td>{{ contact.email || '—' }}</td><td v-if="canWrite"><button class="text-button" type="button" @click="open(contact)">{{ locale === 'en-US' ? 'Edit' : '编辑' }}</button></td></tr></tbody></table></div>
             </SectionCard>
           </template>
         </template>

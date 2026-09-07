@@ -5,9 +5,12 @@ import RequiredMark from '@/design-system/RequiredMark.vue'
 import PersonnelSelect from '@/design-system/PersonnelSelect.vue'
 import { preferredPersonnelId } from '@/demo/personnel'
 import { OPPORTUNITY_ACTION_STATUSES, type CreateOpportunityActionInput, type OpportunityActionDto } from '@/types/workspaces'
+import { useI18n } from '@/i18n'
+import { salesEnumLabel } from '@/features/shared/sales-i18n'
 
 const props = defineProps<{ action?: OpportunityActionDto | null; defaultOwner: string; busy?: boolean; error?: string }>()
 const emit = defineEmits<{ close: []; submit: [value: CreateOpportunityActionInput] }>()
+const { t, locale } = useI18n()
 const form = ref<CreateOpportunityActionInput>({
   title: props.action?.title ?? '', owner: props.action?.owner ?? preferredPersonnelId('Sales', props.defaultOwner),
   due: props.action?.due ?? '2026-07-31', status: props.action?.status ?? 'Open',
@@ -15,13 +18,13 @@ const form = ref<CreateOpportunityActionInput>({
 </script>
 
 <template>
-  <ModalShell :title="action ? '编辑 Action' : '新增 Action'" eyebrow="ACTION PLAN" :busy="busy" @close="$emit('close')" @submit="$emit('submit', form)">
+  <ModalShell :title="action ? t('actionEditor.edit') : t('actionEditor.new')" eyebrow="ACTION PLAN" :busy="busy" @close="$emit('close')" @submit="$emit('submit', form)">
     <p v-if="error" class="form-error">{{ error }}</p>
     <div class="action-form-grid">
-      <label class="wide"><span>Action 标题<RequiredMark :show="!action" /></span><input v-model="form.title" aria-label="Action 标题" required /></label>
-      <label><span>Owner<RequiredMark :show="!action" /></span><PersonnelSelect v-model="form.owner" :roles="['Sales', 'Engineer']" ariaLabel="Action owner" required /></label>
-      <label><span>Due Date<RequiredMark :show="!action" /></span><input v-model="form.due" aria-label="Action 截止日期" type="date" required /></label>
-      <label><span>状态</span><select v-model="form.status" aria-label="Action 状态"><option v-for="item in OPPORTUNITY_ACTION_STATUSES" :key="item">{{ item }}</option></select></label>
+      <label class="wide"><span>{{ t('actionEditor.title') }}<RequiredMark :show="!action" /></span><input v-model="form.title" :aria-label="t('actionEditor.title')" required /></label>
+      <label><span>{{ t('actionEditor.owner') }}<RequiredMark :show="!action" /></span><PersonnelSelect v-model="form.owner" :roles="['Sales', 'Engineer']" :ariaLabel="t('actionEditor.owner')" required /></label>
+      <label><span>{{ t('actionEditor.dueDate') }}<RequiredMark :show="!action" /></span><input v-model="form.due" :aria-label="t('actionEditor.dueDate')" type="date" required /></label>
+      <label><span>{{ t('detail.status') }}</span><select v-model="form.status" :aria-label="t('detail.status')"><option v-for="item in OPPORTUNITY_ACTION_STATUSES" :key="item" :value="item">{{ salesEnumLabel(item, locale) }}</option></select></label>
     </div>
   </ModalShell>
 </template>

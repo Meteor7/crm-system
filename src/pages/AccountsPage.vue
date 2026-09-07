@@ -18,19 +18,21 @@ import AccountSegmentSelect from '@/features/accounts/AccountSegmentSelect.vue'
 import { personnelDisplayName, preferredPersonnelId } from '@/demo/personnel'
 import { mapRequestError, readRequestMeta, type RequestMetaState } from '@/api/request-state'
 import { formatDisplayDate } from '@/domain/time'
+import { useI18n, useLocaleMessage, localeMessage } from '@/i18n'
 
 const props = withDefaults(defineProps<{ apiClient?: CrmApi }>(), { apiClient: () => defaultApi })
 const route = useRoute()
 const router = useRouter()
 const app = useAppStore()
-const rows = ref<AccountSummaryDto[]>([]), total = ref(0), loading = ref(false), error = ref(''), denied = ref(false), requestId = ref(''), meta = ref<RequestMetaState | null>(null)
-const deletingId = ref(''), deleteError = ref(''), deleteRequestId = ref('')
+const { locale, t, message: translatedMessage } = useI18n()
+const rows = ref<AccountSummaryDto[]>([]), total = ref(0), loading = ref(false), error = useLocaleMessage(), denied = ref(false), requestId = ref(''), meta = ref<RequestMetaState | null>(null)
+const deletingId = ref(''), deleteError = useLocaleMessage(), deleteRequestId = ref('')
 const page = ref(typeof route.query.page === 'string' && Number(route.query.page) > 0 ? Number(route.query.page) : 1)
 const pageSize = ref(typeof route.query.pageSize === 'string' && [10, 25, 50].includes(Number(route.query.pageSize)) ? Number(route.query.pageSize) : 10)
 const segment = ref(typeof route.query.segment === 'string' ? route.query.segment : 'All'), city = ref(typeof route.query.city === 'string' ? route.query.city : 'All')
 const segments = ref<string[]>(['Frontend', 'Advanced Packaging'])
 const cities = ref<string[]>([])
-const accountModal = ref(false), busy = ref(false), modalError = ref('')
+const accountModal = ref(false), busy = ref(false), modalError = useLocaleMessage()
 const canWrite = computed(() => app.can('account:write'))
 const canDelete = computed(() => app.bootstrap?.user.role === 'Manager')
 const accountForm = ref<CreateAccountInput>({ name: '', shortName: '', segment: 'Frontend', tier: 'A', city: '上海', region: '华东', owner: preferredPersonnelId('Sales', app.bootstrap?.user.id), visibility: 'Private' })
@@ -50,7 +52,7 @@ async function load() {
     rows.value.forEach((account) => includeCity(account.city))
   } catch (reason) {
     if (sequence !== loadSequence) return
-    const mapped = mapRequestError(reason); error.value = mapped.message; requestId.value = mapped.requestId; denied.value = mapped.denied
+    const mapped = mapRequestError(reason); error.value = mapped.localizedMessage ?? mapped.message; requestId.value = mapped.requestId; denied.value = mapped.denied
     if (mapped.denied) { rows.value = []; total.value = 0 }
   } finally { if (sequence === loadSequence) loading.value = false }
 }
@@ -124,8 +126,13 @@ async function createAccount() {
         persistedSiteCount.value = index + 1
       }
     } catch (reason) {
-      const message = mapRequestError(reason).message
-      modalError.value = createdAccountId.value ? `客户已创建，但厂区保存失败：${message}` : message
+      const mapped = mapRequestError(reason)
+      const localized = mapped.localizedMessage ?? mapped.message
+      if (createdAccountId.value) {
+        const english = typeof localized === 'string' ? localized : localized['en-US']
+        const chinese = typeof localized === 'string' ? localized : localized['zh-CN']
+        modalError.value = localeMessage(translatedMessage('accounts.siteSaveFailed', { message: english })['en-US'], translatedMessage('accounts.siteSaveFailed', { message: chinese })['zh-CN'])
+      } else modalError.value = localized
       return
     }
     segment.value = 'All'; city.value = 'All'
@@ -136,7 +143,7 @@ async function createAccount() {
     persistedSiteCount.value = 0
     await load()
     await router.push({ name: 'account-detail', params: { accountId: targetAccountId } })
-  } catch (reason) { modalError.value = mapRequestError(reason).message }
+  } catch (reason) { const mapped = mapRequestError(reason); modalError.value = mapped.localizedMessage ?? mapped.message }
   finally { busy.value = false }
 }
 watch([segment, city], changeFilters, { flush: 'sync' })
@@ -151,7 +158,7 @@ watch(() => [route.query.page, route.query.pageSize, route.query.segment, route.
 onMounted(() => { void load(); void loadSegments(); void loadCities() })
 function openDetail(account: AccountSummaryDto) { void router.push({ name: 'account-detail', params: { accountId: account.id } }) }
 async function deleteAccount(account: AccountSummaryDto) {
-  if (deletingId.value || !window.confirm(`确认删除客户 ${account.name}？`)) return
+  if (deletingId.value || !window.confirm(`${t('accounts.delete')} ${t('accounts.account').toLowerCase()} ${account.name}?`)) return
   deletingId.value = account.id
   deleteError.value = ''
   deleteRequestId.value = ''
@@ -161,7 +168,7 @@ async function deleteAccount(account: AccountSummaryDto) {
     await load()
   } catch (reason) {
     const mapped = mapRequestError(reason)
-    deleteError.value = mapped.message
+    deleteError.value = mapped.localizedMessage ?? mapped.message
     deleteRequestId.value = mapped.requestId
   } finally {
     deletingId.value = ''
@@ -171,61 +178,61 @@ async function deleteAccount(account: AccountSummaryDto) {
 
 <template>
   <div class="accounts-page">
-    <PageHeader eyebrow="ACCOUNT PORTFOLIO" title="客户档案" description="统一维护客户主数据、经营状态与业务关联；点击客户进入 Account 360 内页。">
-      <button v-if="canWrite" class="primary-button" type="button" data-testid="new-account" @click="openAccountModal"><Plus :size="15" />新增客户</button>
+    <PageHeader eyebrow="ACCOUNT PORTFOLIO" :title="t('accounts.title')" :description="t('accounts.description')">
+      <button v-if="canWrite" class="primary-button" type="button" data-testid="new-account" @click="openAccountModal"><Plus :size="15" />{{ t('accounts.new') }}</button>
     </PageHeader>
-    <section v-if="!denied" class="account-stats"><div><span>客户总数</span><strong>{{ total }}</strong><small>当前筛选范围</small></div><div><span>档案完整度</span><strong>{{ rows.length ? Math.round(rows.reduce((sum, item) => sum + item.completeness, 0) / rows.length) : 0 }}%</strong><small>建议保持 ≥ 85%</small></div></section>
-    <FilterBar :result-label="`${total} 个客户`" @reset="reset"><select v-model="segment" class="filter-control" aria-label="业务领域"><option value="All">全部业务领域</option><option v-for="item in segments" :key="item" :value="item">{{ item }}</option></select><select v-model="city" class="filter-control" aria-label="城市"><option value="All">全部城市</option><option v-for="item in cities" :key="item" :value="item">{{ item }}</option></select></FilterBar>
-    <DataNotice v-if="meta?.stale" :message="meta.message" :request-id="meta.requestId" @refresh="load" />
-    <p v-if="deleteError" class="form-error" data-delete-error>{{ deleteError }}<small v-if="deleteRequestId">Request ID {{ deleteRequestId }}</small></p>
+    <section v-if="!denied" class="account-stats"><div><span>{{ t('accounts.total') }}</span><strong>{{ total }}</strong><small>{{ t('accounts.scope') }}</small></div><div><span>{{ t('accounts.completeness') }}</span><strong>{{ rows.length ? Math.round(rows.reduce((sum, item) => sum + item.completeness, 0) / rows.length) : 0 }}%</strong><small>{{ t('accounts.completenessHint') }}</small></div></section>
+    <FilterBar :result-label="t('accounts.result', { count: total })" @reset="reset"><select v-model="segment" class="filter-control" :aria-label="locale === 'en-US' ? 'Business area' : '业务领域'"><option value="All">{{ t('accounts.allSegments') }}</option><option v-for="item in segments" :key="item" :value="item">{{ item }}</option></select><select v-model="city" class="filter-control" :aria-label="locale === 'en-US' ? 'City' : '城市'"><option value="All">{{ t('accounts.allCities') }}</option><option v-for="item in cities" :key="item" :value="item">{{ item }}</option></select></FilterBar>
+    <DataNotice v-if="meta?.stale" :message="meta.localizedMessage ?? meta.message" :request-id="meta.requestId" @refresh="load" />
+    <p v-if="deleteError" class="form-error" data-delete-error>{{ deleteError }}<small v-if="deleteRequestId">{{ locale === 'en-US' ? 'Request ID' : '请求编号' }} {{ deleteRequestId }}</small></p>
 
     <section class="accounts-card">
       <DataState v-if="loading && !rows.length" type="loading" />
       <DataState v-else-if="denied" type="denied" :message="error" :request-id="requestId" />
       <DataState v-else-if="error" type="error" :message="error" :request-id="requestId" @retry="load" />
-      <DataState v-else-if="!rows.length" type="empty" title="没有匹配的客户" message="清除筛选条件后重试。" />
+      <DataState v-else-if="!rows.length" type="empty" :title="t('accounts.emptyTitle')" :message="t('accounts.emptyMessage')" />
       <div v-else class="table-scroll">
         <table class="crm-table accounts-table">
-          <thead><tr><th>客户</th><th>业务 / 区域</th><th>负责人</th><th>联系人 / 厂区</th><th>Pipeline / 意愿</th><th>下一步</th><th>风险</th><th>完整度</th><th>更新日期</th><th v-if="canDelete">操作</th></tr></thead>
+          <thead><tr><th>{{ t('accounts.account') }}</th><th>{{ t('accounts.businessRegion') }}</th><th>{{ t('accounts.owner') }}</th><th>{{ t('accounts.contactsSites') }}</th><th>{{ t('accounts.pipelineIntent') }}</th><th>{{ t('accounts.nextStep') }}</th><th>{{ t('accounts.risk') }}</th><th>{{ t('accounts.completeness') }}</th><th>{{ t('accounts.updated') }}</th><th v-if="canDelete">{{ t('accounts.actions') }}</th></tr></thead>
           <tbody>
             <tr v-for="account in rows" :key="account.id" :data-account-id="account.id">
               <td><button class="account-link record-name-link" type="button" :data-open-account-detail="account.id" @click="openDetail(account)"><span><Building2 :size="14" /></span><div><strong>{{ account.shortName }}</strong><small>{{ account.name }}</small></div></button></td>
               <td><strong>{{ account.segment }}</strong><small>{{ account.city }} · {{ account.region }}</small></td>
-              <td>{{ personnelDisplayName(account.owner) }}</td><td><strong>{{ account.stakeholderCount }} 位联系人</strong><small>{{ account.siteCount }} 个厂区</small></td><td><strong>¥{{ account.pipelineAmount.toLocaleString('zh-CN') }}</strong><small>意愿 {{ account.intentScore }}</small></td><td><strong>{{ account.nextAction || '暂无' }}</strong><small>{{ account.nextActionDue ? formatDisplayDate(account.nextActionDue) : '未排期' }}</small></td>
-              <td><StatusBadge :label="account.risk" :tone="riskTone(account.risk)" /></td><td>{{ account.completeness }}%</td><td>{{ formatDisplayDate(account.updatedAt) }}</td>
-              <td v-if="canDelete"><button type="button" class="site-remove" :data-delete-account="account.id" :disabled="Boolean(deletingId)" @click="deleteAccount(account)">删除</button></td>
+              <td>{{ personnelDisplayName(account.owner) }}</td><td><strong>{{ t('accounts.contactsCount', { count: account.stakeholderCount }) }}</strong><small>{{ t('accounts.sitesCount', { count: account.siteCount }) }}</small></td><td><strong>¥{{ account.pipelineAmount.toLocaleString(locale) }}</strong><small>{{ locale === 'en-US' ? 'Intent score' : '意愿评分' }} {{ account.intentScore }}</small></td><td><strong>{{ account.nextAction || t('accounts.none') }}</strong><small>{{ account.nextActionDue ? formatDisplayDate(account.nextActionDue) : t('accounts.unscheduled') }}</small></td>
+              <td><StatusBadge :label="account.risk === '高风险' ? t('accounts.riskHigh') : account.risk === '关注' ? t('accounts.riskWatch') : t('accounts.riskStable')" :tone="riskTone(account.risk)" /></td><td>{{ account.completeness }}%</td><td>{{ formatDisplayDate(account.updatedAt) }}</td>
+              <td v-if="canDelete"><button type="button" class="site-remove" :data-delete-account="account.id" :disabled="Boolean(deletingId)" @click="deleteAccount(account)">{{ t('accounts.delete') }}</button></td>
             </tr>
           </tbody>
         </table>
       </div>
       <PaginationControls v-if="!denied && !error && total > pageSize" :page="page" :page-size="pageSize" :total="total" @change="goPage" @page-size-change="changePageSize" />
     </section>
-    <ModalShell v-if="accountModal" title="新增客户" eyebrow="ACCOUNT MASTER" :busy="busy" @close="accountModal = false" @submit="createAccount">
+    <ModalShell v-if="accountModal" :title="locale === 'en-US' ? 'New account' : '新增客户'" eyebrow="ACCOUNT MASTER" :busy="busy" @close="accountModal = false" @submit="createAccount">
       <p v-if="modalError" class="form-error">{{ modalError }}</p>
       <div class="account-form-grid">
-        <label><span>客户全称<RequiredMark /></span><input v-model="accountForm.name" aria-label="客户全称" required /></label>
-        <label><span>客户简称<RequiredMark /></span><input v-model="accountForm.shortName" aria-label="客户简称" required /></label>
-        <label><span>业务领域<RequiredMark /></span><AccountSegmentSelect v-model="accountForm.segment" :segments="segments" label="客户业务领域" required /></label>
-        <label><span>客户等级</span><select v-model="accountForm.tier" aria-label="客户等级"><option>S</option><option>A</option><option>B</option></select></label>
-        <label><span>城市<RequiredMark /></span><input v-model="accountForm.city" aria-label="客户城市" required /></label>
-        <label><span>区域<RequiredMark /></span><input v-model="accountForm.region" aria-label="客户区域" required /></label>
-        <label class="wide"><span>负责人<RequiredMark /></span><PersonnelSelect v-model="accountForm.owner" :roles="['Sales']" :ariaLabel="'\u5ba2\u6237\u8d1f\u8d23\u4eba'" required /></label>
-        <label class="wide"><span>访问权限</span><select v-model="accountForm.visibility" aria-label="客户访问权限"><option value="Private">私有：仅负责人和 Manager 可见</option><option value="Public">公开：所有 Sales 可见，其他 Sales 只读</option></select></label>
+        <label><span>{{ locale === 'en-US' ? 'Account name' : '客户全称' }}<RequiredMark /></span><input v-model="accountForm.name" :aria-label="locale === 'en-US' ? 'Account name' : '客户全称'" required /></label>
+        <label><span>{{ locale === 'en-US' ? 'Short name' : '客户简称' }}<RequiredMark /></span><input v-model="accountForm.shortName" :aria-label="locale === 'en-US' ? 'Short name' : '客户简称'" required /></label>
+        <label><span>{{ locale === 'en-US' ? 'Business area' : '业务领域' }}<RequiredMark /></span><AccountSegmentSelect v-model="accountForm.segment" :segments="segments" :label="locale === 'en-US' ? 'Account business area' : '客户业务领域'" required /></label>
+        <label><span>{{ locale === 'en-US' ? 'Account tier' : '客户等级' }}</span><select v-model="accountForm.tier" :aria-label="locale === 'en-US' ? 'Account tier' : '客户等级'"><option>S</option><option>A</option><option>B</option></select></label>
+        <label><span>{{ locale === 'en-US' ? 'City' : '城市' }}<RequiredMark /></span><input v-model="accountForm.city" :aria-label="locale === 'en-US' ? 'City' : '客户城市'" required /></label>
+        <label><span>{{ locale === 'en-US' ? 'Region' : '区域' }}<RequiredMark /></span><input v-model="accountForm.region" :aria-label="locale === 'en-US' ? 'Region' : '客户区域'" required /></label>
+        <label class="wide"><span>{{ locale === 'en-US' ? 'Owner' : '负责人' }}<RequiredMark /></span><PersonnelSelect v-model="accountForm.owner" :roles="['Sales']" :ariaLabel="locale === 'en-US' ? 'Account owner' : '客户负责人'" required /></label>
+        <label class="wide"><span>{{ locale === 'en-US' ? 'Visibility' : '访问权限' }}</span><select v-model="accountForm.visibility" :aria-label="locale === 'en-US' ? 'Account visibility' : '客户访问权限'"><option value="Private">{{ locale === 'en-US' ? 'Private: owner and Manager only' : '私有：仅负责人和 Manager 可见' }}</option><option value="Public">{{ locale === 'en-US' ? 'Public: all Sales can view; other Sales read-only' : '公开：所有 Sales 可见，其他 Sales 只读' }}</option></select></label>
       </div>
       <section class="site-editor" data-account-site-editor>
         <header>
-          <div><strong>厂区信息</strong><small>可选；客户创建后会同步建立厂区档案</small></div>
-          <button type="button" class="secondary-button" data-add-site @click="addNewSiteDraft">增加厂区</button>
+          <div><strong>{{ locale === 'en-US' ? 'Site information' : '厂区信息' }}</strong><small>{{ locale === 'en-US' ? 'Optional; a site profile is created after account creation' : '可选；客户创建后会同步建立厂区档案' }}</small></div>
+          <button type="button" class="secondary-button" data-add-site @click="addNewSiteDraft">{{ locale === 'en-US' ? 'Add site' : '增加厂区' }}</button>
         </header>
-        <p v-if="!newSiteDrafts.length" class="site-empty">可稍后在客户详情中增加厂区。</p>
+        <p v-if="!newSiteDrafts.length" class="site-empty">{{ locale === 'en-US' ? 'You can add sites later from account details.' : '可稍后在客户详情中增加厂区。' }}</p>
         <article v-for="(site, index) in newSiteDrafts" :key="site.clientId" class="site-draft">
-          <b>厂区 {{ index + 1 }}<small v-if="index < persistedSiteCount">已保存</small></b>
-          <label><span>厂区名称<RequiredMark /></span><input v-model="site.name" :aria-label="`新厂区 ${index + 1} 名称`" :disabled="index < persistedSiteCount" required /></label>
-          <label><span>城市<RequiredMark /></span><input v-model="site.city" :aria-label="`新厂区 ${index + 1} 城市`" :disabled="index < persistedSiteCount" required /></label>
-          <label><span>厂区类型<RequiredMark /></span><input v-model="site.type" :aria-label="`新厂区 ${index + 1} 类型`" :disabled="index < persistedSiteCount" placeholder="例如：晶圆制造" required /></label>
-          <label><span>制程/用途<RequiredMark /></span><input v-model="site.process" :aria-label="`新厂区 ${index + 1} 制程或用途`" :disabled="index < persistedSiteCount" placeholder="例如：16/28nm" required /></label>
-          <label><span>状态<RequiredMark /></span><select v-model="site.status" :aria-label="`新厂区 ${index + 1} 状态`" :disabled="index < persistedSiteCount" required><option>量产</option><option>建设中</option><option>规划中</option></select></label>
-          <button type="button" class="site-remove" :disabled="index < persistedSiteCount" :data-remove-site="site.clientId" @click="removeNewSiteDraft(index)">删除此厂区</button>
+          <b>{{ locale === 'en-US' ? 'Site' : '厂区' }} {{ index + 1 }}<small v-if="index < persistedSiteCount">{{ locale === 'en-US' ? 'Saved' : '已保存' }}</small></b>
+          <label><span>{{ locale === 'en-US' ? 'Site name' : '厂区名称' }}<RequiredMark /></span><input v-model="site.name" :aria-label="locale === 'en-US' ? `New site ${index + 1} name` : `新厂区 ${index + 1} 名称`" :disabled="index < persistedSiteCount" required /></label>
+          <label><span>{{ locale === 'en-US' ? 'City' : '城市' }}<RequiredMark /></span><input v-model="site.city" :aria-label="locale === 'en-US' ? `New site ${index + 1} city` : `新厂区 ${index + 1} 城市`" :disabled="index < persistedSiteCount" required /></label>
+          <label><span>{{ locale === 'en-US' ? 'Site type' : '厂区类型' }}<RequiredMark /></span><input v-model="site.type" :aria-label="locale === 'en-US' ? `New site ${index + 1} type` : `新厂区 ${index + 1} 类型`" :disabled="index < persistedSiteCount" :placeholder="locale === 'en-US' ? 'e.g. Wafer fab' : '例如：晶圆制造'" required /></label>
+          <label><span>{{ locale === 'en-US' ? 'Process / use' : '制程/用途' }}<RequiredMark /></span><input v-model="site.process" :aria-label="locale === 'en-US' ? `New site ${index + 1} process or use` : `新厂区 ${index + 1} 制程或用途`" :disabled="index < persistedSiteCount" :placeholder="locale === 'en-US' ? 'e.g. 16/28nm' : '例如：16/28nm'" required /></label>
+          <label><span>{{ locale === 'en-US' ? 'Status' : '状态' }}<RequiredMark /></span><select v-model="site.status" :aria-label="locale === 'en-US' ? `New site ${index + 1} status` : `新厂区 ${index + 1} 状态`" :disabled="index < persistedSiteCount" required><option value="量产">{{ locale === 'en-US' ? 'Production' : '量产' }}</option><option value="建设中">{{ locale === 'en-US' ? 'Under construction' : '建设中' }}</option><option value="规划中">{{ locale === 'en-US' ? 'Planned' : '规划中' }}</option></select></label>
+          <button type="button" class="site-remove" :disabled="index < persistedSiteCount" :data-remove-site="site.clientId" @click="removeNewSiteDraft(index)">{{ locale === 'en-US' ? 'Remove site' : '删除此厂区' }}</button>
         </article>
       </section>
     </ModalShell>

@@ -88,7 +88,7 @@ describe('permission revocation', () => {
     await flushPromises()
     const text = bossWrapper.get('[data-testid="selected-demo"]').text()
     for (const expected of [
-      'Critical', 'Demo Staff 01', 'Defect capture', 'SEM', '2026-08-01 ~ 2026-08-12', 'Engineering archive comment',
+      '紧急', 'Demo Staff 01', 'Defect capture', 'SEM', '2026-08-01 ~ 2026-08-12', 'Engineering archive comment',
       'Approved', 'Boss archive comment', '演示员工15',
       '8', '96.1', '2.8', '38', 'Sensitive Unreleased Analysis', '2026-07-17',
     ]) expect(text).toContain(expected)
@@ -185,7 +185,7 @@ describe('permission revocation', () => {
 
     await wrapper.get('[data-evaluation-view="execution"]').trigger('click')
     await wrapper.get('[data-add-run="EVAL-103"]').trigger('click')
-    await wrapper.get('[aria-label="Wafer Lot"]').setValue('LOT-DENIED')
+    await wrapper.get('[aria-label="晶圆批次"]').setValue('LOT-DENIED')
     await wrapper.get('.modal-card form').trigger('submit')
     await flushPromises()
     expect(wrapper.find('.state-denied').exists()).toBe(true)

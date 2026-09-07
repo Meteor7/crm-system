@@ -1,15 +1,17 @@
 <script setup lang="ts">
+import { notificationCopy } from '@/i18n/notification-copy'
+import { requestErrorMessage } from '@/api/request-state'
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { Bell, KeyRound, Menu, PanelLeftClose, PanelLeftOpen, Settings, X } from '@lucide/vue'
+import { Bell, Globe2, KeyRound, Menu, PanelLeftClose, PanelLeftOpen, Settings, X } from '@lucide/vue'
 import { navigation } from './navigation'
 import { useAppStore } from '@/stores/app'
-import { hasCapability, ROLE_PROFILES } from '@/domain/permissions'
+import { hasCapability } from '@/domain/permissions'
 import { useNotificationStore } from '@/stores/notifications'
-import type { AppNotification } from '@/types/notifications'
+import type { AppNotification, NotificationCategory } from '@/types/notifications'
 import { usingMock } from '@/api'
 import { formatDisplayDate } from '@/domain/time'
-import { mapRequestError } from '@/api/request-state'
+import { useI18n, useLocaleMessage } from '@/i18n'
 
 type FrappeWindow = Window & { frappe?: unknown }
 
@@ -19,6 +21,7 @@ const route = useRoute()
 const router = useRouter()
 const store = useAppStore()
 const notifications = useNotificationStore()
+const { locale, t, setLocale, message } = useI18n()
 const mobileOpen = ref(false)
 const desktopSidebarCollapsed = ref(false)
 const accountOpen = ref(false)
@@ -26,11 +29,11 @@ const savingPassword = ref(false)
 const currentPassword = ref('')
 const newPassword = ref('')
 const confirmPassword = ref('')
-const passwordError = ref('')
-const passwordNotice = ref('')
+const passwordError = useLocaleMessage()
+const passwordNotice = useLocaleMessage()
 const notificationOpen = ref(false)
 const notificationBusy = ref(false)
-const notificationError = ref('')
+const notificationError = useLocaleMessage()
 let notificationTimer: number | undefined
 const isEmbedded = computed(() => props.embedded ?? (Boolean((window as FrappeWindow).frappe) || import.meta.env.VITE_EMBEDDED === 'true'))
 const brandLogoUrl = `${import.meta.env.BASE_URL}brand/planck-logo-standard.png`
@@ -46,7 +49,20 @@ const user = computed(() => store.bootstrap?.user ?? {
   role: 'Manager',
   team: '大中华区销售',
 })
-const roleLabel = computed(() => store.bootstrap ? ROLE_PROFILES[store.bootstrap.user.role].label : '销售经理')
+const roleLabel = computed(() => {
+  if (!store.bootstrap) return t('shell.salesManager')
+  const role = store.bootstrap.user.role
+  return locale.value === 'en-US' ? role : { Manager: '经理', Sales: '销售', Engineer: '工程师' }[role]
+})
+const notificationCategoryLabels: Record<NotificationCategory, [string, string]> = {
+  Account: ['客户', 'Account'], Contact: ['联系人', 'Contact'], Requirement: ['需求', 'Requirement'],
+  Lead: ['线索', 'Lead'], Opportunity: ['商机', 'Opportunity'], Action: ['行动', 'Action'],
+  Visit: ['拜访', 'Visit'], Booking: ['订单', 'Booking'], Demo: ['演示', 'Demo'],
+  Evaluation: ['评估', 'Evaluation'], InstalledTool: ['已装机设备', 'Installed Tool'],
+  Quotation: ['报价', 'Quotation'], RFQ: ['询价', 'RFQ'], Document: ['文档', 'Document'],
+}
+function notificationCategoryLabel(value: NotificationCategory) { return notificationCategoryLabels[value]?.[locale.value === 'en-US' ? 1 : 0] ?? value }
+const localeMenuOpen = ref(false)
 const visibleNavigation = computed(() => {
   const role = store.bootstrap?.user.role
   return navigation
@@ -79,7 +95,7 @@ async function openNotification(notification: AppNotification) {
     await store.markNotificationRead(notification.id)
     notificationOpen.value = false
   } catch (reason) {
-    notificationError.value = mapRequestError(reason).message
+    notificationError.value = requestErrorMessage(reason)
   } finally {
     notificationBusy.value = false
   }
@@ -90,7 +106,7 @@ async function refreshNotifications() {
   try {
     await store.refreshNotifications()
   } catch (reason) {
-    if (notificationOpen.value) notificationError.value = mapRequestError(reason).message
+    if (notificationOpen.value) notificationError.value = requestErrorMessage(reason)
   }
 }
 
@@ -98,6 +114,7 @@ async function toggleNotificationCenter() {
   notificationOpen.value = !notificationOpen.value
   notificationError.value = ''
   accountOpen.value = false
+  localeMenuOpen.value = false
   if (notificationOpen.value) await refreshNotifications()
 }
 
@@ -108,7 +125,7 @@ async function loadMoreNotifications() {
   try {
     await store.loadMoreNotifications()
   } catch (reason) {
-    notificationError.value = mapRequestError(reason).message
+    notificationError.value = requestErrorMessage(reason)
   } finally {
     notificationBusy.value = false
   }
@@ -125,7 +142,7 @@ async function markAllNotificationsRead() {
   try {
     await store.markAllNotificationsRead()
   } catch (reason) {
-    notificationError.value = mapRequestError(reason).message
+    notificationError.value = requestErrorMessage(reason)
   } finally {
     notificationBusy.value = false
   }
@@ -138,15 +155,15 @@ async function submitPasswordChange() {
     return
   }
   if (!currentPassword.value || !newPassword.value || !confirmPassword.value) {
-    passwordError.value = '请完整填写当前密码、新密码和确认密码'
+    passwordError.value = message('shell.passwordRequired')
     return
   }
   if (newPassword.value !== confirmPassword.value) {
-    passwordError.value = '两次输入的新密码不一致'
+    passwordError.value = message('shell.passwordMismatch')
     return
   }
   if (newPassword.value.length < 8 || !/[A-Za-z]/.test(newPassword.value) || !/[0-9]/.test(newPassword.value)) {
-    passwordError.value = '新密码至少 8 位，并包含字母和数字'
+    passwordError.value = message('shell.passwordPolicy')
     return
   }
   savingPassword.value = true
@@ -155,9 +172,9 @@ async function submitPasswordChange() {
     currentPassword.value = ''
     newPassword.value = ''
     confirmPassword.value = ''
-    passwordNotice.value = '密码已更新，请使用新密码登录。'
+    passwordNotice.value = message('shell.passwordUpdated')
   } catch (error) {
-    passwordError.value = error instanceof Error ? error.message : '密码修改失败'
+    passwordError.value = requestErrorMessage(error, message('shell.passwordFailed'))
   } finally {
     savingPassword.value = false
   }
@@ -182,7 +199,7 @@ onBeforeUnmount(() => {
       v-if="mobileOpen"
       class="nav-scrim"
       type="button"
-      aria-label="关闭导航"
+      :aria-label="t('shell.closeNavigation')"
       data-testid="nav-scrim"
       @click="mobileOpen = false"
     />
@@ -204,21 +221,21 @@ onBeforeUnmount(() => {
           v-if="!desktopSidebarCollapsed"
           class="sidebar-collapse-button"
           type="button"
-          aria-label="收起导航"
+          :aria-label="t('shell.collapseNavigation')"
           aria-expanded="true"
           data-testid="sidebar-collapse-toggle"
           @click="desktopSidebarCollapsed = true"
         >
           <PanelLeftClose :size="18" />
         </button>
-        <button class="sidebar-close" type="button" aria-label="关闭导航" @click="mobileOpen = false">
+        <button class="sidebar-close" type="button" :aria-label="t('shell.closeNavigation')" @click="mobileOpen = false">
           <X :size="20" />
         </button>
       </div>
 
-      <nav class="primary-nav" aria-label="主导航">
+      <nav class="primary-nav" :aria-label="t('shell.mainNavigation')">
         <section v-for="group in visibleNavigation" :key="group.label" class="nav-section">
-          <p>{{ group.label }}</p>
+          <p>{{ group.i18nKey ? t(group.i18nKey) : group.label }}</p>
           <button
             v-for="item in group.items"
             :key="item.key"
@@ -230,7 +247,7 @@ onBeforeUnmount(() => {
             @click="navigate(item.path)"
           >
             <component :is="item.icon" :size="18" :stroke-width="1.8" aria-hidden="true" />
-            <span>{{ item.label }}</span>
+            <span>{{ item.i18nKey ? t(item.i18nKey) : item.label }}</span>
             <b v-if="item.badge">{{ item.badge }}</b>
           </button>
         </section>
@@ -245,34 +262,51 @@ onBeforeUnmount(() => {
             v-if="desktopSidebarCollapsed"
             class="icon-button desktop-sidebar-expand"
             type="button"
-            aria-label="展开导航"
+            :aria-label="t('shell.expandNavigation')"
             aria-expanded="false"
             data-testid="sidebar-expand-toggle"
             @click="desktopSidebarCollapsed = false"
           >
             <PanelLeftOpen :size="20" />
           </button>
-          <button class="icon-button menu-button" type="button" aria-label="打开导航" data-testid="menu-toggle" @click="mobileOpen = !mobileOpen">
+          <button class="icon-button menu-button" type="button" :aria-label="t('shell.openNavigation')" data-testid="menu-toggle" @click="mobileOpen = !mobileOpen">
             <Menu :size="21" />
           </button>
         </div>
         <div class="topbar-end">
+          <div class="locale-control">
+            <button
+              class="locale-toggle"
+              type="button"
+              :aria-label="t('language.switchTo')"
+              :aria-expanded="localeMenuOpen"
+              data-testid="locale-toggle"
+              @click="localeMenuOpen = !localeMenuOpen; accountOpen = false; notificationOpen = false"
+            >
+              <Globe2 :size="17" aria-hidden="true" />
+              <span>{{ locale === 'en-US' ? 'EN' : '中' }}</span>
+            </button>
+            <div v-if="localeMenuOpen" class="locale-menu" role="menu" :aria-label="t('language.label')">
+              <button type="button" role="menuitemradio" :aria-checked="locale === 'zh-CN'" :class="{ selected: locale === 'zh-CN' }" @click="setLocale('zh-CN'); localeMenuOpen = false">{{ t('language.chinese') }}</button>
+              <button type="button" role="menuitemradio" :aria-checked="locale === 'en-US'" :class="{ selected: locale === 'en-US' }" @click="setLocale('en-US'); localeMenuOpen = false">{{ t('language.english') }}</button>
+            </div>
+          </div>
           <div class="notification-control">
             <button
               class="icon-button notification-button"
               type="button"
               data-testid="notification-button"
-              :aria-label="`消息中心，${notifications.unreadCount} 条未读`"
+              :aria-label="`${t('shell.messageCenter')}${locale === 'en-US' ? ', ' : '，'}${t('shell.unreadCount', { count: notifications.unreadCount })}`"
               :aria-expanded="notificationOpen"
-              title="消息中心"
+              :title="t('shell.messageCenter')"
               @click="toggleNotificationCenter"
             >
               <Bell :size="19" /><b v-if="notifications.unreadCount">{{ notifications.unreadCount > 99 ? '99+' : notifications.unreadCount }}</b>
             </button>
-            <section v-if="notificationOpen" class="notification-center" data-testid="notification-center" aria-label="消息中心">
+            <section v-if="notificationOpen" class="notification-center" data-testid="notification-center" :aria-label="t('shell.messageCenter')">
               <header>
-                <div><span>MESSAGE CENTER</span><strong>消息中心</strong></div>
-                <button type="button" :disabled="!notifications.unreadCount || notificationBusy" @click="markAllNotificationsRead">全部已读</button>
+                <div><span>MESSAGE CENTER</span><strong>{{ t('shell.messageCenter') }}</strong></div>
+                <button type="button" :disabled="!notifications.unreadCount || notificationBusy" @click="markAllNotificationsRead">{{ t('shell.markAllRead') }}</button>
               </header>
               <p v-if="notificationError" class="notification-error" data-notification-error role="alert">{{ notificationError }}</p>
               <div class="notification-list">
@@ -287,13 +321,13 @@ onBeforeUnmount(() => {
                 >
                   <i />
                   <span>
-                    <em>{{ notification.category }}</em>
-                    <strong>{{ notification.title }}</strong>
-                    <small>{{ notification.message }}</small>
+                    <em>{{ notificationCategoryLabel(notification.category) }}</em>
+                    <strong>{{ notificationCopy(notification, locale).title }}</strong>
+                    <small>{{ notificationCopy(notification, locale).message }}</small>
                     <time>{{ formatDisplayDate(notification.createdAt) }}</time>
                   </span>
                 </button>
-                <p v-if="!notifications.visibleItems.length">暂无新消息</p>
+                <p v-if="!notifications.visibleItems.length">{{ t('shell.noMessages') }}</p>
               </div>
               <button
                 v-if="notifications.items.length < notifications.serverTotal"
@@ -301,33 +335,33 @@ onBeforeUnmount(() => {
                 type="button"
                 :disabled="notificationBusy"
                 @click="loadMoreNotifications"
-              >加载更多 · {{ notifications.items.length }}/{{ notifications.serverTotal }}</button>
+              >{{ t('shell.loadMore', { current: notifications.items.length, total: notifications.serverTotal }) }}</button>
             </section>
           </div>
           <div class="identity-control">
-            <button class="user-menu" data-testid="account-center-button" type="button" :aria-expanded="accountOpen" aria-label="打开账号中心" title="账号中心" @click="accountOpen = !accountOpen; notificationOpen = false">
+            <button class="user-menu" data-testid="account-center-button" type="button" :aria-expanded="accountOpen" :aria-label="t('shell.accountCenter')" :title="t('shell.accountCenter')" @click="accountOpen = !accountOpen; notificationOpen = false; localeMenuOpen = false">
               <span class="avatar settings-avatar"><Settings :size="19" /></span>
               <span><strong>{{ user.name }}</strong><small>{{ roleLabel }}</small></span>
             </button>
-            <section v-if="accountOpen" class="account-center" data-testid="account-center" aria-label="账号中心">
+            <section v-if="accountOpen" class="account-center" data-testid="account-center" :aria-label="t('shell.accountCenter')">
               <header>
                 <span class="account-center-icon"><Settings :size="18" /></span>
-                <span><strong>账号中心</strong><small>ACCOUNT SETTING</small></span>
+                <span><strong>{{ t('shell.accountCenter') }}</strong><small>{{ t('shell.accountSetting') }}</small></span>
               </header>
               <div class="account-profile">
                 <strong>{{ user.name }}</strong>
-                <small>{{ store.bootstrap?.user.id ?? '当前账号' }}</small>
+                <small>{{ store.bootstrap?.user.id ?? t('shell.currentAccount') }}</small>
                 <span>{{ roleLabel }} · {{ user.team }}</span>
               </div>
               <form v-if="!usingMock" class="password-setting" @submit.prevent="submitPasswordChange">
-                <h3><KeyRound :size="15" />修改登录密码</h3>
-                <label>当前密码<input v-model="currentPassword" type="password" autocomplete="current-password" /></label>
-                <label>新密码<input v-model="newPassword" type="password" autocomplete="new-password" /></label>
-                <label>确认新密码<input v-model="confirmPassword" type="password" autocomplete="new-password" /></label>
-                <small>至少 8 位，并包含字母和数字。</small>
+                <h3><KeyRound :size="15" />{{ t('shell.changePassword') }}</h3>
+                <label>{{ t('shell.currentPassword') }}<input v-model="currentPassword" type="password" autocomplete="current-password" /></label>
+                <label>{{ t('shell.newPassword') }}<input v-model="newPassword" type="password" autocomplete="new-password" /></label>
+                <label>{{ t('shell.confirmPassword') }}<input v-model="confirmPassword" type="password" autocomplete="new-password" /></label>
+                <small>{{ t('shell.passwordHint') }}</small>
                 <p v-if="passwordError" class="account-error" role="alert">{{ passwordError }}</p>
                 <p v-if="passwordNotice" class="account-success" role="status">{{ passwordNotice }}</p>
-                <button type="submit" class="primary-button" :disabled="savingPassword">{{ savingPassword ? '正在保存…' : '更新密码' }}</button>
+                <button type="submit" class="primary-button" :disabled="savingPassword">{{ savingPassword ? t('shell.saving') : t('shell.updatePassword') }}</button>
               </form>
             </section>
           </div>
@@ -364,6 +398,12 @@ onBeforeUnmount(() => {
 .semicrm-app.is-sidebar-collapsed .app-main { width: 100%; margin-left: 0; }
 .topbar { position: sticky; top: 0; z-index: 20; display: flex; height: 70px; align-items: center; justify-content: space-between; padding: 0 28px; background: rgba(246,244,240,.92); border-bottom: 1px solid var(--crm-line); backdrop-filter: blur(12px); }
 .topbar-start, .topbar-end { display: flex; align-items: center; gap: 14px; }
+.locale-control { position: relative; }
+.locale-toggle { display: inline-flex; height: 38px; align-items: center; gap: 7px; padding: 0 10px; color: var(--crm-text-muted); background: #fff; border: 1px solid var(--crm-line); border-radius: 10px; cursor: pointer; font: inherit; font-size: 11px; font-weight: 700; }
+.locale-toggle:hover { color: var(--crm-navy); border-color: var(--crm-line-strong); }
+.locale-menu { position: absolute; top: 46px; right: 0; z-index: 40; display: grid; min-width: 142px; padding: 5px; background: #fff; border: 1px solid var(--crm-line); border-radius: 10px; box-shadow: 0 14px 34px rgba(25, 43, 52, .14); }
+.locale-menu button { padding: 9px 10px; color: var(--crm-text-muted); background: transparent; border: 0; border-radius: 7px; cursor: pointer; font: inherit; font-size: 11px; text-align: left; }
+.locale-menu button:hover, .locale-menu button.selected { color: var(--crm-navy); background: var(--crm-surface-muted); }
 .icon-button { position: relative; display: grid; width: 38px; height: 38px; place-items: center; color: var(--crm-text-muted); background: #fff; border: 1px solid var(--crm-line); border-radius: 10px; cursor: pointer; }
 .menu-button { display: none; }
 .global-search { display: flex; width: min(390px, 32vw); height: 40px; align-items: center; gap: 9px; padding: 0 11px; color: var(--crm-text-muted); background: #fff; border: 1px solid var(--crm-line); border-radius: 11px; }

@@ -1,16 +1,18 @@
 <script setup lang="ts">
 import { AlertTriangle, RefreshCw } from '@lucide/vue'
+import { useI18n, resolveLocaleMessage, type LocaleMessage } from '@/i18n'
+const { t, locale } = useI18n()
 
-defineProps<{ message: string; requestId?: string }>()
+defineProps<{ message: LocaleMessage; requestId?: string }>()
 defineEmits<{ refresh: [] }>()
 </script>
 
 <template>
   <div class="data-notice" role="status">
     <AlertTriangle :size="15" />
-    <span><strong>PARTIAL / STALE</strong>{{ message }}</span>
+    <span><strong>{{ locale === 'en-US' ? 'PARTIAL / STALE' : '部分结果 / 已过期' }}</strong>{{ resolveLocaleMessage(message) }}</span>
     <small v-if="requestId">{{ requestId }}</small>
-    <button type="button" @click="$emit('refresh')"><RefreshCw :size="13" />立即刷新</button>
+    <button type="button" @click="$emit('refresh')"><RefreshCw :size="13" />{{ t('common.refreshNow') }}</button>
   </div>
 </template>
 

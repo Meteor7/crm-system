@@ -23,6 +23,7 @@ import type {
   UpdateInstalledToolInput,
 } from '@/types/workspaces'
 import { personnelDisplayName } from '@/demo/personnel'
+import { localeMessage, useI18n, useLocaleMessage } from '@/i18n'
 
 type InstalledToolSurface = 'project' | 'lifecycle' | 'detail'
 type ModalKind = 'editor' | 'transition' | 'version' | 'service' | ''
@@ -30,6 +31,8 @@ type ModalKind = 'editor' | 'transition' | 'version' | 'service' | ''
 const props = withDefaults(defineProps<{ apiClient?: CrmApi }>(), { apiClient: () => defaultApi })
 const route = useRoute() as ReturnType<typeof useRoute> | undefined
 const router = useRouter() as ReturnType<typeof useRouter> | undefined
+const { locale, t, message } = useI18n()
+const statusLabel = (status: string) => locale.value === 'en-US' ? status : ({ Production: '生产中', 'Upgrade Due': '待升级', Installation: '安装中', Active: '启用', Pending: '待确认', Completed: '已完成', Retired: '已退役', Decommissioned: '已停用' } as Record<string, string>)[status] || status
 
 function readQuery(key: string) {
   const value = route?.query?.[key]
@@ -39,11 +42,11 @@ function parseSurface(value: string): InstalledToolSurface {
   return value === 'project' || value === 'detail' ? value : 'lifecycle'
 }
 
-const surfaces: Array<{ key: InstalledToolSurface; label: string }> = [
-  { key: 'project', label: '项目周期看板' },
-  { key: 'lifecycle', label: '生命周期看板' },
-  { key: 'detail', label: '设备档案' },
-]
+const surfaces = computed<Array<{ key: InstalledToolSurface; label: string }>>(() => [
+  { key: 'project', label: t('detail.installedProject') },
+  { key: 'lifecycle', label: t('detail.installedLifecycle') },
+  { key: 'detail', label: t('detail.installedArchive') },
+])
 const installedTools = ref<InstalledToolDto[]>([])
 const total = ref(0), page = ref(1)
 const pageSize = ref(10)
@@ -53,18 +56,18 @@ const accountId = ref(readQuery('accountId') || 'All')
 const status = ref(readQuery('status') || 'All')
 const engineerOwner = ref(readQuery('engineer') || 'All')
 const loading = ref(true)
-const error = ref('')
+const error = useLocaleMessage()
 const requestId = ref('')
-const notice = ref('')
+const notice = useLocaleMessage()
 const bootstrap = ref<BootstrapDto | null>(null)
 const detail = ref<InstalledToolDetailDto | null>(null)
 const detailLoading = ref(false)
-const detailError = ref('')
+const detailError = useLocaleMessage()
 const detailRequestId = ref('')
 let detailSequence = 0
 const activeModal = ref<ModalKind>('')
 const actionBusy = ref(false)
-const actionError = ref('')
+const actionError = useLocaleMessage()
 const editorSites = ref<SiteDto[]>([])
 let filterTimer: ReturnType<typeof setTimeout> | undefined
 
@@ -125,7 +128,7 @@ async function loadDetail(id: string) {
   } catch (reason) {
     if (sequence !== detailSequence || selectedId.value !== id) return
     const mapped = mapRequestError(reason)
-    detailError.value = mapped.message
+    detailError.value = mapped.localizedMessage ?? mapped.message
     detailRequestId.value = mapped.requestId
   } finally {
     if (sequence === detailSequence) detailLoading.value = false
@@ -204,7 +207,7 @@ watch(
 )
 
 function showDocument(name: string) {
-  notice.value = `${name} 已记录；当前接口未提供下载地址。`
+  notice.value = message('installed.documentRecorded', { name })
   window.setTimeout(() => { notice.value = '' }, 3000)
 }
 function resetFilters() {
@@ -246,29 +249,41 @@ async function openEditor() {
     editorSites.value = (await props.apiClient.getAccount360(current.accountId)).data.sites
   } catch (reason) {
     const mapped = mapRequestError(reason)
-    actionError.value = `${mapped.message} · Request ID: ${mapped.requestId}`
+    actionError.value = requestErrorText(reason)
   }
 }
 
+const missingVersionError = new Error('Missing equipment version')
 function expectedModified(current: InstalledToolDetailDto) {
-  if (!current.modified) throw new Error('设备版本标识缺失，请刷新档案后重试。')
+  if (!current.modified) throw missingVersionError
   return current.modified
 }
 function mutationError(reason: unknown) {
-  const mapped = mapRequestError(reason)
-  return `${mapped.message} · Request ID: ${mapped.requestId}`
+  if (reason === missingVersionError) return message('installed.versionMissing')
+  return requestErrorText(reason)
 }
-async function finishMutation(updated: InstalledToolDetailDto, message: string) {
+function requestErrorText(reason: unknown) {
+  const mapped = mapRequestError(reason)
+  const base = mapped.localizedMessage ?? mapped.message
+  if (typeof base === 'string') return `${base} · Request ID: ${mapped.requestId}`
+  return localeMessage(`${base['en-US']} · Request ID: ${mapped.requestId}`, `${base['zh-CN']} · Request ID: ${mapped.requestId}`)
+}
+function reloadFailureMessage(reason: unknown, englishPrefix: string, chinesePrefix: string) {
+  const detail = requestErrorText(reason)
+  if (typeof detail === 'string') return localeMessage(`${englishPrefix}: ${detail}`, `${chinesePrefix}：${detail}`)
+  return localeMessage(`${englishPrefix}: ${detail['en-US']}`, `${chinesePrefix}：${detail['zh-CN']}`)
+}
+async function finishMutation(updated: InstalledToolDetailDto, successMessage: ReturnType<typeof message>) {
   detail.value = updated
   const index = installedTools.value.findIndex((item) => item.id === updated.id)
   if (index >= 0) installedTools.value[index] = updated
   activeModal.value = ''
-  notice.value = message
+  notice.value = successMessage
   window.setTimeout(() => { notice.value = '' }, 3000)
   try {
     await reloadListAndDetail(updated.id)
   } catch (reason) {
-    notice.value = '操作已保存，但重新读取失败：' + mutationError(reason)
+    notice.value = reloadFailureMessage(reason, 'Saved, but reload failed', '操作已保存，但重新读取失败')
     window.setTimeout(() => { notice.value = '' }, 6000)
   }
 }
@@ -279,7 +294,7 @@ async function advanceLifecycle(input: TransitionInstalledToolInput) {
   actionError.value = ''
   try {
     const result = await props.apiClient.transitionInstalledTool(current.id, input, expectedModified(current))
-    await finishMutation(result.data, `${current.serial} 已推进到下一生命周期节点`)
+    await finishMutation(result.data, message('installed.lifecycleAdvanced', { serial: current.serial }))
   } catch (reason) {
     actionError.value = mutationError(reason)
   } finally {
@@ -293,7 +308,7 @@ async function addVersion(input: AddInstalledToolVersionRecordInput) {
   actionError.value = ''
   try {
     const result = await props.apiClient.addInstalledToolVersionRecord(current.id, input, expectedModified(current))
-    await finishMutation(result.data, `${current.serial} 版本记录已保存`)
+    await finishMutation(result.data, message('installed.versionSaved', { serial: current.serial }))
   } catch (reason) {
     actionError.value = mutationError(reason)
   } finally {
@@ -307,7 +322,7 @@ async function addService(input: AddInstalledToolServiceRecordInput) {
   actionError.value = ''
   try {
     const result = await props.apiClient.addInstalledToolServiceRecord(current.id, input, expectedModified(current))
-    await finishMutation(result.data, `${current.serial} 服务记录已保存`)
+    await finishMutation(result.data, message('installed.serviceSaved', { serial: current.serial }))
   } catch (reason) {
     actionError.value = mutationError(reason)
   } finally {
@@ -322,11 +337,11 @@ async function saveInstalledTool(input: UpdateInstalledToolInput) {
   try {
     await props.apiClient.updateInstalledTool(current.id, input, expectedModified(current))
     activeModal.value = ''
-    notice.value = current.serial + ' 设备主数据已更新'
+    notice.value = message('installed.masterUpdated', { serial: current.serial })
     try {
       await reloadListAndDetail(current.id)
     } catch (reason) {
-      notice.value = '主数据已保存，但重新读取失败：' + mutationError(reason)
+      notice.value = reloadFailureMessage(reason, 'Master data saved, but reload failed', '主数据已保存，但重新读取失败')
       window.setTimeout(() => { notice.value = '' }, 6000)
     }
   } catch (reason) {
@@ -343,7 +358,7 @@ onMounted(async () => {
     if (surface.value === 'detail' && selectedId.value) await loadDetail(selectedId.value)
   } catch (reason) {
     const mapped = mapRequestError(reason)
-    error.value = mapped.message
+    error.value = mapped.localizedMessage ?? mapped.message
     requestId.value = mapped.requestId
   } finally {
     loading.value = false
@@ -354,25 +369,25 @@ onMounted(async () => {
 <template>
   <div class="workspace-page" data-page="installed-tools">
     <header class="page-title-row">
-      <div><span class="eyebrow">INSTALLED BASE · DELIVERY LIFECYCLE</span><h1>Installed Tools</h1><p>以 Serial Number 为设备唯一标识，追踪从工厂验收到质保服务的完整交付档案。</p></div>
+      <div><span class="eyebrow">INSTALLED BASE · DELIVERY LIFECYCLE</span><h1>{{ t('installed.title') }}</h1><p>{{ t('installed.description') }}</p></div>
       <div class="header-actions">
-        <nav class="surface-switch" aria-label="Installed Tool 视图">
+        <nav class="surface-switch" :aria-label="t('installed.views')">
           <button v-for="item in surfaces" :key="item.key" type="button" :data-installed-tool-surface="item.key" :class="{ active: surface === item.key }" @click="switchSurface(item.key)">{{ item.label }}</button>
         </nav>
-        <span class="context-chip"><Cpu :size="15" />{{ installedTools.length }} 台客户设备</span>
+        <span class="context-chip"><Cpu :size="15" />{{ t('detail.installedCount', { count: installedTools.length }) }}</span>
       </div>
     </header>
 
-    <section v-if="loading" class="workspace-panel workspace-panel-body">正在读取 Installed Tool 主数据…</section>
+    <section v-if="loading" class="workspace-panel workspace-panel-body">{{ t('detail.installedLoading') }}</section>
     <section v-else-if="error" class="workspace-panel workspace-panel-body">{{ error }}<small v-if="requestId">Request ID: {{ requestId }}</small></section>
-    <section v-else-if="!installedTools.length" class="workspace-panel workspace-panel-body">当前暂无 Installed Tool。</section>
+    <section v-else-if="!installedTools.length" class="workspace-panel workspace-panel-body">{{ t('detail.installedEmpty') }}</section>
 
     <template v-else>
-      <section class="workspace-panel tool-filter-panel" aria-label="Installed Tool 筛选">
-        <select v-model="accountId" aria-label="客户筛选"><option value="All">全部客户</option><option v-for="[id, name] in accountOptions" :key="id" :value="id">{{ name }}</option></select>
-        <select v-model="status" aria-label="设备状态筛选"><option v-for="item in statusOptions" :key="item" :value="item">{{ item === 'All' ? '全部状态' : item }}</option></select>
-        <select v-model="engineerOwner" aria-label="负责工程师筛选"><option value="All">全部工程师</option><option v-for="owner in engineerOptions" :key="owner" :value="owner">{{ personnelDisplayName(owner) }}</option></select>
-        <button type="button" data-testid="reset-installed-tool-filters" @click="resetFilters"><RotateCcw :size="13" />重置条件</button>
+      <section class="workspace-panel tool-filter-panel" :aria-label="t('detail.installedFilter')">
+        <select v-model="accountId" :aria-label="locale === 'en-US' ? 'Account filter' : '客户筛选'"><option value="All">{{ t('detail.allAccounts') }}</option><option v-for="[id, name] in accountOptions" :key="id" :value="id">{{ name }}</option></select>
+        <select v-model="status" :aria-label="locale === 'en-US' ? 'Equipment status filter' : '设备状态筛选'"><option v-for="item in statusOptions" :key="item" :value="item">{{ item === 'All' ? t('detail.allStatuses') : statusLabel(item) }}</option></select>
+        <select v-model="engineerOwner" :aria-label="locale === 'en-US' ? 'Engineer filter' : '负责工程师筛选'"><option value="All">{{ t('detail.allEngineers') }}</option><option v-for="owner in engineerOptions" :key="owner" :value="owner">{{ personnelDisplayName(owner) }}</option></select>
+        <button type="button" data-testid="reset-installed-tool-filters" @click="resetFilters"><RotateCcw :size="13" />{{ t('common.reset') }}</button>
       </section>
 
       <div class="tool-surface" :data-installed-tool-view="surface">
@@ -392,7 +407,7 @@ onMounted(async () => {
           @service="openService"
           @document="showDocument"
         />
-        <section v-else class="workspace-panel workspace-panel-body">没有匹配筛选条件的 Installed Tool。</section>
+        <section v-else class="workspace-panel workspace-panel-body">{{ t('detail.noFilterMatch') }}</section>
       </div>
       <PaginationControls v-if="total > pageSize" :page="page" :page-size="pageSize" :total="total" @change="goPage" @page-size-change="changePageSize" />
     </template>

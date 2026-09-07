@@ -1,6 +1,6 @@
 import { flushPromises, mount } from '@vue/test-utils'
 import { createPinia } from 'pinia'
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createMemoryHistory, createRouter } from 'vue-router'
 import { navigation } from '@/app/navigation'
 import { createMockApi } from '@/api/mock-adapter'
@@ -14,6 +14,8 @@ import EvaluationsPage from './EvaluationsPage.vue'
 import InstalledToolsPage from './InstalledToolsPage.vue'
 import OpportunityStrategyPage from './OpportunityStrategyPage.vue'
 import ServiceCalendarPage from './ServiceCalendarPage.vue'
+
+afterEach(() => vi.useRealTimers())
 
 async function mountDemoForRole(role: UserRole) {
   const pinia = createPinia()
@@ -47,7 +49,7 @@ describe('P1 business workspace', () => {
     [DemoWorkflowPage, 'Demo 档案', 'demo-workflow'],
     [InstalledToolsPage, 'Installed Tools', 'installed-tools'],
     [DocumentCenterPage, 'Document Center', 'document-center'],
-    [ServiceCalendarPage, 'Calendar', 'calendar'],
+    [ServiceCalendarPage, '日历', 'calendar'],
   ] as const
 
   it.each(pages)('renders %s as a complete page', (component, title, pageId) => {
@@ -103,15 +105,15 @@ describe('P1 business workspace', () => {
     expect(sales.find('[data-demo-sensitive="test-runs"]').exists()).toBe(true)
     expect(sales.findAll('[data-demo-sensitive="test-runs"] tbody tr')).toHaveLength(0)
     expect(sales.get('[data-demo-sensitive="test-runs"]').text()).not.toContain('Test Run DDL')
-    expect(sales.get('[data-testid="selected-demo"]').text()).toContain('Primary Tool')
-    expect(sales.get('[data-testid="selected-demo"]').text()).toContain('Customer Review')
+    expect(sales.get('[data-testid="selected-demo"]').text()).toContain('主要设备')
+    expect(sales.get('[data-testid="selected-demo"]').text()).toContain('客户评审')
   })
 
   it('hides percentage progress from Demo cards and shows Engineer Review', async () => {
     const management = await mountDemoForRole('Manager')
     expect(management.find('.workspace-progress').exists()).toBe(false)
     expect(management.get('[data-demo-board]').text()).not.toMatch(/\d+%/)
-    expect(management.text()).toContain('Engineer Review')
+    expect(management.text()).toContain('工程评估')
     expect(management.text()).not.toContain('Scope Review')
   })
 
@@ -155,7 +157,7 @@ describe('P1 business workspace', () => {
     await toolCards[2].trigger('click')
     await flushPromises()
 
-    expect(wrapper.get('.lifecycle-step.is-current').text()).toContain('Installation')
+    expect(wrapper.get('.lifecycle-step.is-current').text()).toContain('安装')
     expect(wrapper.get('[data-testid=installed-tool-master-data]').text()).toContain('SO-260041')
     await wrapper.findAll('.detail-tabs button')[2].trigger('click')
     expect(wrapper.get('.warranty-body').text()).toContain('档案完整')
@@ -255,21 +257,24 @@ describe('P1 business workspace', () => {
   it('renders upstream schedules in month and week Calendar views for Boss', async () => {
     const pinia = createPinia()
     useAppStore(pinia).bootstrap = (await createMockApi({ latency: 0, role: 'Manager' }).getBootstrap()).data
+    const router = createAppRouter()
+    await router.push('/calendar')
+    await router.isReady()
     const wrapper = mount(ServiceCalendarPage, {
       props: { apiClient: createMockApi({ latency: 0, role: 'Manager' }) },
-      global: { plugins: [pinia] },
+      global: { plugins: [pinia, router] },
     })
     await flushPromises()
 
     expect(wrapper.text()).toContain('全员安排')
     expect(wrapper.text()).toContain('Demo Test DDL')
-    const companySelect = wrapper.get('select[aria-label="按公司分类"]')
+    const companySelect = wrapper.get('select[aria-label="公司"]')
     const company = (companySelect.findAll('option')[1].element as HTMLOptionElement).value
     await companySelect.setValue(company)
     expect(wrapper.get('.event-detail').text()).toContain(company)
     await wrapper.get('.calendar-filters > button').trigger('click')
 
-    const ownerSelect = wrapper.get('select[aria-label="按负责人分类"]')
+    const ownerSelect = wrapper.get('select[aria-label="负责人"]')
     const ownerOption = ownerSelect.findAll('option')[1]
     const owner = (ownerOption.element as HTMLOptionElement).value
     const ownerLabel = ownerOption.text()
@@ -358,6 +363,8 @@ describe('P1 business workspace', () => {
   })
 
   it('reloads Sales visits after bootstrap resolves on a direct Calendar refresh', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(new Date('2026-08-12T12:00:00+08:00'))
     const pinia = createPinia()
     const app = useAppStore(pinia)
     const baseApi = createMockApi({
@@ -383,9 +390,12 @@ describe('P1 business workspace', () => {
       })),
     }
 
+    const router = createAppRouter()
+    await router.push('/calendar')
+    await router.isReady()
     const wrapper = mount(ServiceCalendarPage, {
       props: { apiClient },
-      global: { plugins: [pinia] },
+      global: { plugins: [pinia, router] },
     })
     const bootstrapPromise = app.loadBootstrap(apiClient)
     await flushPromises()
@@ -399,6 +409,8 @@ describe('P1 business workspace', () => {
     expect(wrapper.findAll('.calendar-event.visit')).toHaveLength(1)
   })
   it('keeps server-scoped Sales events when the user ID differs from the display name', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(new Date('2026-08-12T12:00:00+08:00'))
     const pinia = createPinia()
     const apiClient = createMockApi({
       latency: 0,
@@ -409,15 +421,20 @@ describe('P1 business workspace', () => {
     })
     useAppStore(pinia).bootstrap = (await apiClient.getBootstrap()).data
 
+    const router = createAppRouter()
+    await router.push('/calendar')
+    await router.isReady()
     const wrapper = mount(ServiceCalendarPage, {
       props: { apiClient },
-      global: { plugins: [pinia] },
+      global: { plugins: [pinia, router] },
     })
     await flushPromises()
 
     expect(wrapper.findAll('.calendar-event').length).toBeGreaterThan(0)
   })
   it('loads the Engineer Calendar without requesting Sales visits', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(new Date('2026-08-12T12:00:00+08:00'))
     const pinia = createPinia()
     const apiClient = createMockApi({
       latency: 0,
@@ -444,14 +461,17 @@ describe('P1 business workspace', () => {
       }
     }
 
+    const router = createAppRouter()
+    await router.push('/calendar')
+    await router.isReady()
     const wrapper = mount(ServiceCalendarPage, {
       props: { apiClient },
-      global: { plugins: [pinia] },
+      global: { plugins: [pinia, router] },
     })
     await flushPromises()
 
     expect(listVisits).not.toHaveBeenCalled()
-    expect(wrapper.text()).toContain('Calendar')
+    expect(wrapper.text()).toContain('日历')
     expect(wrapper.text()).toContain('Demo Test DDL')
     expect(wrapper.findAll('.calendar-event').length).toBeGreaterThan(0)
     expect(wrapper.findAll('.calendar-event.request').length).toBeGreaterThan(0)
@@ -480,9 +500,12 @@ describe('P1 business workspace', () => {
         },
       }
     }
+    const router = createAppRouter()
+    await router.push('/calendar')
+    await router.isReady()
     const wrapper = mount(ServiceCalendarPage, {
       props: { apiClient },
-      global: { plugins: [pinia] },
+      global: { plugins: [pinia, router] },
     })
     await flushPromises()
 

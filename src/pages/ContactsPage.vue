@@ -16,11 +16,14 @@ import { readAllPages } from '@/features/shared/read-all-pages'
 import ContactModal from '@/features/contacts/ContactModal.vue'
 import ModalShell from '@/design-system/ModalShell.vue'
 import { formatDisplayDate } from '@/domain/time'
+import { useI18n, useLocaleMessage } from '@/i18n'
+import { contactStatusLabel, salesEnumLabel } from '@/features/shared/sales-i18n'
 
 const props = withDefaults(defineProps<{ apiClient?: CrmApi }>(), { apiClient: () => defaultApi })
 const route = useRoute()
 const router = useRouter()
 const app = useAppStore()
+const { locale, t } = useI18n()
 const rows = ref<ContactSummaryDto[]>([])
 const accounts = ref<AccountSummaryDto[]>([])
 const sites = ref<Array<SiteDto & { accountId: string }>>([])
@@ -30,7 +33,7 @@ const page = ref(typeof route.query.page === 'string' && Number(route.query.page
 const pageSize = ref(typeof route.query.pageSize === 'string' && [10, 12, 25, 50].includes(Number(route.query.pageSize)) ? Number(route.query.pageSize) : 12)
 const loading = ref(false)
 const denied = ref(false)
-const error = ref('')
+const error = useLocaleMessage()
 const requestId = ref('')
 const accountId = ref(typeof route.query.accountId === 'string' ? route.query.accountId : 'All')
 const siteId = ref(typeof route.query.siteId === 'string' ? route.query.siteId : 'All')
@@ -45,7 +48,7 @@ const editing = ref<ContactSummaryDto | null>(null)
 const deleteOpen = ref(false)
 const deleteTarget = ref<ContactSummaryDto | null>(null)
 const busy = ref(false)
-const modalError = ref('')
+const modalError = useLocaleMessage()
 const canWrite = computed(() => app.can('contact:write'))
 const canDelete = computed(() => app.can('contact:delete'))
 const writableAccounts = computed(() => {
@@ -73,8 +76,8 @@ function canEditContact(contact: ContactSummaryDto) {
 function siteLabel(contact: ContactSummaryDto) {
   const user = app.bootstrap?.user
   const account = accounts.value.find((item) => item.id === contact.accountId)
-  if (user?.role === 'Sales' && account && account.owner !== user.id) return '仅客户负责人可见'
-  return contact.siteName || '未指定厂区'
+  if (user?.role === 'Sales' && account && account.owner !== user.id) return t('contacts.ownerOnly')
+  return contact.siteName || t('contacts.notSpecifiedSite')
 }
 
 async function loadReferences() {
@@ -113,7 +116,7 @@ async function load() {
   } catch (reason) {
     if (current !== sequence) return
     const mapped = mapRequestError(reason)
-    error.value = mapped.message
+    error.value = mapped.localizedMessage ?? mapped.message
     requestId.value = mapped.requestId
     denied.value = mapped.denied
     rows.value = []
@@ -173,7 +176,7 @@ async function deleteContact() {
       allContacts.value = rows.value
     }
   } catch (reason) {
-    modalError.value = mapRequestError(reason).message
+    const mapped = mapRequestError(reason); modalError.value = mapped.localizedMessage ?? mapped.message
   } finally {
     busy.value = false
   }
@@ -193,7 +196,7 @@ async function saveContact(payload: CreateContactInput) {
       allContacts.value = rows.value
     }
   } catch (reason) {
-    modalError.value = mapRequestError(reason).message
+    const mapped = mapRequestError(reason); modalError.value = mapped.localizedMessage ?? mapped.message
   } finally {
     busy.value = false
   }
@@ -230,34 +233,34 @@ onBeforeUnmount(() => {
 
 <template>
   <div class="contacts-page">
-    <PageHeader eyebrow="CONTACT MASTER" title="联系人主档" description="统一维护客户联系人、组织关系和联系信息；购买角色与影响力保留在具体 Opportunity 关联中。">
-      <button v-if="canCreate" class="primary-button" type="button" data-testid="new-contact" @click="openCreate"><Plus :size="15" />新增联系人</button>
+    <PageHeader eyebrow="CONTACT MASTER" :title="t('contacts.title')" :description="t('contacts.description')">
+      <button v-if="canCreate" class="primary-button" type="button" data-testid="new-contact" @click="openCreate"><Plus :size="15" />{{ t('contacts.new') }}</button>
     </PageHeader>
 
-    <FilterBar :result-label="`${total} 位联系人`" @reset="resetFilters">
-      <select v-model="accountId" class="filter-control" aria-label="客户筛选"><option value="All">全部客户</option><option v-for="account in accounts" :key="account.id" :value="account.id">{{ account.shortName }}</option></select>
-      <select v-model="siteId" class="filter-control" aria-label="厂区筛选"><option value="All">全部厂区</option><option v-for="site in visibleSites" :key="site.id" :value="site.id">{{ site.name }}</option></select>
-      <select v-model="owner" class="filter-control" aria-label="负责人筛选"><option value="All">全部负责人</option><option v-for="item in owners" :key="item" :value="item">{{ personnelDisplayName(item) }}</option></select>
-      <select v-model="contactStatus" class="filter-control" aria-label="状态筛选"><option value="All">全部状态</option><option>Active</option><option>Left Company</option><option>Archived</option></select>
+    <FilterBar :result-label="t('contacts.result', { count: total })" @reset="resetFilters">
+      <select v-model="accountId" class="filter-control" :aria-label="locale === 'en-US' ? 'Account filter' : '客户筛选'"><option value="All">{{ t('contacts.allAccounts') }}</option><option v-for="account in accounts" :key="account.id" :value="account.id">{{ account.shortName }}</option></select>
+      <select v-model="siteId" class="filter-control" :aria-label="locale === 'en-US' ? 'Site filter' : '厂区筛选'"><option value="All">{{ t('contacts.allSites') }}</option><option v-for="site in visibleSites" :key="site.id" :value="site.id">{{ site.name }}</option></select>
+      <select v-model="owner" class="filter-control" :aria-label="locale === 'en-US' ? 'Owner filter' : '负责人筛选'"><option value="All">{{ t('contacts.allOwners') }}</option><option v-for="item in owners" :key="item" :value="item">{{ personnelDisplayName(item) }}</option></select>
+       <select v-model="contactStatus" class="filter-control" :aria-label="locale === 'en-US' ? 'Status filter' : '状态筛选'"><option value="All">{{ t('contacts.allStatuses') }}</option><option v-for="item in ['Active', 'Left Company', 'Archived']" :key="item" :value="item">{{ contactStatusLabel(item, locale) }}</option></select>
     </FilterBar>
-    <p v-if="rows.some((contact) => contact.dataQuality === 'Needs Review')" class="quality-hint" data-testid="needs-review-explanation">Needs Review：由旧 Opportunity / Booking 自由文本迁移，需补全资料或删除。</p>
+    <p v-if="rows.some((contact) => contact.dataQuality === 'Needs Review')" class="quality-hint" data-testid="needs-review-explanation">{{ t('contacts.needsReview') }}</p>
 
     <section class="contacts-card">
       <DataState v-if="loading && !rows.length" type="loading" />
       <DataState v-else-if="denied" type="denied" :message="error" :request-id="requestId" />
       <DataState v-else-if="error" type="error" :message="error" :request-id="requestId" @retry="load" />
-      <DataState v-else-if="!rows.length" type="empty" title="没有匹配的联系人" message="调整搜索或筛选条件后重试。" />
+      <DataState v-else-if="!rows.length" type="empty" :title="t('contacts.emptyTitle')" :message="t('contacts.emptyMessage')" />
       <div v-else class="table-scroll">
         <table class="crm-table contacts-table is-responsive">
-          <thead><tr><th>联系人</th><th>客户 / 厂区</th><th>职位 / 部门</th><th>电话</th><th>邮箱</th><th>负责人</th><th>状态</th><th>更新日期</th><th v-if="showActions">操作</th></tr></thead>
+          <thead><tr><th>{{ t('contacts.title') }}</th><th>{{ t('contacts.accountSite') }}</th><th>{{ t('contacts.titleDepartment') }}</th><th>{{ t('contacts.phone') }}</th><th>{{ t('contacts.email') }}</th><th>{{ t('accounts.owner') }}</th><th>{{ t('contacts.status') }}</th><th>{{ t('contacts.updated') }}</th><th v-if="showActions">{{ t('contacts.actions') }}</th></tr></thead>
           <tbody>
             <tr v-for="contact in rows" :key="contact.id">
-              <td data-label="联系人"><button class="contact-link record-name-link" type="button" :data-contact-id="contact.id" @click="openDetail(contact)"><span><UserRound :size="14" /></span><strong>{{ contact.name }}</strong><StatusBadge v-if="contact.dataQuality === 'Needs Review'" data-testid="needs-review" label="Needs Review" tone="warning" /></button></td>
-              <td data-label="客户 / 厂区"><strong>{{ contact.accountShortName }}</strong><small>{{ siteLabel(contact) }}</small></td>
-              <td data-label="职位 / 部门"><strong>{{ contact.title }}</strong><small>{{ contact.department }}</small></td>
-              <td data-label="电话">{{ contact.phone || '—' }}</td><td data-label="邮箱">{{ contact.email || '—' }}</td><td data-label="负责人">{{ personnelDisplayName(contact.owner) }}</td>
-              <td data-label="状态"><StatusBadge :label="contact.status" :tone="statusTone(contact.status)" /></td><td data-label="更新日期">{{ formatDisplayDate(contact.updatedAt) }}</td>
-              <td v-if="showActions" data-label="操作"><button v-if="canEditContact(contact)" class="edit-button" type="button" data-testid="edit-contact" @click="openEdit(contact)"><Edit3 :size="13" />编辑</button></td>
+               <td :data-label="t('contacts.title')"><button class="contact-link record-name-link" type="button" :data-contact-id="contact.id" @click="openDetail(contact)"><span><UserRound :size="14" /></span><strong>{{ contact.name }}</strong><StatusBadge v-if="contact.dataQuality === 'Needs Review'" data-testid="needs-review" :label="salesEnumLabel(contact.dataQuality, locale)" tone="warning" /></button></td>
+              <td :data-label="t('contacts.accountSite')"><strong>{{ contact.accountShortName }}</strong><small>{{ siteLabel(contact) }}</small></td>
+              <td :data-label="t('contacts.titleDepartment')"><strong>{{ contact.title }}</strong><small>{{ contact.department }}</small></td>
+              <td :data-label="t('contacts.phone')">{{ contact.phone || '—' }}</td><td :data-label="t('contacts.email')">{{ contact.email || '—' }}</td><td :data-label="t('accounts.owner')">{{ personnelDisplayName(contact.owner) }}</td>
+               <td :data-label="t('contacts.status')"><StatusBadge :label="contactStatusLabel(contact.status, locale)" :tone="statusTone(contact.status)" /></td><td :data-label="t('contacts.updated')">{{ formatDisplayDate(contact.updatedAt) }}</td>
+              <td v-if="showActions" :data-label="t('contacts.actions')"><button v-if="canEditContact(contact)" class="edit-button" type="button" data-testid="edit-contact" @click="openEdit(contact)"><Edit3 :size="13" />{{ t('contacts.edit') }}</button></td>
             </tr>
           </tbody>
         </table>
@@ -266,8 +269,8 @@ onBeforeUnmount(() => {
     </section>
 
     <ContactModal v-if="modalOpen" :contact="editing" :accounts="writableAccounts" :sites="writableSites" :contacts="allContacts" :busy="busy" :error="modalError" :can-delete="Boolean(editing && canDelete)" @close="modalOpen = false" @submit="saveContact" @delete="requestDeleteFromEdit" />
-    <ModalShell v-if="deleteOpen && deleteTarget" title="永久删除联系人" eyebrow="HARD DELETE" :busy="busy" @close="deleteOpen = false" @submit="deleteContact">
-      <p class="delete-note">此操作不可恢复。“{{ deleteTarget.name }}”会从本地数据中物理删除；Opportunity 中对应关键人关联会移除，Booking 与 Demo Request 会优先改绑到同客户的现有联系人。</p>
+    <ModalShell v-if="deleteOpen && deleteTarget" :title="locale === 'en-US' ? 'Permanently delete contact' : '永久删除联系人'" eyebrow="HARD DELETE" :busy="busy" @close="deleteOpen = false" @submit="deleteContact">
+      <p class="delete-note">{{ locale === 'en-US' ? 'This cannot be undone. “' : '此操作不可恢复。“' }}{{ deleteTarget.name }}{{ locale === 'en-US' ? '” will be physically removed. Linked stakeholders are removed; Booking and Demo Request are rebound to another contact at the same account when possible.' : '”会从本地数据中物理删除；Opportunity 中对应关键人关联会移除，Booking 与 Demo Request 会优先改绑到同客户的现有联系人。' }}</p>
       <p v-if="modalError" class="form-error">{{ modalError }}</p>
     </ModalShell>
   </div>

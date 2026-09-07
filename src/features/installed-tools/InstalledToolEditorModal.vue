@@ -1,14 +1,19 @@
 <script setup lang="ts">
+import { useLocalizedInput } from '@/i18n/localized-input'
+import { systemValueLabel } from '@/features/shared/system-labels'
 import { computed, ref, watch } from 'vue'
 import ModalShell from '@/design-system/ModalShell.vue'
 import RequiredMark from '@/design-system/RequiredMark.vue'
 import { personnelDisplayName } from '@/demo/personnel'
 import type { SiteDto } from '@/types/crm'
 import type { InstalledToolDto, UpdateInstalledToolInput } from '@/types/workspaces'
+import { useI18n } from '@/i18n'
 
 type EngineerOption = { id: string; name: string; role: string }
 const props = defineProps<{ tool: InstalledToolDto; sites: SiteDto[]; engineers: EngineerOption[]; canReassign: boolean; busy?: boolean; error?: string }>()
 const emit = defineEmits<{ close: []; submit: [value: UpdateInstalledToolInput] }>()
+const { locale, t } = useI18n()
+const copy = (english: string, chinese: string) => locale.value === 'en-US' ? english : chinese
 const form = ref<UpdateInstalledToolInput>({
   siteId: '', model: '', location: '', engineerOwner: '', operatingSystem: '',
   warrantyStart: '', warrantyEnd: '', serviceContract: '', pmCycle: '', ownershipType: '',
@@ -34,33 +39,40 @@ const invalid = computed(() => !props.sites.length || !form.value.siteId || !for
 function submit() {
   emit('submit', Object.fromEntries(Object.entries(form.value).map(([key, value]) => [key, typeof value === 'string' ? value.trim() : value])) as unknown as UpdateInstalledToolInput)
 }
+
+const locationInput = useLocalizedInput(() => form.value.location, (value) => { form.value.location = value }, (value) => systemValueLabel(value, locale.value), () => props.tool)
+const operatingSystemInput = useLocalizedInput(() => form.value.operatingSystem, (value) => { form.value.operatingSystem = value }, (value) => systemValueLabel(value, locale.value), () => props.tool)
+const serviceContractInput = useLocalizedInput(() => form.value.serviceContract, (value) => { form.value.serviceContract = value }, (value) => systemValueLabel(value, locale.value), () => props.tool)
+const pmCycleInput = useLocalizedInput(() => form.value.pmCycle, (value) => { form.value.pmCycle = value }, (value) => systemValueLabel(value, locale.value), () => props.tool)
+const salesOrderInput = useLocalizedInput(() => form.value.salesOrder, (value) => { form.value.salesOrder = value }, (value) => systemValueLabel(value, locale.value), () => props.tool)
+const contractInput = useLocalizedInput(() => form.value.contract, (value) => { form.value.contract = value }, (value) => systemValueLabel(value, locale.value), () => props.tool)
 </script>
 
 <template>
-  <ModalShell title="编辑 Installed Tool 主数据" eyebrow="INSTALLED TOOL MASTER DATA" submit-label="保存设备主数据" :busy="busy" :submit-disabled="invalid" wide @close="emit('close')" @submit="submit">
+  <ModalShell :title="t('installed.editTitle')" :eyebrow="copy('INSTALLED TOOL MASTER DATA', '设备主数据')" :submit-label="t('installed.saveMaster')" :busy="busy" :submit-disabled="invalid" wide @close="emit('close')" @submit="submit">
     <div class="readonly-summary">
-      <div><small>Installed Tool</small><strong>{{ tool.id }}</strong></div>
-      <div><small>Customer</small><strong>{{ tool.account }}</strong></div>
-      <div><small>Source Booking</small><strong>{{ tool.sourceBookingId || '—' }}</strong></div>
-      <div><small>Sales Owner</small><strong>{{ personnelDisplayName(tool.salesOwner) || tool.salesOwner || '—' }}</strong></div>
+       <div><small>{{ copy('Installed Tool', '已装机设备') }}</small><strong>{{ tool.id }}</strong></div>
+       <div><small>{{ copy('Customer', '客户') }}</small><strong>{{ tool.account }}</strong></div>
+       <div><small>{{ copy('Source Booking', '来源 Booking') }}</small><strong>{{ tool.sourceBookingId || '—' }}</strong></div>
+       <div><small>{{ copy('Sales Owner', '销售负责人') }}</small><strong>{{ personnelDisplayName(tool.salesOwner) || tool.salesOwner || '—' }}</strong></div>
     </div>
-    <p class="form-note">生命周期状态与软件、固件、配置版本必须通过对应的审计操作更新。</p>
+    <p class="form-note">{{ t('installed.masterAuditHint') }}</p>
     <p v-if="error" class="form-error">{{ error }}</p>
-    <p v-if="!sites.length" class="form-error">该客户暂无可用厂区，请先补齐客户厂区档案。</p>
+    <p v-if="!sites.length" class="form-error">{{ t('installed.noSites') }}</p>
     <div class="editor-grid">
-      <label><span>Serial Number</span><input :value="tool.serial" aria-label="Serial Number" readonly /></label>
-      <label><span>设备型号<RequiredMark /></span><input v-model="form.model" aria-label="设备型号" required /></label>
-      <label><span>客户厂区<RequiredMark /></span><select v-model="form.siteId" aria-label="客户厂区" required><option v-for="site in sites" :key="site.id" :value="site.id">{{ site.name }} · {{ site.city }}</option></select></label>
-      <label><span>现场位置<RequiredMark /></span><input v-model="form.location" aria-label="现场位置" required /></label>
-      <label><span>负责工程师<RequiredMark /></span><select v-model="form.engineerOwner" aria-label="负责工程师" required :disabled="!canReassign"><option v-if="!engineers.some((item) => item.id === form.engineerOwner)" :value="form.engineerOwner">{{ personnelDisplayName(form.engineerOwner) || form.engineerOwner }}</option><option v-for="engineer in engineers" :key="engineer.id" :value="engineer.id">{{ engineer.name }} · {{ engineer.role }}</option></select><small v-if="!canReassign">工程师不能重新分配负责人</small></label>
-      <label><span>Operating System</span><input v-model="form.operatingSystem" aria-label="Operating System" /></label>
-      <label><span>Warranty Start</span><input v-model="form.warrantyStart" type="date" aria-label="Warranty Start" /></label>
-      <label><span>Warranty End</span><input v-model="form.warrantyEnd" type="date" aria-label="Warranty End" /></label>
-      <label><span>Service Contract</span><input v-model="form.serviceContract" aria-label="Service Contract" /></label>
-      <label><span>PM Cycle</span><input v-model="form.pmCycle" aria-label="PM Cycle" /></label>
-      <label><span>Ownership Type<RequiredMark /></span><input v-model="form.ownershipType" aria-label="Ownership Type" required /></label>
-      <label><span>Sales Order</span><input v-model="form.salesOrder" aria-label="Sales Order" /></label>
-      <label class="wide"><span>Contract</span><input v-model="form.contract" aria-label="Contract" /></label>
+       <label><span>{{ copy('Serial Number', '序列号') }}</span><input :value="tool.serial" :aria-label="copy('Serial Number', '序列号')" readonly /></label>
+      <label><span>{{ t('installed.model') }}<RequiredMark /></span><input v-model="form.model" :aria-label="t('installed.model')" required /></label>
+      <label><span>{{ t('installed.customerSiteField') }}<RequiredMark /></span><select v-model="form.siteId" :aria-label="t('installed.customerSiteField')" required><option v-for="site in sites" :key="site.id" :value="site.id">{{ site.name }} · {{ site.city }}</option></select></label>
+      <label><span>{{ t('installed.siteLocation') }}<RequiredMark /></span><input v-model="locationInput" :aria-label="t('installed.siteLocation')" required /></label>
+      <label><span>{{ t('installed.engineerOwner') }}<RequiredMark /></span><select v-model="form.engineerOwner" :aria-label="t('installed.engineerOwner')" required :disabled="!canReassign"><option v-if="!engineers.some((item) => item.id === form.engineerOwner)" :value="form.engineerOwner">{{ personnelDisplayName(form.engineerOwner) || form.engineerOwner }}</option><option v-for="engineer in engineers" :key="engineer.id" :value="engineer.id">{{ engineer.name }} · {{ engineer.role }}</option></select><small v-if="!canReassign">{{ t('installed.cannotReassign') }}</small></label>
+       <label><span>{{ copy('Operating System', '操作系统') }}</span><input v-model="operatingSystemInput" :aria-label="copy('Operating System', '操作系统')" /></label>
+       <label><span>{{ copy('Warranty Start', '质保开始') }}</span><input v-model="form.warrantyStart" type="date" :aria-label="copy('Warranty Start', '质保开始')" /></label>
+       <label><span>{{ copy('Warranty End', '质保结束') }}</span><input v-model="form.warrantyEnd" type="date" :aria-label="copy('Warranty End', '质保结束')" /></label>
+       <label><span>{{ copy('Service Contract', '服务合同') }}</span><input v-model="serviceContractInput" :aria-label="copy('Service Contract', '服务合同')" /></label>
+       <label><span>{{ copy('PM Cycle', 'PM 周期') }}</span><input v-model="pmCycleInput" :aria-label="copy('PM Cycle', 'PM 周期')" /></label>
+       <label><span>{{ copy('Ownership Type', '归属类型') }}<RequiredMark /></span><input v-model="form.ownershipType" :aria-label="copy('Ownership Type', '归属类型')" required /></label>
+       <label><span>{{ copy('Sales Order', '销售订单') }}</span><input v-model="salesOrderInput" :aria-label="copy('Sales Order', '销售订单')" /></label>
+       <label class="wide"><span>{{ copy('Contract', '合同') }}</span><input v-model="contractInput" :aria-label="copy('Contract', '合同')" /></label>
     </div>
   </ModalShell>
 </template>

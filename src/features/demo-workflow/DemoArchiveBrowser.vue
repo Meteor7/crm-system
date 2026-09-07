@@ -4,6 +4,7 @@ import { groupDemoArchives, type DemoArchiveGroupMode } from '@/domain/demo-arch
 import type { DemoWorkflowDto } from '@/types/workspaces'
 import DemoArchiveGroup from './DemoArchiveGroup.vue'
 import { personnelDisplayName } from '@/demo/personnel'
+import { useI18n } from '@/i18n'
 
 const props = defineProps<{
   items: DemoWorkflowDto[]
@@ -20,6 +21,8 @@ const emit = defineEmits<{
   'group-change': [value: DemoArchiveGroupMode]
   open: [item: DemoWorkflowDto]
 }>()
+const { locale } = useI18n()
+const copy = (english: string, chinese: string) => locale.value === 'en-US' ? english : chinese
 
 const archived = computed(() => props.items.filter((item) => item.archiveCategory === 'Completed'))
 const salesOwners = computed(() => [...new Set(archived.value.map((item) => item.salesOwner))].sort())
@@ -38,54 +41,54 @@ const groups = computed(() => groupDemoArchives(filtered.value, props.groupBy))
   <aside class="archive-browser" data-demo-archive>
     <div class="archive-tools">
       <label>
-        <span>归档结果</span>
+          <span>{{ copy('Archive result', '归档结果') }}</span>
         <select
           :value="result"
-          aria-label="Archive Result"
+          :aria-label="copy('Archive result', '归档结果')"
           @change="emit('update:result', ($event.target as HTMLSelectElement).value as 'all' | 'Accepted' | 'Rejected')"
         >
-          <option value="all">全部</option>
-          <option value="Accepted">Accepted</option>
-          <option value="Rejected">Rejected</option>
+           <option value="all">{{ copy('All', '全部') }}</option>
+          <option value="Accepted">{{ copy('Accepted', '已接受') }}</option>
+          <option value="Rejected">{{ copy('Rejected', '已拒绝') }}</option>
         </select>
       </label>
       <label>
-        <span>Sales</span>
+        <span>{{ copy('Sales', '销售') }}</span>
         <select
           :value="salesOwner"
-          aria-label="Archive Sales Owner"
+           :aria-label="copy('Archive Sales owner', '归档销售负责人')"
           @change="emit('update:salesOwner', ($event.target as HTMLSelectElement).value)"
         >
-          <option value="all">全部</option>
+           <option value="all">{{ copy('All', '全部') }}</option>
           <option v-for="owner in salesOwners" :key="owner" :value="owner">{{ personnelDisplayName(owner) }}</option>
         </select>
       </label>
       <label>
-        <span>Engineer</span>
+        <span>{{ copy('Engineer', '工程师') }}</span>
         <select
           :value="engineerOwner"
-          aria-label="Archive Engineer Owner"
+           :aria-label="copy('Archive Engineer owner', '归档工程师负责人')"
           @change="emit('update:engineerOwner', ($event.target as HTMLSelectElement).value)"
         >
-          <option value="all">全部</option>
+           <option value="all">{{ copy('All', '全部') }}</option>
           <option v-for="owner in engineerOwners" :key="owner" :value="owner">{{ personnelDisplayName(owner) }}</option>
         </select>
       </label>
     </div>
 
-    <div class="group-switch" aria-label="Demo 档案分类">
+    <div class="group-switch" :aria-label="copy('Demo archive grouping', 'Demo 档案分类')">
       <button
         type="button"
         data-archive-group-mode="customer"
         :class="{ active: groupBy === 'customer' }"
         @click="emit('group-change', 'customer')"
-      >按客户</button>
+      >{{ copy('By account', '按客户') }}</button>
       <button
         type="button"
         data-archive-group-mode="equipment"
         :class="{ active: groupBy === 'equipment' }"
         @click="emit('group-change', 'equipment')"
-      >按设备</button>
+      >{{ copy('By equipment', '按设备') }}</button>
     </div>
 
     <div v-if="groups.length" class="archive-groups">
@@ -98,7 +101,7 @@ const groups = computed(() => groupDemoArchives(filtered.value, props.groupBy))
         @open="emit('open', $event)"
       />
     </div>
-    <p v-else class="archive-empty">当前筛选范围内暂无已归档 Demo。</p>
+    <p v-else class="archive-empty">{{ locale === 'en-US' ? 'No archived Demo records match the current filters.' : '当前筛选范围内暂无已归档 Demo。' }}</p>
   </aside>
 </template>
 

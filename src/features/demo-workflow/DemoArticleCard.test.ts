@@ -12,8 +12,8 @@ const artifacts: DemoArtifactMetaDto[] = [
 describe('DemoArticleCard', () => {
   it('shows only engineer-uploaded Test Reports and Demo Request forms', () => {
     const wrapper = mount(DemoArticleCard, { props: { artifacts } })
-    expect(wrapper.text()).toContain('Test Reports1')
-    expect(wrapper.text()).toContain('Demo Request Forms1')
+    expect(wrapper.text()).toContain('测试报告1')
+    expect(wrapper.text()).toContain('Demo Request 表单1')
     expect(wrapper.text()).toContain('capture.txt')
     expect(wrapper.text()).toContain('v2 · Engineer Li')
     expect(wrapper.text()).not.toContain('legacy.pdf')

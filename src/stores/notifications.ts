@@ -33,6 +33,7 @@ export const useNotificationStore = defineStore('notifications', {
       const requirementItems = requirements.slice(0, 3).map((requirement) => ({
         id: `requirement-${requirement.id.toLowerCase()}`,
         category: 'Requirement' as const,
+        generatedLocally: true,
         title: '需求待跟进',
         message: `${requirement.id} · ${requirement.accountName} · ${requirement.title}`,
         route: requirement.linkedDealId
@@ -75,6 +76,7 @@ export const useNotificationStore = defineStore('notifications', {
       sequence += 1
       this.items.unshift({
         ...input,
+        generatedLocally: true,
         id: `notification-${Date.now()}-${sequence}`,
         createdAt: '刚刚',
         read: false,

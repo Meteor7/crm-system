@@ -203,7 +203,7 @@ describe('Mock customer and opportunity operations', () => {
     await wrapper.get('[data-testid="new-opportunity"]').trigger('click')
     await flushPromises()
     await wrapper.get('[aria-label="Opportunity 名称"]').setValue('Demo 新机会')
-    await wrapper.get('[aria-label="Opportunity 金额"]').setValue('100000.00')
+    await wrapper.get('[aria-label="金额"]').setValue('100000.00')
     await wrapper.findAll('[data-modal-submit]').at(-1)!.trigger('submit')
     await flushPromises()
     expect(wrapper.text()).toContain('Demo 新机会')
@@ -293,13 +293,13 @@ describe('Mock customer and opportunity operations', () => {
 
     await router.push({ query: { accountId: 'ACC-005', create: '1', view: 'opportunities' } })
     await flushPromises()
-    expect(wrapper.get('[aria-label="Opportunity 客户"]').element).toHaveProperty('value', 'ACC-005')
+    expect(wrapper.get('[aria-label="客户"]').element).toHaveProperty('value', 'ACC-005')
     expect(router.currentRoute.value.query.create).toBeUndefined()
 
     await wrapper.get('[aria-label="关闭"]').trigger('click')
     await router.push({ query: { accountId: 'ACC-005', view: 'opportunities' } })
     await flushPromises()
-    expect(wrapper.find('[aria-label="Opportunity 客户"]').exists()).toBe(false)
+    expect(wrapper.find('[aria-label="客户"]').exists()).toBe(false)
   })
 
   it('adds and deletes opportunity actions', async () => {

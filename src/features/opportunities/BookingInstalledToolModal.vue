@@ -6,6 +6,8 @@ import { personnelDisplayName } from '@/demo/personnel'
 import type { PersonnelIdentity } from '@/demo/personnel'
 import type { BookingDto, SiteDto } from '@/types/crm'
 import type { ConvertBookingToInstalledToolInput } from '@/types/workspaces'
+import { useI18n } from '@/i18n'
+import { salesEnumLabel } from '@/features/shared/sales-i18n'
 
 const props = defineProps<{
   booking: BookingDto
@@ -15,6 +17,7 @@ const props = defineProps<{
   error?: string
 }>()
 const emit = defineEmits<{ close: []; submit: [value: ConvertBookingToInstalledToolInput] }>()
+const { t, locale } = useI18n()
 
 const form = ref({
   siteId: props.sites[0]?.id ?? '',
@@ -43,9 +46,9 @@ function submit() {
 
 <template>
   <ModalShell
-    title="转入 Installed Tool"
+    :title="t('bookingEditor.convertTool')"
     eyebrow="BOOKING HANDOFF"
-    submit-label="确认转入"
+    :submit-label="t('bookingEditor.confirmConvert')"
     :busy="busy"
     :submit-disabled="!sites.length"
     @close="$emit('close')"
@@ -53,20 +56,20 @@ function submit() {
   >
     <p class="handoff-summary">
       <strong>{{ booking.id }} · {{ booking.equipment }}</strong>
-      <span>{{ booking.accountName }} · Sales {{ personnelDisplayName(booking.owner) }}</span>
+      <span>{{ booking.accountName }} · {{ locale === 'en-US' ? 'Sales' : '销售' }} {{ personnelDisplayName(booking.owner) }}</span>
     </p>
     <p v-if="error" class="form-error">{{ error }}</p>
-    <p v-if="!sites.length" class="form-error">该客户尚无可用厂区，请先补齐客户厂区档案。</p>
+    <p v-if="!sites.length" class="form-error">{{ t('bookingEditor.noSites') }}</p>
     <div class="handoff-form-grid">
-      <label><span>客户厂区<RequiredMark /></span><select v-model="form.siteId" aria-label="客户厂区" required><option v-for="site in sites" :key="site.id" :value="site.id">{{ site.name }} · {{ site.city }}</option></select></label>
-      <label><span>负责工程师<RequiredMark /></span><select v-model="form.engineerOwner" aria-label="负责工程师" required><option v-for="engineer in engineers" :key="engineer.id" :value="engineer.id">{{ engineer.name }} · {{ engineer.demoIdentityId === 'fae' ? 'FAE' : 'Engineer' }}</option></select></label>
-      <label><span>设备型号<RequiredMark /></span><input v-model="form.model" aria-label="设备型号" required /></label>
-      <label><span>现场位置</span><input v-model="form.location" aria-label="现场位置" placeholder="未填写则为待确认" /></label>
-      <label><span>Sales Order</span><input v-model="form.salesOrder" aria-label="Sales Order" placeholder="未填写则为待确认" /></label>
-      <label><span>Contract</span><input v-model="form.contract" aria-label="Contract" placeholder="未填写则为待确认" /></label>
-      <label><span>Software</span><input v-model="form.software" aria-label="Software" placeholder="未填写则为待确认" /></label>
-      <label><span>Firmware</span><input v-model="form.firmware" aria-label="Firmware" placeholder="未填写则为待确认" /></label>
-      <label><span>Configuration</span><input v-model="form.configuration" aria-label="Configuration" placeholder="未填写则为待确认" /></label>
+      <label><span>{{ t('installed.customerSiteField') }}<RequiredMark /></span><select v-model="form.siteId" :aria-label="t('installed.customerSiteField')" required><option v-for="site in sites" :key="site.id" :value="site.id">{{ site.name }} · {{ site.city }}</option></select></label>
+      <label><span>{{ t('installed.engineerOwner') }}<RequiredMark /></span><select v-model="form.engineerOwner" :aria-label="t('installed.engineerOwner')" required><option v-for="engineer in engineers" :key="engineer.id" :value="engineer.id">{{ engineer.name }} · {{ engineer.demoIdentityId === 'fae' ? 'FAE' : (locale === 'en-US' ? 'Engineer' : '工程师') }}</option></select></label>
+      <label><span>{{ t('installed.model') }}<RequiredMark /></span><input v-model="form.model" :aria-label="t('installed.model')" required /></label>
+      <label><span>{{ t('installed.siteLocation') }}</span><input v-model="form.location" :aria-label="t('installed.siteLocation')" :placeholder="t('bookingEditor.pendingPlaceholder')" /></label>
+      <label><span>{{ locale === 'en-US' ? 'Sales order' : '销售订单' }}</span><input v-model="form.salesOrder" :aria-label="locale === 'en-US' ? 'Sales order' : '销售订单'" :placeholder="t('bookingEditor.pendingPlaceholder')" /></label>
+      <label><span>{{ locale === 'en-US' ? 'Contract' : '合同' }}</span><input v-model="form.contract" :aria-label="locale === 'en-US' ? 'Contract' : '合同'" :placeholder="t('bookingEditor.pendingPlaceholder')" /></label>
+      <label><span>{{ salesEnumLabel('Software', locale) }}</span><input v-model="form.software" :aria-label="salesEnumLabel('Software', locale)" :placeholder="t('bookingEditor.pendingPlaceholder')" /></label>
+      <label><span>{{ salesEnumLabel('Firmware', locale) }}</span><input v-model="form.firmware" :aria-label="salesEnumLabel('Firmware', locale)" :placeholder="t('bookingEditor.pendingPlaceholder')" /></label>
+      <label><span>{{ salesEnumLabel('Configuration', locale) }}</span><input v-model="form.configuration" :aria-label="salesEnumLabel('Configuration', locale)" :placeholder="t('bookingEditor.pendingPlaceholder')" /></label>
     </div>
   </ModalShell>
 </template>

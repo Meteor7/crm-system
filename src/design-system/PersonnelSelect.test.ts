@@ -1,5 +1,6 @@
-import { mount } from '@vue/test-utils'
+import { flushPromises, mount } from '@vue/test-utils'
 import { describe, expect, it } from 'vitest'
+import { setLocale } from '@/i18n'
 import PersonnelSelect from './PersonnelSelect.vue'
 
 describe('PersonnelSelect', () => {
@@ -10,6 +11,11 @@ describe('PersonnelSelect', () => {
     expect(wrapper.text()).not.toContain('\u6f14\u793a\u5458\u5de514')
     expect(wrapper.text()).not.toContain('\u6f14\u793a\u7ecf\u740601')
     expect(wrapper.text()).not.toContain('@crm.example.invalid')
+    expect(wrapper.get('option[value=""]').text()).toBe('请选择负责人')
+    setLocale('en-US')
+    await flushPromises()
+    expect(wrapper.get('option[value=""]').text()).toBe('Select assignee')
+    expect(wrapper.get('option[value="person005@crm.example.invalid"]').text()).toContain('Sales')
     await wrapper.get('select').setValue('person005@crm.example.invalid')
     expect(wrapper.emitted('update:modelValue')?.[0]).toEqual(['person005@crm.example.invalid'])
   })

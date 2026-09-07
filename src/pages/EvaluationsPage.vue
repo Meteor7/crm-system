@@ -17,12 +17,15 @@ import TestDeadlineModal from '@/features/evaluations/TestDeadlineModal.vue'
 import TestRunModal from '@/features/evaluations/TestRunModal.vue'
 import TestReportUploadModal from '@/features/evaluations/TestReportUploadModal.vue'
 import ModalShell from '@/design-system/ModalShell.vue'
+import { useI18n, useLocaleMessage, localeMessage } from '@/i18n'
 
 const props = withDefaults(defineProps<{ apiClient?: CrmApi }>(), {
   apiClient: () => defaultApi,
 })
 
 const app = useAppStore()
+const { t, locale } = useI18n()
+const copy = (english: string, chinese: string) => locale.value === 'en-US' ? english : chinese
 const route = useRoute()
 const router = useRouter()
 const rows = ref<EvaluationDto[]>([])
@@ -30,9 +33,9 @@ const total = ref(0), page = ref(1)
 const pageSize = ref(6)
 const loading = ref(false)
 const denied = ref(false)
-const error = ref('')
+const error = useLocaleMessage()
 const requestId = ref('')
-const actionError = ref('')
+const actionError = useLocaleMessage()
 const actionRequestId = ref('')
 const meta = ref<RequestMetaState | null>(null)
 const processing = ref('')
@@ -44,7 +47,7 @@ const deadlineTarget = ref<EvaluationDto | null>(null)
 const reportTarget = ref<EvaluationDto | null>(null)
 const rejectTarget = ref<EvaluationDto | null>(null)
 const rejectReason = ref('')
-const rejectError = ref('')
+const rejectError = useLocaleMessage()
 
 const canWrite = computed(() => app.can('evaluation:write'))
 const canReport = computed(() => app.can('evaluation:view'))
@@ -99,7 +102,7 @@ async function load() {
   } catch (reason) {
     if (current !== sequence) return
     const mapped = mapRequestError(reason)
-    error.value = mapped.message
+    error.value = mapped.localizedMessage ?? mapped.message
     requestId.value = mapped.requestId
     denied.value = mapped.denied
     if (mapped.denied) rows.value = []
@@ -116,7 +119,7 @@ function handleWriteError(reason: unknown) {
   warnings.value = []
   const mapped = mapRequestError(reason)
   if (mapped.denied) {
-    error.value = mapped.message
+    error.value = mapped.localizedMessage ?? mapped.message
     requestId.value = mapped.requestId
     denied.value = true
     rows.value = []
@@ -128,7 +131,7 @@ function handleWriteError(reason: unknown) {
     actionRequestId.value = ''
     return
   }
-  actionError.value = mapped.message
+  actionError.value = mapped.localizedMessage ?? mapped.message
   actionRequestId.value = mapped.requestId
 }
 
@@ -169,7 +172,7 @@ async function confirmReject() {
   if (!rejectTarget.value) return
   const reason = rejectReason.value.trim()
   if (!reason) {
-    rejectError.value = '请填写拒绝原因。'
+    rejectError.value = localeMessage('Enter a rejection reason.', '请填写拒绝原因。')
     return
   }
   rejectError.value = ''
@@ -245,19 +248,19 @@ onMounted(async () => {
 <template>
   <div>
     <PageHeader
-      eyebrow="DEMO TEST"
-      title="Demo Test"
-      description="与 Demo Request 同步管理测试准备、执行和客户评审；完成后自动进入 Demo 档案。"
+      :eyebrow="t('evaluations.pageEyebrow')"
+      :title="t('evaluations.pageTitle')"
+      :description="t('evaluations.pageDescription')"
     >
-      <span class="header-chip"><FlaskConical :size="15" />{{ activeRows.length }} 个进行中项目</span>
+      <span class="header-chip"><FlaskConical :size="15" />{{ t('evaluations.inProgress', { count: activeRows.length }) }}</span>
     </PageHeader>
 
     <div v-if="focusedEvaluation" class="handoff-notice" data-demo-test-focus role="status">
-      已定位 Demo Test <strong>{{ focusedEvaluation.id }}</strong>，来源 Demo Request
-      <strong>{{ focusedEvaluation.demoRequestId }}</strong>。
+      {{ locale === 'en-US' ? 'Focused Demo Test' : '已定位 Demo Test' }} <strong>{{ focusedEvaluation.id }}</strong>{{ locale === 'en-US' ? ', from Demo Request' : '，来源 Demo Request' }}
+      <strong>{{ focusedEvaluation.demoRequestId }}</strong>{{ locale === 'en-US' ? '.' : '。' }}
     </div>
 
-    <DataNotice v-if="meta?.stale" :message="meta.message" :request-id="meta.requestId" @refresh="load" />
+    <DataNotice v-if="meta?.stale" :message="meta.localizedMessage ?? meta.message" :request-id="meta.requestId" @refresh="load" />
     <div v-if="warnings.length" class="api-warning" data-api-warning role="status">
       <span v-for="warning in warnings" :key="warning">{{ warning }}</span>
     </div>
@@ -274,8 +277,8 @@ onMounted(async () => {
     <DataState
       v-else-if="!activeRows.length"
       type="empty"
-      title="没有进行中的 Demo Test"
-      message="新项目会在 Boss 批准 Demo Request 后自动进入这里。"
+      :title="t('evaluations.emptyTitle')"
+      :message="t('evaluations.emptyMessage')"
     />
     <EvaluationWorkspace
       v-else
@@ -319,18 +322,18 @@ onMounted(async () => {
     />
     <ModalShell
       v-if="rejectTarget"
-      title="Reject Demo"
-      eyebrow="DEMO TEST"
-      submit-label="确认拒绝"
+       :title="copy('Reject Demo Test', '拒绝 Demo 测试')"
+       :eyebrow="t('evaluations.pageEyebrow')"
+       :submit-label="copy('Confirm rejection', '确认拒绝')"
       :busy="processing === rejectTarget.id"
       :submit-disabled="!rejectReason.trim()"
       @close="rejectTarget = null"
       @submit="confirmReject"
     >
-      <p class="reject-warning">拒绝后该 Demo Test 将进入档案。请确认项目和原因，避免误操作。</p>
+       <p class="reject-warning">{{ copy('This Demo Test will move to the archive after rejection. Confirm the project and reason to avoid mistakes.', '拒绝后该 Demo 测试将进入档案。请确认项目和原因，避免误操作。') }}</p>
       <label class="reject-reason-field">
-        <span>拒绝原因</span>
-        <textarea v-model="rejectReason" aria-label="Demo 拒绝原因" maxlength="1000" required autofocus />
+         <span>{{ copy('Rejection reason', '拒绝原因') }}</span>
+         <textarea v-model="rejectReason" :aria-label="copy('Demo rejection reason', 'Demo 拒绝原因')" maxlength="1000" required autofocus />
       </label>
       <p v-if="rejectError" class="reject-error" role="alert">{{ rejectError }}</p>
     </ModalShell>

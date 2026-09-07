@@ -48,3 +48,28 @@ describe('customer report model', () => {
     expect(actionValues).toContain('确认第二批样片物流')
   })
 })
+
+
+it('uses English report labels and generated risk copy while preserving business data', async () => {
+  const detail = (await createMockApi({ latency: 0 }).getAccount360('ACC-001')).data
+  const empty = { ...detail, account: { ...detail.account, name: 'Acme', city: 'Shanghai', region: 'East', owner: 'Sales', risk: '高风险' as const, nextAction: 'Follow up' }, sites: [], contacts: [], requirements: [], opportunities: [], bookings: [], actions: [], visits: [], demoRequests: [], evaluations: [], contracts: [] }
+  const report = buildCustomerReportModel(empty, '2026-09-07', 'en-US')
+  expect(report.sheets.map(sheet => sheet.name)).toEqual(['Overview', 'Opportunities', 'Actions', 'People', 'Demo and contracts'])
+  for (const sheet of report.sheets) for (const cell of sheet.rows.flat()) expect(String(cell.v)).not.toMatch(/\p{Script=Han}/u)
+  const businessText = '当前规则未识别到异常'
+  empty.account.name = businessText
+  empty.account.nextAction = businessText
+  const original = structuredClone(empty)
+  expect(buildCustomerReportModel(empty, '2026-09-07', 'en-US').sheets[0].rows.flat().map(cell => cell.v)).toContain(businessText)
+  expect(empty).toEqual(original)
+})
+
+
+it('uses English generated booking titles in reports without modifying the booking', async () => {
+  const detail = (await createMockApi({ latency: 0 }).getAccount360('ACC-001')).data
+  detail.bookings = [{ id: 'B-1', accountId: 'ACC-001', accountName: 'Acme', primaryContactId: 'CON-001', customerContact: 'Customer', amount: '1000.00', currency: 'CNY', bookingDate: '2026-09-07', owner: 'Sales', source: 'Upsell', sourceOpportunityId: '', note: '', ddl: '2026-10-01', equipment: 'Tool X', quantity: 2, bookingType: 'Equipment', title: 'Tool X · 2 台', status: 'Confirmed' }]
+  const reportValues = values(buildCustomerReportModel(detail, '2026-09-07', 'en-US'), 'Opportunities')
+  expect(reportValues).toContain('Tool X · 2 units')
+  expect(reportValues).not.toContain('Tool X · 2 台')
+  expect(detail.bookings[0].title).toBe('Tool X · 2 台')
+})

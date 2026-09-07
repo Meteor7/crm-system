@@ -5,6 +5,7 @@ import type { CrmApi } from '@/api'
 import { createAppRouter } from '@/app/router'
 import { useAppStore } from '@/stores/app'
 import type { QuotationDetailDto, QuotationDraftInput } from '@/features/quotations/types'
+import { setLocale } from '@/i18n'
 import QuotationDetailPage from './QuotationDetailPage.vue'
 import QuotationEditor from '@/features/quotations/QuotationEditor.vue'
 
@@ -150,10 +151,10 @@ describe('QuotationDetailPage', () => {
 
     expect(wrapper.get('[aria-label="交期月数"]').attributes('min')).toBe('1')
     expect(wrapper.get('[aria-label="维保月数"]').attributes('min')).toBe('1')
-    expect(wrapper.get('[aria-label="报价有效期月数"]').attributes('min')).toBe('1')
+    expect(wrapper.get('[aria-label="报价有效期（月）"]').attributes('min')).toBe('1')
     expect(wrapper.findAll('[data-payment-percentage]')).toHaveLength(4)
     expect(wrapper.text()).toContain('FOB上海')
-    expect(wrapper.text()).toContain('Installation, 5 days')
+    expect(wrapper.text()).toContain('Installation, 5 days – included')
     expect(wrapper.get('[data-testid="quotation-preview"]').attributes('src')).toBe('blob:quotation-preview')
     expect(wrapper.get('[data-testid="quotation-preview"]').attributes('srcdoc')).toBeUndefined()
     expect(wrapper.get('[data-testid="quotation-preview"]').attributes('src')).toBe('blob:quotation-preview')
@@ -172,7 +173,7 @@ describe('QuotationDetailPage', () => {
     service.quotation.quotationType = 'Service'; service.version.quotationType = 'Service'; service.versions = [service.version]
     vi.mocked(client.getQuotation).mockResolvedValue({ data: service, warnings: [] })
     const wrapper = await mountPage(client)
-    expect(wrapper.text()).toContain('SERVICE ITEMS')
+    expect(wrapper.text()).toContain('服务项目')
     expect(wrapper.find('[data-add-accessory]').exists()).toBe(false)
   })
 
@@ -236,7 +237,7 @@ describe('QuotationDetailPage', () => {
     const picker = wrapper.get('[data-testid="accessory-pricing-mode-select"]')
     expect(picker.find('select').exists()).toBe(false)
     await picker.get('[role="combobox"]').trigger('click')
-    const charged = picker.findAll('[role="option"]').find((option) => option.text() === 'Charged')
+    const charged = picker.findAll('[role="option"]').find((option) => option.text() === '收费')
     expect(charged).toBeDefined()
     await charged!.trigger('click')
     expect(wrapper.get('[aria-label="配件含税单价"]').attributes('disabled')).toBeUndefined()
@@ -284,7 +285,7 @@ describe('QuotationDetailPage', () => {
     vi.mocked(client.getQuotation).mockResolvedValue({ data: pending, warnings: [] })
     const wrapper = await mountPage(client)
     expect(wrapper.attributes('data-editable')).toBe('false')
-    expect(wrapper.text()).toContain('等待 Manager 审批')
+    expect(wrapper.text()).toContain('等待经理审批')
     expect(wrapper.find('[data-testid="submit-quotation-approval"]').exists()).toBe(false)
     expect(wrapper.get('[aria-label="设备名称"]').attributes('disabled')).toBeDefined()
   })
@@ -390,8 +391,15 @@ describe('QuotationDetailPage adversarial loading', () => {
 
     expect(wrapper.find('.summary-strip').exists()).toBe(true)
     expect(wrapper.text()).toContain('PK20260810-A1')
+    expect(wrapper.text()).toContain('客户站点加载失败：The account is outside the current user scope.（Request ID: req_account_scope）')
     expect(wrapper.text()).toContain('req_account_scope')
     expect(wrapper.find('[data-state="denied"]').exists()).toBe(false)
+    setLocale('en-US')
+    await flushPromises()
+    expect(wrapper.text()).toContain('Account sites failed to load: The account is outside the current user scope.')
+    expect(wrapper.text()).toContain('req_account_scope')
+    expect(client.getAccount360).toHaveBeenCalledTimes(1)
+    wrapper.unmount()
   })
 
   it('loads every active contact page instead of truncating at the backend cap', async () => {

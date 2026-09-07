@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { systemValueLabel } from '@/features/shared/system-labels'
 import { computed, onMounted, ref, watch } from 'vue'
 import { ArrowLeft, Cpu, Edit3, ExternalLink, MapPin, Wrench } from '@lucide/vue'
 import { RouterLink, useRoute } from 'vue-router'
@@ -15,18 +16,22 @@ import PersonnelSelect from '@/design-system/PersonnelSelect.vue'
 import AccountSegmentSelect from '@/features/accounts/AccountSegmentSelect.vue'
 import SectionCard from '@/design-system/SectionCard.vue'
 import StatusBadge from '@/design-system/StatusBadge.vue'
+import { useI18n, useLocaleMessage } from '@/i18n'
+import { salesEnumLabel } from '@/features/shared/sales-i18n'
 
 const props = withDefaults(defineProps<{ apiClient?: CrmApi }>(), { apiClient: () => defaultApi })
 const route = useRoute()
 const app = useAppStore()
+const { locale, t } = useI18n()
 const tools = ref<InstalledToolDto[]>([])
 const loading = ref(false)
-const warning = ref('')
+const warning = useLocaleMessage()
+const warningRequestId = ref('')
 const profileVersion = ref(0)
 const accountDetail = ref<Account360Dto | null>(null)
 const editOpen = ref(false)
 const editBusy = ref(false)
-const editError = ref('')
+const editError = useLocaleMessage()
 const accountForm = ref<CreateAccountInput>({ name: '', shortName: '', segment: 'Frontend', tier: 'A', city: '', region: '', owner: '', visibility: 'Private' })
 const segments = ref<string[]>(['Frontend', 'Advanced Packaging'])
 const siteDrafts = ref<Array<SiteDto & { isNew?: boolean }>>([])
@@ -75,7 +80,8 @@ async function saveAccount() {
     profileVersion.value += 1
     await loadEquipment()
   } catch (reason) {
-    editError.value = mapRequestError(reason).message
+    const mapped = mapRequestError(reason)
+    editError.value = mapped.localizedMessage ?? mapped.message
   } finally {
     editBusy.value = false
   }
@@ -102,7 +108,7 @@ async function loadEquipment() {
   const sequence = ++equipmentSequence
   const requestedAccountId = accountId.value
   loading.value = true
-  warning.value = ''
+  warning.value = ''; warningRequestId.value = ''
   try {
     const items: InstalledToolDto[] = []
     let page = 1
@@ -119,9 +125,8 @@ async function loadEquipment() {
     if (sequence !== equipmentSequence) return
     tools.value = []
     const mapped = mapRequestError(reason)
-    warning.value = mapped.requestId
-      ? `${mapped.message}（Request ID: ${mapped.requestId}）`
-      : mapped.message
+    warning.value = mapped.localizedMessage ?? mapped.message
+    warningRequestId.value = mapped.requestId
   } finally {
     if (sequence === equipmentSequence) loading.value = false
   }
@@ -141,54 +146,54 @@ onMounted(() => { void loadEquipment(); void loadSegments() })
 
 <template>
   <div class="account-detail-page">
-    <div class="detail-actions"><RouterLink class="detail-back-button" :to="{ name: 'accounts' }"><ArrowLeft :size="14" />返回客户档案</RouterLink><button v-if="canWrite" class="primary-button" type="button" data-testid="edit-account" :disabled="!accountDetail" @click="openEdit"><Edit3 :size="14" />修改档案</button></div>
+    <div class="detail-actions"><RouterLink class="detail-back-button" :to="{ name: 'accounts' }"><ArrowLeft :size="14" />{{ t('detail.backAccounts') }}</RouterLink><button v-if="canWrite" class="primary-button" type="button" data-testid="edit-account" :disabled="!accountDetail" @click="openEdit"><Edit3 :size="14" />{{ t('detail.editProfile') }}</button></div>
     <div class="account-detail-layout">
       <AccountProfile :key="profileVersion" :account-id="accountId" :api-client="props.apiClient" @loaded="captureAccount" @manage-sites="openEdit" />
       <aside class="equipment-column">
-        <SectionCard title="设备关联" eyebrow="INSTALLED BASE">
-          <div class="equipment-heading"><span><Cpu :size="18" /></span><div><strong>{{ relatedTools.length }} 台设备</strong><small>当前客户 Installed Tools</small></div></div>
-          <p v-if="warning" class="equipment-warning">{{ warning }}</p>
-          <p v-else-if="loading" class="equipment-empty">正在加载设备…</p>
+        <SectionCard :title="t('detail.equipmentRelation')" eyebrow="INSTALLED BASE">
+           <div class="equipment-heading"><span><Cpu :size="18" /></span><div><strong>{{ relatedTools.length }} {{ locale === 'en-US' ? 'tools' : '台设备' }}</strong><small>{{ locale === 'en-US' ? 'Installed Tools for this account' : '当前客户 Installed Tools' }}</small></div></div>
+          <p v-if="warning" class="equipment-warning">{{ warning }}<small v-if="warningRequestId">{{ locale === 'en-US' ? 'Request ID' : '请求编号' }}: {{ warningRequestId }}</small></p>
+          <p v-else-if="loading" class="equipment-empty">{{ t('detail.loadingEquipment') }}</p>
           <div v-else-if="relatedTools.length" class="equipment-list">
             <article v-for="tool in relatedTools" :key="tool.id" :data-account-tool="tool.id">
-              <header><strong>{{ tool.model }}</strong><StatusBadge :label="tool.status" :tone="tool.status === 'Active' ? 'positive' : 'warning'" /></header>
+               <header><strong>{{ tool.model }}</strong><StatusBadge :label="salesEnumLabel(tool.status, locale)" :tone="tool.status === 'Active' ? 'positive' : 'warning'" /></header>
               <b>{{ tool.serial }}</b>
-              <p><MapPin :size="12" />{{ tool.site }} · {{ tool.location }}</p>
-              <p><Wrench :size="12" />{{ tool.engineerOwner ? personnelDisplayName(tool.engineerOwner) : '工程师待分配' }}</p>
-              <RouterLink v-if="tool.sourceBookingId" :to="{ name: 'booking-detail', params: { bookingId: tool.sourceBookingId } }">来源 {{ tool.sourceBookingId }}<ExternalLink :size="12" /></RouterLink>
+              <p><MapPin :size="12" />{{ tool.site }} · {{ systemValueLabel(tool.location, locale) }}</p>
+              <p><Wrench :size="12" />{{ tool.engineerOwner ? personnelDisplayName(tool.engineerOwner) : t('detail.engineerUnassigned') }}</p>
+              <RouterLink v-if="tool.sourceBookingId" :to="{ name: 'booking-detail', params: { bookingId: tool.sourceBookingId } }">{{ t('detail.source') }} {{ tool.sourceBookingId }}<ExternalLink :size="12" /></RouterLink>
             </article>
           </div>
-          <p v-else class="equipment-empty">暂无已装机设备，Booking 完成转入后会显示在这里。</p>
-          <RouterLink class="equipment-more" :to="{ name: 'installed-tools', query: { accountId } }">查看设备管理<ExternalLink :size="13" /></RouterLink>
+          <p v-else class="equipment-empty">{{ t('detail.noInstalledTools') }}</p>
+          <RouterLink class="equipment-more" :to="{ name: 'installed-tools', query: { accountId } }">{{ t('detail.viewEquipment') }}<ExternalLink :size="13" /></RouterLink>
         </SectionCard>
       </aside>
     </div>
-    <ModalShell v-if="editOpen" title="修改客户档案" eyebrow="ACCOUNT MASTER" :busy="editBusy" @close="editOpen = false" @submit="saveAccount">
+    <ModalShell v-if="editOpen" :title="t('detail.editAccount')" eyebrow="ACCOUNT MASTER" :busy="editBusy" @close="editOpen = false" @submit="saveAccount">
       <p v-if="editError" class="form-error">{{ editError }}</p>
       <div class="account-form-grid">
-        <label><span>客户全称<RequiredMark /></span><input v-model="accountForm.name" aria-label="客户全称" required /></label>
-        <label><span>客户简称<RequiredMark /></span><input v-model="accountForm.shortName" aria-label="客户简称" required /></label>
-        <label><span>业务领域<RequiredMark /></span><AccountSegmentSelect v-model="accountForm.segment" :segments="segments" label="客户业务领域" required /></label>
-        <label><span>客户等级</span><select v-model="accountForm.tier" aria-label="客户等级"><option>S</option><option>A</option><option>B</option></select></label>
-        <label><span>城市<RequiredMark /></span><input v-model="accountForm.city" aria-label="客户城市" required /></label>
-        <label><span>区域<RequiredMark /></span><input v-model="accountForm.region" aria-label="客户区域" required /></label>
-        <label class="wide"><span>负责人<RequiredMark /></span><PersonnelSelect v-model="accountForm.owner" :roles="['Sales']" :ariaLabel="'\u5ba2\u6237\u8d1f\u8d23\u4eba'" required /></label>
-        <label class="wide"><span>访问权限</span><select v-model="accountForm.visibility" aria-label="客户访问权限"><option value="Private">私有：仅负责人和 Manager 可见</option><option value="Public">公开：所有 Sales 可见，其他 Sales 只读</option></select></label>
+        <label><span>{{ t('detail.accountName') }}<RequiredMark /></span><input v-model="accountForm.name" :aria-label="t('detail.accountName')" required /></label>
+        <label><span>{{ t('detail.accountShortName') }}<RequiredMark /></span><input v-model="accountForm.shortName" :aria-label="t('detail.accountShortName')" required /></label>
+         <label><span>{{ t('detail.businessArea') }}<RequiredMark /></span><AccountSegmentSelect v-model="accountForm.segment" :segments="segments" :label="t('detail.businessArea')" required /></label>
+        <label><span>{{ t('detail.accountTier') }}</span><select v-model="accountForm.tier" :aria-label="t('detail.accountTier')"><option>S</option><option>A</option><option>B</option></select></label>
+        <label><span>{{ t('detail.city') }}<RequiredMark /></span><input v-model="accountForm.city" :aria-label="t('detail.city')" required /></label>
+        <label><span>{{ t('detail.region') }}<RequiredMark /></span><input v-model="accountForm.region" :aria-label="t('detail.region')" required /></label>
+        <label class="wide"><span>{{ t('detail.owner') }}<RequiredMark /></span><PersonnelSelect v-model="accountForm.owner" :roles="['Sales']" :ariaLabel="t('detail.owner')" required /></label>
+        <label class="wide"><span>{{ t('detail.access') }}</span><select v-model="accountForm.visibility" :aria-label="t('detail.access')"><option value="Private">{{ t('detail.privateAccess') }}</option><option value="Public">{{ t('detail.publicAccess') }}</option></select></label>
       </div>
       <section class="site-editor" data-account-site-editor>
         <header>
-          <div><strong>厂区信息</strong><small>在客户档案中维护工厂、研发中心及其制程状态</small></div>
-          <button type="button" class="secondary-button" data-add-site @click="addSiteDraft">增加厂区</button>
+          <div><strong>{{ t('detail.sites') }}</strong><small>{{ t('detail.sitesHint') }}</small></div>
+          <button type="button" class="secondary-button" data-add-site @click="addSiteDraft">{{ t('detail.addSite') }}</button>
         </header>
-        <p v-if="!siteDrafts.length" class="site-empty">当前客户尚未建立厂区。</p>
+        <p v-if="!siteDrafts.length" class="site-empty">{{ t('detail.noSites') }}</p>
         <article v-for="(site, index) in siteDrafts" :key="site.id" class="site-draft">
-          <b>厂区 {{ index + 1 }}</b>
-          <label><span>厂区名称<RequiredMark /></span><input v-model="site.name" required /></label>
-          <label><span>城市<RequiredMark /></span><input v-model="site.city" required /></label>
-          <label><span>厂区类型<RequiredMark /></span><input v-model="site.type" placeholder="例如：晶圆制造" required /></label>
-          <label><span>制程/用途<RequiredMark /></span><input v-model="site.process" placeholder="例如：16/28nm" required /></label>
-          <label><span>状态<RequiredMark /></span><select v-model="site.status" required><option>量产</option><option>建设中</option><option>规划中</option></select></label>
-          <button type="button" class="site-remove" :data-remove-site="site.id" @click="removeSiteDraft(index)">删除此厂区</button>
+          <b>{{ t('detail.site') }} {{ index + 1 }}</b>
+          <label><span>{{ t('detail.siteName') }}<RequiredMark /></span><input v-model="site.name" required /></label>
+          <label><span>{{ t('detail.city') }}<RequiredMark /></span><input v-model="site.city" required /></label>
+          <label><span>{{ t('detail.siteType') }}<RequiredMark /></span><input v-model="site.type" :placeholder="locale === 'en-US' ? 'e.g. Wafer fab' : '例如：晶圆制造'" required /></label>
+          <label><span>{{ t('detail.process') }}<RequiredMark /></span><input v-model="site.process" :placeholder="locale === 'en-US' ? 'e.g. 16/28nm' : '例如：16/28nm'" required /></label>
+          <label><span>{{ t('detail.status') }}<RequiredMark /></span><select v-model="site.status" required><option value="量产">{{ t('site.status.production') }}</option><option value="建设中">{{ t('site.status.construction') }}</option><option value="规划中">{{ t('site.status.planning') }}</option></select></label>
+          <button type="button" class="site-remove" :data-remove-site="site.id" @click="removeSiteDraft(index)">{{ t('detail.removeSite') }}</button>
         </article>
       </section>
     </ModalShell>
