@@ -4,7 +4,7 @@ import type { DemoArtifactUploadInput, MultipartFilePart } from './binary-transp
 import { actions, contracts, requirements } from './mock-data'
 import type { ApiResponse, AccountSummaryDto, ContactDetailDto, ContactDto, ContactFileMetaDto, ContactListQuery, ContactSummaryDto, CreateAccountInput, CreateContactInput, CreateDemoRequestInput, CreateLeadInput, CreateStakeholderInput, CreateTestRunInput, CreateVisitInput, DemoRequestCommand, DemoRequestDto, EvaluationDto, EvaluationPreparationBranch, EvaluationStatusCommand, LeadConversionInput, LeadConversionResult, LeadDto, LeadListQuery, ListQuery, OpportunityDto, PersonnelRole, SiteDto, UpdateContactInput, UpdateLeadInput, UpdateStakeholderInput, UpsertBookingInput, UserRole, VisitDetailDto, VisitMeetingRecordDto, VisitMeetingRecordInput } from '@/types/crm'
 import type { AddInstalledToolServiceRecordInput, AddInstalledToolVersionRecordInput, ControlledDocumentAccessRequestDto, ControlledDocumentDto, DocumentUploadRequestDto, ConvertBookingToInstalledToolInput, CreateOpportunityActionInput, CreateOpportunityStakeholderInput, CreateStrategyOpportunityInput, DemoCommentDto, DemoWorkflowDto, InstalledToolDetailDto, InstalledToolDto, InstalledToolLifecycleHistoryDto, InstalledToolServiceHistoryDto, InstalledToolVersionHistoryDto, RollbackOpportunityStageInput, StrategyOpportunityDto, TransitionInstalledToolInput, UpdateInstalledToolInput, UpdateOpportunityActionInput, UpdateOpportunityStakeholderInput, UpdateStrategyOpportunityInput } from '@/types/workspaces'
-import { STRATEGY_OPPORTUNITY_STAGES } from '@/types/workspaces'
+import { OPPORTUNITY_FORECASTS, STRATEGY_OPPORTUNITY_STAGES } from '@/types/workspaces'
 import { getContractRisk } from '@/domain/contracts'
 import { shanghaiDate, shanghaiTimestamp } from '@/domain/time'
 import { buildManagementDashboard } from '@/domain/dashboard'
@@ -544,6 +544,9 @@ export function createMockApi(options: {
     if (Number(normalizedAmount) <= 0) throw new CrmApiError('VALIDATION_ERROR', '金额必须大于 0', requestId(), false)
     if (!Number.isFinite(input.score) || input.score < 0 || input.score > 100) {
       throw new CrmApiError('VALIDATION_ERROR', '金额必须为非负数，购买意愿必须在 0 到 100 之间', requestId(), false)
+    }
+    if (!OPPORTUNITY_FORECASTS.includes(input.forecast)) {
+      throw new CrmApiError('VALIDATION_ERROR', '预测分类不符合后端契约', requestId(), false)
     }
     validateOwner(input.owner, role === 'Manager' ? ['Sales', 'Manager'] : ['Sales'])
   }

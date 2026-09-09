@@ -64,7 +64,7 @@ const pmCycleInput = useLocalizedInput(() => form.value.pmCycle, (value) => { fo
     <p v-if="error" class="form-error">{{ error }}</p>
     <div class="form-grid">
       <label><span>{{ t('installed.serviceDate') }}<RequiredMark /></span><input v-model="form.serviceDate" type="date" required /></label>
-      <label><span>{{ t('installed.serviceType') }}<RequiredMark /></span><select v-model="form.serviceType"><option v-for="item in types" :key="item" :value="item">{{ t('installed.type.' + item) }}</option></select></label>
+      <label><span>{{ t('installed.serviceType') }}<RequiredMark /></span><select v-model="form.serviceType" required><option v-for="item in types" :key="item" :value="item">{{ t('installed.type.' + item) }}</option></select></label>
       <label class="wide"><span>{{ t('installed.handlingResult') }}<RequiredMark /></span><textarea v-model="form.result" rows="3" required /></label>
       <label class="wide"><span>{{ t('installed.openIssues') }}<RequiredMark /></span><textarea v-model="openIssuesInput" rows="2" required /></label>
       <label class="wide"><span>{{ t('installed.nextAction') }}</span><input v-model="form.nextAction" :aria-label="t('installed.nextAction')" /></label>

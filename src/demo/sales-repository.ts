@@ -1,5 +1,5 @@
 import type { AccountSummaryDto, BookingDto, ContactDto, LeadDto, SiteDto, VisitDto } from '@/types/crm'
-import { STRATEGY_OPPORTUNITY_STAGES, type InstalledToolDto, type LegacyStrategyOpportunityDto, type StrategyOpportunityDto, type StrategyOpportunityStage } from '@/types/workspaces'
+import { OPPORTUNITY_FORECASTS, STRATEGY_OPPORTUNITY_STAGES, type InstalledToolDto, type LegacyStrategyOpportunityDto, type OpportunityForecast, type StrategyOpportunityDto, type StrategyOpportunityStage } from '@/types/workspaces'
 import { accounts, bookings, contacts, sites, visits } from '@/api/mock-data'
 import { installedTools as installedToolSeeds, opportunities } from '@/demo/operations-data'
 import { leads } from '@/demo/leads-data'
@@ -130,9 +130,14 @@ function normalizeOpportunity(opportunity: StrategyOpportunityDto): StrategyOppo
   const stage = STRATEGY_OPPORTUNITY_STAGES.includes(opportunity.stage)
     ? opportunity.stage
     : legacyStages[String(opportunity.stage)] ?? '需求发现'
+  const legacyForecasts: Record<string, OpportunityForecast> = { Upside: 'Best Case' }
+  const forecast = OPPORTUNITY_FORECASTS.includes(opportunity.forecast)
+    ? opportunity.forecast
+    : legacyForecasts[String(opportunity.forecast)] ?? 'Pipeline'
   return {
     ...opportunity,
     stage,
+    forecast,
     amount: normalizeMoney(String(opportunity.amount)),
     originalAmount: normalizeMoney(String(opportunity.originalAmount)),
   }
@@ -263,7 +268,7 @@ function removeRetiredLocalContacts(snapshot: SalesSnapshot): SalesSnapshot {
         customerContact: replacement?.name ?? booking.customerContact,
       }
     }),
-    opportunities: snapshot.opportunities.map((opportunity) => ({
+    opportunities: normalizedSnapshot.opportunities.map((opportunity) => ({
       ...opportunity,
       stakeholders: opportunity.stakeholders.filter((stakeholder) => !deletedIds.has(stakeholder.contactId)),
     })),

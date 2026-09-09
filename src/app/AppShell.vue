@@ -346,7 +346,8 @@ onBeforeUnmount(() => {
             <section v-if="accountOpen" class="account-center" data-testid="account-center" :aria-label="t('shell.accountCenter')">
               <header>
                 <span class="account-center-icon"><Settings :size="18" /></span>
-                <span><strong>{{ t('shell.accountCenter') }}</strong><small>{{ t('shell.accountSetting') }}</small></span>
+                <span class="account-center-title"><strong>{{ t('shell.accountCenter') }}</strong><small>{{ t('shell.accountSetting') }}</small></span>
+                <button class="account-center-close" data-testid="account-center-close" type="button" :aria-label="t('common.close')" :title="t('common.close')" @click="accountOpen = false"><X :size="16" /></button>
               </header>
               <div class="account-profile">
                 <strong>{{ user.name }}</strong>
@@ -438,11 +439,14 @@ onBeforeUnmount(() => {
 .identity-control { position: relative; }
 .account-center { position: absolute; top: calc(100% + 10px); right: 0; z-index: 50; width: min(360px, calc(100vw - 32px)); overflow: hidden; background: #fff; border: 1px solid var(--crm-line); border-radius: 13px; box-shadow: 0 20px 50px rgba(8,32,40,.18); }
 .account-center > header { display: flex; align-items: center; gap: 10px; padding: 14px 16px; background: var(--crm-surface); border-bottom: 1px solid var(--crm-line); }
-.account-center > header > span:last-child { display: grid; gap: 2px; }
+.account-center-title { display: grid; gap: 2px; }
 .account-center > header strong { color: var(--crm-navy); font-size: 12px; }
 .account-center > header small { color: var(--crm-text-muted); font-size: 7px; font-weight: 800; letter-spacing: .12em; }
 .account-center-icon { display: grid; width: 34px; height: 34px; place-items: center; color: var(--crm-brand-ink); background: var(--crm-teal); border-radius: 9px; }
 .account-profile { display: grid; gap: 3px; padding: 14px 16px; border-bottom: 1px solid var(--crm-line); }
+.account-center-close { display: grid; margin-left: auto; width: 30px; height: 30px; flex: 0 0 auto; place-items: center; padding: 0; color: var(--crm-text-muted); background: transparent; border: 1px solid transparent; border-radius: 8px; cursor: pointer; }
+.account-center-close:hover { color: var(--crm-navy); background: var(--crm-teal-soft); border-color: var(--crm-line); }
+.account-center-close:focus-visible { outline: 2px solid rgba(254,153,0,.72); outline-offset: 2px; }
 .account-profile strong { color: var(--crm-navy); font-size: 12px; }
 .account-profile small { color: var(--crm-text-muted); font-size: 8px; }
 .account-profile span { margin-top: 4px; color: var(--crm-teal-ink); font-size: 8px; font-weight: 700; }

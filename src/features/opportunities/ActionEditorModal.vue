@@ -24,7 +24,7 @@ const form = ref<CreateOpportunityActionInput>({
       <label class="wide"><span>{{ t('actionEditor.title') }}<RequiredMark :show="!action" /></span><input v-model="form.title" :aria-label="t('actionEditor.title')" required /></label>
       <label><span>{{ t('actionEditor.owner') }}<RequiredMark :show="!action" /></span><PersonnelSelect v-model="form.owner" :roles="['Sales', 'Engineer']" :ariaLabel="t('actionEditor.owner')" required /></label>
       <label><span>{{ t('actionEditor.dueDate') }}<RequiredMark :show="!action" /></span><input v-model="form.due" :aria-label="t('actionEditor.dueDate')" type="date" required /></label>
-      <label><span>{{ t('detail.status') }}</span><select v-model="form.status" :aria-label="t('detail.status')"><option v-for="item in OPPORTUNITY_ACTION_STATUSES" :key="item" :value="item">{{ salesEnumLabel(item, locale) }}</option></select></label>
+      <label><span>{{ t('detail.status') }}<RequiredMark :show="!action" /></span><select v-model="form.status" :aria-label="t('detail.status')" required><option v-for="item in OPPORTUNITY_ACTION_STATUSES" :key="item" :value="item">{{ salesEnumLabel(item, locale) }}</option></select></label>
     </div>
   </ModalShell>
 </template>

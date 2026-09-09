@@ -112,12 +112,12 @@ watch(visitId, () => { void load() })
             <form v-if="editing" class="record-form" @submit.prevent="save">
               <label><span>{{ t('detail.startTime') }}</span><input v-model="form.meetingStart" /></label>
               <label><span>{{ t('detail.endTime') }}</span><input v-model="form.meetingEnd" /></label>
-              <label class="wide"><span>{{ t('detail.meetingPurpose') }}</span><textarea v-model="form.purpose" required /></label>
-              <label class="wide"><span>{{ t('detail.attendees') }}</span><textarea v-model="form.attendees" required /></label>
-              <label class="wide"><span>{{ t('detail.agenda') }}</span><textarea v-model="form.agenda" required /></label>
-              <label class="wide"><span>{{ t('detail.summary') }}</span><textarea v-model="form.summary" required /></label>
-              <label class="wide"><span>{{ t('detail.conclusion') }}</span><textarea v-model="form.conclusion" required /></label>
-              <label class="wide"><span>{{ t('detail.followup') }}</span><textarea v-model="form.followup" required /></label>
+              <label class="wide"><span>{{ t('detail.meetingPurpose') }}<RequiredMark /></span><textarea v-model="form.purpose" required /></label>
+              <label class="wide"><span>{{ t('detail.attendees') }}<RequiredMark /></span><textarea v-model="form.attendees" required /></label>
+              <label class="wide"><span>{{ t('detail.agenda') }}<RequiredMark /></span><textarea v-model="form.agenda" required /></label>
+              <label class="wide"><span>{{ t('detail.summary') }}<RequiredMark /></span><textarea v-model="form.summary" required /></label>
+              <label class="wide"><span>{{ t('detail.conclusion') }}<RequiredMark /></span><textarea v-model="form.conclusion" required /></label>
+              <label class="wide"><span>{{ t('detail.followup') }}<RequiredMark /></span><textarea v-model="form.followup" required /></label>
               <div class="wide form-actions"><button class="secondary-button" type="button" :disabled="busy" @click="cancelEdit"><X :size="14" />{{ t('detail.cancel') }}</button><button class="primary-button" type="submit" :disabled="busy"><Save :size="14" />{{ t('detail.saveVisitRecord') }}</button></div>
             </form>
 

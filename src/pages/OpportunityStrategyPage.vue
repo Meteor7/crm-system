@@ -253,7 +253,7 @@ onMounted(async () => {
         <header><h2>重点商机</h2><span>按管理优先级</span></header>
         <div class="workspace-panel-body workspace-list">
           <button v-for="item in opportunities" :key="item.id" class="workspace-select-card" :class="{ active: item.id === selected.id }" type="button" :data-opportunity-id="item.id" @click="selectedId = item.id">
-            <div class="card-line"><span class="workspace-badge" :class="item.forecast === 'Commit' ? 'positive' : item.forecast === 'Upside' ? 'warning' : 'info'">{{ item.forecast }}</span></div>
+            <div class="card-line"><span class="workspace-badge" :class="item.forecast === 'Commit' ? 'positive' : item.forecast === 'Best Case' ? 'warning' : 'info'">{{ item.forecast }}</span></div>
             <strong>{{ item.title }}</strong><small>{{ item.account }} · {{ item.site }}</small>
             <div class="card-line"><span>{{ formatMoney(item.amount, item.currency) }} · {{ item.probability }}%</span><em>{{ formatDisplayDate(item.updated) }}</em></div>
           </button>
@@ -262,7 +262,7 @@ onMounted(async () => {
 
       <div class="strategy-main" data-testid="selected-opportunity">
         <section class="workspace-panel strategy-overview">
-          <header><div><span class="eyebrow">{{ selected.id }}</span><h2>{{ selected.title }}</h2></div><div class="inline-actions"><span class="workspace-badge" :class="selected.forecast === 'Commit' ? 'positive' : 'warning'">{{ selected.forecast }}</span><button v-if="canWrite" class="secondary-button" type="button" data-testid="edit-opportunity" @click="openOpportunity('edit')"><Pencil :size="13" />编辑</button></div></header>
+          <header><div><span class="eyebrow">{{ selected.id }}</span><h2>{{ selected.title }}</h2></div><div class="inline-actions"><span class="workspace-badge" :class="selected.forecast === 'Commit' ? 'positive' : selected.forecast === 'Best Case' ? 'warning' : 'info'">{{ selected.forecast }}</span><button v-if="canWrite" class="secondary-button" type="button" data-testid="edit-opportunity" @click="openOpportunity('edit')"><Pencil :size="13" />编辑</button></div></header>
           <div class="workspace-panel-body overview-grid">
             <div><small>Customer / Site</small><strong>{{ selected.account }}</strong><span>{{ selected.site }}</span></div>
             <div><small>Stage / Probability</small><strong>{{ selected.stage }}</strong><span>{{ selected.probability }}%赢率</span></div>

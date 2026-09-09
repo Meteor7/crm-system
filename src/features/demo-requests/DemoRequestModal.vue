@@ -8,6 +8,7 @@ import { applyDemoRequestImport, cloneDemoRequestFormData, createEmptyDemoReques
 import { requestErrorMessage } from '@/api/request-state'
 import ModalShell from '@/design-system/ModalShell.vue'
 import RequiredMark from '@/design-system/RequiredMark.vue'
+import PersonnelSelect from '@/design-system/PersonnelSelect.vue'
 import DemoRequestForm from './DemoRequestForm.vue'
 import { useI18n, useLocaleMessage, localeMessage } from '@/i18n'
 
@@ -52,6 +53,9 @@ const opportunityOptions = computed(() => {
     && (item.id === props.request?.opportunityId || item.stage === '需求发现' || item.stage === 'Wafer Demo确认')
     && (!search || `${item.id} ${item.title}`.toLocaleLowerCase().includes(search)))
 })
+const opportunityGuidance = computed(() => locale.value === 'en-US'
+  ? 'Select a customer company below to filter Opportunities or self-test'
+  : '请先选择下方客户公司名筛选 Opportunities 或自测')
 
 let opportunityRequest = 0
 async function loadOpportunities() {
@@ -82,7 +86,7 @@ async function loadOpportunities() {
 }
 
 watch(() => [props.mode, props.request, props.accounts, props.currentSalesContact] as const, () => {
-  accountId.value = props.request?.accountId || props.accounts?.[0]?.id || ''
+  accountId.value = props.request?.accountId || ''
   opportunityId.value = props.request?.requestMode === 'Self Test' ? SELF_TEST_OPTION : props.request?.opportunityId || ''
   primaryContactId.value = props.request?.primaryContactId || props.selectedContactId || ''
   formData.value = props.request
@@ -238,9 +242,9 @@ function submit() {
       </section>
       <div class="request-meta-grid">
         <label>{{ locale === 'en-US' ? 'Opportunity / self-test' : '关联 Opportunity / 自测' }}<RequiredMark :show="mode === 'create'" />
-          <input v-model="opportunitySearch" :aria-label="locale === 'en-US' ? 'Search opportunity' : '搜索 Opportunity'" type="search" :placeholder="locale === 'en-US' ? 'Search by number or name' : '按编号或名称搜索'" />
+          <input v-model="opportunitySearch" :aria-label="locale === 'en-US' ? 'Search opportunity' : '搜索 Opportunity'" type="search" :placeholder="accountId ? (locale === 'en-US' ? 'Search by number or name' : '按编号或名称搜索') : opportunityGuidance" />
           <select v-model="opportunityId" :aria-label="locale === 'en-US' ? 'Linked opportunity' : '关联 Opportunity'" required :disabled="mode === 'edit' || opportunityLoading">
-            <option value="">{{ opportunityLoading ? (locale === 'en-US' ? 'Loading…' : '正在读取…') : (locale === 'en-US' ? 'Select an opportunity or self-test' : '请选择 Opportunity 或自测') }}</option>
+            <option value="">{{ opportunityLoading ? (locale === 'en-US' ? 'Loading…' : '正在读取…') : accountId ? (locale === 'en-US' ? 'Select an opportunity or self-test' : '请选择 Opportunity 或自测') : opportunityGuidance }}</option>
             <option :value="SELF_TEST_OPTION">{{ locale === 'en-US' ? 'Self-test (no opportunity link)' : '自测（无需关联 Opportunity）' }}</option>
             <option v-for="opportunity in opportunityOptions" :key="opportunity.id" :value="opportunity.id">
               {{ opportunity.id }} · {{ opportunity.title }} · {{ opportunityStageLabel(opportunity.stage, locale) }}
@@ -270,16 +274,17 @@ function submit() {
     </template>
     <div v-else-if="mode === 'engineer'" class="form-grid">
       <label>{{ locale === 'en-US' ? 'Assessment decision' : '评估结论' }}<select v-model="review.decision"><option value="approve">{{ locale === 'en-US' ? 'Confirm feasible' : '确认可做' }}</option><option value="return">{{ locale === 'en-US' ? 'Return to Sales' : '退回 Sales' }}</option></select></label>
-      <label class="full">{{ locale === 'en-US' ? 'Test plan' : '测试方案' }}<textarea v-model="review.testPlan" /></label>
-      <label>{{ locale === 'en-US' ? 'Assigned equipment' : '分配设备' }}<input v-model="review.assignedEquipment" /></label>
-      <label>{{ locale === 'en-US' ? 'Resource window' : '资源窗口' }}<input v-model="review.resourceWindow" placeholder="2026-08-01 ~ 2026-08-10" /></label>
-      <label>{{ locale === 'en-US' ? 'Estimated completion' : '预计完成' }}<input v-model="review.estimatedCompletionDate" type="date" /></label>
-      <label>{{ locale === 'en-US' ? 'Technical risk' : '技术风险' }}<input v-model="review.technicalRisk" /></label>
-      <label class="full">{{ locale === 'en-US' ? 'Engineer comment / return reason' : '工程意见 / 退回原因' }}<textarea v-model="review.comment" :aria-label="locale === 'en-US' ? 'Engineer assessment comment' : '工程评估意见'" /></label>
+      <label><span>{{ locale === 'en-US' ? 'Engineer owner' : '工程负责人' }}</span><PersonnelSelect v-model="review.engineerOwner" :roles="['Engineer']" :ariaLabel="locale === 'en-US' ? 'Engineer owner' : '工程负责人'" disabled /></label>
+      <label class="full"><span>{{ locale === 'en-US' ? 'Test plan' : '测试方案' }}<RequiredMark :show="review.decision === 'approve'" /></span><textarea v-model="review.testPlan" :required="review.decision === 'approve'" /></label>
+      <label><span>{{ locale === 'en-US' ? 'Assigned equipment' : '分配设备' }}<RequiredMark :show="review.decision === 'approve'" /></span><input v-model="review.assignedEquipment" :required="review.decision === 'approve'" /></label>
+      <label><span>{{ locale === 'en-US' ? 'Resource window' : '资源窗口' }}<RequiredMark :show="review.decision === 'approve'" /></span><input v-model="review.resourceWindow" placeholder="2026-08-01 ~ 2026-08-10" :required="review.decision === 'approve'" /></label>
+      <label><span>{{ locale === 'en-US' ? 'Estimated completion' : '预计完成' }}<RequiredMark :show="review.decision === 'approve'" /></span><input v-model="review.estimatedCompletionDate" type="date" :required="review.decision === 'approve'" /></label>
+      <label><span>{{ locale === 'en-US' ? 'Technical risk' : '技术风险' }}<RequiredMark :show="review.decision === 'approve'" /></span><input v-model="review.technicalRisk" :required="review.decision === 'approve'" /></label>
+      <label class="full"><span>{{ locale === 'en-US' ? 'Engineer comment / return reason' : '工程意见 / 退回原因' }}<RequiredMark /></span><textarea v-model="review.comment" :aria-label="locale === 'en-US' ? 'Engineer assessment comment' : '工程评估意见'" required /></label>
     </div>
     <div v-else class="form-grid">
       <label>{{ locale === 'en-US' ? 'Approval decision' : '审批决定' }}<select v-model="review.decision"><option value="approve">{{ locale === 'en-US' ? 'Approve and convert to Demo' : '批准并转 Demo' }}</option><option value="reject">{{ locale === 'en-US' ? 'Reject Sales' : '驳回 Sales' }}</option></select></label>
-      <label class="full">{{ locale === 'en-US' ? 'Boss approval comment' : 'Boss 审批意见' }}<textarea v-model="review.comment" :aria-label="locale === 'en-US' ? 'Boss approval comment' : 'Boss 审批意见'" /></label>
+      <label class="full"><span>{{ locale === 'en-US' ? 'Boss approval comment' : 'Boss 审批意见' }}<RequiredMark :show="review.decision === 'reject'" /></span><textarea v-model="review.comment" :aria-label="locale === 'en-US' ? 'Boss approval comment' : 'Boss 审批意见'" :required="review.decision === 'reject'" /></label>
     </div>
   </ModalShell>
 </template>

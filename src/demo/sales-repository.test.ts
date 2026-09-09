@@ -102,6 +102,26 @@ describe('sales repository Contact cleanup', () => {
       .resolves.toBeDefined()
   })
 
+  it('keeps Opportunity normalization when the cache also triggers retired Contact cleanup', () => {
+    const cached = structuredClone(createMemorySalesRepository().snapshot)
+    const staleOpportunity = cached.opportunities[0] as unknown as { forecast: string; amount: number; stage: string }
+    staleOpportunity.forecast = 'Upside'
+    staleOpportunity.amount = 9800000
+    staleOpportunity.stage = 'Demo 验证'
+    cached.contacts.push({
+      ...structuredClone(cached.contacts[0]!),
+      id: 'CON-RETIRED',
+      name: '王志远',
+      dataQuality: 'Needs Review',
+    })
+
+    const opportunity = createMemorySalesRepository(cached).snapshot.opportunities[0]!
+
+    expect(opportunity.forecast).toBe('Best Case')
+    expect(opportunity.amount).toBe('9800000.00')
+    expect(opportunity.stage).toBe('Wafer Demo确认')
+  })
+
   it('reconstructs a missing converted Account and Site when migrating a version-4 cache', () => {
     const current = createMemorySalesRepository().snapshot
     const convertedLead = structuredClone(current.leads.find((lead) => lead.id === 'LEAD-002')!)

@@ -3,6 +3,7 @@ import { requestErrorMessage } from '@/api/request-state'
 import { personnelDisplayName } from '@/demo/personnel'
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
+import RequiredMark from '@/design-system/RequiredMark.vue'
 import {
   Building2,
   Check,
@@ -881,7 +882,7 @@ onBeforeUnmount(() => {
                   <h3>{{ locale === 'en-US' ? 'Request access to Restricted document' : '申请访问受限文档' }}</h3>
                   <p>{{ locale === 'en-US' ? 'Provide a specific business purpose. Content and download links remain hidden until approval.' : '填写具体业务用途。批准前不会显示正文或生成下载链接。' }}</p>
                   <label class="reason-field">
-                    <span>{{ locale === 'en-US' ? 'Business purpose' : '访问用途' }}</span>
+                    <span>{{ locale === 'en-US' ? 'Business purpose' : '访问用途' }}<RequiredMark /></span>
                     <textarea
                       v-model="requestReason"
                       data-access-reason
@@ -947,7 +948,7 @@ onBeforeUnmount(() => {
           <label>{{ locale === 'en-US' ? 'Applicable equipment' : '适用设备' }}<input v-model="uploadForm.applicableTool"></label>
           <label>{{ locale === 'en-US' ? 'Version' : '版本' }}<input v-model="uploadForm.version"></label><label>{{ locale === 'en-US' ? 'Revision' : '修订' }}<input v-model="uploadForm.revision"></label>
           <label>{{ locale === 'en-US' ? 'Review date' : '复审日期' }}<input v-model="uploadForm.reviewDate" type="date"></label>
-          <label class="wide">{{ locale === 'en-US' ? 'File' : '文件' }}<input type="file" accept=".pdf,.docx,.xlsx,.pptx" required @change="selectUploadFile"></label>
+          <label class="wide"><span>{{ locale === 'en-US' ? 'File' : '文件' }}<RequiredMark /></span><input type="file" accept=".pdf,.docx,.xlsx,.pptx" required @change="selectUploadFile"></label>
         </div>
         <p v-if="uploadError" class="upload-error">{{ uploadError }}</p>
         <footer><button type="button" class="secondary-button" @click="uploadOpen = false">{{ locale === 'en-US' ? 'Cancel' : '取消' }}</button><button type="submit" class="primary-button" :disabled="uploadSubmitting">{{ uploadSubmitting ? (locale === 'en-US' ? 'Uploading…' : '上传中…') : (locale === 'en-US' ? 'Submit upload' : '提交上传') }}</button></footer>

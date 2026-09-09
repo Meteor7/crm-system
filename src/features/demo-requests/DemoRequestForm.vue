@@ -75,16 +75,16 @@ function setAccount(event: Event) {
     <section v-if="!hideCustomerInformation" class="form-section" data-customer-information>
       <h3>{{ copy('Customer Information', '客户信息') }}</h3>
       <div class="field-grid">
-        <div class="contact-field"><span>{{ copy('Primary Contact', '主要联系人') }}<RequiredMark :show="showRequiredMarks" /></span>
-          <ContactPicker :model-value="primaryContactId" :contacts="contacts" :account-id="accountId" required @update:model-value="emit('update:primaryContactId', $event)" @create="emit('create-contact')" />
-          <small v-if="errors.primaryContactId" data-field-error="primaryContactId">{{ errors.primaryContactId }}</small>
-        </div>
-        <label>{{ copy('Company Name', '公司名称') }}<RequiredMark :show="showRequiredMarks" />
+        <label data-customer-company>{{ copy('Company Name', '公司名称') }}<RequiredMark :show="showRequiredMarks" />
           <select name="companyName" :value="accountId" :disabled="disableAccount" required @change="setAccount">
             <option value="" disabled>{{ hints.companyName }}</option>
             <option v-for="account in accounts" :key="account.id" :value="account.id">{{ account.name }}</option>
           </select>
         </label>
+        <div class="contact-field" data-customer-primary-contact><span>{{ copy('Primary Contact', '主要联系人') }}<RequiredMark :show="showRequiredMarks" /></span>
+          <ContactPicker :model-value="primaryContactId" :contacts="contacts" :account-id="accountId" required @update:model-value="emit('update:primaryContactId', $event)" @create="emit('create-contact')" />
+          <small v-if="errors.primaryContactId" data-field-error="primaryContactId">{{ errors.primaryContactId }}</small>
+        </div>
         <label>{{ copy('Contact Person', '联系人') }}
           <input name="contactPerson" :value="draft.contactPerson" :placeholder="hints.contactPerson" @input="setField('contactPerson', $event)" />
           <small v-if="errors.contactPerson" data-field-error="contactPerson">{{ errors.contactPerson }}</small>

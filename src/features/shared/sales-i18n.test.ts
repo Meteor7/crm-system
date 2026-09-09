@@ -5,6 +5,7 @@ describe('sales display enum boundaries', () => {
   it('localizes known values while preserving unknown backend values', () => {
     expect(salesEnumLabel('Confirmed', 'zh-CN')).toBe('已确认')
     expect(salesEnumLabel('Confirmed', 'en-US')).toBe('Confirmed')
+    expect(salesEnumLabel('Best Case', 'zh-CN')).toBe('最佳情况')
     expect(salesEnumLabel('new-backend-status', 'zh-CN')).toBe('new-backend-status')
   })
 

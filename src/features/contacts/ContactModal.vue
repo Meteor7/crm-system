@@ -92,9 +92,9 @@ function submit() {
       <label><span>{{ t('detail.phone') }}</span><input v-model="form.phone" :aria-label="locale === 'en-US' ? 'Contact phone' : '联系人电话'" /></label>
       <label><span>{{ t('detail.email') }}</span><input v-model="form.email" :aria-label="locale === 'en-US' ? 'Contact email' : '联系人邮箱'" type="email" /></label>
       <label><span>{{ t('detail.manager') }}</span><select v-model="form.reportsToContactId" :aria-label="t('detail.manager')"><option value="">{{ t('detail.notSpecified') }}</option><option v-for="item in reportingOptions" :key="item.id" :value="item.id" :data-reports-to-option="item.id">{{ item.name }} · {{ item.title }}</option></select></label>
-      <label><span>{{ t('detail.relationship') }}</span><select v-model="form.relationship" :aria-label="t('detail.relationship')"><option v-for="item in ['Strong', 'Developing', 'Weak']" :key="item" :value="item">{{ salesEnumLabel(item, locale) }}</option></select></label>
+      <label><span>{{ t('detail.relationship') }}<RequiredMark :show="!contact" /></span><select v-model="form.relationship" :aria-label="t('detail.relationship')" required><option v-for="item in ['Strong', 'Developing', 'Weak']" :key="item" :value="item">{{ salesEnumLabel(item, locale) }}</option></select></label>
       <label><span>{{ t('detail.owner') }}<RequiredMark :show="!contact" /></span><PersonnelSelect v-model="form.owner" :roles="['Sales']" :ariaLabel="locale === 'en-US' ? 'Contact owner' : '联系人负责人'" required /></label>
-      <label class="wide"><span>{{ t('detail.status') }}</span><select v-model="form.status" :aria-label="t('detail.contactStatus')"><option v-for="item in ['Active', 'Left Company', 'Archived']" :key="item" :value="item">{{ contactStatusLabel(item, locale) }}</option></select></label>
+      <label class="wide"><span>{{ t('detail.status') }}<RequiredMark :show="!contact" /></span><select v-model="form.status" :aria-label="t('detail.contactStatus')" required><option v-for="item in ['Active', 'Left Company', 'Archived']" :key="item" :value="item">{{ contactStatusLabel(item, locale) }}</option></select></label>
     </div>
     <button
       v-if="contact && canDelete"

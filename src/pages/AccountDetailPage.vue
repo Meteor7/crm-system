@@ -178,7 +178,7 @@ onMounted(() => { void loadEquipment(); void loadSegments() })
         <label><span>{{ t('detail.city') }}<RequiredMark /></span><input v-model="accountForm.city" :aria-label="t('detail.city')" required /></label>
         <label><span>{{ t('detail.region') }}<RequiredMark /></span><input v-model="accountForm.region" :aria-label="t('detail.region')" required /></label>
         <label class="wide"><span>{{ t('detail.owner') }}<RequiredMark /></span><PersonnelSelect v-model="accountForm.owner" :roles="['Sales']" :ariaLabel="t('detail.owner')" required /></label>
-        <label class="wide"><span>{{ t('detail.access') }}</span><select v-model="accountForm.visibility" :aria-label="t('detail.access')"><option value="Private">{{ t('detail.privateAccess') }}</option><option value="Public">{{ t('detail.publicAccess') }}</option></select></label>
+        <label class="wide"><span>{{ t('detail.access') }}<RequiredMark /></span><select v-model="accountForm.visibility" :aria-label="t('detail.access')" required><option value="Private">{{ t('detail.privateAccess') }}</option><option value="Public">{{ t('detail.publicAccess') }}</option></select></label>
       </div>
       <section class="site-editor" data-account-site-editor>
         <header>

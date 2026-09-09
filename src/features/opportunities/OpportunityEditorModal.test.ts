@@ -40,6 +40,18 @@ describe('OpportunityEditorModal sale type', () => {
     expect((select.element as HTMLSelectElement).value).toBe('New Equipment')
   })
 
+  it('uses only forecast values accepted by the backend contract', () => {
+    const wrapper = mount(OpportunityEditorModal, { props })
+    const select = wrapper.get('[aria-label="预测分类"]')
+
+    expect(select.findAll('option').map((option) => option.attributes('value'))).toEqual([
+      'Pipeline',
+      'Best Case',
+      'Commit',
+      'Closed',
+    ])
+  })
+
   it('uses Inspection Tool as a hint without pre-filling the equipment type', () => {
     const wrapper = mount(OpportunityEditorModal, { props })
     const input = wrapper.get('[aria-label="设备类型"]')

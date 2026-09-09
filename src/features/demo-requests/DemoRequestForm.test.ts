@@ -9,6 +9,25 @@ import DemoRequestForm from './DemoRequestForm.vue'
 import DemoRequestModal from './DemoRequestModal.vue'
 
 describe('DemoRequestForm', () => {
+  it('guides account selection before Opportunity filtering and shows Company Name before Primary Contact', () => {
+    const modal = mount(DemoRequestModal, {
+      props: { mode: 'create', accounts, opportunities },
+    })
+    expect(modal.get('[aria-label="搜索 Opportunity"]').attributes('placeholder')).toBe('请先选择下方客户公司名筛选 Opportunities 或自测')
+    expect(modal.get('[aria-label="关联 Opportunity"] option[value=""]').text()).toBe('请先选择下方客户公司名筛选 Opportunities 或自测')
+
+    const form = mount(DemoRequestForm, {
+      props: {
+        modelValue: createEmptyDemoRequestFormData(),
+        accountId: '',
+        accounts,
+      },
+    })
+    const customerFields = form.get('[data-customer-information] .field-grid').element.children
+    expect(customerFields[0]?.hasAttribute('data-customer-company')).toBe(true)
+    expect(customerFields[1]?.hasAttribute('data-customer-primary-contact')).toBe(true)
+  })
+
   it('imports a completed PDF and fills the editable DRF without submitting it', async () => {
     const baseApi = createMockApi({ latency: 0 })
     const importedForm = createEmptyDemoRequestFormData()
@@ -271,7 +290,10 @@ describe('DemoRequestForm', () => {
     const wrapper = mount(DemoRequestModal, { props: { mode: 'engineer', request } })
 
     expect(wrapper.text()).not.toContain('请选择 Engineer Owner')
-    expect(wrapper.findAll('select')).toHaveLength(1)
+    expect(wrapper.findAll('select')).toHaveLength(2)
+    const ownerSelect = wrapper.get('[aria-label="工程负责人"]')
+    expect(ownerSelect.attributes('disabled')).toBeDefined()
+    expect((ownerSelect.element as HTMLSelectElement).value).toBe(request.engineerOwner)
 
     const textareas = wrapper.findAll('textarea')
     const inputs = wrapper.findAll('input')

@@ -128,6 +128,17 @@ describe('Opportunity detail', () => {
     expect(wrapper.get('[data-stage-path="Wafer Demo确认"]').classes()).toContain('is-current')
     expect(wrapper.get('[data-stage-path="需求发现"]').classes()).toContain('is-complete')
     expect(wrapper.get('[data-testid="back-opportunities"]').attributes('href')).toContain('/opportunities')
+    expect(wrapper.get('[data-testid="blue-sheet-title"]').text()).toBe('战略分析')
+    const detailGrid = wrapper.get('[data-testid="selected-opportunity"]')
+    expect(Array.from(detailGrid.element.children).map((child) => child.className)).toEqual([
+      'detail-column detail-left',
+      'opportunity-strategy-shell',
+    ])
+    const strategyGrid = wrapper.get('[data-testid="blue-sheet"] .strategy-shell-grid')
+    expect(Array.from(strategyGrid.element.children).map((child) => child.className)).toEqual([
+      'detail-column detail-center',
+      'detail-column detail-right',
+    ])
   })
 
   it('keeps Site-restricted Opportunities readable without exposing invalid main-record actions', async () => {

@@ -186,12 +186,17 @@ describe('Leads pages', () => {
     await wrapper.get('[aria-label="业务领域自定义"]').setValue('Power Semiconductor')
     await wrapper.get('[aria-label="Opportunity 名称"]').setValue('示例企业016缺陷检测正式商机')
     await wrapper.get('[aria-label="金额"]').setValue(9800000)
+    const toolTypeSelect = wrapper.get<HTMLSelectElement>('select[aria-label="设备类型"]')
+    expect(toolTypeSelect.element.value).toBe('')
+    expect(wrapper.find('input[aria-label="设备类型"]').exists()).toBe(false)
+    await toolTypeSelect.setValue('Aconca')
     await wrapper.get('[data-modal-submit]').trigger('submit')
     await flushPromises()
 
     expect(wrapper.text()).toContain('转换已完成')
     expect(convertLead).toHaveBeenCalledWith('LEAD-001', expect.objectContaining({
       newAccount: expect.objectContaining({ segment: 'Power Semiconductor' }),
+      toolType: 'Aconca',
     }))
     expect(wrapper.text()).toContain('OPP-')
     expect(wrapper.find('[data-testid="convert-lead"]').exists()).toBe(false)

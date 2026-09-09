@@ -3,6 +3,8 @@ import type { DemoHealthDto, DemoLifecycleStage, DemoTrackingDto } from './crm'
 
 export const STRATEGY_OPPORTUNITY_STAGES = ['需求发现', 'Wafer Demo确认', '预算审批', '设备规格确认', '报价', '采购流程', 'Won', 'Lost'] as const
 export type StrategyOpportunityStage = typeof STRATEGY_OPPORTUNITY_STAGES[number]
+export const OPPORTUNITY_FORECASTS = ['Pipeline', 'Best Case', 'Commit', 'Closed'] as const
+export type OpportunityForecast = typeof OPPORTUNITY_FORECASTS[number]
 
 export const OPPORTUNITY_STAKEHOLDER_ROLES = [
   'Decision Maker', 'Economic Buyer', 'Technical Buyer', 'User Buyer', 'Coach',
@@ -49,7 +51,7 @@ export interface CreateStrategyOpportunityInput {
   title: string
   owner: string
   stage: StrategyOpportunityStage
-  forecast: string
+  forecast: OpportunityForecast
   amount: DecimalAmount
   intentScore?: number
   probability?: number
@@ -88,7 +90,7 @@ export interface StrategyOpportunityDto {
   site: string
   owner: string
   stage: StrategyOpportunityStage
-  forecast: string
+  forecast: OpportunityForecast
   amount: DecimalAmount
   probability: number
   poDate: string

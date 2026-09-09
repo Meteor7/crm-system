@@ -8,7 +8,7 @@ import PersonnelSelect from '@/design-system/PersonnelSelect.vue'
 import { preferredPersonnelId } from '@/demo/personnel'
 import { calculateOpportunityProbability, getOpportunityStageBaseProbability } from '@/domain/opportunity-probability'
 import type { AccountSummaryDto, SiteDto } from '@/types/crm'
-import type { CreateStrategyOpportunityInput, StrategyOpportunityDto } from '@/types/workspaces'
+import { OPPORTUNITY_FORECASTS, type CreateStrategyOpportunityInput, type StrategyOpportunityDto } from '@/types/workspaces'
 import { useI18n } from '@/i18n'
 import { opportunityStageLabel, salesEnumLabel } from '@/features/shared/sales-i18n'
 
@@ -89,11 +89,11 @@ const toolTypeInput = useLocalizedInput(() => form.value.toolType, (value) => { 
     <p v-if="error" class="form-error">{{ error }}</p>
     <div class="opportunity-form-grid">
       <label class="wide"><span>{{ t('oppEditor.name') }}<RequiredMark :show="!opportunity" /></span><input v-model="form.title" :aria-label="t('oppEditor.name')" required /></label>
-      <label><span>{{ t('oppEditor.account') }}</span><select v-model="form.accountId" :aria-label="t('oppEditor.account')"><option v-for="account in accounts" :key="account.id" :value="account.id">{{ account.shortName }} · {{ account.name }}</option></select></label>
+      <label><span>{{ t('oppEditor.account') }}<RequiredMark :show="!opportunity" /></span><select v-model="form.accountId" :aria-label="t('oppEditor.account')" required><option value="" disabled>{{ t('quotations.selectAccount') }}</option><option v-for="account in accounts" :key="account.id" :value="account.id">{{ account.shortName }} · {{ account.name }}</option></select></label>
       <label><span>{{ t('oppEditor.site') }}<RequiredMark :show="!opportunity" /></span><select v-model="form.siteId" :aria-label="t('oppEditor.site')" required><option v-for="site in sites" :key="site.id" :value="site.id">{{ site.name }}</option></select></label>
       <label><span>{{ t('oppEditor.owner') }}<RequiredMark :show="!opportunity" /></span><PersonnelSelect v-model="form.owner" :roles="['Sales', 'Manager']" :ariaLabel="t('oppEditor.owner')" required /></label>
       <div class="readonly-stage"><span>{{ t('oppEditor.stage') }}</span><strong>{{ opportunityStageLabel(form.stage, locale) }}</strong></div>
-      <label><span>{{ t('oppEditor.forecast') }}</span><select v-model="form.forecast" :aria-label="t('oppEditor.forecast')"><option v-for="item in ['Pipeline', 'Upside', 'Commit']" :key="item" :value="item">{{ salesEnumLabel(item, locale) }}</option></select></label>
+      <label><span>{{ t('oppEditor.forecast') }}<RequiredMark :show="!opportunity" /></span><select v-model="form.forecast" :aria-label="t('oppEditor.forecast')" required><option v-for="item in OPPORTUNITY_FORECASTS" :key="item" :value="item">{{ salesEnumLabel(item, locale) }}</option></select></label>
       <label class="intent-field">
         <span>{{ t('oppEditor.intent') }}</span>
         <div class="intent-slider-row">
@@ -114,11 +114,11 @@ const toolTypeInput = useLocalizedInput(() => form.value.toolType, (value) => { 
         <small>{{ probabilityExplanation }}</small>
       </div>
       <label><span>{{ t('oppEditor.amount') }}<RequiredMark :show="!opportunity" /></span><input v-model="form.amount" :aria-label="t('oppEditor.amount')" type="text" inputmode="decimal" min="0.01" pattern="\d+(?:\.\d{1,2})?" required /></label>
-      <label><span>{{ t('oppEditor.currency') }}</span><select v-model="form.currency" :aria-label="t('oppEditor.currency')"><option>CNY</option><option>USD</option><option>EUR</option></select></label>
+      <label><span>{{ t('oppEditor.currency') }}<RequiredMark :show="!opportunity" /></span><select v-model="form.currency" :aria-label="t('oppEditor.currency')" required><option>CNY</option><option>USD</option><option>EUR</option></select></label>
       <label><span>{{ t('oppEditor.originalAmount') }}</span><input v-model="form.originalAmount" :aria-label="t('oppEditor.originalAmount')" type="text" inputmode="decimal" pattern="\d+(?:\.\d{1,2})?" /></label>
       <label><span>{{ t('oppEditor.poDate') }}<RequiredMark :show="!opportunity" /></span><input v-model="form.poDate" :aria-label="t('oppEditor.poDate')" type="date" required /></label>
-      <label><span>{{ t('oppEditor.toolType') }}</span><input v-model="toolTypeInput" :aria-label="t('oppEditor.toolType')" :placeholder="locale === 'en-US' ? 'Inspection tool' : '检测设备示例'" /></label>
-      <label><span>{{ t('oppEditor.saleType') }}</span><select v-model="form.saleType" :aria-label="t('oppEditor.saleType')"><option v-for="saleType in SALE_TYPE_OPTIONS" :key="saleType" :value="saleType">{{ salesEnumLabel(saleType, locale) }}</option></select></label>
+      <label><span>{{ t('oppEditor.toolType') }}<RequiredMark :show="!opportunity" /></span><input v-model="toolTypeInput" :aria-label="t('oppEditor.toolType')" :placeholder="locale === 'en-US' ? 'Inspection tool' : '检测设备示例'" required /></label>
+      <label><span>{{ t('oppEditor.saleType') }}<RequiredMark :show="!opportunity" /></span><select v-model="form.saleType" :aria-label="t('oppEditor.saleType')" required><option v-for="saleType in SALE_TYPE_OPTIONS" :key="saleType" :value="saleType">{{ salesEnumLabel(saleType, locale) }}</option></select></label>
       <label><span>{{ t('oppEditor.shipmentDate') }}</span><input v-model="form.shipmentDate" :aria-label="t('oppEditor.shipmentDate')" type="date" /></label>
       <label><span>{{ t('oppEditor.fatDate') }}</span><input v-model="form.fatDate" :aria-label="t('oppEditor.fatDate')" type="date" /></label>
       <label class="wide"><span>{{ t('oppEditor.competition') }}</span><input v-model="form.competition" :aria-label="t('oppEditor.competition')" /></label>

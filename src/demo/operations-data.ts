@@ -1,5 +1,6 @@
 import type {
   OpportunityStakeholderInfluence,
+  OpportunityForecast,
   OpportunityStakeholderRole,
   OpportunityStakeholderStance,
   StrategyOpportunityStage,
@@ -16,7 +17,7 @@ export interface StrategyOpportunity {
   site: string
   owner: string
   stage: StrategyOpportunityStage
-  forecast: 'Commit' | 'Upside' | 'Pipeline'
+  forecast: OpportunityForecast
   amount: number
   probability: number
   poDate: string
@@ -181,7 +182,7 @@ export interface ControlledDocument {
 export const opportunities: StrategyOpportunity[] = [
   {
     id: 'OPP-003', accountId: 'ACC-002', siteId: 'SITE-004', title: 'HBM AOI 扩线项目', account: '示例企业044有限公司', site: '武汉二期', owner: 'Demo Staff 01', stage: '采购流程', forecast: 'Commit', amount: 32500000, probability: 79, poDate: '2026-09-18', updated: '2 天前', score: 86,
-    toolType: 'Inspection Tool', saleType: 'New Tool', subRegion: 'Central China', currency: 'CNY', originalAmount: 32500000, shipmentDate: '2026-11-12', fatDate: '2026-10-28', paymentMilestones: ['30% PO', '60% Shipment', '10% SAT'], competition: 'KLA · Final shortlist', winReason: '技术指标与本地服务领先', lostReason: '', history: [{ at: '2026-07-16 17:20', actor: 'Demo Staff 01', field: 'Probability', from: '72%', to: '79%' }, { at: '2026-07-14 09:30', actor: 'Demo Staff 06', field: 'Forecast', from: 'Upside', to: 'Commit' }],
+    toolType: 'Inspection Tool', saleType: 'New Tool', subRegion: 'Central China', currency: 'CNY', originalAmount: 32500000, shipmentDate: '2026-11-12', fatDate: '2026-10-28', paymentMilestones: ['30% PO', '60% Shipment', '10% SAT'], competition: 'KLA · Final shortlist', winReason: '技术指标与本地服务领先', lostReason: '', history: [{ at: '2026-07-16 17:20', actor: 'Demo Staff 01', field: 'Probability', from: '72%', to: '79%' }, { at: '2026-07-14 09:30', actor: 'Demo Staff 06', field: 'Forecast', from: 'Best Case', to: 'Commit' }],
     strengths: ['技术指标在客户基准测试中排名第一', '技术负责人愿意作为内部 Champion', '交付窗口与客户扩线计划匹配'],
     redFlags: ['集团采购要求追加 5% 价格让步', '最终预算批复尚未完成'],
     informationNeeded: ['CFO 最终预算签批日期', '竞争对手最新服务承诺'],
@@ -198,7 +199,7 @@ export const opportunities: StrategyOpportunity[] = [
     ],
   },
   {
-    id: 'OPP-001', accountId: 'ACC-001', siteId: 'SITE-001', title: '南京缺陷检测设备 2 台', account: '示例企业014有限公司', site: '南京 12-inch Fab', owner: 'Demo Staff 01', stage: 'Wafer Demo确认', forecast: 'Upside', amount: 16800000, probability: 68, poDate: '2026-10-08', updated: '6 天前', score: 74,
+    id: 'OPP-001', accountId: 'ACC-001', siteId: 'SITE-001', title: '南京缺陷检测设备 2 台', account: '示例企业014有限公司', site: '南京 12-inch Fab', owner: 'Demo Staff 01', stage: 'Wafer Demo确认', forecast: 'Best Case', amount: 16800000, probability: 68, poDate: '2026-10-08', updated: '6 天前', score: 74,
     toolType: 'Macro Inspection', saleType: 'Capacity Expansion', subRegion: 'East China', currency: 'CNY', originalAmount: 16800000, shipmentDate: '2026-12-05', fatDate: '2026-11-20', paymentMilestones: ['30% PO', '50% FAT', '20% SAT'], competition: 'Onto Innovation · Benchmarking', winReason: '', lostReason: '', history: [{ at: '2026-07-15 14:00', actor: 'Demo Staff 01', field: 'Stage', from: '需求发现', to: 'Wafer Demo确认' }],
     strengths: ['客户对低 false-positive 指标高度认可', '已有同类量产案例'], redFlags: ['样片到达延迟一周', '决策人覆盖不足'], informationNeeded: ['竞争工具复测数据', '客户量产节拍目标'],
     stakeholders: [

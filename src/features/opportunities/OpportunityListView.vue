@@ -70,7 +70,7 @@ function resetBoardLimits() { OPPORTUNITY_STAGES.forEach((item) => { boardLimits
 
 function forecastTone(value: string): Tone {
   if (value === 'Commit') return 'positive'
-  if (value === 'Upside') return 'warning'
+  if (value === 'Best Case') return 'warning'
   return 'info'
 }
 function stageLabel(value: string) {

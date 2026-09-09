@@ -47,7 +47,7 @@ describe('create form required markers', () => {
 
     await wrapper.get('[data-testid="new-account"]').trigger('click')
 
-    expectNativeRequiredFieldsMarked(wrapper, 6)
+    expectNativeRequiredFieldsMarked(wrapper, 8)
   })
 
   it('marks required fields only in shared modal create modes', async () => {
@@ -68,37 +68,37 @@ describe('create form required markers', () => {
       {
         create: mount(ContactModal, { props: contactProps }),
         edit: mount(ContactModal, { props: { ...contactProps, contact: contacts[0] } }),
-        count: 5,
+        count: 7,
       },
       {
         create: mount(StakeholderModal, { props: { accountId: accounts[0].id, contacts } }),
         edit: mount(StakeholderModal, { props: { accountId: accounts[0].id, contacts, contact: contacts[0] } }),
-        count: 3,
+        count: 4,
       },
       {
         create: mount(VisitModal, { props: { mode: 'create', accounts } }),
         edit: mount(VisitModal, { props: { mode: 'review', accounts, visit: visits[0] } }),
-        count: 5,
+        count: 6,
       },
       {
         create: mount(OpportunityEditorModal, { props: { accounts, sitesByAccount: sites, defaultOwner: 'Demo Staff 01' } }),
         edit: mount(OpportunityEditorModal, { props: { accounts, sitesByAccount: sites, defaultOwner: 'Demo Staff 01', opportunity } }),
-        count: 5,
+        count: 10,
       },
       {
         create: mount(BookingEditorModal, { props: { accounts, opportunities: [], contacts: [], defaultOwner: 'Demo Staff 01' } }),
         edit: mount(BookingEditorModal, { props: { accounts, opportunities: [], contacts: [], defaultOwner: 'Demo Staff 01', booking: bookings[0] } }),
-        count: 8,
+        count: 11,
       },
       {
         create: mount(ActionEditorModal, { props: { defaultOwner: 'Demo Staff 01' } }),
         edit: mount(ActionEditorModal, { props: { defaultOwner: 'Demo Staff 01', action } }),
-        count: 3,
+        count: 4,
       },
       {
         create: mount(StakeholderEditorModal, { props: { accountId: accounts[0].id, contacts: [] } }),
         edit: mount(StakeholderEditorModal, { props: { accountId: accounts[0].id, contacts: [], stakeholder } }),
-        count: 2,
+        count: 5,
       },
     ]
 

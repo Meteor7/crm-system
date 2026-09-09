@@ -32,7 +32,7 @@ function submit() {
     <p v-if="error" class="form-error">{{ error }}</p>
     <div class="form-grid">
       <label><span>{{ t('installed.changeDate') }}<RequiredMark /></span><input v-model="form.changeDate" type="date" required /></label>
-      <label><span>{{ t('installed.changeType') }}<RequiredMark /></span><select v-model="form.changeType"><option v-for="item in types" :key="item" :value="item">{{ t('installed.change.' + item) }}</option></select></label>
+      <label><span>{{ t('installed.changeType') }}<RequiredMark /></span><select v-model="form.changeType" required><option v-for="item in types" :key="item" :value="item">{{ t('installed.change.' + item) }}</option></select></label>
       <label><span>{{ t('installed.currentValue') }}</span><input :value="systemValueLabel(currentValue, locale) || '—'" disabled /></label>
       <label><span>{{ t('installed.newValue') }}<RequiredMark /></span><input v-model="form.toValue" required /></label>
       <label class="wide"><span>{{ t('installed.changeReason') }}<RequiredMark /></span><textarea v-model="form.reason" rows="3" required /></label>

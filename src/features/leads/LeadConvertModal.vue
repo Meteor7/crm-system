@@ -7,6 +7,7 @@ import ModalShell from '@/design-system/ModalShell.vue'
 import RequiredMark from '@/design-system/RequiredMark.vue'
 import PersonnelSelect from '@/design-system/PersonnelSelect.vue'
 import AccountSegmentSelect from '@/features/accounts/AccountSegmentSelect.vue'
+import { OPPORTUNITY_TOOL_TYPE_OPTIONS } from '@/features/opportunities/opportunity-options'
 import { useAppStore } from '@/stores/app'
 import { useI18n } from '@/i18n'
 
@@ -61,7 +62,7 @@ watch(() => props.lead, (lead) => {
   form.opportunityAmount = ''
   form.opportunityCloseDate = '2026-12-31'
   form.opportunityOwner = lead.owner
-  form.toolType = '待确认'
+  form.toolType = ''
   form.accountName = lead.company
   form.accountShortName = lead.company.replace(/[（(].*$/, '').slice(0, 12)
   form.accountCity = ''
@@ -121,11 +122,10 @@ function submit() {
     opportunityAmount: String(form.opportunityAmount),
     opportunityCloseDate: form.opportunityCloseDate,
     opportunityOwner: form.opportunityOwner,
-    toolType: toolTypeInput.value,
+    toolType: form.toolType,
   })
 }
 
-const toolTypeInput = useLocalizedInput(() => form.toolType, (value) => { form.toolType = value }, (value) => systemValueLabel(value, locale.value), () => props.lead)
 const siteProcessInput = useLocalizedInput(() => form.siteProcess, (value) => { form.siteProcess = value }, (value) => systemValueLabel(value, locale.value), () => props.lead)
 const opportunityTitleInput = useLocalizedInput(() => form.opportunityTitle, (value) => { form.opportunityTitle = value }, (value) => !props.lead.interest && value === `${props.lead.company} · 新项目` && locale.value === 'en-US' ? `${props.lead.company} · New project` : value, () => props.lead)
 </script>
@@ -141,7 +141,7 @@ const opportunityTitleInput = useLocalizedInput(() => form.opportunityTitle, (va
         <label><span>{{ t('detail.accountName') }}<RequiredMark /></span><input v-model="form.accountName" :aria-label="t('detail.accountName')" required /></label>
         <label><span>{{ t('detail.accountShortName') }}<RequiredMark /></span><input v-model="form.accountShortName" :aria-label="t('detail.accountShortName')" required /></label>
         <label><span>{{ t('detail.businessArea') }}<RequiredMark /></span><AccountSegmentSelect v-model="form.accountSegment" :segments="segments" :label="t('detail.businessArea')" required /></label>
-        <label><span>{{ t('detail.accountTier') }}</span><select v-model="form.accountTier" :aria-label="t('detail.accountTier')"><option>S</option><option>A</option><option>B</option></select></label>
+        <label><span>{{ t('detail.accountTier') }}<RequiredMark /></span><select v-model="form.accountTier" :aria-label="t('detail.accountTier')" required><option>S</option><option>A</option><option>B</option></select></label>
         <label><span>{{ t('detail.city') }}<RequiredMark /></span><input v-model="form.accountCity" :aria-label="t('detail.city')" required /></label>
         <label><span>{{ t('detail.region') }}<RequiredMark /></span><input v-model="form.accountRegion" :aria-label="t('detail.region')" required /></label>
         <label><span>{{ t('detail.owner') }}<RequiredMark /></span><PersonnelSelect v-model="form.accountOwner" :roles="['Sales']" :ariaLabel="t('detail.owner')" required /></label>
@@ -149,7 +149,7 @@ const opportunityTitleInput = useLocalizedInput(() => form.opportunityTitle, (va
         <label><span>{{ t('detail.city') }}<RequiredMark /></span><input v-model="form.siteCity" :aria-label="t('detail.city')" required /></label>
         <label><span>{{ t('detail.siteType') }}<RequiredMark /></span><input v-model="form.siteType" :aria-label="t('detail.siteType')" required /></label>
         <label><span>{{ t('detail.process') }}<RequiredMark /></span><input v-model="siteProcessInput" :aria-label="t('detail.process')" required /></label>
-        <label><span>{{ t('detail.status') }}</span><select v-model="form.siteStatus" :aria-label="t('detail.status')"><option value="量产">{{ t('site.status.production') }}</option><option value="建设中">{{ t('site.status.construction') }}</option><option value="规划中">{{ t('site.status.planning') }}</option></select></label>
+        <label><span>{{ t('detail.status') }}<RequiredMark /></span><select v-model="form.siteStatus" :aria-label="t('detail.status')" required><option value="量产">{{ t('site.status.production') }}</option><option value="建设中">{{ t('site.status.construction') }}</option><option value="规划中">{{ t('site.status.planning') }}</option></select></label>
       </template>
       <label v-else><span>{{ t('detail.site') }}<RequiredMark /></span><select v-model="form.siteId" :aria-label="t('detail.site')" required><option v-for="site in accountSites" :key="site.id" :value="site.id">{{ site.name }}</option></select></label>
       <template v-if="!form.contactId">
@@ -164,7 +164,7 @@ const opportunityTitleInput = useLocalizedInput(() => form.opportunityTitle, (va
       <label><span>{{ t('oppEditor.amount') }}<RequiredMark /></span><input v-model="form.opportunityAmount" :aria-label="t('oppEditor.amount')" type="number" min="0.01" step="0.01" required /></label>
       <label><span>{{ t('oppEditor.poDate') }}<RequiredMark /></span><input v-model="form.opportunityCloseDate" :aria-label="t('oppEditor.poDate')" type="date" required /></label>
       <label><span>{{ t('detail.owner') }}<RequiredMark /></span><PersonnelSelect v-model="form.opportunityOwner" :roles="app.bootstrap?.user.role === 'Manager' ? ['Sales', 'Manager'] : ['Sales']" :ariaLabel="t('detail.owner')" required /></label>
-      <label><span>{{ t('oppEditor.toolType') }}<RequiredMark /></span><input v-model="toolTypeInput" :aria-label="t('oppEditor.toolType')" required /></label>
+      <label><span>{{ t('oppEditor.toolType') }}<RequiredMark /></span><AccountSegmentSelect v-model="form.toolType" :segments="OPPORTUNITY_TOOL_TYPE_OPTIONS" :label="t('oppEditor.toolType')" :custom-option-label="locale === 'en-US' ? '+ Custom equipment type' : '＋自定义设备类型'" :custom-input-label="t('oppEditor.toolType')" :custom-placeholder="locale === 'en-US' ? 'Enter a custom equipment type' : '请输入自定义设备类型'" :empty-placeholder="locale === 'en-US' ? 'Select equipment type' : '请选择设备类型'" :custom-on-empty="false" required /></label>
     </div>
   </ModalShell>
 </template>
