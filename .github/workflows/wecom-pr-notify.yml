@@ -1,7 +1,7 @@
 name: Notify WeCom on PR
 
 on:
-  pull_request:
+  pull_request_target:
     types: [opened, reopened, ready_for_review]
 
 permissions: {}
@@ -13,9 +13,9 @@ jobs:
     timeout-minutes: 5
 
     steps:
-      # `pull_request` keeps this workflow running from the PR's own revision, so changes
-      # here can be verified before merging. Secrets stay available because PR branches
-      # live in this private repository; this workflow never checks out or executes PR code.
+      # Use the default-branch workflow even when stacked PR branches lack this file.
+      # Keep this metadata-only: never check out or execute PR code with secrets.
+      # PR fields are passed through environment variables, not embedded in scripts.
       - name: Validate notification configuration
         env:
           WECOM_BOT_WEBHOOK: ${{ secrets.WECOM_BOT_WEBHOOK }}
