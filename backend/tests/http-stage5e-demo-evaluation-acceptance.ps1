@@ -5,6 +5,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+. (Join-Path $PSScriptRoot 'http-acceptance-values.ps1')
 $backendRoot = Split-Path -Parent $PSScriptRoot
 $composeFile = Join-Path $backendRoot 'compose.yaml'
 $envFile = Join-Path $backendRoot 'test.env.example'
@@ -25,7 +26,7 @@ function Invoke-MultipartFiles {
     $stream = New-Object IO.MemoryStream
     try {
         foreach ($key in $Fields.Keys) {
-            $bytes = [Text.Encoding]::UTF8.GetBytes("--$boundary`r`nContent-Disposition: form-data; name=`"$key`"`r`n`r`n$($Fields[$key])`r`n")
+            $bytes = [Text.Encoding]::UTF8.GetBytes("--$boundary`r`nContent-Disposition: form-data; name=`"$key`"`r`n`r`n$(ConvertTo-CrmHttpFormValue -Value $Fields[$key])`r`n")
             $stream.Write($bytes, 0, $bytes.Length)
         }
         foreach ($file in $Files) {
@@ -43,10 +44,10 @@ function Invoke-CrmPost {
     param($Session, [string]$Method, [hashtable]$Arguments)
     $body = @{}
     foreach ($key in $Arguments.Keys) {
-        $value = $Arguments[$key]
+        $value = ConvertTo-CrmHttpFormValue -Value $Arguments[$key]
         $body[$key] = if ($key -in @('input', 'command')) { $value | ConvertTo-Json -Compress -Depth 15 } else { $value }
     }
-    return (Invoke-RestMethod -Uri "$BaseUrl/api/method/$Method" -Method Post -Body $body -WebSession $Session).message
+    return (Invoke-RestMethod -Uri "$BaseUrl/api/method/$Method" -Method Post -ContentType 'application/x-www-form-urlencoded; charset=utf-8' -Body $body -WebSession $Session).message
 }
 
 function ConvertTo-PythonStringLiteral {
@@ -215,8 +216,8 @@ try {
     if ($uploaded.data.internalReportArtifact.fileName -notlike '*internal-report*' -or $uploaded.data.externalReportArtifact.fileName -notlike '*external-report*' -or $uploaded.data.version -ne 1) { throw 'Uploaded Test Report metadata is incorrect.' }
     $current = (Invoke-RestMethod -Uri "$BaseUrl/api/method/rayher_crm.api.v1.evaluations.get_evaluation?id=$([Uri]::EscapeDataString($created.Evaluation))" -WebSession $sessions.Engineer).message.data
     if ($current.internalReportArtifactId -ne $created.InternalReportArtifact -or $current.externalReportArtifactId -ne $created.ExternalReportArtifact -or @($current.runs).Count -ne 0 -or $current.reportStatus -ne 'Ready') { throw 'Zero-Run report upload did not persist both report artifacts.' }
-    $planned = Invoke-CrmPost $sessions.Engineer 'rayher_crm.api.v1.evaluations.add_evaluation_run' @{id=$created.Evaluation;input=@{date='2026-12-10';lot='LOT-PLAN';wafers=2;capture=$null;falsePositive=$null;wph=$null;summary=''}}
-    $completed = Invoke-CrmPost $sessions.Engineer 'rayher_crm.api.v1.evaluations.add_evaluation_run' @{id=$created.Evaluation;input=@{date='2026-12-11';lot='LOT-DONE';wafers=3;capture=96.5;falsePositive=1.2;wph=12;summary='Passed'}}
+    $planned = Invoke-CrmPost $sessions.Engineer 'rayher_crm.api.v1.evaluations.add_evaluation_run' @{id=$created.Evaluation;input=@{expectedModified=$current.modified;date='2026-12-10';lot='LOT-PLAN';wafers=2;capture=$null;falsePositive=$null;wph=$null;summary=''}}
+    $completed = Invoke-CrmPost $sessions.Engineer 'rayher_crm.api.v1.evaluations.add_evaluation_run' @{id=$created.Evaluation;input=@{expectedModified=$planned.data.modified;date='2026-12-11';lot='LOT-DONE';wafers=3;capture=96.5;falsePositive=1.2;wph=12;summary='Passed'}}
     if ($completed.data.wafers -ne 5 -or $completed.data.reportStatus -ne 'Ready' -or $completed.data.internalReportArtifactId -ne $created.InternalReportArtifact -or $completed.data.externalReportArtifactId -ne $created.ExternalReportArtifact) { throw 'Optional Test Run writes changed report readiness.' }
     $current = $completed.data
     foreach ($status in @('Internal Review', 'Customer Review', 'Accepted')) {

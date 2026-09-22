@@ -10,11 +10,16 @@ x-frappe-image: &frappe-image
       USER root
       RUN apt-get update && apt-get install -y --no-install-recommends fonts-noto-cjk libreoffice-writer libreoffice-calc libreoffice-impress && rm -rf /var/lib/apt/lists/*
       WORKDIR /home/frappe/frappe-bench
-      COPY --chown=frappe:frappe build/rayher_crm.zip /tmp/rayher_crm.zip
+      ARG CRM_APP_ARCHIVE=build/rayher_crm.zip
+      ARG CRM_APP_ARCHIVE_SHA256
+      COPY --chown=frappe:frappe $${CRM_APP_ARCHIVE} /tmp/rayher_crm.zip
+      RUN test -n "$${CRM_APP_ARCHIVE_SHA256}" && printf '%s  %s\n' "$${CRM_APP_ARCHIVE_SHA256}" /tmp/rayher_crm.zip | sha256sum -c -
       USER frappe
       RUN mkdir -p ./apps/rayher_crm && python -c "import zipfile; zipfile.ZipFile('/tmp/rayher_crm.zip').extractall('./apps/rayher_crm')" && rm /tmp/rayher_crm.zip && ./env/bin/pip install --no-cache-dir --editable ./apps/rayher_crm
     args:
       FRAPPE_BASE_IMAGE: ${FRAPPE_BASE_IMAGE:-frappe/erpnext:v15@sha256:2c43d95df3761e0be8230390cd75b96a83c715efd883c0d8f29a65498db49e04}
+      CRM_APP_ARCHIVE: build/rayher_crm.zip
+      CRM_APP_ARCHIVE_SHA256: ${CRM_APP_ARCHIVE_SHA256:-}
 
 x-frappe-volumes: &frappe-volumes
   - sites:/home/frappe/frappe-bench/sites

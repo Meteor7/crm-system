@@ -5,6 +5,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+. (Join-Path $PSScriptRoot 'http-acceptance-values.ps1')
 $backendRoot = Split-Path -Parent $PSScriptRoot
 $workspaceRoot = Split-Path -Parent $backendRoot
 $composeFile = Join-Path $backendRoot 'compose.yaml'
@@ -26,10 +27,10 @@ function Invoke-CrmPost {
     param($Session, [string]$Method, [hashtable]$Arguments)
     $body = @{}
     foreach ($key in $Arguments.Keys) {
-        $value = $Arguments[$key]
+        $value = ConvertTo-CrmHttpFormValue -Value $Arguments[$key]
         $body[$key] = if ($key -in @('input', 'command', 'selection')) { $value | ConvertTo-Json -Compress -Depth 15 } else { $value }
     }
-    return (Invoke-RestMethod -Uri "$BaseUrl/api/method/$Method" -Method Post -Body $body -WebSession $Session).message
+    return (Invoke-RestMethod -Uri "$BaseUrl/api/method/$Method" -Method Post -ContentType 'application/x-www-form-urlencoded; charset=utf-8' -Body $body -WebSession $Session).message
 }
 
 function Invoke-MultipartFile {
@@ -41,7 +42,7 @@ function Invoke-MultipartFile {
     $stream = New-Object IO.MemoryStream
     try {
         foreach ($key in $Fields.Keys) {
-            $part = "--$boundary`r`nContent-Disposition: form-data; name=`"$key`"`r`n`r`n$($Fields[$key])`r`n"
+            $part = "--$boundary`r`nContent-Disposition: form-data; name=`"$key`"`r`n`r`n$(ConvertTo-CrmHttpFormValue -Value $Fields[$key])`r`n"
             $bytes = [Text.Encoding]::UTF8.GetBytes($part)
             $stream.Write($bytes, 0, $bytes.Length)
         }
@@ -64,7 +65,7 @@ function Invoke-MultipartFiles {
     $stream = New-Object IO.MemoryStream
     try {
         foreach ($key in $Fields.Keys) {
-            $bytes = [Text.Encoding]::UTF8.GetBytes("--$boundary`r`nContent-Disposition: form-data; name=`"$key`"`r`n`r`n$($Fields[$key])`r`n")
+            $bytes = [Text.Encoding]::UTF8.GetBytes("--$boundary`r`nContent-Disposition: form-data; name=`"$key`"`r`n`r`n$(ConvertTo-CrmHttpFormValue -Value $Fields[$key])`r`n")
             $stream.Write($bytes, 0, $bytes.Length)
         }
         foreach ($file in $Files) {
@@ -248,6 +249,7 @@ try {
     $current = (Invoke-RestMethod -Uri "$BaseUrl/api/method/rayher_crm.api.v1.evaluations.get_evaluation?id=$([Uri]::EscapeDataString($created.Evaluation))" -WebSession $sessions.Engineer).message.data
     if ($current.internalReportArtifactId -ne $created.InternalReportArtifact -or $current.externalReportArtifactId -ne $created.ExternalReportArtifact -or @($current.runs).Count -ne 0) { throw 'Zero-Run Test Report metadata did not persist.' }
     $current = (Invoke-CrmPost $sessions.Engineer 'rayher_crm.api.v1.evaluations.add_evaluation_run' @{id=$created.Evaluation;input=@{
+        expectedModified=$current.modified
         date='2026-12-11';lot="LOT-S5F-$stamp";wafers=3;capture=96.5;falsePositive=1.2;wph=12;summary='Optional structured record'
     }}).data
     if ($current.reportStatus -ne 'Ready' -or $current.internalReportArtifactId -ne $created.InternalReportArtifact -or $current.externalReportArtifactId -ne $created.ExternalReportArtifact) { throw 'Optional Test Run changed current report readiness.' }
@@ -273,9 +275,9 @@ try {
     try { Invoke-CrmPost $sessions.OtherSales 'rayher_crm.api.v1.notifications.mark_notification_read' @{id=$salesRelease.id} | Out-Null } catch { $markDenied = [int]$_.Exception.Response.StatusCode }
     if ($markDenied -ne 404) { throw "Expected foreign notification HTTP 404, got $markDenied." }
     $marked = Invoke-CrmPost $sessions.Sales 'rayher_crm.api.v1.notifications.mark_notification_read' @{id=$salesRelease.id}
-    if (-not $marked.data.read -or -not $marked.data.readAt.EndsWith('Z')) { throw 'Notification mark-read did not return ISO server state.' }
+    if (-not $marked.data.read -or -not (ConvertTo-CrmHttpFormValue -Value $marked.data.readAt).EndsWith('Z')) { throw 'Notification mark-read did not return ISO server state.' }
     $markAll = Invoke-CrmPost $sessions.Engineer 'rayher_crm.api.v1.notifications.mark_all_notifications_read' @{}
-    if (-not $markAll.data.readAt.EndsWith('Z')) { throw 'Notification mark-all did not return ISO server time.' }
+    if (-not (ConvertTo-CrmHttpFormValue -Value $markAll.data.readAt).EndsWith('Z')) { throw 'Notification mark-all did not return ISO server time.' }
     $managerNotifications = (Invoke-RestMethod -Uri "$BaseUrl/api/method/rayher_crm.api.v1.notifications.list_notifications?page=1&pageSize=200" -WebSession $sessions.Manager).message
     if (@($managerNotifications.data | Where-Object {$_.id -eq $salesRelease.id}).Count -ne 0) { throw 'Manager wildcarded into a recipient notification.' }
 

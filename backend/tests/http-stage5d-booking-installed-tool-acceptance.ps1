@@ -5,6 +5,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+. (Join-Path $PSScriptRoot 'http-acceptance-values.ps1')
 $backendRoot = Split-Path -Parent $PSScriptRoot
 $composeFile = Join-Path $backendRoot 'compose.yaml'
 $envFile = Join-Path $backendRoot 'test.env.example'
@@ -19,10 +20,10 @@ function Invoke-CrmPost {
     param($Session, [string]$Method, [hashtable]$Arguments)
     $body = @{}
     foreach ($key in $Arguments.Keys) {
-        $value = $Arguments[$key]
+        $value = ConvertTo-CrmHttpFormValue -Value $Arguments[$key]
         $body[$key] = if ($key -eq 'input') { $value | ConvertTo-Json -Compress -Depth 10 } else { $value }
     }
-    return (Invoke-RestMethod -Uri "$BaseUrl/api/method/$Method" -Method Post -Body $body -WebSession $Session).message
+    return (Invoke-RestMethod -Uri "$BaseUrl/api/method/$Method" -Method Post -ContentType 'application/x-www-form-urlencoded; charset=utf-8' -Body $body -WebSession $Session).message
 }
 
 function ConvertTo-PythonStringLiteral {

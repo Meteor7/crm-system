@@ -5,6 +5,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+. (Join-Path $PSScriptRoot 'http-acceptance-values.ps1')
 $backendRoot = Split-Path -Parent $PSScriptRoot
 $composeFile = Join-Path $backendRoot 'compose.yaml'
 $envFile = Join-Path $backendRoot 'test.env.example'
@@ -29,10 +30,10 @@ function Invoke-CrmPost {
     param($Session, [string]$Method, [hashtable]$Arguments)
     $body = @{}
     foreach ($key in $Arguments.Keys) {
-        $value = $Arguments[$key]
+        $value = ConvertTo-CrmHttpFormValue -Value $Arguments[$key]
         $body[$key] = if ($key -eq 'input') { $value | ConvertTo-Json -Compress -Depth 10 } else { $value }
     }
-    $response = Invoke-RestMethod -Uri "$BaseUrl/api/method/$Method" -Method Post -Body $body -WebSession $Session
+    $response = Invoke-RestMethod -Uri "$BaseUrl/api/method/$Method" -Method Post -ContentType 'application/x-www-form-urlencoded; charset=utf-8' -Body $body -WebSession $Session
     return $response.message
 }
 
@@ -193,6 +194,14 @@ try {
         opportunityOwner = 'Administrator'
         toolType = 'Inspection'
     }
+    $assignmentStatus = 0
+    try {
+        Invoke-CrmPost $salesSession 'rayher_crm.api.v1.leads.convert_lead' @{
+            id = $created.Lead; input = $conversionInput
+        } | Out-Null
+    } catch { $assignmentStatus = [int]$_.Exception.Response.StatusCode }
+    if ($assignmentStatus -ne 403) { throw "Expected HTTP 403 when Sales assigns an Opportunity to Administrator, got $assignmentStatus." }
+    $conversionInput.opportunityOwner = $salesEmail
     $conversion = Invoke-CrmPost $salesSession 'rayher_crm.api.v1.leads.convert_lead' @{
         id = $created.Lead
         input = $conversionInput
@@ -215,7 +224,7 @@ try {
     }
     if ($scopeStatus -ne 403) { throw "Expected HTTP 403 for foreign Account detail, got $scopeStatus." }
 
-    Write-Output 'Stage 5B authenticated HTTP acceptance passed: create/list/update/409/scope-403/convert.'
+    Write-Output 'Stage 5B authenticated HTTP acceptance passed: create/list/update/409/scope-403/assignment-403/convert.'
 } finally {
     $adminPassword = $null
     $salesPassword = $null

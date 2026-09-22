@@ -68,10 +68,12 @@
 先取得并核对外部参数，然后在 Ubuntu 受控部署目录执行；不要把展开后的配置或凭据保存到日志：
 
 ```bash
+set -euo pipefail
 docker compose --env-file backend/.env.staging -f backend/compose.yaml config --quiet
-sha256sum backend/build/rayher_crm.zip
-docker compose --env-file backend/.env.staging -f backend/compose.yaml build backend
-docker compose --env-file backend/.env.staging -f backend/compose.yaml up -d
+archive_hash="$(sha256sum backend/build/rayher_crm.zip | awk '{print $1}')"
+test -n "$archive_hash"
+docker compose --env-file backend/.env.staging -f backend/compose.yaml build --build-arg "CRM_APP_ARCHIVE_SHA256=$archive_hash" backend
+docker compose --env-file backend/.env.staging -f backend/compose.yaml up -d --no-build
 docker compose --env-file backend/.env.staging -f backend/compose.yaml ps
 curl --fail --silent https://<staging-fqdn>/api/method/ping
 ```

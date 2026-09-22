@@ -1,8 +1,13 @@
+#Requires -Version 7.0
+
+[CmdletBinding()]
 param(
     [string]$BackendRoot = (Split-Path -Parent $PSScriptRoot)
 )
 
 $ErrorActionPreference = 'Stop'
+$BackendRoot = (Resolve-Path -LiteralPath $BackendRoot).Path
+$repositoryRoot = Split-Path -Parent $BackendRoot
 
 function Assert-PackageContract {
     param(
@@ -15,12 +20,26 @@ function Assert-PackageContract {
     }
 }
 
+function Join-BackendPath {
+    param([string]$RelativePath)
+
+    return Join-Path $BackendRoot ($RelativePath -replace '[\\/]', [IO.Path]::DirectorySeparatorChar)
+}
+
 $composeFile = Join-Path $BackendRoot 'compose.yaml'
 $envFile = Join-Path $BackendRoot '.env.example'
-$appRoot = Join-Path $BackendRoot 'apps\rayher_crm'
-$prepareScript = Join-Path $BackendRoot 'scripts\prepare-app-build-context.ps1'
-$restoreDrillScript = Join-Path $BackendRoot 'scripts\backup-restore-drill.sh'
-$frontendContractScript = Join-Path $BackendRoot 'tests\frappe-frontend-contract.ps1'
+$backendReadmeFile = Join-Path $BackendRoot 'README.md'
+$appRoot = Join-BackendPath 'apps/rayher_crm'
+$prepareScript = Join-BackendPath 'scripts/prepare-app-build-context.ps1'
+$archiveContractScript = Join-BackendPath 'tests/app-archive-contract.ps1'
+$dockerIgnoreFile = Join-Path $BackendRoot '.dockerignore'
+$restoreDrillScript = Join-BackendPath 'scripts/backup-restore-drill.sh'
+$frontendContractScript = Join-BackendPath 'tests/frappe-frontend-contract.ps1'
+$stagingDocuments = @(
+    (Join-Path $repositoryRoot 'docs/CRM-Ubuntu-Staging部署与回滚清单-2026-08-04.md'),
+    (Join-Path $repositoryRoot 'docs/CRM-Stage6-本地完成与Staging交接-2026-08-04.md')
+)
+$stage5cHandoffFile = Join-Path $repositoryRoot 'docs/CRM-Stage5C-安全断点交接-2026-08-04.md'
 
 $requiredAppFiles = @(
     'pyproject.toml',
@@ -141,40 +160,73 @@ $requiredAppFiles = @(
 )
 
 foreach ($relativePath in $requiredAppFiles) {
-    Assert-PackageContract (Test-Path -LiteralPath (Join-Path $appRoot $relativePath) -PathType Leaf) "missing app file: $relativePath"
+    $portableRelativePath = $relativePath -replace '[\\/]', [IO.Path]::DirectorySeparatorChar
+    Assert-PackageContract (Test-Path -LiteralPath (Join-Path $appRoot $portableRelativePath) -PathType Leaf) "missing app file: $relativePath"
 }
 
-$textExtensions = @('.py', '.toml', '.in', '.rst', '.txt', '.json', '.csv', '.md', '.html', '.css', '.js', '.svg')
-Get-ChildItem -LiteralPath $appRoot -Recurse -File | ForEach-Object {
-    $bytes = [IO.File]::ReadAllBytes($_.FullName)
-    $prefixLength = [Math]::Min(18, $bytes.Length)
-    $prefix = if ($prefixLength -gt 0) { [Text.Encoding]::ASCII.GetString($bytes, 0, $prefixLength) } else { '' }
-    Assert-PackageContract (-not $prefix.StartsWith('%TSD-Header-###%')) "protected wrapper detected: $($_.FullName)"
-    if ($textExtensions -contains $_.Extension.ToLowerInvariant()) {
-        Assert-PackageContract (-not ($bytes -contains 0)) "null byte detected in text app source: $($_.FullName)"
-    }
-}
-
-$composeText = Get-Content -LiteralPath $composeFile -Raw -Encoding UTF8
-$envText = Get-Content -LiteralPath $envFile -Raw -Encoding UTF8
-$pyprojectText = Get-Content -LiteralPath (Join-Path $appRoot 'pyproject.toml') -Raw -Encoding UTF8
+$composeText = ('' + (Get-Content -LiteralPath $composeFile -Raw -Encoding UTF8)).Replace("`r`n", "`n")
+$envText = ('' + (Get-Content -LiteralPath $envFile -Raw -Encoding UTF8)).Replace("`r`n", "`n")
+$backendReadmeText = ('' + (Get-Content -LiteralPath $backendReadmeFile -Raw -Encoding UTF8)).Replace("`r`n", "`n")
+$pyprojectText = ('' + (Get-Content -LiteralPath (Join-Path $appRoot 'pyproject.toml') -Raw -Encoding UTF8)).Replace("`r`n", "`n")
 
 Assert-PackageContract ($composeText -match '(?m)^\s+dockerfile_inline:\s*\|\s*$') 'Compose must contain an auditable inline Dockerfile'
 Assert-PackageContract ($composeText -match 'ARG FRAPPE_BASE_IMAGE') 'inline Dockerfile must accept the pinned base image'
 Assert-PackageContract ($composeText -match 'FROM \$\$\{FRAPPE_BASE_IMAGE\}') 'inline Dockerfile must build from FRAPPE_BASE_IMAGE'
-Assert-PackageContract ($composeText -match 'COPY --chown=frappe:frappe build/rayher_crm\.zip') 'the verified rehydrated archive must be copied into the image'
+Assert-PackageContract ($composeText -match '(?ms)FROM \$\$\{FRAPPE_BASE_IMAGE\}.*?^\s+ARG CRM_APP_ARCHIVE=build/rayher_crm\.zip$') 'the build stage must declare and default CRM_APP_ARCHIVE'
+Assert-PackageContract ($composeText -match 'COPY --chown=frappe:frappe \$\$\{CRM_APP_ARCHIVE\}') 'the selected verified archive must be copied into the image'
+Assert-PackageContract ($composeText -match '(?m)^\s+CRM_APP_ARCHIVE: build/rayher_crm\.zip$') 'Compose must hard-code the production archive build argument'
+Assert-PackageContract ($composeText -match 'sha256sum -c -') 'the image build must verify the selected archive hash before extraction'
 Assert-PackageContract ($composeText -notmatch 'COPY --chown=frappe:frappe apps/rayher_crm') 'raw protected app source must not be copied by BuildKit'
 Assert-PackageContract ($composeText -match 'USER frappe') 'final app installation must run as the frappe user'
 Assert-PackageContract ($composeText -match 'libreoffice-writer' -and $composeText -match 'libreoffice-calc' -and $composeText -match 'libreoffice-impress') 'RFQ Office preview dependencies must be installed'
 Assert-PackageContract ($composeText -match 'pip install') 'the Python app must be installed into the bench environment'
 Assert-PackageContract (Test-Path -LiteralPath $prepareScript -PathType Leaf) 'byte-rehydrating build-context script must exist'
+Assert-PackageContract (Test-Path -LiteralPath $archiveContractScript -PathType Leaf) 'Git HEAD archive contract must exist'
+Assert-PackageContract (Test-Path -LiteralPath $dockerIgnoreFile -PathType Leaf) 'backend/.dockerignore must restrict the build context'
 Assert-PackageContract (Test-Path -LiteralPath $restoreDrillScript -PathType Leaf) 'backup restore drill script must exist'
 Assert-PackageContract (Test-Path -LiteralPath $frontendContractScript -PathType Leaf) 'Frappe frontend contract script must exist'
-Assert-PackageContract (Test-Path -LiteralPath (Join-Path $BackendRoot 'tests\http-stage5e-demo-evaluation-acceptance.ps1') -PathType Leaf) 'Stage 5E HTTP acceptance script must exist'
-Assert-PackageContract (Test-Path -LiteralPath (Join-Path $BackendRoot 'tests\http-stage5f-files-reports-notifications-acceptance.ps1') -PathType Leaf) 'Stage 5F HTTP acceptance script must exist'
+Assert-PackageContract (Test-Path -LiteralPath (Join-BackendPath 'tests/http-stage5e-demo-evaluation-acceptance.ps1') -PathType Leaf) 'Stage 5E HTTP acceptance script must exist'
+Assert-PackageContract (Test-Path -LiteralPath (Join-BackendPath 'tests/http-stage5f-files-reports-notifications-acceptance.ps1') -PathType Leaf) 'Stage 5F HTTP acceptance script must exist'
 $prepareText = Get-Content -LiteralPath $prepareScript -Raw -Encoding UTF8
 Assert-PackageContract ($prepareText -match 'ZipArchive') 'build-context script must use .NET ZipArchive'
 Assert-PackageContract ($prepareText -match '%TSD-Header-###%') 'build-context script must reject protected wrappers'
+Assert-PackageContract ($prepareText -match 'git -C \$repositoryRoot -c core\.quotePath=false ls-files -z -- \$sourceRepositoryPath') 'build-context script must enumerate Git-tracked source with a null-delimited command'
+Assert-PackageContract ($prepareText -match 'Assert-SafeSourceFile') 'build-context script must scan tracked files even when tests are excluded from production'
+Assert-PackageContract ($prepareText -match 'VerifyRebuild') 'build-context script must independently rebuild and compare generated frontend assets'
+Assert-PackageContract ($prepareText -match 'LastWriteTime = \[DateTimeOffset\]::new\(1980, 1, 1') 'build-context script must freeze ZIP timestamps for reproducibility'
+$dockerIgnoreText = ('' + (Get-Content -LiteralPath $dockerIgnoreFile -Raw -Encoding UTF8)).Replace("`r`n", "`n")
+$expectedDockerIgnore = "**`n!build/`nbuild/**`n!build/rayher_crm.zip`n!build/rayher_crm-tests.zip"
+Assert-PackageContract ($dockerIgnoreText.Trim() -eq $expectedDockerIgnore) 'Docker build context must allow only the verified production and test archives'
+foreach ($stagingDocument in $stagingDocuments) {
+    Assert-PackageContract (Test-Path -LiteralPath $stagingDocument -PathType Leaf) "staging deployment document must exist: $stagingDocument"
+    $stagingText = ('' + (Get-Content -LiteralPath $stagingDocument -Raw -Encoding UTF8)).Replace("`r`n", "`n")
+    Assert-PackageContract ($stagingText -match 'set -euo pipefail') "staging deployment must stop before startup when archive verification or image build fails: $stagingDocument"
+    Assert-PackageContract ($stagingText -match 'archive_hash="\$\(sha256sum backend/build/rayher_crm\.zip') "staging deployment must calculate the app archive hash: $stagingDocument"
+    Assert-PackageContract ($stagingText -match 'build --build-arg "CRM_APP_ARCHIVE_SHA256=\$archive_hash" backend') "staging deployment must bind the calculated archive hash to the image build: $stagingDocument"
+    Assert-PackageContract ($stagingText -notmatch '(?m)^docker compose .* build backend\s*$') "staging deployment must not document an unverified app image build: $stagingDocument"
+    Assert-PackageContract ($stagingText -match 'up -d --no-build') "staging deployment must start the image that passed the verified build: $stagingDocument"
+}
+Assert-PackageContract ($backendReadmeText -match '(?s)build --build-arg "CRM_APP_ARCHIVE_SHA256=\$archiveHash" backend\nif \(\$LASTEXITCODE -ne 0\) \{ throw .*? \}\ndocker compose .*? up -d --no-build') 'local lifecycle must stop before startup when the verified image build fails'
+foreach ($command in @(
+    'docker compose --env-file backend/.env.example -f backend/compose.yaml config',
+    'pwsh -NoProfile -File backend/tests/compose-contract.ps1',
+    'pnpm build:frappe',
+    'pwsh -NoProfile -File backend/scripts/prepare-app-build-context.ps1'
+)) {
+    $checkedCommand = [regex]::Escape($command) + '\nif \(\$LASTEXITCODE -ne 0\) \{ throw '
+    Assert-PackageContract ($backendReadmeText -match $checkedCommand) "local lifecycle must stop when this prerequisite fails: $command"
+}
+Assert-PackageContract (Test-Path -LiteralPath $stage5cHandoffFile -PathType Leaf) 'Stage 5C handoff document must exist'
+$stage5cHandoffText = ('' + (Get-Content -LiteralPath $stage5cHandoffFile -Raw -Encoding UTF8)).Replace("`r`n", "`n")
+Assert-PackageContract ($stage5cHandoffText -notmatch '(?m)^powershell\.exe .*prepare-app-build-context') 'Stage 5C handoff must use the required PowerShell 7 archive builder'
+Assert-PackageContract ([regex]::Matches($stage5cHandoffText, 'build --build-arg "CRM_APP_ARCHIVE_SHA256=\$archiveHash" backend').Count -eq 2) 'every Stage 5C image build must bind the current archive hash'
+Assert-PackageContract ([regex]::Matches($stage5cHandoffText, 'build --build-arg .* backend\nif \(\$LASTEXITCODE -ne 0\) \{ throw ').Count -eq 2) 'every Stage 5C image build must stop the workflow on failure'
+$topLevelDeploymentDocuments = Get-ChildItem -LiteralPath (Join-Path $repositoryRoot 'docs') -File -Filter '*.md'
+foreach ($deploymentDocument in $topLevelDeploymentDocuments) {
+    $deploymentText = ('' + (Get-Content -LiteralPath $deploymentDocument.FullName -Raw -Encoding UTF8)).Replace("`r`n", "`n")
+    Assert-PackageContract ($deploymentText -notmatch '(?m)^docker compose .* build backend\s*$') "top-level deployment documentation must not contain an unverified backend build: $($deploymentDocument.FullName)"
+    Assert-PackageContract ($deploymentText -notmatch '(?m)^docker compose .* up -d --build(?:\s|$)') "top-level deployment documentation must not combine an unverified build with startup: $($deploymentDocument.FullName)"
+}
 $restoreDrillText = Get-Content -LiteralPath $restoreDrillScript -Raw -Encoding UTF8
 Assert-PackageContract ($restoreDrillText -match 'bench --site "\$\{source_site\}" backup --with-files --compress') 'restore drill must create a database and file backup'
 Assert-PackageContract ($restoreDrillText -match 'bench --site "\$\{restore_site\}" restore') 'restore drill must restore into an isolated site'
@@ -184,6 +236,7 @@ Assert-PackageContract ($restoreDrillText -match 'if ! bench drop-site') 'restor
 Assert-PackageContract ($envText -match '(?m)^FRAPPE_BASE_IMAGE=frappe/erpnext:v15@sha256:[0-9a-f]{64}$') 'FRAPPE_BASE_IMAGE must be v15 and digest-pinned'
 Assert-PackageContract ($envText -match '(?m)^CLAMAV_IMAGE=clamav/clamav:1\.4\.5@sha256:[0-9a-f]{64}$') 'CLAMAV_IMAGE must use the pinned official 1.4.5 amd64 digest'
 Assert-PackageContract ($envText -match '(?m)^CRM_IMAGE=rayher-crm-stage1:v15-local$') 'CRM_IMAGE must use the new local image name'
+Assert-PackageContract ($envText -notmatch '(?m)^CRM_APP_ARCHIVE=') 'the production archive path must not be environment-overridable'
 Assert-PackageContract ($envText -match '(?m)^ALLOW_TESTS=false$') 'the documented LAN environment must disable Frappe tests'
 Assert-PackageContract ($composeText -match 'allow_tests_value=True') 'Compose must translate local true to a parsed Python boolean'
 Assert-PackageContract ($composeText -match 'allow_tests_value=False') 'Compose must translate deployment false to a parsed Python boolean'

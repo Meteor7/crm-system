@@ -5,6 +5,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+. (Join-Path $PSScriptRoot 'http-acceptance-values.ps1')
 $backendRoot = Split-Path -Parent $PSScriptRoot
 $composeFile = Join-Path $backendRoot 'compose.yaml'
 $envFile = Join-Path $backendRoot 'test.env.example'
@@ -30,12 +31,12 @@ function Invoke-CrmPost {
     param($Session, [string]$Method, [hashtable]$Arguments)
     $body = @{}
     foreach ($key in $Arguments.Keys) {
-        $value = $Arguments[$key]
+        $value = ConvertTo-CrmHttpFormValue -Value $Arguments[$key]
         $body[$key] = if ($key -in @('input', 'command')) {
             $value | ConvertTo-Json -Compress -Depth 10
         } else { $value }
     }
-    $response = Invoke-RestMethod -Uri "$BaseUrl/api/method/$Method" -Method Post -Body $body -WebSession $Session
+    $response = Invoke-RestMethod -Uri "$BaseUrl/api/method/$Method" -Method Post -ContentType 'application/x-www-form-urlencoded; charset=utf-8' -Body $body -WebSession $Session
     return $response.message
 }
 
@@ -114,10 +115,11 @@ try {
     Invoke-RestMethod -Uri "$BaseUrl/api/method/login" -Method Post -Body @{ usr = $actionSalesEmail; pwd = $actionSalesPassword } -WebSession $actionSalesSession | Out-Null
     Invoke-RestMethod -Uri "$BaseUrl/api/method/login" -Method Post -Body @{ usr = $managerEmail; pwd = $managerPassword } -WebSession $managerSession | Out-Null
 
-    $account = Invoke-CrmPost $salesSession 'rayher_crm.api.v1.accounts.create_account' @{ input = @{
+    $accountInput = @{
         name = "Stage 5G HTTP Account $stamp"; shortName = "S5G $stamp"; segment = 'Frontend'
-        tier = 'A'; city = 'Shanghai'; region = 'East China'; owner = $salesEmail
-    } }
+        tier = 'A'; city = 'Shanghai'; region = 'East China'; owner = $salesEmail; visibility = 'Private'
+    }
+    $account = Invoke-CrmPost $salesSession 'rayher_crm.api.v1.accounts.create_account' @{ input = $accountInput }
     $created.Account = $account.data.id
 
     $productionStatus = [string]::Concat([char]0x91CF, [char]0x4EA7)
@@ -196,6 +198,17 @@ try {
     $assigned = @($actionSalesNotifications.message.data | Where-Object { $_.category -eq 'Visit' -and $_.title -eq 'Visit action assigned' -and $_.route -eq $expectedVisitRoute })
     if ($assigned.Count -ne 1) { throw 'Action Sales did not receive exactly one precisely routed Visit action notification.' }
     if ($assigned[0].recipientId -ne $actionSalesEmail -or $assigned[0].actorId -ne $salesEmail -or $assigned[0].message -notlike '*Prepare plan*') { throw 'Visit action notification identity or business context is incorrect.' }
+    $privateVisitStatus = 0
+    try {
+        Invoke-RestMethod -Uri "$BaseUrl/api/method/rayher_crm.api.v1.visits.get_visit?id=$([Uri]::EscapeDataString($created.Visit))" -WebSession $actionSalesSession | Out-Null
+    } catch { $privateVisitStatus = [int]$_.Exception.Response.StatusCode }
+    if ($privateVisitStatus -ne 403) { throw "Expected Private Account boundary HTTP 403 for a Visit action owner, got $privateVisitStatus." }
+    # Assignment cannot bypass a Private Account; publish this fixture before
+    # checking that the assigned Sales user can open the notification's target.
+    $accountInput.visibility = 'Public'
+    Invoke-CrmPost $salesSession 'rayher_crm.api.v1.accounts.update_account' @{
+        id = $created.Account; input = $accountInput; expectedModified = $account.data.modified
+    } | Out-Null
     $actionOwnerVisit = (Invoke-RestMethod -Uri "$BaseUrl/api/method/rayher_crm.api.v1.visits.get_visit?id=$([Uri]::EscapeDataString($created.Visit))" -WebSession $actionSalesSession).message.data
     if ($actionOwnerVisit.id -ne $created.Visit -or $actionOwnerVisit.actionOwner -ne $actionSalesEmail) { throw 'Visit action recipient could not open the precisely routed Visit.' }
     $created.Notifications += $assigned[0].id

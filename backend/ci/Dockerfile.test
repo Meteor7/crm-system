@@ -1,0 +1,7 @@
+ARG CRM_TEST_BASE_IMAGE=rayher-crm-stage1:v15-test
+FROM ${CRM_TEST_BASE_IMAGE}
+USER frappe
+# Frappe's optional native JUnit writer; production images never install this.
+RUN ./env/bin/pip install --no-cache-dir --no-deps --require-hashes --only-binary=:all: -r /dev/stdin <<'EOF'
+unittest-xml-reporting==3.2.0 --hash=sha256:f3d7402e5b3ac72a5ee3149278339db1a8f932ee405f48bcb9c681372f2717d5
+EOF

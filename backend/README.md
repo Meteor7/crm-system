@@ -8,16 +8,29 @@ From the repository root:
 
 ```powershell
 docker compose --env-file backend/.env.example -f backend/compose.yaml config
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File backend/tests/compose-contract.ps1
-docker compose --env-file backend/.env.example -f backend/compose.yaml up -d
+if ($LASTEXITCODE -ne 0) { throw 'Compose configuration validation failed.' }
+pwsh -NoProfile -File backend/tests/compose-contract.ps1
+if ($LASTEXITCODE -ne 0) { throw 'Compose contract failed.' }
+pnpm build:frappe
+if ($LASTEXITCODE -ne 0) { throw 'Frappe frontend build failed.' }
+pwsh -NoProfile -File backend/scripts/prepare-app-build-context.ps1
+if ($LASTEXITCODE -ne 0) { throw 'Verified app archive preparation failed.' }
+$archiveHash = (Get-FileHash -LiteralPath backend/build/rayher_crm.zip -Algorithm SHA256).Hash
+docker compose --env-file backend/.env.example -f backend/compose.yaml build --build-arg "CRM_APP_ARCHIVE_SHA256=$archiveHash" backend
+if ($LASTEXITCODE -ne 0) { throw 'Verified backend image build failed.' }
+docker compose --env-file backend/.env.example -f backend/compose.yaml up -d --no-build
+if ($LASTEXITCODE -ne 0) { throw 'CRM stack startup failed.' }
 docker compose --env-file backend/.env.example -f backend/compose.yaml ps
+if ($LASTEXITCODE -ne 0) { throw 'CRM stack status check failed.' }
 ```
 
-The site is served only on the local loopback interface at `http://rayher-crm.localhost:2224`. MariaDB and both Redis services have no published host ports.
+The tracked `.env.example` is the reproducible default template. It publishes only the frontend on `127.0.0.1:2224`, so a local stack is reachable from that machine alone; MariaDB, Redis, and ClamAV have no published host ports. The tracked `lan.env.example` is the opt-in trusted-LAN template: it differs from `.env.example` only in `HTTP_BIND_ADDRESS` and publishes the same frontend on `0.0.0.0:2224` for colleagues on the company network. Copy whichever one you need to an ignored environment-specific file before adding deployment-specific values.
 
 The first start creates two random credentials inside the new `rayher-crm-stage1-local_local-secrets` Docker volume. They are never placed in `.env`, source control, or command output. The same start creates `rayher-crm.localhost` and installs ERPNext. The CRM custom app `rayher_crm` is added and installed in the backend implementation stage; HRMS, the PR #24 ERP/OA app, and OCR are not installed.
 
-The local `.env.example` explicitly sets `ALLOW_TESTS=true` so real Frappe integration tests can run. Ubuntu staging and production must override it to `false`; production is never a test runner.
+Both templates explicitly set `ALLOW_TESTS=false`; production is never a test runner. Isolated integration tests use `test.env.example`, loopback port `2225`, and the dedicated `.test` site.
+
+The unified release gate and archive builder require PowerShell 7 (`pwsh`). Run the full gate with `pwsh -NoProfile -File backend/tests/run-release-gate.ps1 -StartBackend`; omitting `-StartBackend` fails closed instead of testing a stale stack. The gate recreates only the dedicated `rayher-crm-stage1-tests` volumes, builds test code as `rayher-crm-stage1:v15-test`, and verifies the production package as `rayher-crm-release-gate:v15`, so it cannot overwrite the LAN image tag.
 
 ## Safe inspection
 

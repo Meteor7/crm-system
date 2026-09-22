@@ -52,8 +52,11 @@ sha256sum backend/build/rayher_crm.zip
 ## 5. 首次部署顺序
 
 ```bash
-docker compose --env-file backend/.env.staging -f backend/compose.yaml build backend
-docker compose --env-file backend/.env.staging -f backend/compose.yaml up -d
+set -euo pipefail
+archive_hash="$(sha256sum backend/build/rayher_crm.zip | awk '{print $1}')"
+test -n "$archive_hash"
+docker compose --env-file backend/.env.staging -f backend/compose.yaml build --build-arg "CRM_APP_ARCHIVE_SHA256=$archive_hash" backend
+docker compose --env-file backend/.env.staging -f backend/compose.yaml up -d --no-build
 docker compose --env-file backend/.env.staging -f backend/compose.yaml ps
 ```
 

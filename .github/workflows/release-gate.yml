@@ -3,21 +3,127 @@ name: Release Gate
 on:
   pull_request:
   push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-gate-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 jobs:
-  release-gate:
+  frontend:
     runs-on: ubuntu-latest
-    timeout-minutes: 90
+    timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@a8198c4bff370c8506180b035930dea56dbd5288 # v5
         with:
           version: 11.9.0
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           node-version: 24
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - name: Run unified release gate
+      - run: pnpm typecheck
+      - name: Frontend tests and JUnit
+        run: |
+          mkdir -p backend/build/ci-reports
+          pnpm exec vitest run --silent=passed-only --reporter=default --reporter=junit --outputFile.junit=backend/build/ci-reports/frontend.xml
+      - name: Save frontend reports
+        if: always()
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: frontend-reports-${{ github.run_attempt }}
+          path: backend/build/ci-reports/
+          retention-days: 14
+
+  package:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@a8198c4bff370c8506180b035930dea56dbd5288 # v5
+        with:
+          version: 11.9.0
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm exec vite build --mode frappe --outDir backend/apps/rayher_crm/rayher_crm/public/crm --emptyOutDir
+      - name: CI isolation and cleanup regression checks
+        run: bash backend/ci/test-environment.sh
+      - name: Contracts and reproducible archives
         shell: pwsh
-        run: ./backend/tests/run-release-gate.ps1 -StartBackend
+        run: |
+          New-Item -ItemType Directory -Force backend/build/ci-reports | Out-Null
+          ./backend/ci/package.ps1 *>&1 | Tee-Object -FilePath backend/build/ci-reports/package.log
+      - name: Save verified archives
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          # A failed backend-only rerun must reuse the successful package job's artifact.
+          name: verified-archives
+          overwrite: true
+          path: |
+            backend/build/rayher_crm.zip
+            backend/build/rayher_crm-tests.zip
+            backend/build/manifest.json
+          if-no-files-found: error
+          retention-days: 14
+      - name: Save package diagnostics
+        if: always()
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: package-reports-${{ github.run_attempt }}
+          path: backend/build/ci-reports/
+          retention-days: 14
+
+  backend:
+    needs: [frontend, package]
+    # Fork code must never be scheduled on the staging machine.
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: [self-hosted, Linux, X64, crm-staging, crm-rootless]
+    timeout-minutes: 90
+    env:
+      CRM_CI_PROJECT: crm-ci-${{ github.run_id }}-${{ github.run_attempt }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
+        with:
+          name: verified-archives
+          path: backend/build
+      - name: Fresh stack, native JUnit, HTTP acceptance and production image
+        run: bash backend/ci/backend.sh
+      - name: Ensure isolated stack cleanup
+        if: always()
+        run: bash backend/ci/cleanup.sh
+      - name: Save backend diagnostics
+        if: always()
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: backend-reports-${{ github.run_attempt }}
+          path: backend/build/ci-reports/
+          retention-days: 14
+
+  # Keep this exact name: main's required status check already references it.
+  release-gate:
+    if: always()
+    needs: [frontend, package, backend]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Require every gate to succeed
+        env:
+          RESULTS: ${{ toJSON(needs) }}
+        run: |
+          echo "$RESULTS" | jq -r 'to_entries[] | "\(.key): \(.value.result)"'
+          echo "$RESULTS" | jq -e 'all(.[]; .result == "success")' > /dev/null

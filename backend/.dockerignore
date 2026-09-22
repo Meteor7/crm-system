@@ -1,0 +1,5 @@
+**
+!build/
+build/**
+!build/rayher_crm.zip
+!build/rayher_crm-tests.zip
