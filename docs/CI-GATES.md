@@ -28,9 +28,26 @@ HTTP RPC helpers explicitly declare form content types so a preceding JSON or mu
 
 Cleanup runs in the shell EXIT trap and an `always()` workflow step. The next job recovers CI-labelled resources left by a hard cancellation or reboot. Cleanup refuses the host Docker socket and touches only the dedicated rootless daemon. Reports are collected before resource removal; a cleanup failure fails the job. The pipeline does not deploy the CRM to staging or production.
 
-## Review/merge sequence
+## Merge record
 
-This change is stacked on PR #6 (`codex/fix-release-gate`) and retains its reproducible archive and image checks. Merge #6 first, then retarget this PR to `main`. The staging runner infrastructure PR can merge independently and must be provisioned before the backend job can run. Existing `main` branch rules do not need modification.
+PR #6 and PR #9 landed on `main` together as one squash commit, followed by the staging runner PR #8. The sequence this section originally recommended — merge #6, then retarget #9 to `main` — does not work: #9 forked from a commit preceding #6's merge-from-main, so retargeting conflicts on `test_stage5g_dashboard_stakeholders.py`, `run-release-gate.ps1` and `seven-page-workspace.test.ts`, the last as a whole-file conflict because the two sides disagree on line endings. #9 was merged into `codex/fix-release-gate` first instead, which is conflict-free, and the combined branch was then squashed onto `main`.
+
+The squash commit carrying #6 and #9 was created with the placeholder title `probe`. Its body is intact and its content is the change described throughout this document.
+
+Measured on the final merged content: 802 frontend tests across 118 files, 265 backend tests with zero skips, all six HTTP acceptance suites passing, reproducible production package, isolated production image build and clean teardown. Earlier figures quoted in the pull request descriptions (694 frontend tests) were measured before PR #4 and PR #7 were merged in, and PR #6's claim of stabilized date-sensitive calendar and dashboard tests does not correspond to any change in that branch.
+
+`main` requires the `release-gate` context through repository ruleset "Protect main", with strict up-to-date checks and linear history. Because that context now depends on the single self-hosted runner, the repository owner is registered as a bypass actor in pull-request mode: a pull request can still be merged when the runner is unavailable, but direct pushes to `main` remain blocked.
+
+## Known gaps
+
+These are real and unfixed. They are recorded so that a green gate is not read as a stronger guarantee than it is.
+
+- Neither the frontend nor the backend report has a minimum test-count floor. Deleting or skipping most of the suite still passes, as long as at least one test executes. The frontend JUnit is produced and uploaded but not validated at all.
+- `docker image prune -af --filter until=168h` in `backend/ci/cleanup.sh` filters on image creation time, not last use, so it evicts the digest-pinned `frappe/erpnext`, `mariadb`, `redis` and `clamav` images at the start of every backend run. Each run then re-pulls several GB, and a registry outage fails the gate repository-wide.
+- The report-tools build retags its parent image, leaving one dangling multi-GB image per run that cleanup does not remove.
+- The self-hosted runner is not registered with `--ephemeral` and no environment approval gate protects the backend job. `actions/checkout` cleans the worktree but not `.git/`, so state planted by one run can execute during later checkouts. The fork guard is correct and complete; this gap concerns same-repository branches.
+- The Frappe app archive is not byte-identical across Windows and Linux, because .NET stamps the host byte in the zip central directory. The SHA-256 manifest binds an archive to a commit but is computed from the same artifact it validates, so it detects corruption in transit rather than substitution.
+- Negative assertions in the HTTP acceptance suites compare status codes only and do not inspect `exc_type`, so an unrelated permission regression can satisfy a 403 expectation. In `http-stage5f` the `OtherSales` session is never exercised with a successful call, so three of its checks could pass for the wrong reason.
 
 Local validation of report handling: `pwsh -NoProfile -File backend/tests/backend-test-report-contract.ps1`. Run `bash backend/ci/test-environment.sh` to exercise environment/cleanup guards with a fake Docker CLI. Validate workflow syntax with `actionlint`; custom labels are listed in `.github/actionlint.yaml`. The local unified `run-release-gate.ps1 -StartBackend` command also installs the JUnit writer in its test image and retains native reports under `backend/build/ci-reports`.
 
