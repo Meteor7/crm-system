@@ -10,20 +10,41 @@ const STORE_NAME = 'snapshots'
 const SNAPSHOT_KEY = 'demo-workflow-v1'
 
 export interface DemoSnapshot {
-  version: 1 | 2 | 3 | 4 | 5 | 6
+  version: 1 | 2 | 3 | 4 | 5 | 6 | 7
   demoRequests: DemoRequestDto[]
   evaluations: EvaluationDto[]
   artifacts: StoredDemoArtifact[]
   comments?: DemoCommentDto[]
 }
 
+/** The snapshot shape written by the current build; older shapes are migrated on load. */
+export const DEMO_SNAPSHOT_VERSION = 7
+
 export function migrateDemoSnapshot(snapshot: DemoSnapshot): DemoSnapshot {
-  if (snapshot.version === 6) {
+  if (snapshot.version === 6 || snapshot.version === DEMO_SNAPSHOT_VERSION) {
     const migrated = cloneSnapshot(snapshot)
     migrated.comments ??= []
+    migrateDemoTestRounds(migrated)
+    migrated.version = DEMO_SNAPSHOT_VERSION
     return migrateDemoIdentityReferences(migrated)
   }
   return seedDemoSnapshot()
+}
+
+/**
+ * v7 introduced test rounds. Snapshots written before then have no `testRound`
+ * on Evaluations and no `round` on Test Runs or report artifacts; everything that
+ * already existed belongs to round 1, exactly like the Frappe backfill patch.
+ */
+function migrateDemoTestRounds(snapshot: DemoSnapshot) {
+  snapshot.evaluations.forEach((evaluation) => {
+    evaluation.testRound ??= 1
+    evaluation.customerReviews ??= []
+    evaluation.runs.forEach((run) => { run.round ??= 1 })
+  })
+  snapshot.artifacts.forEach((artifact) => {
+    if (artifact.type === 'Test Report' || artifact.type === 'Customer Report') artifact.round ??= 1
+  })
 }
 
 function migrateDemoIdentityReferences(snapshot: DemoSnapshot): DemoSnapshot {
@@ -80,7 +101,7 @@ function invalidSnapshot(message: string): never {
 }
 
 export function validateDemoSnapshot(snapshot: DemoSnapshot) {
-  if (snapshot.version !== 6) invalidSnapshot('version must be 6')
+  if (snapshot.version !== DEMO_SNAPSHOT_VERSION) invalidSnapshot(`version must be ${DEMO_SNAPSHOT_VERSION}`)
   if (snapshot.demoRequests.length !== 10) invalidSnapshot('expected 10 Demo Requests')
   if (snapshot.evaluations.length !== 6) invalidSnapshot('expected 6 Evaluations')
   if (snapshot.artifacts.length) invalidSnapshot('new seed must not contain artifacts')
@@ -144,7 +165,7 @@ export function seedDemoSnapshot(): DemoSnapshot {
       : structuredClone(request.history),
   }))
   const snapshot: DemoSnapshot = {
-    version: 6,
+    version: DEMO_SNAPSHOT_VERSION,
     demoRequests: requests,
     evaluations: evaluations.map((evaluation) => ({
       ...structuredClone(evaluation),

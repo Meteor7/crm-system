@@ -9,7 +9,7 @@ from typing import Any
 
 import frappe
 from frappe.utils import add_years, now_datetime, today
-from frappe.utils.file_manager import save_file
+from rayher_crm.services.private_file_lifecycle import save_private_file as save_file
 
 from rayher_crm.api.v1.errors import CrmApiException
 from rayher_crm.permissions.roles import assert_capability, resolve_crm_role

@@ -23,7 +23,7 @@ from rayher_crm.services.common import (
 )
 from rayher_crm.services.concurrency import lock_document
 from rayher_crm.services.contacts import _contact_account
-from rayher_crm.services.notifications import create_notification
+from rayher_crm.services.notifications import notify_if_reachable
 
 
 VISIT_TYPES = {"On-site", "Video", "Phone"}
@@ -126,6 +126,18 @@ def _require_visit(name: str):
     if not frappe.has_permission("CRM Visit", "read", doc=doc, user=frappe.session.user):
         raise CrmApiException("SCOPE_DENIED", "The Visit is outside the current user scope.")
     return doc
+
+
+def assert_can_change_visit(doc) -> None:
+    """Keep every change to a visit with its owner and the Managers.
+
+    Sales also read a colleague's visit as its action owner, but only to complete
+    that action. Editing or advancing it, writing its meeting record (a complete
+    record submits the visit for Manager review) and above all naming themselves
+    owner -- which would take the visit away from its owner -- are not theirs to do.
+    """
+    if resolve_crm_role() == "Sales" and doc.visit_owner != frappe.session.user:
+        raise CrmApiException("SCOPE_DENIED", "Only the Visit owner or a CRM Manager can change this Visit.")
 
 
 def list_visits(query: dict[str, Any]) -> tuple[list[dict[str, Any]], int, int, int]:
@@ -253,15 +265,25 @@ def _apply_advance(doc, command: dict[str, Any]) -> None:
 
 
 def _notify_update(doc, command_type: str, command: dict[str, Any]) -> bool:
+    # Notices follow a change that has already been made; one that nobody can
+    # receive any more (a departed owner) must not undo or fail it.
     if command_type in {"advance", "edit"} and doc.action_owner and doc.next_action and ({"actionOwner", "nextAction"} & command.keys()):
-        create_notification(
+        notify_if_reachable(
             recipient=doc.action_owner, category="Visit", title="Visit action assigned",
             message=f"{doc.subject}: {doc.next_action}", route=f"/visits?focus={doc.name}",
             source_doctype="CRM Visit", source_name=doc.name,
         )
         return True
+    previous = doc.get_doc_before_save()
+    if command_type == "edit" and previous is not None and previous.visit_owner != doc.visit_owner:
+        notify_if_reachable(
+            recipient=doc.visit_owner, category="Visit", title="Visit assigned",
+            message=f"{doc.subject} on {doc.visit_date} is now owned by you.", route=f"/visits?focus={doc.name}",
+            source_doctype="CRM Visit", source_name=doc.name,
+        )
+        return True
     if command_type == "advance" and doc.status == "Manager Reviewed":
-        create_notification(
+        notify_if_reachable(
             recipient=doc.visit_owner, category="Visit", title="Visit minutes reviewed",
             message=f"{doc.subject} was reviewed by the CRM Manager.", route=f"/visits?focus={doc.name}",
             source_doctype="CRM Visit", source_name=doc.name,
@@ -286,6 +308,9 @@ def update_visit(
     doc = lock_document("CRM Visit", name, expected_modified, "NOT_FOUND")
     if not frappe.has_permission("CRM Visit", "read", doc=doc, user=frappe.session.user):
         raise CrmApiException("SCOPE_DENIED", "The Visit is outside the current user scope.")
+    # An action owner may complete their action; every other command changes the visit.
+    if command_type != "complete_action":
+        assert_can_change_visit(doc)
 
     if command_type == "edit":
         _apply_edit(doc, command)
@@ -329,9 +354,18 @@ def review_visit(name: str, expected_modified: Any = None) -> dict[str, Any]:
     if not record or not all(str(record.get(field) or "").strip() for field in required):
         raise CrmApiException("INVALID_TRANSITION", "Complete the Visit record before Manager review.")
 
-    doc.status = "Manager Reviewed"
-    doc.save(ignore_permissions=True)
-    _notify_update(doc, "advance")
+    # The API edge commits a request that ends in a handled error, so without a
+    # savepoint a failure after the save would report an error for a review that
+    # was nevertheless recorded.
+    savepoint = f"crm_visit_review_{frappe.generate_hash(length=8)}"
+    frappe.db.savepoint(savepoint)
+    try:
+        doc.status = "Manager Reviewed"
+        doc.save(ignore_permissions=True)
+        _notify_update(doc, "advance", {"status": "Manager Reviewed"})
+    except Exception:
+        frappe.db.rollback(save_point=savepoint)
+        raise
     doc.reload()
     return serialize_visit(doc)
 

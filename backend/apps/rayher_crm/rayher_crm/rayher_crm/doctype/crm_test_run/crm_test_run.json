@@ -1,8 +1,9 @@
 {
   "actions":[],"autoname":"format:CRM-RUN-{#####}","creation":"2026-08-04 00:00:00.000000","doctype":"DocType","engine":"InnoDB",
-  "field_order":["evaluation","run_date","lot","wafers","status","capture","false_positive","wph","summary"],
+  "field_order":["evaluation","test_round","run_date","lot","wafers","status","capture","false_positive","wph","summary"],
   "fields":[
     {"fieldname":"evaluation","fieldtype":"Link","label":"Evaluation","options":"CRM Evaluation","reqd":1},
+    {"default":"1","fieldname":"test_round","fieldtype":"Int","label":"Test Round","reqd":1},
     {"fieldname":"run_date","fieldtype":"Date","label":"Date","reqd":1},
     {"fieldname":"lot","fieldtype":"Data","label":"Lot","reqd":1},
     {"fieldname":"wafers","fieldtype":"Int","label":"Wafers","reqd":1},
@@ -13,5 +14,5 @@
     {"fieldname":"summary","fieldtype":"Small Text","label":"Summary"}
   ],
   "index_web_pages_for_search":0,"modified":"2026-08-04 00:00:00.000000","modified_by":"Administrator","module":"Rayher CRM","name":"CRM Test Run","naming_rule":"Expression","owner":"Administrator",
-  "permissions":[{"create":1,"delete":1,"read":1,"role":"CRM Manager","write":1},{"read":1,"role":"CRM Sales"},{"create":1,"read":1,"role":"CRM Engineer","write":1}],"sort_field":"modified","sort_order":"DESC","states":[]
+  "permissions":[{"read":1,"role":"CRM Manager"},{"read":1,"role":"CRM Sales"},{"read":1,"role":"CRM Engineer"}],"sort_field":"modified","sort_order":"DESC","states":[]
 }

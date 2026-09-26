@@ -12,7 +12,7 @@ from typing import Any
 
 import frappe
 from frappe.utils import now_datetime
-from frappe.utils.file_manager import save_file
+from rayher_crm.services.private_file_lifecycle import save_private_file as save_file
 
 from rayher_crm.api.v1.errors import CrmApiException
 from rayher_crm.permissions.roles import resolve_crm_role

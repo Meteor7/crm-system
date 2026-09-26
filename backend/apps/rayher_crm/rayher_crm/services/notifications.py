@@ -131,6 +131,24 @@ def create_notification(
     return _serialize(event)
 
 
+def notify_if_reachable(*, recipient: str | None, **fields: Any) -> dict[str, Any] | None:
+    """Send an informational notice, skipping a recipient who can no longer receive it.
+
+    A notice follows a business action that has already happened. When its
+    recipient has left (disabled) or lost their CRM role, raising here would fail
+    that action -- or, where the caller has no savepoint, report an error while the
+    action commits anyway. `create_notification` stays strict for callers that
+    choose a recipient on purpose.
+    """
+    if not isinstance(recipient, str) or not recipient or not frappe.db.get_value("User", recipient, "enabled"):
+        return None
+    try:
+        resolve_crm_role(recipient)
+    except frappe.PermissionError:
+        return None
+    return create_notification(recipient=recipient, **fields)
+
+
 def list_notifications(
     page: Any = None,
     page_size: Any = None,

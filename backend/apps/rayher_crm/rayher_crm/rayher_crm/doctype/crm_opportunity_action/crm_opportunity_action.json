@@ -1,12 +1,13 @@
 {
   "actions": [], "autoname": "hash", "creation": "2026-08-04 00:00:00.000000", "doctype": "DocType", "engine": "InnoDB",
-  "field_order": ["opportunity", "title", "action_owner", "due", "status", "archived"],
+  "field_order": ["opportunity", "title", "action_owner", "due", "status", "remark", "archived"],
   "fields": [
     {"fieldname": "opportunity", "fieldtype": "Link", "label": "Opportunity", "options": "CRM Opportunity", "reqd": 1},
     {"fieldname": "title", "fieldtype": "Data", "label": "Title", "reqd": 1},
     {"fieldname": "action_owner", "fieldtype": "Link", "label": "Owner", "options": "User", "reqd": 1},
     {"fieldname": "due", "fieldtype": "Date", "label": "Due", "reqd": 1},
     {"default": "Open", "fieldname": "status", "fieldtype": "Select", "label": "Status", "options": "Open\nDone", "reqd": 1},
+    {"fieldname": "remark", "fieldtype": "Text", "label": "Remark"},
     {"default": "0", "fieldname": "archived", "fieldtype": "Check", "label": "Archived", "read_only": 1}
   ],
   "index_web_pages_for_search": 0, "modified": "2026-08-04 00:00:00.000000", "modified_by": "Administrator", "module": "Rayher CRM", "name": "CRM Opportunity Action", "naming_rule": "Random", "owner": "Administrator",

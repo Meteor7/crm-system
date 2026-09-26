@@ -26,6 +26,7 @@ permission_query_conditions = {
     "CRM Installed Tool": "rayher_crm.permissions.scope.installed_tool_query",
     "CRM Demo Request": "rayher_crm.permissions.scope.demo_request_query",
     "CRM Evaluation": "rayher_crm.permissions.scope.evaluation_query",
+    "CRM Evaluation Customer Review": "rayher_crm.permissions.scope.evaluation_customer_review_query",
     "CRM Contact File": "rayher_crm.permissions.scope.contact_file_query",
     "CRM Demo Artifact": "rayher_crm.permissions.scope.demo_artifact_query",
     "CRM Notification Event": "rayher_crm.permissions.scope.notification_query",
@@ -46,6 +47,7 @@ has_permission = {
     "CRM Installed Tool": "rayher_crm.permissions.scope.has_site_bearing_permission",
     "CRM Demo Request": "rayher_crm.permissions.scope.has_crm_permission",
     "CRM Evaluation": "rayher_crm.permissions.scope.has_crm_permission",
+    "CRM Evaluation Customer Review": "rayher_crm.permissions.scope.has_crm_permission",
     "CRM Contact File": "rayher_crm.permissions.scope.has_crm_permission",
     "CRM Demo Artifact": "rayher_crm.permissions.scope.has_crm_permission",
     "CRM Notification Event": "rayher_crm.permissions.scope.has_crm_permission",
@@ -58,6 +60,14 @@ has_permission = {
 }
 
 
+
+delete_file_data_content = "rayher_crm.services.private_file_lifecycle.delete_file_content"
+
+doc_events = {
+    "File": {
+        "before_insert": "rayher_crm.services.private_file_lifecycle.protect_private_upload",
+    },
+}
 
 scheduler_events = {
     "daily": [

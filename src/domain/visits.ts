@@ -1,6 +1,24 @@
-import type { CreateVisitInput, VisitStatus } from '@/types/crm'
+import type { CreateVisitInput, UserRole, VisitStatus } from '@/types/crm'
 
 export const VISIT_STATUS_ORDER: VisitStatus[] = ['Planned', 'Visited', 'Minutes Submitted', 'Manager Reviewed']
+
+/** Mirrors the backend `edit` command: a Visit is frozen once the Manager has reviewed the minutes. */
+export function isVisitEditable(visit: { status: VisitStatus }) {
+  return visit.status !== 'Manager Reviewed'
+}
+
+/**
+ * Mirrors the backend `assert_can_change_visit`. Sales also see a colleague's visit as its
+ * action owner, but only to complete that action; editing the visit, writing its meeting
+ * record (a complete record submits it for review) and above all naming themselves owner
+ * stay with the visit owner and the Managers.
+ */
+export function canChangeVisit(
+  visit: { owner: string; status: VisitStatus },
+  user: { id: string; role: UserRole } | null | undefined,
+) {
+  return isVisitEditable(visit) && !!user && (user.role === 'Manager' || visit.owner === user.id)
+}
 
 export function validateCreateVisit(input: CreateVisitInput) {
   const required: Array<[keyof CreateVisitInput, string]> = [

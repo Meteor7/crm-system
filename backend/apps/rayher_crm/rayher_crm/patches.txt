@@ -13,3 +13,6 @@ rayher_crm.patches.v1_0.backfill_demo_request_mode_and_reports
 rayher_crm.patches.v1_0.expand_demo_report_version_index
 rayher_crm.patches.v1_0.backfill_quotation_type
 rayher_crm.patches.v1_0.seed_quotation_catalog
+rayher_crm.patches.v1_0.backfill_demo_test_round
+rayher_crm.patches.v1_0.submit_planned_visits_with_complete_records
+rayher_crm.patches.v1_0.protect_demo_artifact_files

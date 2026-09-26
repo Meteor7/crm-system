@@ -28,6 +28,7 @@ import type {
   CreateAccountInput,
   CreateDemoRequestInput,
   CreateVisitInput,
+  UpdateVisitInput,
   DashboardDto,
   DemoArtifactMetaDto,
   DemoRequestCommand,
@@ -36,6 +37,8 @@ import type {
   DemoRequestTransitionResult,
   DemoTestReportUploadInput,
   DemoTestReportUploadResult,
+  CustomerReportUploadInput,
+  CustomerReportUploadResult,
   EvaluationDto,
   EvaluationPreparationBranch,
   EvaluationStatusCommand,
@@ -183,6 +186,7 @@ export interface CrmApi {
   createVisit(input: CreateVisitInput): Promise<ApiResponse<VisitDto>>
   submitVisitRecord(id: string, file: MultipartFilePart): Promise<ApiResponse<VisitDetailDto>>
   reviewVisit(id: string, expectedModified?: string): Promise<ApiResponse<VisitDto>>
+  updateVisit(id: string, input: UpdateVisitInput, expectedModified?: string): Promise<ApiResponse<VisitDto>>
   updateVisitMeetingRecord(id: string, input: VisitMeetingRecordInput, expectedModified?: string): Promise<ApiResponse<VisitMeetingRecordDto>>
   getVisitAttachment(fileId: string): Promise<BinaryDownload>
   listContacts(query: ContactListQuery): Promise<ApiResponse<PageData<ContactSummaryDto>>>
@@ -225,6 +229,7 @@ export interface CrmApi {
   saveDemoArtifact(input: DemoArtifactUploadInput): Promise<ApiResponse<DemoArtifactMetaDto>>
   getDemoArtifact(id: string): Promise<BinaryDownload>
   releaseDemoTestReport(id: string, input: DemoTestReportUploadInput): Promise<ApiResponse<DemoTestReportUploadResult>>
+  uploadCustomerReport(id: string, input: CustomerReportUploadInput): Promise<ApiResponse<CustomerReportUploadResult>>
   /** 只读：Contract 同上，迁移期只读。 */
   listContracts(query: ListQuery): Promise<ApiResponse<PageData<ContractDto>>>
   listQuotationCatalog(): Promise<ApiResponse<QuotationCatalogItemDto[]>>

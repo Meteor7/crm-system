@@ -39,7 +39,7 @@ describe('demo repository', () => {
   it('seeds exactly ten linked Demo records with balanced real owners', () => {
     const snapshot = seedDemoSnapshot()
 
-    expect(snapshot.version).toBe(6)
+    expect(snapshot.version).toBe(7)
     expect(snapshot.demoRequests.map((item) => item.id)).toEqual([
       'DR-101', 'DR-102', 'DR-103', 'DR-104', 'DR-105',
       'DR-106', 'DR-107', 'DR-108', 'DR-109', 'DR-110',
@@ -88,7 +88,7 @@ describe('demo repository', () => {
 
     const migrated = migrateDemoSnapshot(legacy)
 
-    expect(migrated.version).toBe(6)
+    expect(migrated.version).toBe(7)
     expect(migrated.demoRequests).toHaveLength(10)
     expect(migrated.demoRequests.some((item) => item.id === 'DR-LEGACY')).toBe(false)
     expect(migrated.demoRequests.some((item) => item.engineerOwner === 'FAE Mia')).toBe(false)
@@ -97,12 +97,55 @@ describe('demo repository', () => {
 
   it('keeps existing v6 snapshots readable when comment storage is missing', () => {
     const existing = seedDemoSnapshot()
+    ;(existing as { version: number }).version = 6
     delete existing.comments
 
-    expect(migrateDemoSnapshot(existing).comments).toEqual([])
+    const migrated = migrateDemoSnapshot(existing)
+    expect(migrated.version).toBe(7)
+    expect(migrated.comments).toEqual([])
   })
 
-  it('rejects malformed v6 snapshots before they are persisted', () => {
+  it('backfills round 1 onto v6 snapshots written before retest rounds existed', () => {
+    // A browser that persisted its snapshot before this build has Evaluations,
+    // Test Runs and report artifacts with no round at all; a retest on such a
+    // record must not compute `undefined + 1`.
+    const existing = seedDemoSnapshot()
+    ;(existing as { version: number }).version = 6
+    const evaluation = existing.evaluations.find((item) => item.id === 'EVAL-104')!
+    delete (evaluation as { testRound?: number }).testRound
+    delete evaluation.customerReviews
+    evaluation.runs.forEach((run) => { delete (run as { round?: number }).round })
+    existing.artifacts.push(
+      {
+        id: 'ART-OLD-REPORT', demoRequestId: 'DR-108', evaluationId: 'EVAL-104',
+        type: 'Test Report', fileName: '[Internal] report.pdf', mimeType: 'application/pdf',
+        blob: new Blob(['pdf']), version: 1, createdBy: 'person053@crm.example.invalid',
+        createdAt: '2026-07-27T10:30:00+08:00', visibility: 'Internal',
+      },
+      {
+        id: 'ART-OLD-FORM', demoRequestId: 'DR-108',
+        type: 'Demo Request DOCX', fileName: 'form.docx',
+        mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        blob: new Blob(['docx']), version: 1, createdBy: 'person002@crm.example.invalid',
+        createdAt: '2026-07-20T10:00:00+08:00', visibility: 'Internal',
+      },
+    )
+
+    const migrated = migrateDemoSnapshot(existing)
+
+    expect(migrated.version).toBe(7)
+    const restored = migrated.evaluations.find((item) => item.id === 'EVAL-104')!
+    expect(restored.testRound).toBe(1)
+    expect(restored.customerReviews).toEqual([])
+    expect(restored.runs.map((run) => run.round)).toEqual([1])
+    expect(migrated.artifacts.find((item) => item.id === 'ART-OLD-REPORT')?.round).toBe(1)
+    // Demo Request forms predate testing and never carry a round.
+    expect(migrated.artifacts.find((item) => item.id === 'ART-OLD-FORM')?.round).toBeUndefined()
+    // Already-numbered records are left alone.
+    expect(migrated.evaluations.find((item) => item.id === 'EVAL-103')?.testRound).toBe(1)
+  })
+
+  it('rejects malformed snapshots before they are persisted', () => {
     const invalid = seedDemoSnapshot()
     invalid.demoRequests[0].engineerOwner = 'FAE Team'
 

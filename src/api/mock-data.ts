@@ -168,12 +168,13 @@ function withDemoRequestDefaults(requests: Array<Omit<DemoRequestDto, 'customerE
   })
 }
 
-function withEvaluationDefaults(evaluations: Array<Omit<EvaluationDto, 'testRunDeadline' | 'reportStatus' | 'reportVersion'>>): EvaluationDto[] {
+function withEvaluationDefaults(evaluations: Array<Omit<EvaluationDto, 'testRunDeadline' | 'reportStatus' | 'reportVersion' | 'testRound'>>): EvaluationDto[] {
   return evaluations.map((evaluation) => ({
     ...evaluation,
     testRunDeadline: evaluation.plannedEnd,
     reportStatus: 'Not Ready',
     reportVersion: 0,
+    testRound: 1,
   }))
 }
 
@@ -334,34 +335,34 @@ export const evaluations = withEvaluationDefaults([
     id: 'EVAL-102', accountId: 'ACC-004', accountName: '示例企业045有限公司', demoRequestId: 'DR-106',
     segment: 'Frontend', title: 'DRAM 晶圆边缘缺陷验证', status: 'Sample Received', owner: '演示员工15',
     plannedEnd: '2026-08-22', wafers: 6, acceptance: 'Pending', criteria: '边缘缺陷检出率 ≥ 95%',
-    runs: [{ id: 'CUSTOMER01-R01', date: '2026-08-03', lot: 'CUSTOMER01-EDGE-01', wafers: 6, status: 'Planned', capture: null, falsePositive: null, wph: null, summary: '' }],
+    runs: [{ id: 'CUSTOMER01-R01', date: '2026-08-03', lot: 'CUSTOMER01-EDGE-01', round: 1, wafers: 6, status: 'Planned', capture: null, falsePositive: null, wph: null, summary: '' }],
   },
   {
     id: 'EVAL-103', accountId: 'ACC-006', accountName: '示例企业027有限公司', requirementId: 'REQ-007',
     demoRequestId: 'DR-107', segment: 'Advanced Packaging', title: 'Chiplet Final Inspection 执行', status: 'Testing', owner: '演示员工14',
     plannedEnd: '2026-08-01', wafers: 10, acceptance: 'Pending', criteria: 'Capture ≥ 93%；False Positive ≤ 4%',
     runs: [
-      { id: 'CUSTOMER04-R01', date: '2026-07-27', lot: 'JC-CHIPLET-071', wafers: 5, status: 'Completed', capture: 93.8, falsePositive: 3.9, wph: 42, summary: '第一批达到目标，继续验证重复性。' },
-      { id: 'CUSTOMER04-R02', date: '2026-07-30', lot: 'JC-CHIPLET-072', wafers: 5, status: 'Planned', capture: null, falsePositive: null, wph: null, summary: '' },
+      { id: 'CUSTOMER04-R01', date: '2026-07-27', lot: 'JC-CHIPLET-071', round: 1, wafers: 5, status: 'Completed', capture: 93.8, falsePositive: 3.9, wph: 42, summary: '第一批达到目标，继续验证重复性。' },
+      { id: 'CUSTOMER04-R02', date: '2026-07-30', lot: 'JC-CHIPLET-072', round: 1, wafers: 5, status: 'Planned', capture: null, falsePositive: null, wph: null, summary: '' },
     ],
   },
   {
     id: 'EVAL-104', accountId: 'ACC-005', accountName: '示例企业040有限公司', requirementId: 'REQ-006',
     demoRequestId: 'DR-108', segment: 'Advanced Packaging', title: 'Micro-bump 检测客户评审', status: 'Customer Review', owner: '演示员工15',
     plannedEnd: '2026-07-30', wafers: 8, acceptance: 'Pending', criteria: 'Capture ≥ 95%；False Positive ≤ 3%',
-    runs: [{ id: 'CUSTOMER05-R01', date: '2026-07-26', lot: 'TF-MB-0726', wafers: 8, status: 'Completed', capture: 96.1, falsePositive: 2.8, wph: 38, summary: '指标达标，等待客户确认最终缺陷分类。' }],
+    runs: [{ id: 'CUSTOMER05-R01', date: '2026-07-26', lot: 'TF-MB-0726', round: 1, wafers: 8, status: 'Completed', capture: 96.1, falsePositive: 2.8, wph: 38, summary: '指标达标，等待客户确认最终缺陷分类。' }],
   },
   {
     id: 'EVAL-105', accountId: 'ACC-003', accountName: '示例企业003有限公司',
     demoRequestId: 'DR-109', segment: 'Frontend', title: '功率器件外观检测归档', status: 'Accepted', owner: '演示员工14',
     plannedEnd: '2026-07-23', wafers: 6, acceptance: 'Accepted', criteria: '客户确认缺陷覆盖率与报告',
-    runs: [{ id: 'HH-R01', date: '2026-07-20', lot: 'HH-POWER-01', wafers: 6, status: 'Completed', capture: 97.2, falsePositive: 2.1, wph: 35, summary: '客户确认全部验收指标。' }],
+    runs: [{ id: 'HH-R01', date: '2026-07-20', lot: 'HH-POWER-01', round: 1, wafers: 6, status: 'Completed', capture: 97.2, falsePositive: 2.1, wph: 35, summary: '客户确认全部验收指标。' }],
   },
   {
     id: 'EVAL-106', accountId: 'ACC-007', accountName: '示例企业018有限公司',
     demoRequestId: 'DR-110', segment: 'Advanced Packaging', title: 'Fan-out 面板级封装归档', status: 'Rejected', owner: '演示员工15',
     plannedEnd: '2026-07-22', wafers: 4, acceptance: 'Rejected', criteria: 'Capture ≥ 92%；False Positive ≤ 5%',
-    runs: [{ id: 'HT-R01', date: '2026-07-19', lot: 'HT-FOPLP-01', wafers: 4, status: 'Completed', capture: 93.4, falsePositive: 6.2, wph: 18, summary: '检出率达标，但面板翘曲导致误报率超标。' }],
+    runs: [{ id: 'HT-R01', date: '2026-07-19', lot: 'HT-FOPLP-01', round: 1, wafers: 4, status: 'Completed', capture: 93.4, falsePositive: 6.2, wph: 18, summary: '检出率达标，但面板翘曲导致误报率超标。' }],
   },
 ])
 

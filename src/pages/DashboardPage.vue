@@ -103,8 +103,8 @@ const PROCESS_DIMENSION_LABELS: Record<ProcessDimension, Record<string, [string,
   },
   'run-results': { Planned: ['计划中', 'Planned'], Completed: ['已完成', 'Completed'] },
   visits: {
-    Planned: ['待提交拜访记录', 'Minutes pending'], Visited: ['已完成', 'Completed'], 'Minutes Submitted': ['拜访记录已提交', 'Minutes submitted'],
-    'Manager Reviewed': ['管理者已审核', 'Manager reviewed'],
+    Planned: ['待拜访', 'To visit'], Visited: ['已拜访', 'Visited'], 'Minutes Submitted': ['待经理审核', 'Awaiting manager review'],
+    'Manager Reviewed': ['拜访完成', 'Visit completed'],
   },
   risk: { 稳健: ['稳健', 'Steady'], 关注: ['关注', 'Watch'], 高风险: ['高风险', 'High risk'] },
 }

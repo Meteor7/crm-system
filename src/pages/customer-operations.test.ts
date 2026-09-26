@@ -106,8 +106,8 @@ describe('customer operations pages', () => {
     const wrapper = mount(VisitsPage, { props: { apiClient: createMockApi({ latency: 0 }) }, global: globals() })
     await flushPromises()
 
-    expect(wrapper.text()).toContain('待提交拜访记录')
-    expect(wrapper.text()).toContain('管理者已审核')
+    expect(wrapper.text()).toContain('待拜访')
+    expect(wrapper.text()).toContain('拜访完成')
     await wrapper.get('[data-testid="new-visit"]').trigger('click')
     await wrapper.get('[aria-label="拜访主题"]').setValue('新增客户拜访')
     await wrapper.get('[data-modal-submit]').trigger('submit')

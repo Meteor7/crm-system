@@ -203,7 +203,7 @@ try {
     [IO.File]::WriteAllText($internalReportPath, 'internal capture=96.5', [Text.UTF8Encoding]::new($false))
     [IO.File]::WriteAllText($externalReportPath, 'customer capture=96.5', [Text.UTF8Encoding]::new($false))
     try {
-        $uploaded = Invoke-MultipartFiles $sessions.Engineer 'rayher_crm.api.v1.evaluations.release_demo_test_report' @{id=$created.Evaluation} @(
+        $uploaded = Invoke-MultipartFiles $sessions.Engineer 'rayher_crm.api.v1.evaluations.release_demo_test_report' @{id=$created.Evaluation; expectedRound=1} @(
             @{Name='internalFile';Path=$internalReportPath;MimeType='text/plain'},
             @{Name='externalFile';Path=$externalReportPath;MimeType='text/plain'}
         )
@@ -221,9 +221,12 @@ try {
     if ($completed.data.wafers -ne 5 -or $completed.data.reportStatus -ne 'Ready' -or $completed.data.internalReportArtifactId -ne $created.InternalReportArtifact -or $completed.data.externalReportArtifactId -ne $created.ExternalReportArtifact) { throw 'Optional Test Run writes changed report readiness.' }
     $current = $completed.data
     foreach ($status in @('Internal Review', 'Customer Review', 'Accepted')) {
-        $step = Invoke-CrmPost $sessions.Engineer 'rayher_crm.api.v1.evaluations.update_evaluation_status' @{id=$created.Evaluation;command=@{status=$status};expectedModified=$current.modified}
+        $command = @{status=$status}
+        if ($status -eq 'Accepted') { $command.customerComment = 'Customer accepted the demo results' }
+        $step = Invoke-CrmPost $sessions.Engineer 'rayher_crm.api.v1.evaluations.update_evaluation_status' @{id=$created.Evaluation;command=$command;expectedModified=$current.modified}
         $current = $step.data
     }
+    if ($current.testRound -ne 1) { throw 'HTTP Evaluation did not report its test round.' }
     if ($current.acceptance -ne 'Accepted') { throw 'HTTP Evaluation acceptance was not derived.' }
     $opportunityAfterAcceptance = (Invoke-RestMethod -Uri "$BaseUrl/api/method/rayher_crm.api.v1.opportunities.get_strategy_opportunity?id=$([Uri]::EscapeDataString($created.Opportunity))" -WebSession $sessions.Sales).message.data
     if ($opportunityAfterAcceptance.stage -ne $budgetApprovalStage) { throw "Accepted Evaluation did not advance Opportunity to $budgetApprovalStage." }
@@ -261,6 +264,7 @@ try {
     }
     Remove-TestChildren 'CRM Test Run' 'evaluation' $created.Evaluation
     Remove-TestChildren 'CRM Evaluation History' 'evaluation' $created.Evaluation
+    Remove-TestChildren 'CRM Evaluation Customer Review' 'evaluation' $created.Evaluation
     Remove-TestDoc 'CRM Evaluation' $created.Evaluation
     Remove-TestChildren 'CRM Demo Comment' 'demo_request' $created.Request
     Remove-TestChildren 'CRM Demo Request History' 'demo_request' $created.Request

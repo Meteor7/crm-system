@@ -10,7 +10,7 @@ from rayher_crm.permissions.roles import capabilities_for_role, resolve_crm_role
 
 SCOPED_DOCTYPES = (
     "Customer", "Contact", "Lead", "CRM Opportunity", "CRM Booking", "CRM Installed Tool",
-    "CRM Demo Request", "CRM Evaluation", "CRM Visit",
+    "CRM Demo Request", "CRM Evaluation", "CRM Evaluation Customer Review", "CRM Visit",
     "CRM Contact File", "CRM Demo Artifact", "CRM Notification Event",
     "CRM Quotation", "CRM Quotation Version", "CRM Quotation Approval",
     "CRM RFQ", "CRM RFQ Version",
@@ -30,14 +30,30 @@ DEMO_REQUEST_DOCPERMS = {
     "CRM Sales": {"read", "write", "create", "report", "export", "print", "email"},
     "CRM Engineer": {"read", "report", "export", "print"},
 }
+# Evaluation state (status, round, report pointers) is owned by the evaluation
+# service, which writes with ignore_permissions; a direct write permission would
+# let a user bypass the state machine and the retest gate.
 EVALUATION_DOCPERMS = {
-    "CRM Manager": ROLE_DOCPERMS["CRM Manager"],
+    "CRM Manager": {"read", "report", "export", "print"},
     "CRM Sales": {"read", "report", "export", "print"},
-    "CRM Engineer": {"read", "write", "report", "export", "print"},
+    "CRM Engineer": {"read", "report", "export", "print"},
 }
+# Customer Review rows are immutable record-keeping written by the evaluation
+# service (ignore_permissions); every role only ever reads them, scoped to the
+# parent Evaluation.
+CUSTOMER_REVIEW_DOCPERMS = {
+    "CRM Manager": {"read", "report", "export"},
+    "CRM Sales": {"read", "report", "export"},
+    "CRM Engineer": {"read", "report", "export"},
+}
+# Visits are changed only through the visit service, which writes with
+# ignore_permissions. A Sales user also reads a colleague's visit as its action
+# owner, so a write DocPerm would let them change it through the standard document
+# API -- take it over, mark it reviewed or attach unscanned files -- skipping the
+# service's owner and workflow checks.
 VISIT_DOCPERMS = {
     "CRM Manager": ROLE_DOCPERMS["CRM Manager"],
-    "CRM Sales": {"read", "write", "create", "report", "export", "print", "email"},
+    "CRM Sales": {"read", "report", "export", "print", "email"},
     "CRM Engineer": set(),
 }
 CONTACT_FILE_DOCPERMS = {
@@ -45,9 +61,13 @@ CONTACT_FILE_DOCPERMS = {
     "CRM Sales": {"read", "write", "create", "report", "export"},
     "CRM Engineer": {"read", "report", "export"},
 }
+# Demo artifacts (Demo Request forms, Test Reports, Customer Reports) are created
+# only by the upload services, which scan the file and check the workflow stage
+# before inserting with ignore_permissions. A direct create permission would let
+# a user post forged report rows through the standard resource API.
 ARTIFACT_DOCPERMS = {
-    "CRM Manager": {"read", "create", "report", "export"},
-    "CRM Sales": {"read", "create", "report", "export"},
+    "CRM Manager": {"read", "report", "export"},
+    "CRM Sales": {"read", "report", "export"},
     "CRM Engineer": {"read", "report", "export"},
 }
 NOTIFICATION_DOCPERMS = {
@@ -64,7 +84,8 @@ ROLE_TO_SERVER_ROLE = {"Manager": "CRM Manager", "Sales": "CRM Sales", "Engineer
 DOCTYPES_TO_VIEW_CAPABILITY = {
     "Customer": "account:view", "Contact": "contact:view", "Lead": "requirement:view",
     "CRM Opportunity": "deal:view", "CRM Booking": "deal:view", "CRM Installed Tool": "service:view",
-    "CRM Demo Request": "demo_request:view", "CRM Evaluation": "evaluation:view", "CRM Visit": "visit:view",
+    "CRM Demo Request": "demo_request:view", "CRM Evaluation": "evaluation:view",
+    "CRM Evaluation Customer Review": "evaluation:view", "CRM Visit": "visit:view",
     "CRM Contact File": "stakeholder:view", "CRM Demo Artifact": "demo_request:view",
     "CRM Notification Event": "dashboard:view", "CRM Quotation": "quotation:view",
     "CRM Quotation Version": "quotation:view", "CRM Quotation Approval": "quotation:view",
@@ -77,6 +98,7 @@ def _permissions_for_doctype(doctype: str, role: str) -> set[str]:
         "CRM Installed Tool": INSTALLED_TOOL_DOCPERMS,
         "CRM Demo Request": DEMO_REQUEST_DOCPERMS,
         "CRM Evaluation": EVALUATION_DOCPERMS,
+        "CRM Evaluation Customer Review": CUSTOMER_REVIEW_DOCPERMS,
         "CRM Visit": VISIT_DOCPERMS,
         "CRM Contact File": CONTACT_FILE_DOCPERMS,
         "CRM Demo Artifact": ARTIFACT_DOCPERMS,
@@ -108,6 +130,7 @@ def install_crm_doc_permissions() -> None:
             "CRM Installed Tool": INSTALLED_TOOL_DOCPERMS,
             "CRM Demo Request": DEMO_REQUEST_DOCPERMS,
             "CRM Evaluation": EVALUATION_DOCPERMS,
+            "CRM Evaluation Customer Review": CUSTOMER_REVIEW_DOCPERMS,
             "CRM Visit": VISIT_DOCPERMS,
             "CRM Contact File": CONTACT_FILE_DOCPERMS,
             "CRM Demo Artifact": ARTIFACT_DOCPERMS,
@@ -274,6 +297,16 @@ def conditions_for_doctype(doctype: str, user: str | None = None) -> str:
         return "1=0"
     if doctype == "CRM Notification Event":
         return f"`tabCRM Notification Event`.`recipient_user` = {frappe.db.escape(resolved_user)}"
+    if doctype == "CRM Evaluation Customer Review":
+        # A review row is visible exactly when its parent Evaluation is. The parent
+        # condition references `tabCRM Evaluation` unaliased, so nesting it inside a
+        # correlated EXISTS on the same table keeps it bound to the parent row.
+        evaluation_scope = conditions_for_doctype("CRM Evaluation", resolved_user)
+        return (
+            "EXISTS (SELECT 1 FROM `tabCRM Evaluation` "
+            "WHERE `tabCRM Evaluation`.`name` = `tabCRM Evaluation Customer Review`.`evaluation` "
+            f"AND ({evaluation_scope}))"
+        )
     if doctype == "CRM Demo Artifact":
         escaped_user = frappe.db.escape(resolved_user)
         submitted = (
@@ -496,6 +529,10 @@ def demo_request_query(user: str | None = None) -> str:
 
 def evaluation_query(user: str | None = None) -> str:
     return conditions_for_doctype("CRM Evaluation", user)
+
+
+def evaluation_customer_review_query(user: str | None = None) -> str:
+    return conditions_for_doctype("CRM Evaluation Customer Review", user)
 
 
 def contact_file_query(user: str | None = None) -> str:

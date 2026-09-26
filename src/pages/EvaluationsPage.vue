@@ -16,8 +16,9 @@ import PaginationControls from '@/features/shared/PaginationControls.vue'
 import TestDeadlineModal from '@/features/evaluations/TestDeadlineModal.vue'
 import TestRunModal from '@/features/evaluations/TestRunModal.vue'
 import TestReportUploadModal from '@/features/evaluations/TestReportUploadModal.vue'
-import ModalShell from '@/design-system/ModalShell.vue'
-import { useI18n, useLocaleMessage, localeMessage } from '@/i18n'
+import CustomerReportUploadModal from '@/features/evaluations/CustomerReportUploadModal.vue'
+import CustomerCommentModal from '@/features/evaluations/CustomerCommentModal.vue'
+import { useI18n, useLocaleMessage } from '@/i18n'
 
 const props = withDefaults(defineProps<{ apiClient?: CrmApi }>(), {
   apiClient: () => defaultApi,
@@ -25,7 +26,6 @@ const props = withDefaults(defineProps<{ apiClient?: CrmApi }>(), {
 
 const app = useAppStore()
 const { t, locale } = useI18n()
-const copy = (english: string, chinese: string) => locale.value === 'en-US' ? english : chinese
 const route = useRoute()
 const router = useRouter()
 const rows = ref<EvaluationDto[]>([])
@@ -45,9 +45,10 @@ const selectedId = ref('')
 const runTarget = ref<EvaluationDto | null>(null)
 const deadlineTarget = ref<EvaluationDto | null>(null)
 const reportTarget = ref<EvaluationDto | null>(null)
-const rejectTarget = ref<EvaluationDto | null>(null)
-const rejectReason = ref('')
-const rejectError = useLocaleMessage()
+const customerReportTarget = ref<EvaluationDto | null>(null)
+const commentTarget = ref<EvaluationDto | null>(null)
+const commentError = useLocaleMessage()
+const commentOutcome = ref<'archive' | 'retest'>('archive')
 
 const canWrite = computed(() => app.can('evaluation:write'))
 const canReport = computed(() => app.can('evaluation:view'))
@@ -126,7 +127,8 @@ function handleWriteError(reason: unknown) {
     runTarget.value = null
     deadlineTarget.value = null
     reportTarget.value = null
-    rejectTarget.value = null
+    customerReportTarget.value = null
+    commentTarget.value = null
     actionError.value = ''
     actionRequestId.value = ''
     return
@@ -159,26 +161,37 @@ async function persistStatus(id: string, command: EvaluationStatusCommand) {
 }
 
 async function changeStatus(id: string, status: EvaluationStatus) {
-  if (status === 'Rejected') {
-    rejectTarget.value = rows.value.find((item) => item.id === id) ?? null
-    rejectReason.value = ''
-    rejectError.value = ''
+  const evaluation = rows.value.find((item) => item.id === id) ?? null
+  // Leaving Customer Review always records a comment first, whether it archives or retests.
+  if (evaluation?.status === 'Customer Review') {
+    commentError.value = ''
+    // `submitCustomerComment` maps retest back to Testing, so preselect the
+    // radio the user already chose instead of always defaulting to archive.
+    commentOutcome.value = status === 'Testing' ? 'retest' : 'archive'
+    commentTarget.value = evaluation
     return
   }
   await persistStatus(id, { status })
 }
 
-async function confirmReject() {
-  if (!rejectTarget.value) return
-  const reason = rejectReason.value.trim()
-  if (!reason) {
-    rejectError.value = localeMessage('Enter a rejection reason.', '请填写拒绝原因。')
-    return
-  }
-  rejectError.value = ''
-  const rejected = await persistStatus(rejectTarget.value.id, { status: 'Rejected', reason })
-  if (rejected) rejectTarget.value = null
-  else rejectError.value = actionError.value
+function openRetest(evaluation: EvaluationDto) {
+  commentError.value = ''
+  commentOutcome.value = 'retest'
+  commentTarget.value = evaluation
+}
+
+async function submitCustomerComment(payload: { comment: string; outcome: 'archive' | 'retest' }) {
+  if (!commentTarget.value) return
+  commentError.value = ''
+  const status: EvaluationStatus = payload.outcome === 'retest' ? 'Testing' : 'Accepted'
+  const done = await persistStatus(commentTarget.value.id, { status, customerComment: payload.comment })
+  if (done) commentTarget.value = null
+  else commentError.value = actionError.value
+}
+
+function customerReportUploaded() {
+  customerReportTarget.value = null
+  void load()
 }
 
 async function completePreparation(evaluation: EvaluationDto, branch: EvaluationPreparationBranch) {
@@ -295,6 +308,8 @@ onMounted(async () => {
       @deadline="deadlineTarget = $event"
       @run="runTarget = $event"
       @report="reportTarget = $event"
+      @customer-report="customerReportTarget = $event"
+      @retest="openRetest"
       @customer-change="clearWarnings"
     />
     <PaginationControls v-if="!denied && !error && total > pageSize" :page="page" :page-size="pageSize" :total="total" @change="goPage" @page-size-change="changePageSize" />
@@ -320,28 +335,27 @@ onMounted(async () => {
       @close="reportTarget = null"
       @uploaded="reportUploaded"
     />
-    <ModalShell
-      v-if="rejectTarget"
-       :title="copy('Reject Demo Test', '拒绝 Demo 测试')"
-       :eyebrow="t('evaluations.pageEyebrow')"
-       :submit-label="copy('Confirm rejection', '确认拒绝')"
-      :busy="processing === rejectTarget.id"
-      :submit-disabled="!rejectReason.trim()"
-      @close="rejectTarget = null"
-      @submit="confirmReject"
-    >
-       <p class="reject-warning">{{ copy('This Demo Test will move to the archive after rejection. Confirm the project and reason to avoid mistakes.', '拒绝后该 Demo 测试将进入档案。请确认项目和原因，避免误操作。') }}</p>
-      <label class="reject-reason-field">
-         <span>{{ copy('Rejection reason', '拒绝原因') }}</span>
-         <textarea v-model="rejectReason" :aria-label="copy('Demo rejection reason', 'Demo 拒绝原因')" maxlength="1000" required autofocus />
-      </label>
-      <p v-if="rejectError" class="reject-error" role="alert">{{ rejectError }}</p>
-    </ModalShell>
+    <CustomerReportUploadModal
+      v-if="customerReportTarget"
+      :evaluation="customerReportTarget"
+      :api-client="apiClient"
+      @close="customerReportTarget = null"
+      @uploaded="customerReportUploaded"
+    />
+    <CustomerCommentModal
+      v-if="commentTarget"
+      :evaluation="commentTarget"
+      :busy="processing === commentTarget.id"
+      :submit-error="commentError"
+      :default-outcome="commentOutcome"
+      @close="commentTarget = null"
+      @submit="submitCustomerComment"
+    />
   </div>
 </template>
 
 <style scoped>
 .header-chip{display:flex;align-items:center;gap:6px;padding:9px 11px;color:var(--crm-teal);background:#fff;border:1px solid var(--crm-line);border-radius:9px;font-size:9px;font-weight:700}
 .handoff-notice,.api-warning,.api-error{margin-bottom:12px;padding:9px 12px;border-radius:10px;font-size:10px}.handoff-notice{color:#315f4b;background:#eaf5ef;border:1px solid #bddccb}.api-warning,.api-error{display:grid;gap:4px}.api-warning{color:#7d611f;background:var(--crm-warning-soft);border:1px solid #ecd99d}.api-error{color:#9f2d2d;background:#fff1f0;border:1px solid #efb4af}.api-error small{color:inherit;opacity:.75}
-.reject-warning{margin:0 0 14px;padding:10px;color:#8b3434;background:var(--crm-danger-soft);border:1px solid #efb4af;border-radius:8px;font-size:10px;line-height:1.6}.reject-reason-field{display:grid;gap:7px}.reject-reason-field span{color:var(--crm-text-muted);font-size:10px;font-weight:800}.reject-reason-field textarea{min-height:120px;resize:vertical;padding:10px;border:1px solid var(--crm-line-strong);border-radius:8px;font:inherit;line-height:1.5}.reject-reason-field textarea:focus{border-color:var(--crm-danger);outline:0;box-shadow:0 0 0 3px rgba(182,69,69,.12)}.reject-error{margin:10px 0 0;color:var(--crm-danger);font-size:10px}
+
 </style>

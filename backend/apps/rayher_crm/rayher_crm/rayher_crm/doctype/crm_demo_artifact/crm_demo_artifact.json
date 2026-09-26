@@ -1,16 +1,17 @@
 {
   "actions": [], "autoname": "format:CRM-ART-{#####}", "creation": "2026-08-04 00:00:00.000000", "doctype": "DocType", "engine": "InnoDB",
-  "field_order": ["demo_request", "evaluation", "account", "artifact_type", "private_file", "file_name", "mime_type", "size_bytes", "artifact_version", "visibility", "content_hash", "canonical_hash", "created_by_user", "created_at"],
+  "field_order": ["demo_request", "evaluation", "account", "artifact_type", "private_file", "file_name", "mime_type", "size_bytes", "artifact_version", "test_round", "visibility", "content_hash", "canonical_hash", "created_by_user", "created_at"],
   "fields": [
     {"fieldname": "demo_request", "fieldtype": "Link", "label": "Demo Request", "options": "CRM Demo Request", "reqd": 1},
     {"fieldname": "evaluation", "fieldtype": "Link", "label": "Evaluation", "options": "CRM Evaluation"},
     {"fieldname": "account", "fieldtype": "Link", "label": "Account", "options": "Customer"},
-      {"fieldname": "artifact_type", "fieldtype": "Select", "label": "Artifact Type", "options": "Demo Request DOCX\nTest Report", "reqd": 1},
+      {"fieldname": "artifact_type", "fieldtype": "Select", "label": "Artifact Type", "options": "Demo Request DOCX\nTest Report\nCustomer Report", "reqd": 1},
     {"fieldname": "private_file", "fieldtype": "Link", "label": "Private File", "options": "File", "reqd": 1, "unique": 1},
     {"fieldname": "file_name", "fieldtype": "Data", "label": "File Name", "reqd": 1},
     {"fieldname": "mime_type", "fieldtype": "Data", "label": "MIME Type", "reqd": 1},
     {"fieldname": "size_bytes", "fieldtype": "Int", "label": "Size Bytes", "reqd": 1},
     {"fieldname": "artifact_version", "fieldtype": "Int", "label": "Artifact Version", "reqd": 1},
+    {"default": "1", "fieldname": "test_round", "fieldtype": "Int", "label": "Test Round"},
     {"fieldname": "visibility", "fieldtype": "Select", "label": "Visibility", "options": "Internal\nCustomer Review", "reqd": 1},
     {"fieldname": "content_hash", "fieldtype": "Data", "label": "SHA-256", "reqd": 1},
     {"fieldname": "canonical_hash", "fieldtype": "Data", "label": "Canonical SHA-256"},
@@ -18,5 +19,5 @@
     {"fieldname": "created_at", "fieldtype": "Datetime", "label": "Created At", "reqd": 1}
   ],
   "index_web_pages_for_search": 0, "modified": "2026-08-04 00:00:00.000000", "modified_by": "Administrator", "module": "Rayher CRM", "name": "CRM Demo Artifact", "naming_rule": "Expression", "owner": "Administrator",
-  "permissions": [{"create": 1, "read": 1, "role": "CRM Manager"}, {"create": 1, "read": 1, "role": "CRM Sales"}, {"read": 1, "role": "CRM Engineer"}], "sort_field": "created_at", "sort_order": "DESC", "states": []
+  "permissions": [{"read": 1, "role": "CRM Manager"}, {"read": 1, "role": "CRM Sales"}, {"read": 1, "role": "CRM Engineer"}], "sort_field": "created_at", "sort_order": "DESC", "states": []
 }

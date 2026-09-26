@@ -3,7 +3,7 @@ import { personnelDisplayName } from '@/demo/personnel'
 import { computed, ref, watch } from 'vue'
 import { CalendarClock, ExternalLink, FileText, FlaskConical, History, Plus, UserRoundCog } from '@lucide/vue'
 import type { EvaluationDto, EvaluationPreparationBranch, EvaluationStatus, Tone } from '@/types/crm'
-import { evaluationGroup, evaluationPreparationStatus, evaluationStatusOptions, hasCompletedTestRun, isEvaluationPreparationComplete } from '@/domain/evaluations'
+import { canRetestEvaluation, evaluationGroup, evaluationPreparationStatus, evaluationStatusOptions, hasCompletedTestRun, isEvaluationPreparationComplete } from '@/domain/evaluations'
 import { formatDisplayDate } from '@/domain/time'
 import StatusBadge from '@/design-system/StatusBadge.vue'
 import type { EvaluationView } from './EvaluationWorkspaceNav.vue'
@@ -39,6 +39,8 @@ const emit = defineEmits<{
   deadline: [evaluation: EvaluationDto]
   run: [evaluation: EvaluationDto]
   report: [evaluation: EvaluationDto]
+  'customer-report': [evaluation: EvaluationDto]
+  retest: [evaluation: EvaluationDto]
   'customer-change': []
 }>()
 
@@ -65,10 +67,25 @@ const nextStatus = computed(() => selected.value
   : undefined)
 const selectedIsPreparation = computed(() => selected.value && evaluationGroup(selected.value.status) === 'Preparation')
 const preparationComplete = computed(() => selected.value ? isEvaluationPreparationComplete(selected.value) : false)
+const reportsMissing = computed(() => !selected.value?.internalReportArtifactId || !selected.value?.externalReportArtifactId)
+const runMissing = computed(() => !!selected.value && !hasCompletedTestRun(selected.value))
 const internalReviewBlocked = computed(() => selected.value?.status === 'Testing'
-  && (!selected.value.internalReportArtifactId
-    || !selected.value.externalReportArtifactId
-    || !hasCompletedTestRun(selected.value)))
+  && (reportsMissing.value || runMissing.value))
+// Say which half of the gate is still open. After a retest the card keeps showing the
+// earlier rounds' completed runs, so "complete a Test Run" alone reads as already done.
+const internalReviewHint = computed(() => {
+  const round = selected.value?.testRound ?? 1
+  if (reportsMissing.value && runMissing.value) {
+    return copy(`Upload both Test Reports and complete a Test Run in round ${round} first.`, `请先上传 Internal 和 External Test Report，并完成第 ${round} 轮 Test Run。`)
+  }
+  if (runMissing.value) {
+    return copy(`Complete a Test Run in round ${round} first. Runs from earlier rounds do not count.`, `请先完成第 ${round} 轮 Test Run，之前轮次的 Test Run 不计入。`)
+  }
+  return copy('Upload both Test Reports first.', '请先上传 Internal 和 External Test Report。')
+})
+const inCustomerReview = computed(() => selected.value?.status === 'Customer Review'
+  && (props.view === 'overview' || props.view === 'customer'))
+const roundLabel = (round: number) => copy(`Round ${round}`, `第 ${round} 轮`)
 const showAdvance = computed(() => {
   if (!selected.value || !nextStatus.value) return false
   if (selected.value.status === 'Scheduled') return preparationComplete.value
@@ -77,8 +94,8 @@ const showAdvance = computed(() => {
 const advanceLabel = computed(() => {
   if (!nextStatus.value) return ''
   const labels = locale.value === 'en-US'
-    ? { Testing: 'Enter Test Execution', 'Internal Review': 'Complete Test Execution', 'Customer Review': 'Submit Customer Review', Accepted: 'Accept Demo' }
-    : { Testing: '进入 Test Execution', 'Internal Review': '完成 Test Execution', 'Customer Review': '提交 Customer Review', Accepted: 'Accept Demo' }
+    ? { Testing: 'Enter Test Execution', 'Internal Review': 'Complete Test Execution', 'Customer Review': 'Submit Customer Review', Accepted: 'Customer Comment' }
+    : { Testing: '进入 Test Execution', 'Internal Review': '完成 Test Execution', 'Customer Review': '提交 Customer Review', Accepted: 'Customer Comment' }
   return labels[nextStatus.value as keyof typeof labels] ?? (locale.value === 'en-US' ? `Advance to ${nextStatus.value}` : `推进至 ${nextStatus.value}`)
 })
 const viewLabel = computed(() => (locale.value === 'en-US' ? ({
@@ -193,8 +210,8 @@ watch(accountId, () => emit('customer-change'))
           data-test-report-card
         >
            <header><FileText :size="15" /><strong>{{ copy('Test Report', '测试报告') }}</strong><span>{{ reportStatusLabel(selected.reportStatus) }}</span></header>
-           <div v-if="selected.internalReportArtifact" class="report-file"><strong>{{ copy('Internal', '内部') }}</strong><b>{{ selected.internalReportArtifact.fileName }}</b><small>v{{ selected.internalReportArtifact.version }} · {{ personnelDisplayName(selected.internalReportArtifact.createdBy) }} · {{ formatDisplayDate(selected.internalReportArtifact.createdAt) }}</small></div>
-           <div v-if="selected.externalReportArtifact" class="report-file"><strong>{{ copy('External', '外部') }}</strong><b>{{ selected.externalReportArtifact.fileName }}</b><small>v{{ selected.externalReportArtifact.version }} · {{ personnelDisplayName(selected.externalReportArtifact.createdBy) }} · {{ formatDisplayDate(selected.externalReportArtifact.createdAt) }}</small></div>
+           <div v-if="selected.internalReportArtifact" class="report-file"><strong>{{ copy('Internal', '内部') }}</strong><b>{{ selected.internalReportArtifact.fileName }}</b><small>{{ roundLabel(selected.internalReportArtifact.round ?? selected.testRound) }} · v{{ selected.internalReportArtifact.version }} · {{ personnelDisplayName(selected.internalReportArtifact.createdBy) }} · {{ formatDisplayDate(selected.internalReportArtifact.createdAt) }}</small></div>
+           <div v-if="selected.externalReportArtifact" class="report-file"><strong>{{ copy('External', '外部') }}</strong><b>{{ selected.externalReportArtifact.fileName }}</b><small>{{ roundLabel(selected.externalReportArtifact.round ?? selected.testRound) }} · v{{ selected.externalReportArtifact.version }} · {{ personnelDisplayName(selected.externalReportArtifact.createdBy) }} · {{ formatDisplayDate(selected.externalReportArtifact.createdAt) }}</small></div>
           <p v-if="!selected.internalReportArtifact || !selected.externalReportArtifact">{{ locale === 'en-US' ? 'Upload both Internal and External reports before entering Internal Review.' : 'Internal 和 External 两份报告均上传后才可进入 Internal Review。' }}</p>
           <button
             v-if="canWrite"
@@ -226,7 +243,7 @@ watch(accountId, () => emit('customer-change'))
         >{{ locale === 'en-US' ? 'Complete Test Preparation' : '完成 Test Preparation' }}</button>
 
         <button
-          v-if="canWrite && selectedIsPreparation && (view === 'overview' || view === 'preparation')"
+          v-if="canWrite && ((selectedIsPreparation && (view === 'overview' || view === 'preparation')) || (selected.status === 'Testing' && (view === 'overview' || view === 'execution')))"
           type="button"
           class="primary-button"
           :data-set-ddl="selected.id"
@@ -254,15 +271,32 @@ watch(accountId, () => emit('customer-change'))
           :disabled="processing === selected.id || internalReviewBlocked"
           @click="emit('status', selected.id, nextStatus!)"
         >{{ advanceLabel }}</button>
-        <p v-if="canWrite && internalReviewBlocked" class="action-hint" data-test-run-review-gate>{{ locale === 'en-US' ? 'Upload both Test Reports and complete a Test Run first.' : '请先上传 Internal 和 External Test Report以及完成Test Run。' }}</p>
+        <p v-if="canWrite && internalReviewBlocked" class="action-hint" data-test-run-review-gate>{{ internalReviewHint }}</p>
+        <section v-if="inCustomerReview" class="customer-report-card" data-customer-report-card>
+          <header><FileText :size="15" /><strong>{{ copy('Customer Report', 'Customer 报告') }}</strong><span>{{ roundLabel(selected.testRound) }}</span></header>
+          <div v-if="selected.customerReportArtifact" class="report-file"><b>{{ selected.customerReportArtifact.fileName }}</b><small>v{{ selected.customerReportArtifact.version }} · {{ personnelDisplayName(selected.customerReportArtifact.createdBy) }} · {{ formatDisplayDate(selected.customerReportArtifact.createdAt) }}</small></div>
+          <p v-else>{{ copy('No customer report uploaded for this round yet.', '本轮尚未上传 Customer 报告。') }}</p>
+          <button
+            v-if="canWrite"
+            type="button"
+            class="secondary-button"
+            :data-customer-report-action="selected.id"
+            :disabled="processing === selected.id"
+            @click="emit('customer-report', selected)"
+          >
+            <FileText :size="14" />{{ copy('Upload Customer Report', '上传 Customer Report') }}
+          </button>
+        </section>
         <button
-          v-if="canWrite && !['Accepted', 'Rejected'].includes(selected.status)"
+          v-if="canWrite && inCustomerReview && canRetestEvaluation(selected.status)"
           type="button"
-          class="danger-button"
-          data-reject-evaluation
+          class="secondary-button"
+          :data-retest-evaluation="selected.id"
           :disabled="processing === selected.id"
-          @click="emit('status', selected.id, 'Rejected')"
-        >{{ locale === 'en-US' ? 'Reject Demo' : 'Reject Demo' }}</button>
+          @click="emit('retest', selected)"
+        >
+          <History :size="14" />{{ copy('Retest', '申请 Retest') }}
+        </button>
         <div class="owner-note">
           <FlaskConical :size="14" />
           <span>{{ locale === 'en-US' ? 'Only the current owner can act here. Open the detail view for full test information.' : '操作区域只保留当前负责人可执行动作；详细测试信息请进入内页。' }}</span>
@@ -286,7 +320,7 @@ watch(accountId, () => emit('customer-change'))
 <style scoped>
 .evaluation-workspace{display:grid;grid-template-columns:minmax(0,1fr) 248px;gap:14px;align-items:start}.workspace-main{min-width:0;display:grid;gap:12px}.toolbar{display:flex;align-items:center;gap:10px;padding:11px;background:#fff;border:1px solid var(--crm-line);border-radius:12px}.toolbar-search{display:flex;min-width:240px;flex:1;align-items:center;gap:7px;height:36px;padding:0 11px;color:var(--crm-text-muted);background:var(--crm-surface);border:1px solid var(--crm-line);border-radius:8px}.toolbar-search input{min-width:0;flex:1;background:transparent;border:0;outline:0;font:inherit;font-size:12px}.toolbar label{display:flex;align-items:center;gap:7px;color:var(--crm-text-muted);font-size:11px;font-weight:700}.toolbar select{height:36px;padding:0 9px;background:#fff;border:1px solid var(--crm-line-strong);border-radius:8px;font:inherit;font-size:11px}.row-count{flex:none;color:var(--crm-text-muted);font-size:11px;font-weight:700}.evaluation-table-wrap{overflow:auto;background:#fff;border:1px solid var(--crm-line);border-radius:12px}.evaluation-table{width:100%;min-width:870px;border-collapse:collapse}.evaluation-table th,.evaluation-table td{padding:13px 12px;border-bottom:1px solid var(--crm-line);font-size:11px;text-align:left}.evaluation-table th{color:var(--crm-text-muted);background:#faf8f5;font-size:10px;letter-spacing:.02em}.evaluation-table tbody tr{cursor:pointer;transition:background .15s ease}.evaluation-table tbody tr:hover,.evaluation-table tr.selected{background:#fff8ed}.evaluation-table tr.selected{box-shadow:inset 3px 0 0 var(--crm-teal)}.evaluation-table td:first-child{min-width:190px}.evaluation-table td b,.evaluation-table td strong{display:block}.evaluation-table td b{margin-bottom:4px;color:var(--crm-teal);font-size:11px}.evaluation-table td strong{color:var(--crm-link);font-size:12px}.detail-link{display:grid;width:30px;height:30px;place-items:center;color:var(--crm-teal);background:#fff;border:1px solid var(--crm-line);border-radius:7px;cursor:pointer}.empty-copy{padding:42px;color:var(--crm-text-muted);text-align:center}.action-panel{position:sticky;top:16px;display:grid;align-content:start;gap:10px;padding:16px;background:#fff;border:1px solid var(--crm-line);border-radius:12px}.panel-kicker{display:flex;align-items:center;gap:7px;color:var(--crm-teal);font-size:11px;font-weight:800}.action-panel>b{color:var(--crm-teal);font-size:12px}.action-panel h2{margin:0;color:var(--crm-navy);font-size:15px;line-height:1.4}.action-panel>p{margin:0;color:var(--crm-text-muted);font-size:11px;line-height:1.5}.action-panel dl{display:grid;margin:2px 0}.action-panel dl div{display:flex;justify-content:space-between;gap:8px;padding:8px 0;border-bottom:1px solid var(--crm-line);font-size:10px}.action-panel dt{color:var(--crm-text-muted)}.action-panel dd{margin:0;font-weight:700;text-align:right}.owner-note{display:flex;align-items:flex-start;gap:7px;margin-top:2px;padding:10px;color:var(--crm-text-muted);background:var(--crm-surface);border-radius:8px;font-size:10px;line-height:1.5}.owner-note svg{flex:none;color:var(--crm-teal)}@media(max-width:1000px){.evaluation-workspace{grid-template-columns:1fr}.action-panel{position:static}.toolbar{align-items:stretch;flex-wrap:wrap}.toolbar-search{min-width:100%}}
 .evaluation-link{display:grid;gap:4px;padding:0;color:inherit;background:transparent;border:0;font:inherit;text-align:left;cursor:pointer}.evaluation-link:hover strong{color:var(--crm-link-hover);text-decoration:none}
-.test-report-card{display:grid;gap:8px;padding:11px;background:var(--crm-surface);border:1px solid var(--crm-line);border-radius:9px}.test-report-card header{display:flex;align-items:center;gap:6px;color:var(--crm-navy)}.test-report-card header span{margin-left:auto;color:var(--crm-teal);font-size:9px;font-weight:800}.report-file{display:grid;grid-template-columns:55px minmax(0,1fr);gap:3px 7px;padding:7px;background:#fff;border:1px solid var(--crm-line);border-radius:7px}.report-file strong{grid-row:1/3;color:var(--crm-teal);font-size:8px}.report-file b{overflow:hidden;color:var(--crm-navy);font-size:10px;text-overflow:ellipsis;white-space:nowrap}.report-file small{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.test-report-card small,.test-report-card p{margin:0;color:var(--crm-text-muted);font-size:9px;line-height:1.5}.test-report-card .primary-button,.test-report-card .secondary-button{width:100%}
+.test-report-card,.customer-report-card{display:grid;gap:8px;padding:11px;background:var(--crm-surface);border:1px solid var(--crm-line);border-radius:9px}.test-report-card header,.customer-report-card header{display:flex;align-items:center;gap:6px;color:var(--crm-navy)}.test-report-card header span,.customer-report-card header span{margin-left:auto;color:var(--crm-teal);font-size:9px;font-weight:800}.report-file{display:grid;grid-template-columns:55px minmax(0,1fr);gap:3px 7px;padding:7px;background:#fff;border:1px solid var(--crm-line);border-radius:7px}.report-file strong{grid-row:1/3;color:var(--crm-teal);font-size:8px}.report-file b{overflow:hidden;color:var(--crm-navy);font-size:10px;text-overflow:ellipsis;white-space:nowrap}.report-file small{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.test-report-card small,.test-report-card p,.customer-report-card small,.customer-report-card p{margin:0;color:var(--crm-text-muted);font-size:9px;line-height:1.5}.test-report-card .primary-button,.test-report-card .secondary-button,.customer-report-card .secondary-button{width:100%}
 .evaluation-history{display:grid;gap:8px;padding:10px 0;border-top:1px solid var(--crm-line);border-bottom:1px solid var(--crm-line)}.evaluation-history header{display:flex;align-items:center;gap:6px;color:var(--crm-navy);font-size:10px}.evaluation-history ol{display:grid;gap:8px;margin:0;padding:0;list-style:none}.evaluation-history li{display:grid;gap:2px}.evaluation-history li span{color:var(--crm-teal);font-size:8px;font-weight:800}.evaluation-history li strong{font-size:9px;line-height:1.4}.evaluation-history li small{color:var(--crm-text-muted);font-size:8px}
 @media(max-width:839px){.toolbar{display:grid;grid-template-columns:minmax(0,1fr) auto}.toolbar-search{grid-column:1/-1;min-width:0}.row-count{align-self:center}.evaluation-table-wrap{overflow:visible;background:transparent;border:0}.evaluation-table{min-width:0;border-collapse:separate}.evaluation-table thead{display:none}.evaluation-table tbody{display:grid;gap:10px}.evaluation-table tr{display:grid;overflow:hidden;background:#fff;border:1px solid var(--crm-line);border-radius:11px}.evaluation-table tbody tr:hover,.evaluation-table tr.selected{background:#fff}.evaluation-table tr.selected{border-color:var(--crm-teal);box-shadow:inset 3px 0 0 var(--crm-teal)}.evaluation-table td,.evaluation-table td:first-child{display:grid;min-width:0;grid-template-columns:104px minmax(0,1fr);align-items:center;gap:10px;padding:9px 12px;font-size:12px}.evaluation-table td::before{grid-column:1;content:attr(data-label);color:var(--crm-text-muted);font-size:10px;font-weight:800}.evaluation-table td>*{grid-column:2}.evaluation-link{min-width:0}.evaluation-link strong{overflow-wrap:anywhere}.action-panel{padding:14px}}
 @media(max-width:480px){.toolbar{grid-template-columns:1fr}.toolbar label{justify-content:space-between}.toolbar select{min-width:0;max-width:65%}.row-count{justify-self:start}.evaluation-table td,.evaluation-table td:first-child{grid-template-columns:88px minmax(0,1fr)}}

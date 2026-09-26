@@ -209,7 +209,7 @@ def _actions_for_opportunity(opportunity_id: str) -> list[dict[str, Any]]:
     rows = frappe.get_all(
         "CRM Opportunity Action",
         filters={"opportunity": opportunity_id, "archived": 0},
-        fields=["name", "title", "action_owner", "due", "status"],
+        fields=["name", "title", "action_owner", "due", "status", "remark"],
         order_by="creation asc",
     )
     return [{
@@ -218,6 +218,7 @@ def _actions_for_opportunity(opportunity_id: str) -> list[dict[str, Any]]:
         "owner": row.action_owner,
         "due": str(row.due or ""),
         "status": row.status,
+        "remark": row.remark or "",
     } for row in rows]
 
 
@@ -629,6 +630,14 @@ def delete_opportunity_stakeholder(opportunity_id: str, stakeholder_id: str) -> 
     return {"id": stakeholder_id}
 
 
+def _action_remark(value: Any) -> str:
+    if value is None:
+        return ""
+    if not isinstance(value, str) or len(value) > 10000:
+        raise CrmApiException("VALIDATION_ERROR", "Remark must be text of at most 10000 characters.")
+    return value.strip()
+
+
 def _validate_action(payload: dict[str, Any], opportunity) -> dict[str, Any]:
     due = optional_date(payload.get("due"), "due")
     if not due:
@@ -643,13 +652,14 @@ def _validate_action(payload: dict[str, Any], opportunity) -> dict[str, Any]:
         "action_owner": action_owner,
         "due": due,
         "status": validate_choice(payload.get("status"), "status", ACTION_STATUSES),
+        "remark": _action_remark(payload.get("remark")),
     }
 
 
 def _serialize_action(doc) -> dict[str, Any]:
     return {
         "id": doc.name, "title": doc.title, "owner": doc.action_owner,
-        "due": str(doc.due or ""), "status": doc.status,
+        "due": str(doc.due or ""), "status": doc.status, "remark": doc.remark or "",
     }
 
 
@@ -685,6 +695,7 @@ def update_opportunity_action(opportunity_id: str, action_id: str, payload: dict
     opportunity = _require_opportunity(opportunity_id)
     doc = _lock_relation("CRM Opportunity Action", action_id, opportunity_id, "ACTION_NOT_FOUND")
     before = _serialize_action(doc)
+    payload = {"remark": doc.remark or "", **payload}
     savepoint = f"crm_opportunity_action_update_{frappe.generate_hash(length=8)}"
     frappe.db.savepoint(savepoint)
     try:

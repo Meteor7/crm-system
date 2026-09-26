@@ -3,14 +3,16 @@ import { meetingParseMessage } from '@/features/visits/meeting-messages'
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { ArrowLeft, Download, FileUp, Pencil, Save, X } from '@lucide/vue'
 import { useRoute } from 'vue-router'
-import { api as defaultApi, type CrmApi } from '@/api'
+import { api as defaultApi, CrmApiError, type CrmApi } from '@/api'
 import { mapRequestError } from '@/api/request-state'
 import { downloadBlob } from '@/features/shared/download-blob'
 import { personnelDisplayName } from '@/demo/personnel'
 import { formatDisplayDate } from '@/domain/time'
+import { canChangeVisit } from '@/domain/visits'
 import { useI18n, useLocaleMessage } from '@/i18n'
 import { useAppStore } from '@/stores/app'
-import type { MeetingRecordParseStatus, VisitDetailDto, VisitMeetingRecordInput, VisitStatus } from '@/types/crm'
+import type { AccountSummaryDto, MeetingRecordParseStatus, UpdateVisitInput, VisitDetailDto, VisitMeetingRecordInput, VisitStatus } from '@/types/crm'
+import VisitModal from '@/features/visits/VisitModal.vue'
 import DataState from '@/design-system/DataState.vue'
 import PageHeader from '@/design-system/PageHeader.vue'
 import SectionCard from '@/design-system/SectionCard.vue'
@@ -18,7 +20,7 @@ import StatusBadge from '@/design-system/StatusBadge.vue'
 import { meetingRecordParseLabel, salesEnumLabel } from '@/features/shared/sales-i18n'
 
 const props = withDefaults(defineProps<{ apiClient?: CrmApi }>(), { apiClient: () => defaultApi })
-const { locale, t } = useI18n()
+const { locale, message, t } = useI18n()
 const route = useRoute()
 const app = useAppStore()
 const detail = ref<VisitDetailDto | null>(null)
@@ -26,11 +28,18 @@ const loading = ref(true), busy = ref(false), error = useLocaleMessage(), reques
 const form = reactive<VisitMeetingRecordInput>({ meetingStart: '', meetingEnd: '', purpose: '', attendees: '', agenda: '', summary: '', conclusion: '', followup: '' })
 const visitId = computed(() => typeof route.params.visitId === 'string' ? route.params.visitId : '')
 const canWrite = computed(() => app.can('visit:write'))
+const editVisit = ref(false)
+const visitError = useLocaleMessage(), visitRequestId = ref(''), visitConflict = ref(false)
+// The edit modal never shows the account picker, so it needs no account list.
+const noAccounts: AccountSummaryDto[] = []
+// Rescheduling and the meeting record both change the visit, which stays with its owner and
+// the Managers; an action owner reading a colleague's visit only completes that action.
+const canEditVisit = computed(() => canWrite.value && !!detail.value && canChangeVisit(detail.value, app.bootstrap?.user))
 const parseTone: Record<MeetingRecordParseStatus, 'positive' | 'warning' | 'neutral' | 'danger'> = { Parsed: 'positive', NeedsManualReview: 'warning', ArchiveOnly: 'neutral', Failed: 'danger' }
-const visitStatusLabel: Record<VisitStatus, string> = { Planned: '待提交拜访记录', Visited: '已完成', 'Minutes Submitted': '拜访记录已提交', 'Manager Reviewed': '管理者已审核' }
+const visitStatusLabel: Record<VisitStatus, string> = { Planned: '待拜访', Visited: '已拜访', 'Minutes Submitted': '待经理审核', 'Manager Reviewed': '拜访完成' }
 function statusText(status: VisitStatus) {
   if (locale.value !== 'en-US') return visitStatusLabel[status]
-  return ({ Planned: 'Minutes pending', Visited: 'Completed', 'Minutes Submitted': 'Minutes submitted', 'Manager Reviewed': 'Manager reviewed' } as Record<VisitStatus, string>)[status]
+  return ({ Planned: 'To visit', Visited: 'Visited', 'Minutes Submitted': 'Awaiting manager review', 'Manager Reviewed': 'Visit completed' } as Record<VisitStatus, string>)[status]
 }
 function parseText(status: MeetingRecordParseStatus) {
   return meetingRecordParseLabel(status, locale.value)
@@ -42,10 +51,10 @@ function fillForm() {
   Object.assign(form, record ? { meetingStart: record.meetingStart, meetingEnd: record.meetingEnd, purpose: record.purpose, attendees: record.attendees, agenda: record.agenda, summary: record.summary, conclusion: record.conclusion, followup: record.followup } : { meetingStart: '', meetingEnd: '', purpose: detail.value?.objective ?? '', attendees: '', agenda: '', summary: '', conclusion: '', followup: '' })
 }
 
-async function load() {
+async function load(): Promise<boolean> {
   loading.value = true; error.value = ''
-  try { detail.value = (await props.apiClient.getVisitDetail(visitId.value)).data; fillForm() }
-  catch (reason) { const mapped = mapRequestError(reason); error.value = mapped.localizedMessage ?? mapped.message; requestId.value = mapped.requestId }
+  try { detail.value = (await props.apiClient.getVisitDetail(visitId.value)).data; fillForm(); return true }
+  catch (reason) { const mapped = mapRequestError(reason); error.value = mapped.localizedMessage ?? mapped.message; requestId.value = mapped.requestId; return false }
   finally { loading.value = false }
 }
 
@@ -57,6 +66,39 @@ async function save() {
     await load()
   } catch (reason) { const mapped = mapRequestError(reason); error.value = mapped.localizedMessage ?? mapped.message; requestId.value = mapped.requestId }
   finally { busy.value = false }
+}
+
+async function saveVisit(payload: UpdateVisitInput) {
+  busy.value = true; clearVisitEditError()
+  try {
+    await props.apiClient.updateVisit(visitId.value, payload, detail.value?.modified)
+    closeVisitEdit()
+    await load()
+  } catch (reason) {
+    const mapped = mapRequestError(reason)
+    // Reloading here would refill the editor from the server and throw away what the user
+    // just typed, so the draft stays until they ask for the latest version.
+    visitConflict.value = reason instanceof CrmApiError && reason.code === 'VERSION_CONFLICT'
+    visitError.value = visitConflict.value ? message('visitModal.versionConflict') : mapped.localizedMessage ?? mapped.message
+    visitRequestId.value = mapped.requestId
+  }
+  finally { busy.value = false }
+}
+
+function clearVisitEditError() { visitError.value = ''; visitRequestId.value = ''; visitConflict.value = false }
+
+function closeVisitEdit() {
+  const stale = visitConflict.value
+  editVisit.value = false
+  clearVisitEditError()
+  // After a conflict the version token is stale, so every later save would fail the same way.
+  if (stale) void load()
+}
+
+// Discards the draft on purpose: it is the way out of a stale version token.
+async function reloadVisit() {
+  if (await load()) clearVisitEditError()
+  else { visitError.value = error.value; visitRequestId.value = requestId.value }
 }
 
 async function upload(event: Event) {
@@ -89,7 +131,9 @@ watch(visitId, () => { void load() })
     <p v-if="error" class="form-error">{{ error }}<small v-if="requestId">{{ locale === 'en-US' ? 'Request ID' : '请求编号' }} {{ requestId }}</small></p>
     <DataState v-if="loading" type="loading" />
     <template v-else-if="detail">
-      <PageHeader eyebrow="VISIT RECORD" :title="detail.subject" :description="`${detail.accountName} · ${formatDisplayDate(detail.date)} · ${salesEnumLabel(detail.type, locale)}`" />
+      <PageHeader eyebrow="VISIT RECORD" :title="detail.subject" :description="`${detail.accountName} · ${formatDisplayDate(detail.date)} · ${salesEnumLabel(detail.type, locale)}`">
+        <button v-if="canEditVisit && !editing" class="secondary-button" type="button" data-edit-visit :disabled="busy" @click="editVisit = true"><Pencil :size="13" />{{ t('detail.edit') }}</button>
+      </PageHeader>
 
       <section class="visit-facts">
         <div><small>{{ t('detail.account') }}</small><strong>{{ detail.accountName }}</strong></div>
@@ -104,8 +148,8 @@ watch(visitId, () => { void load() })
             <template #action>
               <div class="record-actions">
                 <StatusBadge v-if="detail.meetingRecord" :label="parseText(detail.meetingRecord.parseStatus)" :tone="parseTone[detail.meetingRecord.parseStatus]" />
-                <label v-if="canWrite && !editing && detail.status !== 'Manager Reviewed'" class="secondary-button upload-record-button" :class="{ disabled: busy }"><FileUp :size="13" />{{ t('detail.uploadParsed') }}<input type="file" :disabled="busy" :aria-label="t('detail.uploadParsed')" @change="upload" /></label>
-                <button v-if="canWrite && !editing && detail.status !== 'Manager Reviewed'" class="secondary-button" type="button" @click="editing = true"><Pencil :size="13" />{{ detail.meetingRecord ? t('detail.editRecord') : t('detail.manualEntry') }}</button>
+                <label v-if="canEditVisit && !editing" class="secondary-button upload-record-button" :class="{ disabled: busy }"><FileUp :size="13" />{{ t('detail.uploadParsed') }}<input type="file" :disabled="busy" :aria-label="t('detail.uploadParsed')" @change="upload" /></label>
+                <button v-if="canEditVisit && !editing" class="secondary-button" type="button" data-edit-record @click="editing = true"><Pencil :size="13" />{{ detail.meetingRecord ? t('detail.editRecord') : t('detail.manualEntry') }}</button>
               </div>
             </template>
 
@@ -144,6 +188,7 @@ watch(visitId, () => { void load() })
           <SectionCard :title="t('detail.visitObjective')" eyebrow="OBJECTIVE"><p class="objective">{{ detail.objective }}</p></SectionCard>
         </aside>
       </div>
+      <VisitModal v-if="editVisit" mode="edit" :visit="detail" :accounts="noAccounts" :busy="busy" :error="visitError" :request-id="visitRequestId" :conflict="visitConflict" @close="closeVisitEdit" @reload="reloadVisit" @submit="saveVisit($event as UpdateVisitInput)" />
     </template>
   </div>
 </template>

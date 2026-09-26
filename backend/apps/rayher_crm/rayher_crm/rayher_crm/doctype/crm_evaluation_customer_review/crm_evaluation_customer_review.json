@@ -1,0 +1,31 @@
+{
+  "actions": [],
+  "autoname": "hash",
+  "creation": "2026-09-11 00:00:00.000000",
+  "doctype": "DocType",
+  "engine": "InnoDB",
+  "field_order": ["evaluation", "demo_request", "test_round", "comment", "author", "at"],
+  "fields": [
+    {"fieldname": "evaluation", "fieldtype": "Link", "label": "Evaluation", "options": "CRM Evaluation", "reqd": 1, "in_list_view": 1},
+    {"fieldname": "demo_request", "fieldtype": "Link", "label": "Demo Request", "options": "CRM Demo Request", "reqd": 1},
+    {"default": "1", "fieldname": "test_round", "fieldtype": "Int", "label": "Test Round", "reqd": 1, "in_list_view": 1},
+    {"fieldname": "comment", "fieldtype": "Small Text", "label": "Comment", "reqd": 1},
+    {"fieldname": "author", "fieldtype": "Link", "label": "Author", "options": "User", "reqd": 1},
+    {"fieldname": "at", "fieldtype": "Datetime", "label": "At", "reqd": 1}
+  ],
+  "index_web_pages_for_search": 0,
+  "modified": "2026-09-11 00:00:00.000000",
+  "modified_by": "Administrator",
+  "module": "Rayher CRM",
+  "name": "CRM Evaluation Customer Review",
+  "naming_rule": "Random",
+  "owner": "Administrator",
+  "permissions": [
+    {"read": 1, "role": "CRM Manager"},
+    {"read": 1, "role": "CRM Sales"},
+    {"read": 1, "role": "CRM Engineer"}
+  ],
+  "sort_field": "at",
+  "sort_order": "ASC",
+  "states": []
+}

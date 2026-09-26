@@ -16,7 +16,7 @@ withDefaults(defineProps<{
   showTimeline: true,
 })
 defineEmits<{ download: [id: string]; preview: [id: string] }>()
-const { locale } = useI18n()
+const { locale, t } = useI18n()
 const copy = (english: string, chinese: string) => locale.value === 'en-US' ? english : chinese
 const statusLabel = (status: string) => copy(status, ({ Requested: '已申请', 'Scope Confirmed': '范围已确认', 'Sample Received': '样品已收到', Scheduled: '已排期', Testing: '测试中', Analysis: '分析中', 'Internal Review': '内部评审', 'Customer Review': '客户评审', Accepted: '已接受', Rejected: '已拒绝', Pending: '待确认' } as Record<string, string>)[status] || status)
 </script>
@@ -77,10 +77,10 @@ const statusLabel = (status: string) => copy(status, ({ Requested: '已申请', 
        <header><h2>{{ copy('Demo Test', 'Demo 测试') }}</h2><span>{{ statusLabel(item.evaluation.status) }}</span></header>
       <div class="table-wrap">
         <table class="crm-table demo-table">
-           <thead><tr><th>{{ copy('Run', '运行') }}</th><th>{{ copy('Date', '日期') }}</th><th>{{ copy('Lot', '批次') }}</th><th>{{ copy('Wafers', '晶圆数') }}</th><th>{{ copy('Capture', '捕获率') }}</th><th>{{ copy('False Positive', '误报率') }}</th><th>WPH</th><th>{{ copy('Status', '状态') }}</th><th>{{ copy('Summary', '摘要') }}</th></tr></thead>
+           <thead><tr><th>{{ copy('Run', '运行') }}</th><th>{{ copy('Round', '轮次') }}</th><th>{{ copy('Date', '日期') }}</th><th>{{ copy('Lot', '批次') }}</th><th>{{ copy('Wafers', '晶圆数') }}</th><th>{{ copy('Capture', '捕获率') }}</th><th>{{ copy('False Positive', '误报率') }}</th><th>WPH</th><th>{{ copy('Status', '状态') }}</th><th>{{ copy('Summary', '摘要') }}</th></tr></thead>
           <tbody>
             <tr v-for="run in item.evaluation.runs" :key="run.id">
-              <td><strong>{{ run.id }}</strong></td><td>{{ formatDisplayDate(run.date) }}</td><td>{{ run.lot }}</td><td>{{ run.wafers }}</td>
+              <td><strong>{{ run.id }}</strong></td><td data-run-round>{{ t('customerComment.round', { round: run.round ?? 1 }) }}</td><td>{{ formatDisplayDate(run.date) }}</td><td>{{ run.lot }}</td><td>{{ run.wafers }}</td>
               <td>{{ run.capture ?? '—' }}</td><td>{{ run.falsePositive ?? '—' }}</td><td>{{ run.wph ?? '—' }}</td>
                <td>{{ statusLabel(run.status) }}</td><td>{{ run.summary || (locale === 'en-US' ? 'Pending analysis' : '待分析') }}</td>
             </tr>
@@ -91,6 +91,20 @@ const statusLabel = (status: string) => copy(status, ({ Requested: '已申请', 
 
     <DemoArticleCard :artifacts="item.artifacts || []" @preview="$emit('preview', $event)" @download="$emit('download', $event)" />
 
+    <section class="workspace-panel customer-comment-panel" data-customer-comment-log>
+      <header><h2>{{ t('customerComment.section') }}</h2><span class="workspace-badge info">{{ t('customerComment.round', { round: item.testRound ?? 1 }) }}</span></header>
+      <div class="workspace-panel-body">
+        <p v-if="!item.customerReviews?.length" class="empty-copy">{{ t('customerComment.empty') }}</p>
+        <ol v-else class="comment-log">
+          <li v-for="review in item.customerReviews" :key="review.id">
+            <span class="round-chip">{{ t('customerComment.round', { round: review.round }) }}</span>
+            <p>{{ review.comment }}</p>
+            <small>{{ personnelDisplayName(review.author) }} · {{ formatDisplayDate(review.createdAt) }}</small>
+          </li>
+        </ol>
+      </div>
+    </section>
+
     <section class="workspace-panel conclusion-panel">
        <header><h2>{{ copy('Demo Conclusion', 'Demo 结论') }}</h2><span class="workspace-badge info">{{ statusLabel(item.conclusion.status) }}</span></header>
       <div class="workspace-panel-body"><strong>{{ item.conclusion.summary || (locale === 'en-US' ? 'No formal conclusion' : '暂无正式结论') }}</strong></div>
@@ -100,4 +114,5 @@ const statusLabel = (status: string) => copy(status, ({ Requested: '已申请', 
 
 <style scoped>
 .demo-main{display:grid;gap:14px;min-width:0}.archive-overview h2{margin-top:4px;font-size:20px}.archive-overview-body{display:flex;flex-wrap:wrap;gap:10px 22px;padding:14px 16px;color:var(--crm-text-muted);font-size:12px}.archive-overview-body strong{color:var(--crm-navy)}.detail-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:1px;background:var(--crm-line)}.detail-grid>div{display:grid;gap:6px;padding:14px;background:#fff}.detail-grid small{color:var(--crm-text-muted);font-size:10px}.detail-grid strong{color:var(--crm-navy);font-size:11px;line-height:1.5}.request-wafers{display:grid;gap:7px;padding:14px 16px;border-top:1px solid var(--crm-line);font-size:11px}.request-wafers span{color:var(--crm-text-muted)}.archive-list{display:grid;gap:1px;background:var(--crm-line)}.archive-list button,.archive-list p{display:grid;gap:5px;margin:0;padding:13px 16px;border:0;background:#fff;text-align:left}.archive-list button{grid-template-columns:auto 1fr auto;align-items:center;color:var(--crm-teal);cursor:pointer}.archive-list button strong{color:var(--crm-navy);font-size:11px}.archive-list button span{color:var(--crm-text-muted);font-size:10px}.table-wrap{overflow:auto}.demo-table{min-width:650px}@media(max-width:720px){.detail-grid{grid-template-columns:1fr}.archive-list button{grid-template-columns:auto 1fr}.archive-list button span{grid-column:2}}
+.customer-comment-panel .comment-log{display:grid;gap:10px;margin:0;padding:0;list-style:none}.customer-comment-panel .comment-log li{display:grid;gap:4px;padding:10px 11px;background:var(--crm-surface);border:1px solid var(--crm-line);border-radius:9px}.customer-comment-panel .round-chip{width:max-content;padding:2px 6px;color:var(--crm-teal);background:var(--crm-teal-soft);border-radius:4px;font-size:8px;font-weight:800}.customer-comment-panel .comment-log p{margin:0;line-height:1.6}.customer-comment-panel .comment-log small{color:var(--crm-text-muted);font-size:9px}
 </style>

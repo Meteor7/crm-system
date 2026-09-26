@@ -34,9 +34,13 @@ export function isEvaluationPreparationComplete(evaluation: PreparationEvaluatio
 }
 
 export function hasCompletedTestRun(evaluation: {
-  runs: ReadonlyArray<Pick<EvaluationDto['runs'][number], 'status'>>
+  runs: ReadonlyArray<Pick<EvaluationDto['runs'][number], 'status'> & { round?: number }>
+  testRound?: number
 }): boolean {
-  return evaluation.runs.some((run) => run.status === 'Completed')
+  // A retest opens a new round; runs completed in earlier rounds are history and
+  // must not satisfy the Internal Review gate for the current round.
+  const currentRound = evaluation.testRound ?? 1
+  return evaluation.runs.some((run) => run.status === 'Completed' && (run.round ?? 1) === currentRound)
 }
 
 export function isIsoDate(value: string) {
@@ -55,11 +59,18 @@ export function evaluationGroup(status: EvaluationStatus): EvaluationGroup {
 }
 
 export function evaluationStatusOptions(current: EvaluationStatus): EvaluationStatus[] {
+  // Accepted is the single terminal state; Rejected only survives for records archived
+  // before Customer Review became a comment-only, outcome-free step.
   if (current === 'Accepted' || current === 'Rejected') return [current]
-  if (current === 'Analysis') return ['Analysis', 'Customer Review', 'Rejected']
+  // Customer Review either archives or sends the demo back for another test round.
+  if (current === 'Customer Review') return [current, 'Accepted', 'Testing']
+  if (current === 'Analysis') return [current, 'Customer Review']
   const index = activeFlow.indexOf(current)
-  const next: EvaluationStatus = current === 'Customer Review' ? 'Accepted' : activeFlow[index + 1]
-  return [current, next, 'Rejected']
+  return [current, activeFlow[index + 1]]
+}
+
+export function canRetestEvaluation(status: EvaluationStatus) {
+  return status === 'Customer Review'
 }
 
 export function canTransitionEvaluation(current: EvaluationStatus, next: EvaluationStatus) {

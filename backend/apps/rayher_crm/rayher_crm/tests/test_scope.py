@@ -384,6 +384,39 @@ class TestCrmScope(FrappeTestCase):
             "CRM Evaluation", "read", doc=self.foreign_evaluation, user=self.engineer,
         ))
 
+    def _create_customer_review(self, evaluation: str, demo_request: str, comment: str) -> str:
+        return frappe.get_doc({
+            "doctype": "CRM Evaluation Customer Review", "evaluation": evaluation,
+            "demo_request": demo_request, "test_round": 1, "comment": comment,
+            "author": self.sales, "at": frappe.utils.now_datetime(),
+        }).insert(ignore_permissions=True).name
+
+    def test_customer_review_scope_follows_the_parent_evaluation(self):
+        owned_review = self._create_customer_review(
+            self.owned_evaluation, self.owned_demo_request, "owned comment",
+        )
+        foreign_review = self._create_customer_review(
+            self.foreign_evaluation, self.foreign_demo_request, "foreign comment",
+        )
+        doctype = "CRM Evaluation Customer Review"
+
+        self.assertIn("`tabCRM Evaluation Customer Review`.`evaluation`", conditions_for_doctype(doctype, self.sales))
+        self.assertIn("`crm_demo_request`.`sales_owner`", conditions_for_doctype(doctype, self.sales))
+        self.assertIn("`tabCRM Evaluation`.`evaluation_owner`", conditions_for_doctype(doctype, self.engineer))
+
+        manager_names = self._visible_names(doctype, self.manager)
+        self.assertIn(owned_review, manager_names)
+        self.assertIn(foreign_review, manager_names)
+        for user in (self.sales, self.engineer):
+            names = self._visible_names(doctype, user)
+            self.assertIn(owned_review, names, user)
+            self.assertNotIn(foreign_review, names, user)
+            self.assertTrue(frappe.has_permission(doctype, "read", doc=owned_review, user=user))
+            self.assertFalse(frappe.has_permission(doctype, "read", doc=foreign_review, user=user))
+            # Record-keeping rows are never written by hand through the standard API.
+            self.assertFalse(frappe.has_permission(doctype, "write", doc=owned_review, user=user))
+            self.assertFalse(frappe.has_permission(doctype, "delete", doc=owned_review, user=user))
+
     def test_all_sales_child_scopes_include_the_private_parent_guard(self):
         for doctype in (
             "Lead",
@@ -392,6 +425,7 @@ class TestCrmScope(FrappeTestCase):
             "CRM Installed Tool",
             "CRM Demo Request",
             "CRM Evaluation",
+            "CRM Evaluation Customer Review",
             "CRM Demo Artifact",
             "CRM Visit",
             "CRM Quotation",

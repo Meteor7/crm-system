@@ -200,6 +200,7 @@ class TestRealSemiconductorFlow(FrappeTestCase):
             {"file_name": "瀚芯-CIS-Demo-Test-Report.txt", "mime_type": "text/plain", "content": b"Capture=96.8%; False Positive=1.1%; WPH=18.5; Result=Accepted"},
             {"file_name": "瀚芯-CIS-Customer-Test-Report.txt", "mime_type": "text/plain", "content": b"Capture=96.8%; False Positive=1.1%; WPH=18.5; Result=Accepted"},
             scanner=CleanScanner(),
+            expected_round=1,
         )
         evaluation = get_evaluation(evaluation["id"])
         evaluation = add_evaluation_run(evaluation["id"], {
@@ -209,7 +210,10 @@ class TestRealSemiconductorFlow(FrappeTestCase):
             "expectedModified": evaluation["modified"],
         })
         for status in ("Internal Review", "Customer Review", "Accepted"):
-            evaluation = update_evaluation_status(evaluation["id"], {"status": status}, evaluation["modified"])
+            command = {"status": status}
+            if status == "Accepted":
+                command["customerComment"] = "客户确认 12 片 CIS 晶圆达到验收指标"
+            evaluation = update_evaluation_status(evaluation["id"], command, evaluation["modified"])
         frappe.set_user(self.sales)
         self.assertEqual(get_strategy_opportunity(opportunity_id)["stage"], "预算审批")
         workflow = get_demo_workflow(request["id"])

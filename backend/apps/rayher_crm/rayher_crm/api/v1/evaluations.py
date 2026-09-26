@@ -69,7 +69,7 @@ def get_demo_workflow(id: str) -> dict:
 
 @frappe.whitelist(methods=["POST"])
 @api_endpoint
-def release_demo_test_report(id: str) -> dict:
+def release_demo_test_report(id: str, expectedRound: str | None = None) -> dict:
     internal = frappe.request.files.get("internalFile")
     external = frappe.request.files.get("externalFile")
     if internal is None or external is None:
@@ -83,4 +83,21 @@ def release_demo_test_report(id: str) -> dict:
             "content": upload.stream.read(demo_reports.MAX_FILE_BYTES + 1),
         }
 
-    return success_response(demo_reports.release_demo_test_report(id, part(internal), part(external)))
+    return success_response(
+        demo_reports.release_demo_test_report(id, part(internal), part(external), expected_round=expectedRound),
+    )
+
+
+@frappe.whitelist(methods=["POST"])
+@api_endpoint
+def upload_customer_report(id: str, expectedRound: str | None = None) -> dict:
+    upload = frappe.request.files.get("file")
+    if upload is None:
+        from rayher_crm.api.v1.errors import CrmApiException
+        raise CrmApiException("VALIDATION_ERROR", "A Customer Report file is required.")
+
+    return success_response(demo_reports.upload_customer_report(id, {
+        "file_name": upload.filename,
+        "mime_type": upload.mimetype,
+        "content": upload.stream.read(demo_reports.MAX_FILE_BYTES + 1),
+    }, expected_round=expectedRound))

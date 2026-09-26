@@ -232,7 +232,7 @@ try {
     $temporaryFiles += @($internalReportSource, $externalReportSource)
     [IO.File]::WriteAllText($internalReportSource, "metric,value`ncapture,96.5`n", [Text.UTF8Encoding]::new($false))
     [IO.File]::WriteAllText($externalReportSource, "metric,value`ncustomer_capture,96.5`n", [Text.UTF8Encoding]::new($false))
-    $released = Invoke-MultipartFiles $sessions.Manager 'rayher_crm.api.v1.evaluations.release_demo_test_report' @{id=$created.Evaluation} @(
+    $released = Invoke-MultipartFiles $sessions.Manager 'rayher_crm.api.v1.evaluations.release_demo_test_report' @{id=$created.Evaluation; expectedRound=1} @(
         @{Name='internalFile';Path=$internalReportSource;MimeType='text/csv'},
         @{Name='externalFile';Path=$externalReportSource;MimeType='text/csv'}
     )

@@ -278,6 +278,7 @@ try {
         Remove-TestChildren 'CRM Notification Event' 'recipient_user' $userId
     }
     Remove-TestChildren 'CRM Visit Meeting Record' 'visit' $created.Visit
+    Remove-TestChildren 'CRM Notification Event' 'source_name' $created.Visit
     Remove-TestDoc 'CRM Visit' $created.Visit
     Remove-TestDoc 'Contact' $created.Stakeholder
     Remove-OpportunityChildren $created.Opportunity

@@ -261,10 +261,13 @@ describe('delivery workflow pages', () => {
     )
   })
 
-  it('requires a confirmation reason before rejecting a Demo Test', async () => {
+  it('requires a customer comment before archiving or retesting a Demo Test', async () => {
     const repository = createDemoRepository(createMemoryDemoStorage(), seedDemoSnapshot)
     await repository.transact((snapshot) => {
-      snapshot.evaluations.find((item) => item.id === 'EVAL-103')!.modified = '2026-08-25T10:00:00.000000Z'
+      const evaluation = snapshot.evaluations.find((item) => item.id === 'EVAL-103')!
+      evaluation.status = 'Customer Review'
+      evaluation.reportStatus = 'Ready'
+      evaluation.modified = '2026-08-25T10:00:00.000000Z'
     })
     const api = createMockApi({ repository, latency: 0, role: 'Manager' })
     const updateStatus = vi.spyOn(api, 'updateEvaluationStatus')
@@ -272,21 +275,54 @@ describe('delivery workflow pages', () => {
     await flushPromises()
 
     await wrapper.get('[data-evaluation="EVAL-103"]').trigger('click')
-    await wrapper.get('[data-reject-evaluation]').trigger('click')
+    // Rejection is gone: Customer Review only records a comment.
+    expect(wrapper.find('[data-reject-evaluation]').exists()).toBe(false)
 
+    await wrapper.get('[data-advance-status="Accepted"]').trigger('click')
     expect(updateStatus).not.toHaveBeenCalled()
-    expect(wrapper.get('[aria-label="拒绝 Demo 测试"]').attributes('aria-modal')).toBe('true')
-    expect(wrapper.get('[data-modal-submit]').attributes('disabled')).toBeDefined()
+    expect(wrapper.get('[aria-label="记录 Customer Comment"]').attributes('aria-modal')).toBe('true')
+    expect(wrapper.get('[data-submit-customer-comment]').attributes('disabled')).toBeDefined()
 
-    await wrapper.get('[aria-label="Demo 拒绝原因"]').setValue('Test result does not meet acceptance criteria')
-    await wrapper.get('.modal-card form').trigger('submit')
+    await wrapper.get('[data-customer-comment-body]').setValue('客户认为误报率仍偏高，要求再测一轮')
+    await wrapper.get('[data-outcome-retest]').setValue()
+    await wrapper.get('[data-submit-customer-comment]').trigger('click')
     await flushPromises()
 
     expect(updateStatus).toHaveBeenCalledWith(
       'EVAL-103',
-      { status: 'Rejected', reason: 'Test result does not meet acceptance criteria' },
+      { status: 'Testing', customerComment: '客户认为误报率仍偏高，要求再测一轮' },
       '2026-08-25T10:00:00.000000Z',
     )
+  })
+
+  it('uploads a Customer Report from the Customer Review panel', async () => {
+    const repository = createDemoRepository(createMemoryDemoStorage(), seedDemoSnapshot)
+    await repository.transact((snapshot) => {
+      const evaluation = snapshot.evaluations.find((item) => item.id === 'EVAL-103')!
+      evaluation.status = 'Customer Review'
+      evaluation.reportStatus = 'Ready'
+    })
+    const api = createMockApi({ repository, latency: 0, role: 'Manager' })
+    const wrapper = mount(EvaluationsPage, { props: { apiClient: api }, global: await globals('/evaluations') })
+    await flushPromises()
+
+    await wrapper.get('[data-evaluation="EVAL-103"]').trigger('click')
+    await wrapper.get('[data-customer-report-action="EVAL-103"]').trigger('click')
+    expect(wrapper.get('[aria-label="上传 Customer 报告"]').attributes('aria-modal')).toBe('true')
+
+    const input = wrapper.get('[data-customer-report]')
+    const file = new File(['customer feedback'], 'customer-feedback.pptx', {
+      type: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+    })
+    Object.defineProperty(input.element, 'files', { value: [file], configurable: true })
+    await input.trigger('change')
+    await wrapper.get('[data-upload-customer-report]').trigger('click')
+    await flushPromises()
+
+    const snapshot = await repository.read()
+    expect(snapshot.artifacts.filter((item) => item.type === 'Customer Report')).toEqual([
+      expect.objectContaining({ fileName: '[Customer] customer-feedback.pptx', round: 1, version: 1 }),
+    ])
   })
 
   it('completes each preparation branch with the current Evaluation version', async () => {

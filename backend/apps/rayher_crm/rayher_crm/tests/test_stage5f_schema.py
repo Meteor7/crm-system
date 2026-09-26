@@ -37,10 +37,13 @@ class TestStage5FSchema(FrappeTestCase):
         self.assertTrue(artifact.get_field("private_file").unique)
         self.assertEqual(
             artifact.get_field("artifact_type").options,
-            "Demo Request DOCX\nTest Report",
+            "Demo Request DOCX\nTest Report\nCustomer Report",
         )
         self.assertEqual(artifact.get_field("visibility").options, "Internal\nCustomer Review")
         self.assertEqual(artifact.get_field("artifact_version").fieldtype, "Int")
+        self.assertEqual(artifact.get_field("test_round").fieldtype, "Int")
+        test_run = frappe.get_meta("CRM Test Run")
+        self.assertEqual((test_run.get_field("test_round").fieldtype, test_run.get_field("test_round").default), ("Int", "1"))
         self.assertEqual((artifact.get_field("created_by_user").fieldtype, artifact.get_field("created_by_user").options), ("Link", "User"))
         self.assertEqual(artifact.get_field("canonical_hash").fieldtype, "Data")
 

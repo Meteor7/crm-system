@@ -115,6 +115,14 @@ function notificationFor(method: keyof CrmApi, args: unknown[], data: unknown): 
         route: nodeRoute('/visits', id),
         ...recipientFor(text(result.owner, text(input.owner))),
       }
+    case 'updateVisit':
+      return {
+        category: 'Visit',
+        title: '拜访已更新',
+        message: `${text(result.subject, text(input.subject, id))} · ${text(result.owner, text(input.owner))}`,
+        route: nodeRoute('/visits', id),
+        ...recipientFor(text(result.owner, text(input.owner))),
+      }
     case 'reviewVisit':
       return {
         category: 'Visit',

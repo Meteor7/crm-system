@@ -2,7 +2,7 @@ import type { CrmApi, DashboardQuery } from './contracts'
 import { CrmApiError } from './contracts'
 import type { DemoArtifactUploadInput, MultipartFilePart } from './binary-transport'
 import { actions, contracts, requirements } from './mock-data'
-import type { ApiResponse, AccountSummaryDto, ContactDetailDto, ContactDto, ContactFileMetaDto, ContactListQuery, ContactSummaryDto, CreateAccountInput, CreateContactInput, CreateDemoRequestInput, CreateLeadInput, CreateStakeholderInput, CreateTestRunInput, CreateVisitInput, DemoRequestCommand, DemoRequestDto, EvaluationDto, EvaluationPreparationBranch, EvaluationStatusCommand, LeadConversionInput, LeadConversionResult, LeadDto, LeadListQuery, ListQuery, OpportunityDto, PersonnelRole, SiteDto, UpdateContactInput, UpdateLeadInput, UpdateStakeholderInput, UpsertBookingInput, UserRole, VisitDetailDto, VisitMeetingRecordDto, VisitMeetingRecordInput } from '@/types/crm'
+import type { ApiResponse, AccountSummaryDto, ContactDetailDto, ContactDto, ContactFileMetaDto, ContactListQuery, ContactSummaryDto, CreateAccountInput, CreateContactInput, CreateDemoRequestInput, CreateLeadInput, CreateStakeholderInput, CreateTestRunInput, CreateVisitInput, DemoRequestCommand, DemoRequestDto, EvaluationDto, EvaluationPreparationBranch, EvaluationStatusCommand, LeadConversionInput, LeadConversionResult, LeadDto, LeadListQuery, ListQuery, OpportunityDto, PersonnelRole, SiteDto, UpdateContactInput, UpdateLeadInput, UpdateStakeholderInput, UpdateVisitInput, UpsertBookingInput, UserRole, VisitDetailDto, VisitMeetingRecordDto, VisitMeetingRecordInput } from '@/types/crm'
 import type { AddInstalledToolServiceRecordInput, AddInstalledToolVersionRecordInput, ControlledDocumentAccessRequestDto, ControlledDocumentDto, DocumentUploadRequestDto, ConvertBookingToInstalledToolInput, CreateOpportunityActionInput, CreateOpportunityStakeholderInput, CreateStrategyOpportunityInput, DemoCommentDto, DemoWorkflowDto, InstalledToolDetailDto, InstalledToolDto, InstalledToolLifecycleHistoryDto, InstalledToolServiceHistoryDto, InstalledToolVersionHistoryDto, RollbackOpportunityStageInput, StrategyOpportunityDto, TransitionInstalledToolInput, UpdateInstalledToolInput, UpdateOpportunityActionInput, UpdateOpportunityStakeholderInput, UpdateStrategyOpportunityInput } from '@/types/workspaces'
 import { OPPORTUNITY_FORECASTS, STRATEGY_OPPORTUNITY_STAGES } from '@/types/workspaces'
 import { getContractRisk } from '@/domain/contracts'
@@ -10,7 +10,7 @@ import { shanghaiDate, shanghaiTimestamp } from '@/domain/time'
 import { buildManagementDashboard } from '@/domain/dashboard'
 import { canTransitionEvaluation, evaluationPreparationStatus, hasCompletedTestRun, isEvaluationPreparationComplete, isIsoDate } from '@/domain/evaluations'
 import { ROLE_PROFILES, assertAnyCapability, assertCapability } from '@/domain/permissions'
-import { validateCreateVisit } from '@/domain/visits'
+import { isVisitEditable, validateCreateVisit } from '@/domain/visits'
 import { validateReportingLine } from '@/domain/stakeholders'
 import { deriveDemoRequestSummary, getDemoRequestFormData, validateDemoRequestFormData } from '@/domain/demo-request-form'
 import { deriveDemoHealth, mapDemoLifecycleStage } from '@/domain/demo-lifecycle'
@@ -66,6 +66,15 @@ function validateContactFileUpload(file: MultipartFilePart) {
     throw new CrmApiError('VALIDATION_ERROR', '仅支持 PDF、Office 文档、TXT、CSV、PNG 和 JPG 文件', requestId(), false)
   }
 }
+
+// A retest opens a new round, so a report chosen in a window opened before the retest
+// belongs to the round the uploader saw, not to the round the Evaluation is on now.
+function assertExpectedRound(evaluation: EvaluationDto, expectedRound: number) {
+  if (expectedRound !== evaluation.testRound) {
+    throw new CrmApiError('CONFLICT', `该 Demo Test 已进入第 ${evaluation.testRound} 轮，请刷新后重新上传报告`, requestId(), false)
+  }
+}
+
 export function createMockApi(options: {
   repository?: DemoRepository
   latency?: number
@@ -387,6 +396,12 @@ export function createMockApi(options: {
     return false
   }
 
+  // Mirrors the backend `assert_can_change_visit`: an action owner reaches a colleague's
+  // visit only to complete that action, so editing it or writing its record is refused.
+  function assertCanChangeVisit(visit: { owner: string }) {
+    if (role === 'Sales' && visit.owner !== userId) throw new CrmApiError('SCOPE_DENIED', '只有拜访负责人或经理可以修改该拜访', requestId(), false)
+  }
+
   function canAccessRequirement(item: { accountId: string; owner: string }) {
     if (profile.scope === 'all') return true
     if (role === 'Sales') {
@@ -474,7 +489,7 @@ export function createMockApi(options: {
       && (artifact.createdBy === userId || request.salesOwner === userId)
     if (allowOwnedRequestDocx && ownedRequestDocx && role === 'Sales') return true
     if (!wasDemoRequestSubmitted(request)) return false
-    if (artifact.type === 'Test Report') return Boolean(evaluation)
+    if (artifact.type === 'Test Report' || artifact.type === 'Customer Report') return Boolean(evaluation)
     if (role === 'Manager') return true
     if (capabilities.includes('demo_request:engineering_review')) return true
     return false
@@ -623,7 +638,10 @@ export function createMockApi(options: {
     const index = actionId ? opportunity.actions.findIndex((item) => item.id === actionId) : -1
     if (actionId && index < 0) throw new CrmApiError('ACTION_NOT_FOUND', '未找到该 Action', requestId(), false)
     const id = actionId ?? nextId('ACT', localStrategyOpportunities.flatMap((item) => item.actions))
-    const action = { ...input, id, owner }
+    if (input.remark !== undefined && (typeof input.remark !== 'string' || input.remark.length > 10000)) {
+      throw new CrmApiError('VALIDATION_ERROR', 'Remark must be text of at most 10000 characters.', requestId(), false)
+    }
+    const action = { ...input, id, owner, remark: input.remark?.trim() ?? (index >= 0 ? opportunity.actions[index].remark ?? '' : '') }
     if (index >= 0) opportunity.actions[index] = action
     else opportunity.actions.push(action)
     opportunity.history.unshift({ at: historyAt, actor: userId, field: 'Action', from: index >= 0 ? 'Updated' : '', to: action.title })
@@ -1456,12 +1474,39 @@ export function createMockApi(options: {
       return response(localVisits[index])
     },
 
+    async updateVisit(id: string, input: UpdateVisitInput, expectedModified?: string) {
+      await wait()
+      assertCapability(capabilities, 'visit:write')
+      const index = localVisits.findIndex((item) => item.id === id)
+      if (index < 0) throw new CrmApiError('VISIT_NOT_FOUND', '未找到该拜访记录', requestId(), false)
+      const visit = localVisits[index]
+      if (!canAccessVisit(visit)) throw new CrmApiError('SCOPE_DENIED', '该拜访不在当前用户范围内', requestId(), false)
+      assertAccountScope(visit.accountId)
+      assertCanChangeVisit(visit)
+      if (!isVisitEditable(visit)) throw new CrmApiError('INVALID_TRANSITION', '经理已审核的拜访不能再编辑', requestId(), false)
+      if (expectedModified && visit.modified && expectedModified !== visit.modified) {
+        throw new CrmApiError('VERSION_CONFLICT', '拜访记录已被其他用户修改', requestId(), false)
+      }
+      try { validateCreateVisit({ ...input, accountId: visit.accountId }) } catch (error) {
+        throw new CrmApiError('VALIDATION_ERROR', error instanceof Error ? error.message : '拜访信息不完整', requestId(), false)
+      }
+      // Only a changed owner is re-validated: the backend lets any active Sales user stay owner.
+      const owner = input.owner === visit.owner ? visit.owner : validateOwner(input.owner, ['Sales'])
+      localVisits[index] = {
+        ...visit, subject: input.subject.trim(), date: input.date, type: input.type, owner,
+        objective: input.objective.trim(), modified: shanghaiTimestamp(),
+      }
+      salesRepository.save()
+      return response(localVisits[index])
+    },
+
     async submitVisitRecord(id: string, file: MultipartFilePart) {
       await wait()
       assertCapability(capabilities, 'visit:write')
       const visit = scoped(localVisits, canAccessVisit).find((item) => item.id === id)
-      if (visit?.status === 'Manager Reviewed') throw new CrmApiError('INVALID_TRANSITION', '\u5df2\u5ba1\u6838\u7684\u62dc\u8bbf\u8bb0\u5f55\u4e0d\u80fd\u518d\u4fee\u6539', requestId(), false)
+      if (visit && !isVisitEditable(visit)) throw new CrmApiError('INVALID_TRANSITION', '\u5df2\u5ba1\u6838\u7684\u62dc\u8bbf\u8bb0\u5f55\u4e0d\u80fd\u518d\u4fee\u6539', requestId(), false)
       if (!visit) throw new CrmApiError('VISIT_NOT_FOUND', '未找到该拜访记录', requestId(), false)
+      assertCanChangeVisit(visit)
       if (!file.fileName.trim() || !file.blob.size || file.blob.size > CONTACT_FILE_MAX_SIZE || /\.(exe|dll|bat|cmd|ps1|js|msi)$/i.test(file.fileName)) {
         throw new CrmApiError('VALIDATION_ERROR', '文件为空、过大或属于禁止上传的可执行文件', requestId(), false)
       }
@@ -1490,7 +1535,8 @@ export function createMockApi(options: {
         parseMessage: complete ? '会议记录解析成功' : parseable ? '部分字段未识别，请检查并补录' : '文件已归档，此格式需手动补录',
         parsedAt: shanghaiTimestamp(), manuallyCorrected: false, modified: shanghaiTimestamp(),
       })
-      if (visit.status === 'Visited') visit.status = 'Minutes Submitted'
+      // Mirrors the backend: a complete record submits the visit for Manager review.
+      if (complete && (visit.status === 'Planned' || visit.status === 'Visited')) visit.status = 'Minutes Submitted'
       visit.modified = shanghaiTimestamp()
       salesRepository.save()
       return this.getVisitDetail(id)
@@ -1500,8 +1546,9 @@ export function createMockApi(options: {
       await wait()
       assertCapability(capabilities, 'visit:write')
       const visit = scoped(localVisits, canAccessVisit).find((item) => item.id === id)
-      if (visit?.status === 'Manager Reviewed') throw new CrmApiError('INVALID_TRANSITION', '\u5df2\u5ba1\u6838\u7684\u62dc\u8bbf\u8bb0\u5f55\u4e0d\u80fd\u518d\u4fee\u6539', requestId(), false)
+      if (visit && !isVisitEditable(visit)) throw new CrmApiError('INVALID_TRANSITION', '\u5df2\u5ba1\u6838\u7684\u62dc\u8bbf\u8bb0\u5f55\u4e0d\u80fd\u518d\u4fee\u6539', requestId(), false)
       if (!visit) throw new CrmApiError('VISIT_NOT_FOUND', '未找到该拜访记录', requestId(), false)
+      assertCanChangeVisit(visit)
       const now = shanghaiTimestamp()
       const record: VisitMeetingRecordDto = {
         id: meetingRecords.get(id)?.id ?? `VIS-MTG-${id}`, visitId: id,
@@ -1511,7 +1558,9 @@ export function createMockApi(options: {
         manuallyCorrected: true, modified: now,
       }
       meetingRecords.set(id, record)
-      if (visit.status === 'Visited') visit.status = 'Minutes Submitted'
+      const complete = [record.purpose, record.attendees, record.agenda, record.summary, record.conclusion, record.followup]
+        .every((value) => value.trim())
+      if (complete && (visit.status === 'Planned' || visit.status === 'Visited')) visit.status = 'Minutes Submitted'
       visit.modified = now
       salesRepository.save()
       return response(record)
@@ -2206,7 +2255,7 @@ export function createMockApi(options: {
           segment: request.segment, title: request.title, status: 'Requested' as const, owner: request.engineerOwner, plannedEnd: request.estimatedCompletionDate || request.targetDate,
           testRunDeadline: '', wafers: 0, acceptance: 'Pending' as const,
           waferPreparationStatus: 'Pending' as const, testPreparationStatus: 'Pending' as const,
-          reportStatus: 'Not Ready' as const, reportVersion: 0,
+          reportStatus: 'Not Ready' as const, reportVersion: 0, testRound: 1,
           criteria: request.acceptanceCriteria, runs: [],
         }
          snapshot.evaluations.unshift(evaluation)
@@ -2278,11 +2327,16 @@ export function createMockApi(options: {
       if (!evaluation) throw new CrmApiError('EVALUATION_NOT_FOUND', '未找到 Evaluation', requestId(), false)
       assertEvaluationScope(snapshot.demoRequests, evaluation)
       if (!canTransitionEvaluation(evaluation.status, command.status)) throw new CrmApiError('INVALID_TRANSITION', `不能从 ${evaluation.status} 转为 ${command.status}`, requestId(), false)
-      if (evaluation.status === 'Testing' && command.status === 'Internal Review'
-        && (!hasCompletedTestRun(evaluation)
-          || !snapshot.artifacts.some((item) => item.id === evaluation.internalReportArtifactId && item.type === 'Test Report')
-          || !snapshot.artifacts.some((item) => item.id === evaluation.externalReportArtifactId && item.type === 'Test Report'))) {
-        throw new CrmApiError('INVALID_TRANSITION', '请先上传 Internal 和 External Test Report以及完成Test Run。', requestId(), false)
+      if (evaluation.status === 'Testing' && command.status === 'Internal Review') {
+        // Same order and meaning as the backend gate: the run check names the round,
+        // because earlier rounds' completed runs stay visible but no longer count.
+        if (!hasCompletedTestRun(evaluation)) {
+          throw new CrmApiError('INVALID_TRANSITION', `请先完成第 ${evaluation.testRound} 轮 Test Run，之前轮次的 Test Run 不计入。`, requestId(), false)
+        }
+        if (!snapshot.artifacts.some((item) => item.id === evaluation.internalReportArtifactId && item.type === 'Test Report')
+          || !snapshot.artifacts.some((item) => item.id === evaluation.externalReportArtifactId && item.type === 'Test Report')) {
+          throw new CrmApiError('INVALID_TRANSITION', '请先上传 Internal 和 External Test Report。', requestId(), false)
+        }
       }
       if (command.status === 'Customer Review') {
         if (evaluation.reportStatus !== 'Ready') {
@@ -2290,17 +2344,69 @@ export function createMockApi(options: {
         }
       }
       if (command.status === evaluation.status) return response(evaluation)
-      const rejectionReason = command.status === 'Rejected' ? command.reason?.trim() : ''
-      if (command.status === 'Rejected' && !rejectionReason) {
-        throw new CrmApiError('VALIDATION_ERROR', '请填写拒绝原因。', requestId(), false)
+      // Customer Review is a record-keeping step: both of its exits (archive and retest)
+      // must leave a comment behind, tagged with the round it was given for.
+      const leavingCustomerReview = evaluation.status === 'Customer Review'
+      const customerComment = leavingCustomerReview ? command.customerComment?.trim() ?? '' : ''
+      if (leavingCustomerReview && !customerComment) {
+        throw new CrmApiError('VALIDATION_ERROR', '请填写 Customer Comment。', requestId(), false)
       }
+      const isRetest = leavingCustomerReview && command.status === 'Testing'
       if (command.status === 'Accepted') {
         const request = snapshot.demoRequests.find((item) => item.id === evaluation.demoRequestId)
-        if (request?.opportunityId) advanceDemoOpportunity(request.opportunityId, 'evaluation_accepted')
+        // Mirrors the backend: archiving is the only way out of Customer Review, so only an
+        // Opportunity still at the Demo gate is advanced. One closed as Lost, or moved back
+        // after the Demo Request was converted, stays where it is instead of blocking it.
+        const [demoGate] = demoOpportunityTransitions.evaluation_accepted
+        if (request?.opportunityId && assertOpportunity(request.opportunityId).stage === demoGate) {
+          advanceDemoOpportunity(request.opportunityId, 'evaluation_accepted')
+        }
       }
       const previousStatus = evaluation.status
+      const commentedRound = evaluation.testRound
+      const previousDeadline = evaluation.testRunDeadline
+      if (customerComment) {
+        evaluation.customerReviews = [...(evaluation.customerReviews ?? []), {
+          id: `${evaluation.id}-CR-${(evaluation.customerReviews?.length ?? 0) + 1}`,
+          round: commentedRound,
+          comment: customerComment,
+          author: userId,
+          createdAt: shanghaiTimestamp(),
+        }]
+      }
+      if (isRetest) {
+        // A retest opens a fresh round. Previous artifacts are never touched — the round
+        // stamp is what keeps them apart — but the report gate has to close again so the
+        // new round cannot advance on the previous round's reports.
+        evaluation.testRound = commentedRound + 1
+        // The previous round's DDL is history too: kept, it would flag the new round
+        // as overdue and keep the deadline reminders firing.
+        evaluation.testRunDeadline = ''
+        evaluation.reportStatus = 'Not Ready'
+        evaluation.reportArtifactId = undefined
+        evaluation.reportArtifact = undefined
+        evaluation.internalReportArtifactId = undefined
+        evaluation.internalReportArtifact = undefined
+        evaluation.externalReportArtifactId = undefined
+        evaluation.externalReportArtifact = undefined
+        evaluation.customerReportArtifactId = undefined
+        evaluation.customerReportArtifact = undefined
+      }
       evaluation.status = command.status
       evaluation.acceptance = command.status === 'Accepted' || command.status === 'Rejected' ? command.status : 'Pending'
+      if (isRetest && previousDeadline) {
+        // Mirror set_evaluation_test_run_deadline: a deadline change always leaves a
+        // Deadline row, so the cleared round DDL stays traceable in the history.
+        evaluation.history = [{
+          id: `${evaluation.id}-H-${(evaluation.history?.length ?? 0) + 1}`,
+          actor: userId,
+          at: shanghaiTimestamp(),
+          eventType: 'Deadline',
+          from: previousDeadline,
+          to: '',
+          summary: `Cleared round ${commentedRound} Test Run deadline for retest`,
+        }, ...(evaluation.history ?? [])]
+      }
       evaluation.history = [{
         id: `${evaluation.id}-H-${(evaluation.history?.length ?? 0) + 1}`,
         actor: userId,
@@ -2308,11 +2414,15 @@ export function createMockApi(options: {
         eventType: 'Status',
         from: previousStatus,
         to: command.status,
-        summary: command.status === 'Rejected' ? `Demo Test rejected: ${rejectionReason}` : `Demo Test moved to ${command.status}`,
+        summary: isRetest
+          ? `Demo Test retest requested, round ${evaluation.testRound}: ${customerComment}`
+          : command.status === 'Accepted' && customerComment
+            ? `Demo Test archived with customer comment: ${customerComment}`
+            : `Demo Test moved to ${command.status}`,
       }, ...(evaluation.history ?? [])]
       markProgress(
         snapshot.demoRequests.find((item) => item.id === evaluation.demoRequestId),
-        command.status === 'Rejected' ? `Demo Test rejected: ${rejectionReason}` : `Demo Test 推进至 ${command.status}`,
+        isRetest ? `Demo Test 第 ${evaluation.testRound} 轮重测` : `Demo Test 推进至 ${command.status}`,
       )
       return response(evaluation)
       })
@@ -2342,7 +2452,7 @@ export function createMockApi(options: {
       if (completeMetrics && !input.summary.trim()) throw new CrmApiError('VALIDATION_ERROR', '完成 Test Run 时结果摘要不能为空', requestId(), false)
       const nextRunNumber = Math.max(0, ...evaluation.runs.map((run) => Number(run.id.match(/-R(\d+)$/)?.[1] ?? 0))) + 1
       const runId = `${evaluation.id}-R${String(nextRunNumber).padStart(2, '0')}`
-      evaluation.runs.push({ ...input, id: runId, summary: input.summary.trim(), status: completeMetrics ? 'Completed' : 'Planned' })
+      evaluation.runs.push({ ...input, id: runId, round: evaluation.testRound, summary: input.summary.trim(), status: completeMetrics ? 'Completed' : 'Planned' })
       evaluation.wafers = evaluation.runs.reduce((sum, run) => sum + run.wafers, 0)
       const request = snapshot.demoRequests.find((item) => item.id === evaluation.demoRequestId)
       if (request) markProgress(request, `${completeMetrics ? '完成' : '创建'} Test Run ${runId}`)
@@ -2442,13 +2552,14 @@ export function createMockApi(options: {
         if (evaluation.status !== 'Testing') {
           throw new CrmApiError('INVALID_REPORT_STAGE', '测试报告只能在 Testing 阶段上传', requestId(), false)
         }
+        assertExpectedRound(evaluation, input.expectedRound)
         const version = Math.max(evaluation.reportVersion, ...snapshot.artifacts
           .filter((item) => item.evaluationId === evaluation.id && item.type === 'Test Report')
           .map((item) => item.version), 0) + 1
         const createReport = (file: MultipartFilePart, label: 'Internal' | 'External', visibility: 'Internal' | 'Customer Review'): StoredDemoArtifact => ({
           id: nextId('ART', snapshot.artifacts), demoRequestId: request.id, evaluationId: evaluation.id,
           type: 'Test Report', fileName: `[${label}] ${file.fileName.trim().replace(/^\[(?:External|Internal)\]\s+/i, '')}`,
-          mimeType: file.mimeType || 'application/pdf', blob: file.blob, version, createdBy: userId, createdAt: now, visibility,
+          mimeType: file.mimeType || 'application/pdf', blob: file.blob, version, round: evaluation.testRound, createdBy: userId, createdAt: now, visibility,
         })
         const internal = createReport(input.internalFile, 'Internal', 'Internal')
         snapshot.artifacts.push(internal)
@@ -2466,8 +2577,42 @@ export function createMockApi(options: {
           externalReportArtifact,
           reportVersion: version,
         })
-        markProgress(request, `上传 Test Report v${version}`)
+        markProgress(request, `上传第 ${evaluation.testRound} 轮 Test Report v${version}`)
         return response({ internalReportArtifact, externalReportArtifact, version })
+      })
+    },
+
+    async uploadCustomerReport(id, input) {
+      await wait()
+      return repository.transact((snapshot) => {
+        assertCapability(capabilities, 'evaluation:write')
+        const evaluation = snapshot.evaluations.find((item) => item.id === id)
+        if (!evaluation) throw new CrmApiError('EVALUATION_NOT_FOUND', '未找到 Evaluation', requestId(), false)
+        assertEvaluationScope(snapshot.demoRequests, evaluation)
+        const request = snapshot.demoRequests.find((item) => item.id === evaluation.demoRequestId)
+        if (!request) throw new CrmApiError('DEMO_REQUEST_NOT_FOUND', '未找到关联 Demo Request', requestId(), false)
+        const file = input.file
+        if (!file.fileName.trim() || file.blob.size === 0) throw new CrmApiError('VALIDATION_ERROR', 'Customer 报告不能为空', requestId(), false)
+        if (file.size > 100 * 1024 * 1024) throw new CrmApiError('VALIDATION_ERROR', '报告文件不能超过 100 MiB', requestId(), false)
+        if (evaluation.status !== 'Customer Review') {
+          throw new CrmApiError('INVALID_REPORT_STAGE', 'Customer 报告只能在 Customer Review 阶段上传', requestId(), false)
+        }
+        assertExpectedRound(evaluation, input.expectedRound)
+        const version = Math.max(...snapshot.artifacts
+          .filter((item) => item.evaluationId === evaluation.id && item.type === 'Customer Report')
+          .map((item) => item.version), 0) + 1
+        const artifact: StoredDemoArtifact = {
+          id: nextId('ART', snapshot.artifacts), demoRequestId: request.id, evaluationId: evaluation.id,
+          type: 'Customer Report', fileName: `[Customer] ${file.fileName.trim().replace(/^\[Customer\]\s+/i, '')}`,
+          mimeType: file.mimeType || 'application/pdf', blob: file.blob, version, round: evaluation.testRound,
+          createdBy: userId, createdAt: now, visibility: 'Customer Review',
+        }
+        snapshot.artifacts.push(artifact)
+        const { blob: _blob, ...meta } = artifact
+        evaluation.customerReportArtifactId = artifact.id
+        evaluation.customerReportArtifact = meta
+        markProgress(request, `上传第 ${evaluation.testRound} 轮 Customer Report v${version}`)
+        return response({ artifact: meta, round: evaluation.testRound, version })
       })
     },
 
@@ -2707,7 +2852,8 @@ export function createMockApi(options: {
           const artifacts = snapshot.artifacts
             .filter((artifact) => artifact.demoRequestId === request.id)
             .filter((artifact) => canReadDemoArtifact(request, evaluation, artifact))
-            .map(({ id, type, fileName, version, createdAt }) => ({ id, type, fileName, version, createdAt }))
+            .map(({ id, type, fileName, mimeType, version, round, createdBy, createdAt, visibility }) =>
+            ({ id, type, fileName, mimeType, version, round, createdBy, createdAt, visibility }))
           const requestSnapshot: NonNullable<DemoWorkflowDto['request']> = {
             objective: request.objective,
             requestedEquipment: request.requestedEquipment,
@@ -2846,10 +2992,16 @@ export function createMockApi(options: {
             artifacts,
             conclusion: {
               status: evaluation?.acceptance === 'Accepted' ? 'Accepted' : evaluation?.acceptance === 'Rejected' ? 'Rejected' : 'Pending',
+              // Customer comments are customer-facing record-keeping, so the Sales owner
+              // sees them too. Only the engineering test summary stays gated. This mirrors
+              // list_demo_workflows in services/evaluations.py.
+              customerFeedback: evaluation?.customerReviews?.at(-1)?.comment ?? '',
               ...(fullArchive || engineeringArchive ? {
                 summary: evaluation?.runs.filter((run) => run.status === 'Completed').at(-1)?.summary ?? '',
               } : {}),
             },
+            testRound: evaluation?.testRound ?? 1,
+            customerReviews: (evaluation?.customerReviews ?? []).map((review) => ({ ...review })),
             approvals: [
               { label: 'Sales 提交', actor: request.history.find((item) => item.to === 'Engineer Review')?.actor ?? request.createdBy, status: 'Done' },
               { label: 'FAE Review', actor: request.history.find((item) => item.to === 'Manager Approval')?.actor ?? request.engineerOwner, status: faeDone ? 'Done' : 'Current' },

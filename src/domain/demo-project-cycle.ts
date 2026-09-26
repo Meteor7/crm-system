@@ -152,8 +152,9 @@ export function buildDemoProjectTimeline(item: DemoWorkflowDto): DemoProjectTime
     item.evaluation?.owner || item.engineerOwner,
     '',
   ]
-  const runDate = item.evaluation?.runs.find((run) => run.status === 'Completed')?.date
-    || item.evaluation?.runs[0]?.date
+  const currentRuns = item.evaluation?.runs.filter((run) => (run.round || 1) === (item.testRound || 1)) ?? []
+  const runDate = currentRuns.find((run) => run.status === 'Completed')?.date
+    || currentRuns[0]?.date
 
   return timelineMilestones.map((milestone, index) => ({
     ...milestone,

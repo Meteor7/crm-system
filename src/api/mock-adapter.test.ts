@@ -20,10 +20,11 @@ function multipartFile(fileName: string, content: string, mimeType = 'applicatio
   return { fileName, mimeType, size: blob.size, blob }
 }
 
-function reportFiles(fileName: string, content: string, mimeType = 'application/pdf') {
+function reportFiles(fileName: string, content: string, mimeType = 'application/pdf', expectedRound = 1) {
   return {
     internalFile: multipartFile(fileName, content, mimeType),
     externalFile: multipartFile(`customer-${fileName}`, content, mimeType),
+    expectedRound,
   }
 }
 
@@ -314,6 +315,34 @@ describe('mock CRM API', () => {
     })).resolves.toMatchObject({ data: { status: 'Planned', subject: 'Boss 客户沟通' } })
     const sales = createMockApi({ latency: 0, role: 'Sales' })
     await expect(sales.reviewVisit('V-001'))
+      .rejects.toMatchObject({ code: 'PERMISSION_DENIED' })
+  })
+
+  it('lets Sales edit the basic fields of their own Visit until the Manager has reviewed it', async () => {
+    const salesRepository = createMemorySalesRepository()
+    const sales = createMockApi({ latency: 0, role: 'Sales', userId: 'person002@crm.example.invalid', salesRepository })
+    const created = await sales.createVisit({ accountId: 'ACC-001', subject: '原定拜访', date: '2026-07-21', type: 'Video', owner: 'person002@crm.example.invalid', objective: '确认样片' })
+
+    // Customers reschedule: date, subject, type and objective all change in one edit.
+    const edited = await sales.updateVisit(created.data.id, { subject: '改期后拜访', date: '2026-07-28', type: 'On-site', owner: 'person002@crm.example.invalid', objective: '确认样片与参会人' }, created.data.modified)
+    expect(edited.data).toMatchObject({ id: created.data.id, subject: '改期后拜访', date: '2026-07-28', type: 'On-site', objective: '确认样片与参会人', status: 'Planned' })
+    expect(edited.data.modified).toBeTruthy()
+    expect((await sales.getVisit(created.data.id)).data).toMatchObject({ subject: '改期后拜访', date: '2026-07-28' })
+
+    // A stale modified token is rejected, the same as the Frappe optimistic lock.
+    await expect(sales.updateVisit(created.data.id, { subject: '再改', date: '2026-07-29', type: 'Phone', owner: 'person002@crm.example.invalid', objective: '确认' }, '2000-01-01 00:00:00.000000'))
+      .rejects.toMatchObject({ code: 'VERSION_CONFLICT' })
+    await expect(sales.updateVisit(created.data.id, { subject: '  ', date: '2026-07-29', type: 'Phone', owner: 'person002@crm.example.invalid', objective: '确认' }, edited.data.modified))
+      .rejects.toMatchObject({ code: 'VALIDATION_ERROR' })
+    await expect(sales.updateVisit(created.data.id, { subject: '转给同事', date: '2026-07-29', type: 'Phone', owner: 'person034@crm.example.invalid', objective: '确认' }, edited.data.modified))
+      .rejects.toMatchObject({ code: 'SCOPE_DENIED' })
+
+    // Reviewed Visits are frozen for everyone, and Engineers never hold visit:write.
+    const manager = createMockApi({ latency: 0, role: 'Manager', userName: '演示经理01', salesRepository })
+    await expect(manager.updateVisit('V-001', { subject: '事后改动', date: '2026-07-12', type: 'On-site', owner: 'person002@crm.example.invalid', objective: '确认' }))
+      .rejects.toMatchObject({ code: 'INVALID_TRANSITION' })
+    const engineer = createMockApi({ latency: 0, role: 'Engineer', salesRepository })
+    await expect(engineer.updateVisit(created.data.id, { subject: '工程师改动', date: '2026-07-29', type: 'Phone', owner: 'person002@crm.example.invalid', objective: '确认' }))
       .rejects.toMatchObject({ code: 'PERMISSION_DENIED' })
   })
 
@@ -784,9 +813,49 @@ describe('mock CRM API', () => {
     await api.releaseDemoTestReport(evaluationId, reportFiles('cis-demo-report.pdf', 'report'))
     await api.updateEvaluationStatus(evaluationId, { status: 'Internal Review' })
     await api.updateEvaluationStatus(evaluationId, { status: 'Customer Review' })
-    await api.updateEvaluationStatus(evaluationId, { status: 'Accepted' })
+    await api.updateEvaluationStatus(evaluationId, { status: 'Accepted', customerComment: '客户确认留痕' })
 
     expect((await api.getStrategyOpportunity(opportunity.id)).data.stage).toBe('预算审批')
+  })
+
+  it('archives a Demo Test whose Opportunity has left the Demo gate', async () => {
+    async function inCustomerReview(suffix: string) {
+      const opportunity = await createEligibleDemoOpportunity(api, suffix)
+      const created = await api.createDemoRequest({
+        accountId: 'ACC-001', primaryContactId: 'CON-001', opportunityId: opportunity.id,
+        requestMode: 'Opportunity', formData: completeDemoRequestForm(), customerExpectedDate: '2026-09-01', submit: true,
+      })
+      await api.transitionDemoRequest(created.data.id, {
+        type: 'engineer_approve', engineerOwner: 'person077@crm.example.invalid', testPlan: 'CIS defect recipe',
+        assignedEquipment: 'Macro Inspection Lab-01', resourceWindow: '2026-08-15 ~ 2026-08-20',
+        estimatedCompletionDate: '2026-08-21', technicalRisk: 'Low', comment: 'Technical scope confirmed',
+      })
+      const approved = await api.transitionDemoRequest(created.data.id, { type: 'manager_approve', comment: 'Approved' })
+      const evaluationId = approved.data.evaluation!.id
+      await api.completeEvaluationPreparation(evaluationId, 'wafer', '')
+      await api.completeEvaluationPreparation(evaluationId, 'test', '')
+      await api.updateEvaluationStatus(evaluationId, { status: 'Testing' })
+      await api.addEvaluationRun(evaluationId, {
+        date: '2026-08-20', lot: `CIS-LOT-${suffix}`, wafers: 12,
+        capture: 60, falsePositive: 9, wph: 18.5, summary: 'Below acceptance criteria',
+      })
+      await api.releaseDemoTestReport(evaluationId, reportFiles('cis-demo-report.pdf', 'report'))
+      await api.updateEvaluationStatus(evaluationId, { status: 'Internal Review' })
+      await api.updateEvaluationStatus(evaluationId, { status: 'Customer Review' })
+      return { opportunityId: opportunity.id, evaluationId }
+    }
+    // With Reject gone, archiving is the only way out of Customer Review. An Opportunity
+    // closed as Lost, or moved back once the Demo Request was converted, must not hold it.
+    const lost = await inCustomerReview('archive-lost')
+    await api.updateStrategyOpportunity(lost.opportunityId, { stage: 'Lost', lostReason: '客户不认可 Demo' })
+    const rolledBack = await inCustomerReview('archive-rolled-back')
+    await api.rollbackOpportunityStage(rolledBack.opportunityId, { targetStage: '需求发现', reason: '客户预算冻结，重新评估需求' })
+
+    for (const [scenario, stage] of [[lost, 'Lost'], [rolledBack, '需求发现']] as const) {
+      const archived = await api.updateEvaluationStatus(scenario.evaluationId, { status: 'Accepted', customerComment: '客户不认可检出率，项目关闭' })
+      expect(archived.data.status).toBe('Accepted')
+      expect((await api.getStrategyOpportunity(scenario.opportunityId)).data.stage).toBe(stage)
+    }
   })
 
   it('runs a Self Test through the complete Demo flow without changing Opportunities', async () => {
@@ -815,7 +884,7 @@ describe('mock CRM API', () => {
     await api.releaseDemoTestReport(evaluationId, reportFiles('self-test.pdf', 'report'))
     await api.updateEvaluationStatus(evaluationId, { status: 'Internal Review' })
     await api.updateEvaluationStatus(evaluationId, { status: 'Customer Review' })
-    await api.updateEvaluationStatus(evaluationId, { status: 'Accepted' })
+    await api.updateEvaluationStatus(evaluationId, { status: 'Accepted', customerComment: '客户确认留痕' })
     expect((await api.listStrategyOpportunities({ accountId: 'ACC-001' })).data.items.map((item) => [item.id, item.stage])).toEqual(before)
   })
 
@@ -1292,7 +1361,7 @@ describe('mock CRM API', () => {
     await api.releaseDemoTestReport('EVAL-103', reportFiles('results.txt', 'capture=96', 'text/plain'))
     const internal = await api.updateEvaluationStatus('EVAL-103', { status: 'Internal Review' })
     const review = await api.updateEvaluationStatus('EVAL-103', { status: 'Customer Review' })
-    const accepted = await api.updateEvaluationStatus('EVAL-103', { status: 'Accepted' })
+    const accepted = await api.updateEvaluationStatus('EVAL-103', { status: 'Accepted', customerComment: '客户确认留痕' })
     expect(internal.data.acceptance).toBe('Pending')
     expect(review.data.acceptance).toBe('Pending')
     expect(accepted.data.acceptance).toBe('Accepted')
@@ -1438,10 +1507,10 @@ describe('mock CRM API', () => {
     const engineer = createMockApi({ repository, latency: 0, role: 'Engineer', userName: '演示员工14', assignedAccountIds: ['ACC-001', 'ACC-006'] })
 
     await expect(engineer.updateEvaluationStatus('EVAL-103', { status: 'Internal Review' }))
-      .rejects.toMatchObject({ code: 'INVALID_TRANSITION' })
+      .rejects.toMatchObject({ code: 'INVALID_TRANSITION', message: '请先完成第 1 轮 Test Run，之前轮次的 Test Run 不计入。' })
     await engineer.releaseDemoTestReport('EVAL-103', reportFiles('results.csv', 'metric,value\ncapture,96', 'text/csv'))
     await expect(engineer.updateEvaluationStatus('EVAL-103', { status: 'Internal Review' }))
-      .rejects.toMatchObject({ code: 'INVALID_TRANSITION' })
+      .rejects.toMatchObject({ code: 'INVALID_TRANSITION', message: '请先完成第 1 轮 Test Run，之前轮次的 Test Run 不计入。' })
     await engineer.addEvaluationRun('EVAL-103', {
       date: '2026-08-20', lot: 'LOT-COMPLETE', wafers: 1,
       capture: 96, falsePositive: 1, wph: 12, summary: 'Passed',
@@ -1609,6 +1678,142 @@ describe('mock CRM API', () => {
     snapshot = await repository.read()
     expect(snapshot.evaluations.find((item) => item.id === 'EVAL-103')).toMatchObject({ reportVersion: 3, reportArtifactId: released.data.internalReportArtifact.id })
     expect(snapshot.artifacts).toHaveLength(3)
+  })
+
+  it('opens a new round on retest without overwriting the previous round reports', async () => {
+    const repository = createDemoRepository(createMemoryDemoStorage(), seedDemoSnapshot)
+    const boss = createMockApi({ repository, latency: 0, role: 'Manager', userName: 'Boss' })
+
+    await boss.releaseDemoTestReport('EVAL-103', reportFiles('round1.pdf', 'round one'))
+    await boss.updateEvaluationStatus('EVAL-103', { status: 'Internal Review' })
+    await boss.updateEvaluationStatus('EVAL-103', { status: 'Customer Review' })
+
+    const retested = await boss.updateEvaluationStatus('EVAL-103', { status: 'Testing', customerComment: '误报率仍偏高，请重测' })
+    expect(retested.data).toMatchObject({ status: 'Testing', testRound: 2, reportStatus: 'Not Ready' })
+    // The round-1 DDL would otherwise flag the new round as overdue on day one.
+    expect(retested.data.testRunDeadline).toBe('')
+    // Clearing it is still a deadline change, so it leaves a Deadline row behind the retest.
+    expect(retested.data.history?.[0]).toMatchObject({ eventType: 'Status', to: 'Testing' })
+    expect(retested.data.history?.[1]).toMatchObject({
+      eventType: 'Deadline', from: '2026-08-01', to: '', summary: 'Cleared round 1 Test Run deadline for retest',
+    })
+    expect(retested.data.internalReportArtifactId).toBeUndefined()
+    expect(retested.data.externalReportArtifactId).toBeUndefined()
+    expect(retested.data.customerReviews).toEqual([
+      expect.objectContaining({ round: 1, comment: '误报率仍偏高，请重测' }),
+    ])
+
+    // The round-1 reports must survive untouched; the gate has to close again.
+    let snapshot = await repository.read()
+    expect(snapshot.artifacts.filter((item) => item.type === 'Test Report')).toHaveLength(2)
+    await expect(boss.updateEvaluationStatus('EVAL-103', { status: 'Internal Review' }))
+      .rejects.toMatchObject({ code: 'INVALID_TRANSITION' })
+
+    await boss.releaseDemoTestReport('EVAL-103', reportFiles('round2.pdf', 'round two', 'application/pdf', 2))
+    snapshot = await repository.read()
+    const reports = snapshot.artifacts.filter((item) => item.type === 'Test Report')
+    expect(reports).toHaveLength(4)
+    expect(reports.filter((item) => item.round === 1)).toHaveLength(2)
+    expect(reports.filter((item) => item.round === 2)).toHaveLength(2)
+    expect(reports.map((item) => item.fileName)).toContain('[Internal] round1.pdf')
+    expect(reports.map((item) => item.fileName)).toContain('[Internal] round2.pdf')
+
+    // Round-2 reports alone are not enough: the round-1 Completed run is history,
+    // so Internal Review stays closed until a run is completed in round 2.
+    expect(retested.data.runs.map((run) => run.round)).toEqual([1, 1])
+    await expect(boss.updateEvaluationStatus('EVAL-103', { status: 'Internal Review' }))
+      .rejects.toMatchObject({ code: 'INVALID_TRANSITION' })
+    const rerun = await boss.addEvaluationRun('EVAL-103', {
+      date: '2026-07-30', lot: 'LOT-RETEST', wafers: 2,
+      capture: 97, falsePositive: 2, wph: 36, summary: '重测通过',
+    })
+    expect(rerun.data.runs.map((run) => run.round)).toEqual([1, 1, 2])
+    const reviewed = await boss.updateEvaluationStatus('EVAL-103', { status: 'Internal Review' })
+    expect(reviewed.data).toMatchObject({ status: 'Internal Review', testRound: 2 })
+  })
+
+  it('refuses a report uploaded from a window opened before the retest', async () => {
+    const repository = createDemoRepository(createMemoryDemoStorage(), seedDemoSnapshot)
+    const boss = createMockApi({ repository, latency: 0, role: 'Manager', userName: 'Boss' })
+
+    await boss.releaseDemoTestReport('EVAL-103', reportFiles('round1.pdf', 'round one'))
+    await boss.updateEvaluationStatus('EVAL-103', { status: 'Internal Review' })
+    await boss.updateEvaluationStatus('EVAL-103', { status: 'Customer Review' })
+    await boss.updateEvaluationStatus('EVAL-103', { status: 'Testing', customerComment: '误报率仍偏高，请重测' })
+
+    // The upload window still names round 1, so filing it would label round-2 work as round 1.
+    await expect(boss.releaseDemoTestReport('EVAL-103', reportFiles('stale.pdf', 'from the old tab')))
+      .rejects.toMatchObject({ code: 'CONFLICT' })
+    let snapshot = await repository.read()
+    expect(snapshot.artifacts.filter((item) => item.type === 'Test Report')).toHaveLength(2)
+
+    await boss.releaseDemoTestReport('EVAL-103', reportFiles('round2.pdf', 'round two', 'application/pdf', 2))
+    await boss.addEvaluationRun('EVAL-103', {
+      date: '2026-07-30', lot: 'LOT-RETEST', wafers: 2, capture: 97, falsePositive: 2, wph: 36, summary: '重测通过',
+    })
+    await boss.updateEvaluationStatus('EVAL-103', { status: 'Internal Review' })
+    await boss.updateEvaluationStatus('EVAL-103', { status: 'Customer Review' })
+
+    await expect(boss.uploadCustomerReport('EVAL-103', { expectedRound: 1, file: multipartFile('stale-feedback.pdf', 'from the old tab') }))
+      .rejects.toMatchObject({ code: 'CONFLICT' })
+    snapshot = await repository.read()
+    expect(snapshot.artifacts.filter((item) => item.type === 'Customer Report')).toHaveLength(0)
+
+    const reloaded = await boss.uploadCustomerReport('EVAL-103', { expectedRound: 2, file: multipartFile('feedback.pdf', 'from the reloaded tab') })
+    expect(reloaded.data).toMatchObject({ round: 2, version: 1 })
+  })
+
+  it('requires a customer comment to leave Customer Review', async () => {
+    const repository = createDemoRepository(createMemoryDemoStorage(), seedDemoSnapshot)
+    const boss = createMockApi({ repository, latency: 0, role: 'Manager', userName: 'Boss' })
+    await boss.releaseDemoTestReport('EVAL-103', reportFiles('results.pdf', 'ok'))
+    await boss.updateEvaluationStatus('EVAL-103', { status: 'Internal Review' })
+    await boss.updateEvaluationStatus('EVAL-103', { status: 'Customer Review' })
+
+    for (const status of ['Accepted', 'Testing'] as const) {
+      await expect(boss.updateEvaluationStatus('EVAL-103', { status }))
+        .rejects.toMatchObject({ code: 'VALIDATION_ERROR' })
+      await expect(boss.updateEvaluationStatus('EVAL-103', { status, customerComment: '   ' }))
+        .rejects.toMatchObject({ code: 'VALIDATION_ERROR' })
+    }
+
+    const archived = await boss.updateEvaluationStatus('EVAL-103', { status: 'Accepted', customerComment: '客户验收通过' })
+    expect(archived.data).toMatchObject({ status: 'Accepted', acceptance: 'Accepted' })
+    expect(archived.data.customerReviews).toEqual([
+      expect.objectContaining({ round: 1, comment: '客户验收通过' }),
+    ])
+  })
+
+  it('stores Customer Reports per round and only during Customer Review', async () => {
+    const repository = createDemoRepository(createMemoryDemoStorage(), seedDemoSnapshot)
+    const boss = createMockApi({ repository, latency: 0, role: 'Manager', userName: 'Boss' })
+
+    // contracts.ts normalizes INVALID_REPORT_STAGE to INVALID_TRANSITION at the public boundary.
+    await expect(boss.uploadCustomerReport('EVAL-103', { expectedRound: 1, file: multipartFile('early.pdf', 'too early') }))
+      .rejects.toMatchObject({ code: 'INVALID_TRANSITION' })
+
+    await boss.releaseDemoTestReport('EVAL-103', reportFiles('results.pdf', 'ok'))
+    await boss.updateEvaluationStatus('EVAL-103', { status: 'Internal Review' })
+    await boss.updateEvaluationStatus('EVAL-103', { status: 'Customer Review' })
+
+    const first = await boss.uploadCustomerReport('EVAL-103', { expectedRound: 1, file: multipartFile('feedback.pdf', 'customer feedback') })
+    expect(first.data).toMatchObject({ round: 1, version: 1 })
+    expect(first.data.artifact).toMatchObject({ type: 'Customer Report', fileName: '[Customer] feedback.pdf', round: 1 })
+
+    await expect(boss.uploadCustomerReport('EVAL-103', { expectedRound: 1, file: multipartFile('empty.pdf', '') }))
+      .rejects.toMatchObject({ code: 'VALIDATION_ERROR' })
+
+    const second = await boss.uploadCustomerReport('EVAL-103', { expectedRound: 1, file: multipartFile('feedback-v2.pdf', 'revised') })
+    expect(second.data).toMatchObject({ round: 1, version: 2 })
+    const snapshot = await repository.read()
+    expect(snapshot.artifacts.filter((item) => item.type === 'Customer Report')).toHaveLength(2)
+
+    // The [Customer] marker is a literal prefix, never a character class: names that
+    // merely start with those letters stay intact and a re-upload is not double-tagged.
+    const essentials = await boss.uploadCustomerReport('EVAL-103', { expectedRound: 1, file: multipartFile('essentials.pdf', 'plain name') })
+    expect(essentials.data.artifact.fileName).toBe('[Customer] essentials.pdf')
+    const reupload = await boss.uploadCustomerReport('EVAL-103', { expectedRound: 1, file: multipartFile('[Customer] feedback.pdf', 'already tagged') })
+    expect(reupload.data.artifact.fileName).toBe('[Customer] feedback.pdf')
   })
 
   it('blocks Planned and Completed Runs after Test Execution', async () => {

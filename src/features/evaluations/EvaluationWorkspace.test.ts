@@ -1,6 +1,7 @@
 import { mount } from '@vue/test-utils'
 import { describe, expect, it } from 'vitest'
 import { evaluations } from '@/api/mock-data'
+import type { EvaluationDto } from '@/types/crm'
 import EvaluationWorkspace from './EvaluationWorkspace.vue'
 
 describe('EvaluationWorkspace', () => {
@@ -118,20 +119,22 @@ describe('EvaluationWorkspace', () => {
 
     expect(wrapper.get('[data-advance-status="Internal Review"]').attributes('disabled')).toBeDefined()
     expect(wrapper.get('[data-test-report-card]').text()).toContain('Test Report')
-    expect(wrapper.get('[data-test-run-review-gate]').text()).toBe('请先上传 Internal 和 External Test Report以及完成Test Run。')
+    expect(wrapper.get('[data-test-run-review-gate]').text()).toBe('请先上传 Internal 和 External Test Report，并完成第 1 轮 Test Run。')
     expect(wrapper.get('[data-report-action]').text()).toContain('上传两份 Test Report')
     expect(wrapper.get('[data-report-action]').classes()).toContain('primary-button')
     expect(wrapper.get('[data-add-test-run]').classes()).toContain('secondary-button')
+    // A retest reopens Testing with the previous round's deadline cleared, so the
+    // deadline can be set again during execution, not only during preparation.
+    expect(wrapper.find(`[data-set-ddl="${testing.id}"]`).exists()).toBe(true)
 
-    await wrapper.setProps({
-      evaluations: [{
+    const ready: EvaluationDto = {
         ...testing,
-        runs: [{ id: 'CRM-RUN-00001', date: '2026-08-11', lot: 'LOT-1', wafers: 1, status: 'Completed', capture: 96, falsePositive: 1, wph: 12, summary: 'Passed' }],
+        runs: [{ id: 'CRM-RUN-00001', date: '2026-08-11', lot: 'LOT-1', round: 1, wafers: 1, status: 'Completed' as const, capture: 96, falsePositive: 1, wph: 12, summary: 'Passed' }],
         reportArtifactId: 'CRM-ART-00001',
         internalReportArtifactId: 'CRM-ART-00001',
         externalReportArtifactId: 'CRM-ART-00002',
         reportVersion: 1,
-        reportStatus: 'Ready',
+        reportStatus: 'Ready' as const,
         internalReportArtifact: {
           id: 'CRM-ART-00001', demoRequestId: testing.demoRequestId!, evaluationId: testing.id,
           type: 'Test Report', fileName: '[Internal] capture-results.xlsx',
@@ -143,13 +146,19 @@ describe('EvaluationWorkspace', () => {
           type: 'Test Report', fileName: '[External] customer-results.pdf', mimeType: 'application/pdf', version: 1,
           createdBy: 'Engineer Li', createdAt: '2026-08-11T10:00:00+08:00', visibility: 'Customer Review',
         },
-      }],
-    })
+    }
+    await wrapper.setProps({ evaluations: [ready] })
     expect(wrapper.get('[data-advance-status="Internal Review"]').attributes('disabled')).toBeUndefined()
     expect(wrapper.find('[data-test-run-review-gate]').exists()).toBe(false)
     expect(wrapper.get('[data-test-report-card]').text()).toContain('[Internal] capture-results.xlsx')
     expect(wrapper.get('[data-test-report-card]').text()).toContain('[External] customer-results.pdf')
     expect(wrapper.get('[data-report-action]').text()).toContain('上传新版本')
     expect(wrapper.get('[data-report-action]').classes()).toContain('secondary-button')
+
+    // After a retest the round-1 run is still listed, so the hint must say that only a
+    // run completed in the current round unlocks Internal Review.
+    await wrapper.setProps({ evaluations: [{ ...ready, testRound: 2 }] })
+    expect(wrapper.get('[data-advance-status="Internal Review"]').attributes('disabled')).toBeDefined()
+    expect(wrapper.get('[data-test-run-review-gate]').text()).toBe('请先完成第 2 轮 Test Run，之前轮次的 Test Run 不计入。')
   })
 })

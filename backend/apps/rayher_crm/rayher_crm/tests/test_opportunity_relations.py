@@ -214,3 +214,19 @@ class TestOpportunityRelations(FrappeTestCase):
         history = [row for row in serialized["history"] if row["field"] == "actionUpdated"][-1]
         self.assertEqual(json.loads(history["from"]), created)
         self.assertEqual(json.loads(history["to"]), updated)
+
+    def test_action_remark_round_trips_updates_and_clears(self):
+        from rayher_crm.services.opportunities import get_strategy_opportunity
+
+        _, opportunity, _ = self._records(self.sales, "ActionRemark")
+        remark = "Line one" + chr(10) + "第二行"
+        created = create_opportunity_action(opportunity["id"], self._action_input(remark=remark))
+        self.assertEqual(created["remark"], remark)
+        # An update that omits the remark must not silently drop it.
+        updated = update_opportunity_action(opportunity["id"], created["id"], self._action_input(status="Done"))
+        self.assertEqual(updated["remark"], created["remark"])
+        self.assertEqual(get_strategy_opportunity(opportunity["id"])["actions"][0]["remark"], created["remark"])
+        cleared = update_opportunity_action(opportunity["id"], created["id"], self._action_input(remark=""))
+        self.assertEqual(cleared["remark"], "")
+        with self.assertRaises(CrmApiException):
+            create_opportunity_action(opportunity["id"], self._action_input(remark="x" * 10001))

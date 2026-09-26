@@ -1,0 +1,252 @@
+"""Coordinate private blob reuse with deletion without locking unrelated business rows."""
+from __future__ import annotations
+
+import hashlib
+from pathlib import Path
+
+import frappe
+
+
+def _session_id():
+    """Identify the MariaDB session, so a silent reconnect invalidates our locks.
+
+    Frappe sets `auto_reconnect`, and pymysql reconnects in place -- the
+    connection object survives, its server session does not, and with it every
+    `GET_LOCK` this request believes it still holds. The server thread id is the
+    one value that changes, so the lock cache is keyed on it. If a driver ever
+    stops exposing it we fall back to a unique object, which only costs us a
+    redundant re-acquisition.
+    """
+    try:
+        return frappe.db._conn.thread_id()
+    except Exception:
+        return object()
+
+
+def _lock_content(content_hash: str, *, required: bool = True) -> bool:
+    """Hold the content lock for this request. `required=False` reports failure.
+
+    Best-effort callers must not use the throwing form: `frappe.throw` pushes its
+    text onto `frappe.local.message_log` before raising, so even a swallowed
+    exception would tack "This attachment is being updated" onto the response of a
+    request that failed for an entirely unrelated reason.
+    """
+    # Connection-scoped locks survive savepoint rollback and are released with the
+    # outer transaction. A lost connection also releases them automatically.
+    key = "crm-private:" + hashlib.sha256(f"{frappe.local.site}:{content_hash}".encode()).hexdigest()[:48]
+    session = _session_id()
+    cached = getattr(frappe.local, "crm_private_content_locks", None)
+    if cached is None or cached[0] != session:
+        cached = frappe.local.crm_private_content_locks = (session, set())
+    held = cached[1]
+    if key in held:
+        return True
+    if frappe.db.sql("SELECT GET_LOCK(%s, 5)", (key,))[0][0] != 1:
+        if required:
+            frappe.throw("This attachment is being updated. Please retry.")
+        return False
+    held.add(key)
+
+    def release():
+        if key not in held:
+            return
+        try:
+            frappe.db.sql("SELECT RELEASE_LOCK(%s)", (key,))
+        finally:
+            held.discard(key)
+
+    frappe.db.after_commit.add(release)
+    frappe.db.after_rollback.add(release)
+    return True
+
+
+def _blob_matches_path(path: str, content_hash: str) -> bool:
+    digest = hashlib.md5(usedforsecurity=False)
+    try:
+        with open(path, "rb") as stream:
+            for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+                digest.update(chunk)
+    except FileNotFoundError:
+        # Only a missing blob is an answer. A storage failure must keep propagating
+        # out of `delete_file_content`, or the File row is deleted while its bytes
+        # stay behind with nothing left pointing at them.
+        return False
+    return digest.hexdigest() == content_hash
+
+
+def _blob_matches(doc) -> bool:
+    return _blob_matches_path(doc.get_full_path(), doc.content_hash)
+
+
+def _reference_clause(file_url: str, exclude: str | None) -> tuple[str, tuple]:
+    """Candidate File rows pointing at this path. `exclude` is the caller's own row.
+
+    `exclude=None` means the caller has no row of its own left -- a rolled-back
+    insert -- so every match counts. It is not "exclude nothing by accident": a
+    deletion must always pass its own name, or it finds itself and refuses to run.
+    """
+    clause = "SELECT name FROM tabFile WHERE file_url=%s"
+    params: tuple = (file_url,)
+    if exclude is not None:
+        clause += " AND name!=%s"
+        params = (file_url, exclude)
+    return clause, params
+
+
+def _local_reference_names(file_url: str, exclude: str | None) -> set[str]:
+    clause, params = _reference_clause(file_url, exclude)
+    return {row[0] for row in frappe.db.sql(clause, params)}
+
+
+def _committed_reference_names(file_url: str, exclude: str | None) -> set[str]:
+    """References this transaction cannot see in its own snapshot.
+
+    A separate, read-only connection sees rows committed after our REPEATABLE READ
+    snapshot opened. It is opened per call on purpose: a cached connection would
+    accumulate a snapshot of its own and stop being a current read. That costs a
+    full connect, so callers only reach here once the cheap local read has failed
+    to find a reason to keep the blob.
+
+    `_get_connection`, `GET_LOCK` and `RELEASE_LOCK` are MariaDB/MySQL-specific;
+    this module does not support the Postgres driver.
+    """
+    clause, params = _reference_clause(file_url, exclude)
+    connection = frappe.db._get_connection()
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute(clause, params)
+            return {row[0] for row in cursor.fetchall()}
+    finally:
+        connection.close()
+
+
+def _confirm(names: set[str], file_url: str) -> bool:
+    # A current PRIMARY-key read per candidate, which drops our own deletions, in
+    # name order so concurrent deletes of one blob take row locks in one sequence.
+    for name in sorted(names):
+        if frappe.db.sql(
+            "SELECT name FROM tabFile WHERE name=%s AND file_url=%s FOR UPDATE",
+            (name, file_url),
+        ):
+            return True
+    return False
+
+
+def _has_live_reference(file_url: str, exclude: str | None = None) -> bool:
+    """True when some File row still points at this physical path.
+
+    Equal content can occupy different paths after concurrent uploads, so only a
+    reference to *this* path may block deletion. The File table is never scanned
+    under a lock.
+
+    Our own snapshot is consulted first and answers the common case -- a sibling
+    attachment inserted in this very transaction -- without opening a second
+    connection. Only when nothing local stands in the way, i.e. when we are about
+    to unlink the bytes, do we pay for the current read.
+    """
+    if _confirm(_local_reference_names(file_url, exclude), file_url):
+        return True
+    return _confirm(_committed_reference_names(file_url, exclude), file_url)
+
+
+def _unlink_private_file(path: str) -> None:
+    root = Path(frappe.get_site_path("private", "files")).resolve()
+    target = Path(path).resolve()
+    if root not in target.parents or not target.is_file():
+        return
+    target.unlink()
+
+
+def discard_rolled_back_blob(path: str | None, file_url: str | None, content_hash: str | None) -> None:
+    """Remove a blob an aborted upload wrote, never one another record still owns.
+
+    Callers run this from an ``except`` handler, after ``rollback(save_point=...)``
+    has already dropped this upload's own File row. Frappe de-duplicates by content
+    hash, so the path can be the physical file an *earlier* upload still points at --
+    and that upload may have committed after this request opened its REPEATABLE READ
+    snapshot. Checking references with ``frappe.db.exists`` on this connection would
+    therefore miss it and delete a live attachment, so the check has to be the same
+    current read, under the same content lock, that ``delete_file_content`` uses.
+
+    Never raises: the caller is about to re-raise the original upload failure, and a
+    leaked blob is a much smaller problem than a replaced exception or a deleted
+    attachment that belongs to somebody else.
+    """
+    if not path:
+        return
+    if not file_url or not content_hash:
+        # Without both we cannot prove the bytes at this path are the ones this
+        # upload wrote, and an unconditional unlink is exactly the bug being fixed.
+        frappe.logger("rayher_crm").warning(
+            "Leaving a rolled back upload blob in place: no file_url or content hash to check it against"
+        )
+        return
+    try:
+        # Blocks a concurrent insert of the same content from resolving to this path
+        # while we decide. If the lock is unavailable the upload holding it owns the
+        # blob, so leaving the bytes in place is the safe outcome.
+        if not _lock_content(content_hash, required=False):
+            return
+        if _has_live_reference(file_url):
+            return
+        if not _blob_matches_path(path, content_hash):
+            # The path already holds a different, newly uploaded file.
+            return
+        _unlink_private_file(path)
+    except Exception:
+        frappe.logger("rayher_crm").exception("Could not remove a rolled back upload blob")
+
+
+def protect_private_upload(doc, method=None) -> None:
+    if not doc.is_private or doc.is_folder or doc.is_remote_file or not doc.content_hash:
+        return
+    _lock_content(doc.content_hash)
+    # File.before_insert has already resolved/reused the blob. Cleanup may have
+    # won the lock meanwhile: recreate uploaded bytes, or reject a stale copy.
+    if not _blob_matches(doc):
+        if doc.get("_content"):
+            doc.save_file(content=doc._content, ignore_existing_file_check=True)
+        else:
+            frappe.throw("The source attachment was removed. Please upload the file again.")
+
+
+def delete_file_content(doc, only_thumbnail=False) -> None:
+    # Also covers Frappe's new-file rollback callback when its File row is gone.
+    if not doc.is_private or doc.is_folder or doc.is_remote_file or not doc.content_hash:
+        doc.delete_file_from_filesystem(only_thumbnail=only_thumbnail)
+        return
+    # Best-effort, like `discard_rolled_back_blob`: Frappe calls this from
+    # `File.on_rollback`, from cascading deletes and from `after_migrate`
+    # cleanups, none of which can absorb a throw. `frappe.throw` would also push
+    # its text onto `message_log` and surface on an unrelated failed response.
+    # Losing the lock means somebody is writing this content right now, so the
+    # safe answer is to keep the bytes and let a later delete reclaim them.
+    if not _lock_content(doc.content_hash, required=False):
+        return
+    # Inserts of this same content hold the advisory lock until commit/rollback,
+    # so no new reference can appear between this check and the unlink below.
+    if _has_live_reference(doc.file_url, doc.name):
+        # The thumbnail stays too: Frappe derives its path from `file_url`, which
+        # the surviving row shares, so removing it here would blank that row's
+        # preview. Frappe's own `_delete_file_on_disk` makes the same trade.
+        return
+    # A rolled-back insert has no File row left. The framework can still ask
+    # for thumbnail-only cleanup because another path has the same hash.
+    # Keep genuine thumbnail-only calls intact while the File row exists.
+    if only_thumbnail and doc.flags.new_file and not frappe.db.sql(
+        "SELECT name FROM tabFile WHERE name=%s FOR UPDATE", (doc.name,),
+    ):
+        only_thumbnail = False
+    # A removed path may already belong to a different newly uploaded file.
+    if _blob_matches(doc):
+        doc.delete_file_from_filesystem(only_thumbnail=only_thumbnail)
+
+
+def save_private_file(file_name, content, doctype, name, is_private=1):
+    # Keep the original bytes available if cleanup removes a deduplicated blob
+    # before File.before_insert acquires the content lock.
+    return frappe.get_doc({
+        "doctype": "File", "file_name": file_name, "content": content,
+        "attached_to_doctype": doctype, "attached_to_name": name,
+        "is_private": is_private,
+    }).insert(ignore_permissions=True)

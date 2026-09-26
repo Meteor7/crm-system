@@ -12,7 +12,8 @@ from zipfile import BadZipFile, ZipFile
 
 import frappe
 from frappe.utils import now_datetime
-from frappe.utils.file_manager import save_file
+from rayher_crm.services.private_file_lifecycle import discard_rolled_back_blob
+from rayher_crm.services.private_file_lifecycle import save_private_file as save_file
 
 from rayher_crm.api.v1.errors import CrmApiException
 from rayher_crm.permissions.roles import assert_capability
@@ -211,9 +212,12 @@ def _lock_editable_visit(visit_id: str):
         raise CrmApiException("NOT_FOUND", "Visit was not found.")
     if rows[0].status == "Manager Reviewed":
         raise CrmApiException("INVALID_TRANSITION", "Manager-reviewed Visit records cannot be changed.")
-    from rayher_crm.services.visits import _require_visit
-    _require_visit(visit_id)
-    return frappe.get_doc("CRM Visit", visit_id)
+    from rayher_crm.services.visits import _require_visit, assert_can_change_visit
+    visit = _require_visit(visit_id)
+    # The record belongs to the visit: an action owner who can read the visit still
+    # may not write its record, because a complete record submits it for review.
+    assert_can_change_visit(visit)
+    return visit
 
 
 def upload(visit_id: str, file_name: str, mime_type: str, content: bytes, scanner: MalwareScanner | None = None) -> None:
@@ -235,10 +239,15 @@ def upload(visit_id: str, file_name: str, mime_type: str, content: bytes, scanne
     except Exception:
         frappe.db.rollback(save_point=savepoint)
         if created_file:
-            try:
-                created_file.delete_file()
-            except Exception:
-                pass
+            # `File.delete_file` does not exist on Frappe v15 -- the old call
+            # raised AttributeError into a bare `except: pass`, so every failed
+            # upload silently leaked its blob. `discard_rolled_back_blob` is the
+            # reference-counted path demo reports already use: it never raises,
+            # and it will not take bytes an earlier upload still points at, which
+            # content de-duplication makes a real possibility here.
+            discard_rolled_back_blob(
+                created_file.get_full_path(), created_file.file_url, created_file.content_hash
+            )
         raise
 
 
@@ -263,13 +272,84 @@ def update_record(visit_id: str, payload: dict[str, Any], expected_modified: Any
     return _serialize_record(doc)
 
 
+RECORD_REQUIRED_FIELDS = ("purpose", "attendees", "agenda", "summary", "conclusion", "followup")
+# CRM Visit.next_action is a Data field, i.e. varchar(140).
+NEXT_ACTION_MAX_LENGTH = 140
+
+
+def next_action_from_followup(followup: Any) -> str:
+    """The first non-blank line of a record's follow-up, cut to fit CRM Visit.next_action.
+
+    A follow-up is Long Text and routinely runs to several lines. The meeting record
+    keeps all of it; the visit only needs the next step, and copying the whole text
+    fails validation (or, through SQL, MariaDB's strict mode) once it passes 140.
+    """
+    lines = (line.strip() for line in str(followup or "").splitlines())
+    return next((line for line in lines if line), "")[:NEXT_ACTION_MAX_LENGTH]
+
+
+# CRM Visit.outcome is Small Text, a TEXT column of 65,535 bytes, while a conclusion is
+# Long Text. 4,000 characters stay well inside that column even at four bytes a
+# character and after Frappe's HTML sanitising; the meeting record keeps all of it.
+OUTCOME_MAX_LENGTH = 4000
+
+
+def outcome_from_conclusion(conclusion: Any) -> str:
+    """A record's conclusion, cut to what CRM Visit.outcome can always hold."""
+    return str(conclusion or "").strip()[:OUTCOME_MAX_LENGTH]
+
+
 def _mark_record_submitted(visit_id: str) -> None:
+    """Saving a complete visit record submits the visit for Manager review.
+
+    A new visit waits at Planned. Once its record is uploaded or entered with every
+    required field, it moves straight to Minutes Submitted, and the Manager review
+    completes it. An upload that leaves fields empty keeps the visit Planned until
+    the record is completed, because review_visit refuses an incomplete record.
+    Visited remains only for visits advanced through the API before this flow.
+    """
     visit = frappe.get_doc("CRM Visit", visit_id)
     if visit.status == "Manager Reviewed":
         raise CrmApiException("INVALID_TRANSITION", "Manager-reviewed Visit records cannot be changed.")
-    if visit.status == "Visited":
-        visit.status = "Minutes Submitted"
-        visit.save(ignore_permissions=True)
+    if visit.status not in {"Planned", "Visited"}:
+        return
+    record = get_record(visit_id)
+    if not record or not all(str(record.get(field) or "").strip() for field in RECORD_REQUIRED_FIELDS):
+        return
+    # Advancing through the API refuses to leave Planned without an outcome
+    # (`visits._apply_advance`), and the visit list has a column for it. This path
+    # skips Visited, and the edit form carries no outcome field, so the record's
+    # own conclusion and follow-up stand in -- otherwise every visit submitted
+    # this way would show an empty outcome forever, with no way to fill it.
+    if not str(visit.outcome or "").strip():
+        visit.outcome = outcome_from_conclusion(record.get("conclusion"))
+    if not str(visit.next_action or "").strip():
+        visit.next_action = next_action_from_followup(record.get("followup"))
+    visit.status = "Minutes Submitted"
+    visit.save(ignore_permissions=True)
+    _notify_managers_of_submission(visit)
+
+
+def _notify_managers_of_submission(visit) -> None:
+    """Remind every CRM Manager that a visit now waits for their review.
+
+    Sent once, when the saved record moves the visit to Minutes Submitted, inside the
+    caller's savepoint so a failed save leaves no reminder behind. A Manager who saves
+    the record is not reminded about their own submission.
+    """
+    from rayher_crm.services.notifications import create_notification
+    from rayher_crm.services.quotations import _manager_users
+
+    account_name = frappe.db.get_value("Customer", visit.account, "customer_name") or visit.account
+    for manager in _manager_users():
+        if manager == frappe.session.user:
+            continue
+        create_notification(
+            recipient=manager, category="Visit", title="Visit awaiting review",
+            message=f"{account_name} · {visit.subject} was submitted for Manager review.",
+            route=f"/visits?focus={visit.name}",
+            source_doctype="CRM Visit", source_name=visit.name,
+        )
 
 
 def download(file_id: str) -> dict[str, Any]:

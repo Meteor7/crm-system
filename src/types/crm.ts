@@ -387,7 +387,7 @@ export interface DemoHealthDto {
   daysToCustomerExpected: number | null
 }
 
-export type DemoArtifactType = 'Demo Request DOCX' | 'Test Report'
+export type DemoArtifactType = 'Demo Request DOCX' | 'Test Report' | 'Customer Report'
 
 export interface DemoArtifactMetaDto {
   id: string
@@ -397,6 +397,7 @@ export interface DemoArtifactMetaDto {
   fileName: string
   mimeType: string
   version: number
+  round?: number
   createdBy: string
   createdAt: string
   visibility: 'Internal' | 'Customer Review'
@@ -515,6 +516,8 @@ export interface TestRunDto {
   id: string
   date: string
   lot: string
+  /** Test round the run belongs to; a retest opens a new round and only that round's runs gate Internal Review. */
+  round: number
   wafers: number
   status: 'Planned' | 'Completed'
   capture: number | null
@@ -523,7 +526,7 @@ export interface TestRunDto {
   summary: string
 }
 
-export type CreateTestRunInput = Omit<TestRunDto, 'id' | 'status'>
+export type CreateTestRunInput = Omit<TestRunDto, 'id' | 'status' | 'round'>
 export type AddEvaluationRunInput = CreateTestRunInput & { expectedModified?: string }
 export type SetEvaluationTestRunDeadlineInput = { testRunDeadline: string; expectedModified?: string }
 
@@ -538,6 +541,14 @@ export interface EvaluationHistoryDto {
   from: string
   to: string
   summary: string
+}
+
+export interface EvaluationCustomerReviewDto {
+  id: string
+  round: number
+  comment: string
+  author: string
+  createdAt: string
 }
 
 export interface EvaluationDto {
@@ -562,6 +573,10 @@ export interface EvaluationDto {
   externalReportArtifactId?: string
   externalReportArtifact?: DemoArtifactMetaDto
   reportVersion: number
+  customerReportArtifactId?: string
+  customerReportArtifact?: DemoArtifactMetaDto
+  testRound: number
+  customerReviews?: EvaluationCustomerReviewDto[]
   criteria?: string
   runs: TestRunDto[]
   history?: EvaluationHistoryDto[]
@@ -577,6 +592,9 @@ export interface EvaluationDto {
 export interface DemoTestReportUploadInput {
   internalFile: MultipartFilePart
   externalFile: MultipartFilePart
+  // The round the uploader was looking at. A retest opens a new round, so a window left
+  // open across one is refused instead of filing its report against the wrong round.
+  expectedRound: number
 }
 
 export interface DemoTestReportUploadResult {
@@ -585,9 +603,20 @@ export interface DemoTestReportUploadResult {
   version: number
 }
 
+export interface CustomerReportUploadInput {
+  file: MultipartFilePart
+  expectedRound: number
+}
+
+export interface CustomerReportUploadResult {
+  artifact: DemoArtifactMetaDto
+  round: number
+  version: number
+}
+
 export interface EvaluationStatusCommand {
   status: EvaluationStatus
-  reason?: string
+  customerComment?: string
 }
 
 export interface ContractDto {
@@ -710,6 +739,9 @@ export interface CreateVisitInput {
   objective: string
 }
 
+
+/** Fields a Sales/Manager user may change on an existing Visit; the backend `edit` command locks after Manager Reviewed. */
+export type UpdateVisitInput = Pick<CreateVisitInput, 'subject' | 'date' | 'type' | 'owner' | 'objective'>
 
 export interface DashboardDto {
   asOf: string

@@ -8,11 +8,12 @@ from typing import Any
 
 import frappe
 from frappe.utils import now_datetime
-from frappe.utils.file_manager import save_file
+from rayher_crm.services.private_file_lifecycle import save_private_file as save_file
 
 from rayher_crm.api.v1.errors import CrmApiException
 from rayher_crm.permissions.roles import assert_capability, resolve_crm_role
 from rayher_crm.permissions.scope import conditions_for_doctype
+from rayher_crm.rayher_crm.doctype.crm_demo_artifact.crm_demo_artifact import SERVICE_OWNED_ARTIFACT_FLAG
 from rayher_crm.services.common import normalize_pagination, to_iso_timestamp
 from rayher_crm.services.demo_requests import _require_demo_request
 from rayher_crm.services.file_security import DOCX_MIME, MAX_FILE_BYTES, MalwareScanner, validate_and_scan
@@ -20,6 +21,20 @@ from rayher_crm.services.file_security import DOCX_MIME, MAX_FILE_BYTES, Malware
 
 REQUEST_DOCX = "Demo Request DOCX"
 TEST_REPORT = "Test Report"
+CUSTOMER_REPORT = "Customer Report"
+
+
+def insert_service_artifact(values: Mapping[str, Any]):
+    """Create a CRM Demo Artifact on behalf of an upload service.
+
+    Only the upload services may create artifacts: they scan the file, check the
+    workflow stage and allocate the version first. The controller rejects any
+    insert without this in-memory flag, so neither the standard resource API nor
+    the Desk form can post a forged report row.
+    """
+    artifact = frappe.get_doc({"doctype": "CRM Demo Artifact", **values})
+    artifact.flags[SERVICE_OWNED_ARTIFACT_FLAG] = True
+    return artifact.insert(ignore_permissions=True)
 
 
 def _serialize(doc) -> dict[str, Any]:
@@ -36,6 +51,9 @@ def _serialize(doc) -> dict[str, Any]:
     }
     if doc.evaluation:
         result["evaluationId"] = doc.evaluation
+    if doc.artifact_type in (TEST_REPORT, CUSTOMER_REPORT):
+        # Only reports belong to a test round; the Demo Request form predates testing.
+        result["round"] = int(doc.test_round or 1)
     return result
 
 
@@ -156,8 +174,7 @@ def save_demo_artifact(
                 raise CrmApiException("LINK_MISMATCH", "Artifact Request and Evaluation do not match.")
         version = _next_version(request.name, evaluation_id)
         file_doc = save_file(file_name.strip(), content, "CRM Demo Request", request.name, is_private=1)
-        meta = frappe.get_doc({
-            "doctype": "CRM Demo Artifact",
+        meta = insert_service_artifact({
             "demo_request": request.name,
             "evaluation": evaluation_id,
             "account": request.account,
@@ -171,10 +188,16 @@ def save_demo_artifact(
             "content_hash": hashlib.sha256(content).hexdigest(),
             "created_by_user": frappe.session.user,
             "created_at": now_datetime(),
-        }).insert(ignore_permissions=True)
+        })
         frappe.db.set_value(
             "File", file_doc.name,
-            {"attached_to_doctype": "CRM Demo Artifact", "attached_to_name": meta.name, "attached_to_field": None},
+            # File's native owner shortcut must not bypass the scoped download endpoint:
+            # the uploader keeps the URL after losing the role or the scope. The real
+            # author is recorded on the artifact's own `created_by_user`.
+            {
+                "attached_to_doctype": "CRM Demo Artifact", "attached_to_name": meta.name,
+                "attached_to_field": None, "owner": "Administrator",
+            },
             update_modified=False,
         )
     except Exception:
@@ -204,6 +227,24 @@ def list_demo_artifacts(demo_request_id: str, query: Mapping[str, Any] | None = 
     return [_serialize(frappe.get_doc("CRM Demo Artifact", row.name)) for row in rows], total, page, page_size
 
 
+def _file_belongs_to_artifact(file_doc, meta) -> bool:
+    """Serve only a private file attached to this artifact or to its own Demo.
+
+    The upload services attach each file to its artifact. A file still attached to
+    the artifact's Evaluation or Demo Request is accepted for rows created before
+    re-attachment, but a file owned by any other record is never served, even if
+    an artifact row points at it.
+    """
+    if not file_doc.is_private:
+        return False
+    owners = {("CRM Demo Artifact", meta.name)}
+    if meta.evaluation:
+        owners.add(("CRM Evaluation", meta.evaluation))
+    if meta.demo_request:
+        owners.add(("CRM Demo Request", meta.demo_request))
+    return (file_doc.attached_to_doctype, file_doc.attached_to_name) in owners
+
+
 def download_demo_artifact(artifact_id: str) -> dict[str, Any]:
     access_id = f"RPTDL-{frappe.generate_hash(length=20).upper()}"
     if not frappe.db.exists("CRM Demo Artifact", artifact_id):
@@ -228,7 +269,10 @@ def download_demo_artifact(artifact_id: str) -> dict[str, Any]:
     if not frappe.has_permission("CRM Demo Artifact", "read", doc=meta, user=frappe.session.user):
         _audit(artifact_id, meta.account, "Denied", "scope denied")
         raise CrmApiException("SCOPE_DENIED", "The Demo Artifact is outside the current user scope.")
-    file_doc = frappe.get_doc("File", meta.private_file)
+    file_doc = frappe.get_doc("File", meta.private_file) if frappe.db.exists("File", meta.private_file) else None
+    if file_doc is None or not _file_belongs_to_artifact(file_doc, meta):
+        _audit(artifact_id, meta.account, "Denied", "file not owned by artifact")
+        raise CrmApiException("PERMISSION_DENIED", "The Demo Artifact file does not belong to this record.")
     content = file_doc.get_content()
     if isinstance(content, str):
         content = content.encode()
@@ -238,5 +282,6 @@ def download_demo_artifact(artifact_id: str) -> dict[str, Any]:
 
 
 __all__ = [
-    "MAX_FILE_BYTES", "download_demo_artifact", "list_demo_artifacts", "save_demo_artifact",
+    "MAX_FILE_BYTES", "download_demo_artifact", "insert_service_artifact", "list_demo_artifacts",
+    "save_demo_artifact",
 ]

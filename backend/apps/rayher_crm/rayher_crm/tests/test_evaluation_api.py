@@ -168,6 +168,7 @@ class TestEvaluationApi(FrappeTestCase):
             {"file_name": "results.txt", "mime_type": "text/plain", "content": b"capture=96"},
             {"file_name": "customer-results.txt", "mime_type": "text/plain", "content": b"capture=96"},
             scanner=CleanScanner(),
+            expected_round=1,
         )
         completed = get_evaluation(evaluation_id)
         self.assertEqual(completed["runs"], [])
@@ -297,10 +298,14 @@ class TestEvaluationApi(FrappeTestCase):
             {"file_name": "results.csv", "mime_type": "text/csv", "content": b"metric,value\ncapture,96\n"},
             {"file_name": "customer-results.csv", "mime_type": "text/csv", "content": b"metric,value\ncapture,96\n"},
             scanner=CleanScanner(),
+            expected_round=1,
         )
         evaluation = get_evaluation(evaluation_id)
         for status in ("Internal Review", "Customer Review", "Accepted"):
-            evaluation = update_evaluation_status(evaluation_id, {"status": status}, evaluation["modified"])
+            command = {"status": status}
+            if status == "Accepted":
+                command["customerComment"] = "Customer signed off on the demo"
+            evaluation = update_evaluation_status(evaluation_id, command, evaluation["modified"])
         self.assertEqual(evaluation["acceptance"], "Accepted")
         sales_notice = frappe.get_all(
             "CRM Notification Event",
@@ -339,24 +344,212 @@ class TestEvaluationApi(FrappeTestCase):
         self.assertEqual((len(scoped), total, page, page_size), (1, 1, 1, 10))
         self.assertEqual(scoped[0]["id"], self.request["id"])
 
-    def test_rejected_evaluation_does_not_advance_opportunity(self):
+    def _in_customer_review(self, request: dict, engineer: str) -> dict:
+        """Take a Demo Test to Customer Review with a completed round-1 run and reports."""
+        evaluation_id = request["evaluationId"]
+        frappe.set_user(engineer)
+        current = get_evaluation(evaluation_id)
+        for status in ("Scope Confirmed", "Sample Received", "Scheduled", "Testing"):
+            current = update_evaluation_status(evaluation_id, {"status": status}, current["modified"])
+        add_evaluation_run(evaluation_id, {
+            "date": "2026-12-11", "lot": "LOT-ARCHIVE", "wafers": 1,
+            "capture": 60, "falsePositive": 9, "wph": 12, "summary": "Below criteria",
+            "expectedModified": current["modified"],
+        })
+        release_demo_test_report(
+            evaluation_id,
+            {"file_name": "results.csv", "mime_type": "text/csv", "content": b"metric,value\ncapture,60\n"},
+            {"file_name": "customer-results.csv", "mime_type": "text/csv", "content": b"metric,value\ncapture,60\n"},
+            scanner=CleanScanner(),
+            expected_round=1,
+        )
+        current = get_evaluation(evaluation_id)
+        for status in ("Internal Review", "Customer Review"):
+            current = update_evaluation_status(evaluation_id, {"status": status}, current["modified"])
+        return current
+
+    def test_archive_never_waits_on_the_opportunity_stage(self):
+        # With Reject gone, archiving is the only way out of Customer Review. An
+        # Opportunity that has left the Demo gate -- closed as Lost after the customer
+        # turned the demo down, or moved back once the Demo Request was converted --
+        # must not hold the Demo Test there, and must stay where Sales put it.
+        for request, engineer, stage in (
+            (self.request, self.engineer, "Lost"),
+            (self.foreign_request, self.other_engineer, "需求发现"),
+        ):
+            current = self._in_customer_review(request, engineer)
+            opportunity_id = request["opportunityId"]
+            values = {"stage": stage, "lost_reason": "Demo not accepted"} if stage == "Lost" else {"stage": stage}
+            frappe.db.set_value("CRM Opportunity", opportunity_id, values)
+
+            archived = update_evaluation_status(
+                request["evaluationId"],
+                {"status": "Accepted", "customerComment": "客户不认可检出率，项目关闭"},
+                current["modified"],
+            )
+
+            self.assertEqual(archived["status"], "Accepted")
+            self.assertEqual(frappe.db.get_value("CRM Opportunity", opportunity_id, "stage"), stage)
+
+    def test_retest_records_the_comment_and_does_not_advance_opportunity(self):
         evaluation_id = self.request["evaluationId"]
         frappe.set_user(self.engineer)
         current = get_evaluation(evaluation_id)
-        with self.assertRaises(CrmApiException) as missing_reason:
-            update_evaluation_status(evaluation_id, {"status": "Rejected"}, current["modified"])
-        self.assertEqual(missing_reason.exception.field_errors, {"reason": "Required"})
-        rejected = update_evaluation_status(
+
+        class CleanScanner:
+            def scan(self, content: bytes) -> bool:
+                return True
+
+        for status in ("Scope Confirmed", "Sample Received", "Scheduled", "Testing"):
+            current = update_evaluation_status(evaluation_id, {"status": status}, current["modified"])
+        add_evaluation_run(evaluation_id, {
+            "date": "2026-12-11", "lot": "LOT-RETEST", "wafers": 1,
+            "capture": 90, "falsePositive": 4, "wph": 12, "summary": "Marginal",
+            "expectedModified": current["modified"],
+        })
+        release_demo_test_report(
             evaluation_id,
-            {"status": "Rejected", "reason": "Capture rate did not meet the acceptance criteria"},
+            {"file_name": "results.csv", "mime_type": "text/csv", "content": b"metric,value"},
+            {"file_name": "customer-results.csv", "mime_type": "text/csv", "content": b"metric,value"},
+            scanner=CleanScanner(),
+            expected_round=1,
+        )
+        current = get_evaluation(evaluation_id)
+        for status in ("Internal Review", "Customer Review"):
+            current = update_evaluation_status(evaluation_id, {"status": status}, current["modified"])
+        current = set_evaluation_test_run_deadline(evaluation_id, {
+            "testRunDeadline": "2099-01-15", "expectedModified": current["modified"],
+        })
+        self.assertEqual(current["testRunDeadline"], "2099-01-15")
+
+        retested = update_evaluation_status(
+            evaluation_id,
+            {"status": "Testing", "customerComment": "Capture rate did not meet the acceptance criteria"},
             current["modified"],
         )
-        self.assertEqual(rejected["status"], "Rejected")
+        self.assertEqual((retested["status"], retested["testRound"]), ("Testing", 2))
         self.assertEqual(
-            rejected["history"][0]["summary"],
-            "Demo Test rejected: Capture rate did not meet the acceptance criteria",
+            retested["history"][0]["summary"],
+            "Demo Test retest requested, round 2: Capture rate did not meet the acceptance criteria",
         )
+        # The round-1 deadline is history: carried over it would mark the new round
+        # overdue from day one and keep the DDL reminders firing for it.
+        self.assertEqual(retested["testRunDeadline"], "")
+        # Clearing it is a deadline change like any other, so it leaves a Deadline row
+        # right behind the retest Status row instead of vanishing silently.
+        self.assertEqual(
+            {key: retested["history"][1][key] for key in ("eventType", "from", "to", "summary")},
+            {
+                "eventType": "Deadline", "from": "2099-01-15", "to": "",
+                "summary": "Cleared round 1 Test Run deadline for retest",
+            },
+        )
+        # A retest is not an outcome, so the Opportunity must stay where it was.
         self.assertEqual(
             frappe.db.get_value("CRM Opportunity", self.request["opportunityId"], "stage"),
             "Wafer Demo确认",
         )
+        self.assertEqual([run["round"] for run in retested["runs"]], [1])
+
+        # The old round remains in the archive, but must not date the new timeline.
+        workflow = next(item for item in list_demo_workflows() if item["id"] == self.request["id"])
+        timeline = {step["key"]: step for step in workflow["projectTimeline"]}
+        self.assertEqual((timeline["test-execution"]["state"], timeline["test-execution"]["date"]), ("Current", ""))
+        self.assertEqual((timeline["internal-review"]["state"], timeline["internal-review"]["date"]), ("Waiting", ""))
+        self.assertEqual([run["round"] for run in workflow["evaluation"]["runs"]], [1])
+
+        # Test Runs and Evaluations are service-owned: no CRM role may write or
+        # create them through the standard document API, so nobody can re-tag
+        # the historical round-1 run, forge a Completed run in the new round, or
+        # wind the Evaluation back to round 1 to pass the Internal Review gate.
+        round_one_run = retested["runs"][0]["id"]
+        for user in (self.manager, self.engineer):
+            frappe.set_user(user)
+            moved = frappe.get_doc("CRM Test Run", round_one_run)
+            moved.test_round = 2
+            with self.assertRaises(frappe.PermissionError):
+                moved.save()
+            with self.assertRaises(frappe.PermissionError):
+                frappe.get_doc({
+                    "doctype": "CRM Test Run", "evaluation": evaluation_id, "run_date": "2026-12-17",
+                    "lot": "LOT-FORGED", "wafers": 1, "status": "Completed",
+                }).insert()
+            wound = frappe.get_doc("CRM Evaluation", evaluation_id)
+            wound.test_round = 1
+            with self.assertRaises(frappe.PermissionError):
+                wound.save()
+            frappe.set_user("Administrator")
+        self.assertEqual(frappe.db.get_value("CRM Test Run", round_one_run, "test_round"), 1)
+        self.assertEqual(frappe.db.count("CRM Test Run", {"evaluation": evaluation_id}), 1)
+        # Even a privileged writer cannot change the round marker after creation.
+        moved = frappe.get_doc("CRM Test Run", round_one_run)
+        moved.test_round = 2
+        with self.assertRaises(frappe.ValidationError):
+            moved.save()
+        moved = frappe.get_doc("CRM Test Run", round_one_run)
+        moved.evaluation = self.foreign_request["evaluationId"]
+        with self.assertRaises(frappe.ValidationError):
+            moved.save()
+        edited = frappe.get_doc("CRM Test Run", round_one_run)
+        edited.summary = "Summary edits stay allowed"
+        edited.save()
+        self.assertEqual(frappe.db.get_value("CRM Test Run", round_one_run, "summary"), "Summary edits stay allowed")
+        # The Evaluation's own round only ever advances by one through the
+        # service: even a privileged writer can neither wind it back nor skip.
+        for bogus_round in (1, 3):
+            wound = frappe.get_doc("CRM Evaluation", evaluation_id)
+            wound.test_round = bogus_round
+            with self.assertRaises(frappe.ValidationError):
+                wound.save()
+        self.assertEqual(frappe.db.get_value("CRM Evaluation", evaluation_id, "test_round"), 2)
+        untouched = frappe.get_doc("CRM Evaluation", evaluation_id)
+        untouched.criteria = "Unrelated edits stay allowed"
+        untouched.save()
+        self.assertEqual(frappe.db.get_value("CRM Evaluation", evaluation_id, "test_round"), 2)
+        # A run inserted with an arbitrary round is stamped from the parent instead.
+        stamped = frappe.get_doc({
+            "doctype": "CRM Test Run", "evaluation": evaluation_id, "test_round": 7,
+            "run_date": "2026-12-17", "lot": "LOT-DIRECT", "wafers": 1, "status": "Planned",
+        }).insert()
+        self.assertEqual(stamped.test_round, 2)
+        with self.assertRaises(frappe.ValidationError):
+            frappe.get_doc({
+                "doctype": "CRM Test Run", "evaluation": "CRM-EVAL-MISSING", "test_round": 1,
+                "run_date": "2026-12-17", "lot": "LOT-ORPHAN", "wafers": 1, "status": "Planned",
+            }).insert()
+        frappe.delete_doc("CRM Test Run", stamped.name, force=True)
+
+        # Round-2 reports alone must not reopen Internal Review: the round-1
+        # Completed run is history, not evidence that the retest was performed.
+        release_demo_test_report(
+            evaluation_id,
+            {"file_name": "results-r2.csv", "mime_type": "text/csv", "content": b"metric,value"},
+            {"file_name": "customer-results-r2.csv", "mime_type": "text/csv", "content": b"metric,value"},
+            scanner=CleanScanner(),
+            expected_round=2,
+        )
+        current = get_evaluation(evaluation_id)
+        self.assertEqual(current["reportStatus"], "Ready")
+        with self.assertRaises(CrmApiException) as no_round_two_run:
+            update_evaluation_status(evaluation_id, {"status": "Internal Review"}, current["modified"])
+        self.assertEqual(no_round_two_run.exception.code, "INVALID_TRANSITION")
+        self.assertIn("round 2", no_round_two_run.exception.public_message)
+
+        # A run completed in round 2 is tagged with that round and opens the gate.
+        current = add_evaluation_run(evaluation_id, {
+            "date": "2026-12-18", "lot": "LOT-RETEST-2", "wafers": 1,
+            "capture": 97, "falsePositive": 2, "wph": 12, "summary": "Retest passed",
+            "expectedModified": current["modified"],
+        })
+        self.assertEqual([run["round"] for run in current["runs"]], [1, 2])
+        self.assertEqual(
+            frappe.db.get_value("CRM Test Run", current["runs"][-1]["id"], "test_round"), 2,
+        )
+        reviewed = update_evaluation_status(evaluation_id, {"status": "Internal Review"}, current["modified"])
+        self.assertEqual((reviewed["status"], reviewed["testRound"]), ("Internal Review", 2))
+
+        workflow = next(item for item in list_demo_workflows() if item["id"] == self.request["id"])
+        timeline = {step["key"]: step for step in workflow["projectTimeline"]}
+        self.assertEqual(timeline["test-execution"]["date"], "2026-12-18")
+        self.assertEqual(timeline["internal-review"]["date"], "2026-12-18")
+        self.assertEqual([run["round"] for run in workflow["evaluation"]["runs"]], [1, 2])

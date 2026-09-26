@@ -61,7 +61,11 @@ class TestStage5GSchema(FrappeTestCase):
         engineer = self._user("crm-stage5g-engineer@example.invalid", "CRM Engineer")
         roles = {row.role: row for row in frappe.get_meta("CRM Visit").permissions}
         self.assertTrue(roles["CRM Manager"].read and roles["CRM Manager"].write)
-        self.assertTrue(roles["CRM Sales"].read and roles["CRM Sales"].write)
+        self.assertTrue(roles["CRM Sales"].read)
+        # Sales write visits through the visit service only: a write DocPerm would let an
+        # action owner change a colleague's visit through the standard document API.
+        self.assertFalse(bool(roles["CRM Sales"].write))
+        self.assertFalse(bool(roles["CRM Sales"].create))
         self.assertFalse(bool(roles["CRM Engineer"].read))
         self.assertFalse(bool(roles["CRM Engineer"].write))
         self.assertEqual(conditions_for_doctype("CRM Visit", manager), "1=1")

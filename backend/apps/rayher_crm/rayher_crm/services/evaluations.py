@@ -10,10 +10,11 @@ import frappe
 
 from rayher_crm.api.v1.errors import CrmApiException
 from rayher_crm.permissions.roles import assert_capability
+from rayher_crm.rayher_crm.doctype.crm_evaluation.crm_evaluation import OPEN_RETEST_ROUND_FLAG
 from rayher_crm.permissions.scope import conditions_for_doctype
 from rayher_crm.services.common import normalize_pagination, optional_date, required_text, to_iso_timestamp
 from rayher_crm.services.concurrency import lock_document
-from rayher_crm.services.opportunities import advance_opportunity_for_demo_event
+from rayher_crm.services.opportunities import DEMO_EVENT_TRANSITIONS, advance_opportunity_for_demo_event
 from rayher_crm.services.notifications import active_crm_users, create_notification
 
 
@@ -62,6 +63,7 @@ def _lock_evaluation(name: str):
 def serialize_test_run(doc) -> dict[str, Any]:
     return {
         "id": doc.name, "date": str(doc.run_date or ""), "lot": doc.lot,
+        "round": int(doc.test_round or 1),
         "wafers": int(doc.wafers or 0), "status": doc.status,
         "capture": float(doc.capture) if doc.capture is not None else None,
         "falsePositive": float(doc.false_positive) if doc.false_positive is not None else None,
@@ -76,6 +78,26 @@ def _runs(evaluation_id: str) -> list[dict[str, Any]]:
         order_by="run_date asc, creation asc, name asc", ignore_permissions=True,
     )
     return [serialize_test_run(frappe.get_doc("CRM Test Run", name)) for name in names]
+
+
+def _customer_reviews(evaluation: str) -> list[dict[str, Any]]:
+    """Customer Review is record-keeping: every round's comment is kept, oldest first."""
+    rows = frappe.get_all(
+        "CRM Evaluation Customer Review",
+        filters={"evaluation": evaluation},
+        fields=["name", "test_round", "comment", "author", "at"],
+        order_by="at asc",
+    )
+    return [
+        {
+            "id": row.name,
+            "round": int(row.test_round or 1),
+            "comment": row.comment or "",
+            "author": row.author or "",
+            "createdAt": to_iso_timestamp(row.at),
+        }
+        for row in rows
+    ]
 
 
 def _history(evaluation_id: str) -> list[dict[str, Any]]:
@@ -104,9 +126,16 @@ def append_evaluation_history(
     }).insert(ignore_permissions=True)
 
 
-def _has_completed_test_run(evaluation_id: str) -> bool:
+def _has_completed_test_run(evaluation_id: str, test_round: int) -> bool:
+    """A retest opens a new round, so only runs completed in *this* round count.
+
+    Round-1 runs stay attached to the evaluation as history; without the round
+    filter the Internal Review gate would reopen on them as soon as the new
+    round's reports were uploaded, without any retest actually being run.
+    """
     return bool(frappe.db.exists(
-        "CRM Test Run", {"evaluation": evaluation_id, "status": "Completed"},
+        "CRM Test Run",
+        {"evaluation": evaluation_id, "status": "Completed", "test_round": int(test_round or 1)},
     ))
 
 
@@ -133,6 +162,7 @@ def serialize_evaluation(doc) -> dict[str, Any]:
         "wafers": sum(run["wafers"] for run in runs), "acceptance": doc.acceptance,
         "reportStatus": doc.report_status,
         "reportVersion": int(doc.report_version or 0), "criteria": doc.criteria or "",
+        "testRound": int(doc.test_round or 1), "customerReviews": _customer_reviews(doc.name),
         "waferPreparationStatus": _preparation_status(doc, "wafer"),
         "testPreparationStatus": _preparation_status(doc, "test"),
         "runs": runs, "history": _history(doc.name), "modified": to_iso_timestamp(doc.modified),
@@ -148,14 +178,15 @@ def serialize_evaluation(doc) -> dict[str, Any]:
         result["requirementId"] = doc.requirement_id
     from rayher_crm.services.demo_artifacts import _serialize
     artifact_fields = (
-        ("report_artifact_id", "reportArtifactId", "reportArtifact"),
-        ("internal_report_artifact_id", "internalReportArtifactId", "internalReportArtifact"),
-        ("external_report_artifact_id", "externalReportArtifactId", "externalReportArtifact"),
+        ("report_artifact_id", "reportArtifactId", "reportArtifact", "Test Report"),
+        ("internal_report_artifact_id", "internalReportArtifactId", "internalReportArtifact", "Test Report"),
+        ("external_report_artifact_id", "externalReportArtifactId", "externalReportArtifact", "Test Report"),
+        ("customer_report_artifact_id", "customerReportArtifactId", "customerReportArtifact", "Customer Report"),
     )
-    for fieldname, id_key, artifact_key in artifact_fields:
+    for fieldname, id_key, artifact_key, artifact_type in artifact_fields:
         artifact_id = getattr(doc, fieldname, None)
         if artifact_id and frappe.db.exists(
-            "CRM Demo Artifact", {"name": artifact_id, "artifact_type": "Test Report"},
+            "CRM Demo Artifact", {"name": artifact_id, "artifact_type": artifact_type},
         ):
             result[id_key] = artifact_id
             result[artifact_key] = _serialize(frappe.get_doc("CRM Demo Artifact", artifact_id))
@@ -244,8 +275,11 @@ def update_evaluation_status(name: str, command: dict[str, Any], expected_modifi
     ):
         raise CrmApiException("INVALID_TRANSITION", "Wafer and Test Preparation must both be completed.")
     if doc.status == "Testing" and next_status == "Internal Review":
-        if not _has_completed_test_run(name):
-            raise CrmApiException("INVALID_TRANSITION", "Complete at least one Test Run before Internal Review.")
+        if not _has_completed_test_run(name, int(doc.test_round or 1)):
+            raise CrmApiException(
+                "INVALID_TRANSITION",
+                f"Complete at least one Test Run in round {int(doc.test_round or 1)} before Internal Review.",
+            )
         report_ids = (doc.internal_report_artifact_id, doc.external_report_artifact_id)
         if not all(artifact_id and frappe.db.exists(
             "CRM Demo Artifact", {"name": artifact_id, "artifact_type": "Test Report"},
@@ -253,22 +287,30 @@ def update_evaluation_status(name: str, command: dict[str, Any], expected_modifi
             raise CrmApiException("INVALID_TRANSITION", "Upload Internal and External Test Reports before Internal Review.")
     allowed = {doc.status}
     if doc.status not in TERMINAL_STATUSES:
-        allowed.add("Rejected")
         if doc.status in STATUS_NEXT:
             allowed.add(STATUS_NEXT[doc.status])
+        # Customer Review records a comment and then either archives or reopens testing.
+        # Rejected is no longer reachable; it survives only for records archived before
+        # Customer Review became an outcome-free step.
+        if doc.status == "Customer Review":
+            allowed.add("Testing")
     if next_status not in allowed:
         raise CrmApiException("INVALID_TRANSITION", f"Evaluation cannot move from {doc.status} to {next_status}.")
     if next_status == "Customer Review" and doc.report_status != "Ready":
         raise CrmApiException("REPORT_NOT_READY", "A Test Report is required before Customer Review.")
     if next_status == doc.status:
         return serialize_evaluation(doc)
-    rejection_reason = ""
-    if next_status == "Rejected":
-        rejection_reason = required_text(command, "reason")
-        if len(rejection_reason) > 1000:
+    leaving_customer_review = doc.status == "Customer Review"
+    customer_comment = ""
+    if leaving_customer_review:
+        customer_comment = required_text(command, "customerComment")
+        if len(customer_comment) > 1000:
             raise CrmApiException(
-                "VALIDATION_ERROR", "reason is too long.", field_errors={"reason": "Maximum length is 1000"},
+                "VALIDATION_ERROR",
+                "customerComment is too long.",
+                field_errors={"customerComment": "Maximum length is 1000"},
             )
+    is_retest = leaving_customer_review and next_status == "Testing"
 
     savepoint = f"crm_evaluation_status_{frappe.generate_hash(length=8)}"
     frappe.db.savepoint(savepoint)
@@ -281,17 +323,57 @@ def update_evaluation_status(name: str, command: dict[str, Any], expected_modifi
             doc.wafer_preparation_status = "Completed"
             doc.test_preparation_status = "Completed"
         doc.acceptance = next_status if next_status in TERMINAL_STATUSES else "Pending"
+        commented_round = int(doc.test_round or 1)
+        previous_deadline = str(doc.test_run_deadline or "")
+        if is_retest:
+            # A retest opens a new round. Artifacts are append-only and stay exactly
+            # where they are; clearing the pointers re-arms the Internal Review gate so
+            # the new round cannot advance on the previous round's reports.
+            doc.test_round = commented_round + 1
+            doc.flags[OPEN_RETEST_ROUND_FLAG] = True
+            # The previous round's deadline is history too: left in place it would flag
+            # the new round as overdue and keep the DDL reminders firing for it.
+            doc.test_run_deadline = None
+            doc.report_status = "Not Ready"
+            doc.report_artifact_id = None
+            doc.internal_report_artifact_id = None
+            doc.external_report_artifact_id = None
+            doc.customer_report_artifact_id = None
         doc.save(ignore_permissions=True)
-        history_summary = (
-            f"Demo Test rejected: {rejection_reason}"
-            if next_status == "Rejected"
-            else f"Demo Test moved to {next_status}"
-        )
+        if customer_comment:
+            frappe.get_doc({
+                "doctype": "CRM Evaluation Customer Review",
+                "evaluation": doc.name,
+                "demo_request": doc.demo_request,
+                "test_round": commented_round,
+                "comment": customer_comment,
+                "author": frappe.session.user,
+                "at": frappe.utils.now_datetime(),
+            }).insert(ignore_permissions=True)
+        if is_retest and previous_deadline:
+            # Mirror set_evaluation_test_run_deadline: every deadline change leaves a
+            # Deadline row. Written before the Status row so the retest stays newest.
+            append_evaluation_history(
+                doc, "Deadline", f"Cleared round {commented_round} Test Run deadline for retest",
+                previous_deadline, "",
+            )
+        if is_retest:
+            history_summary = f"Demo Test retest requested, round {doc.test_round}: {customer_comment}"
+        elif next_status == "Accepted" and customer_comment:
+            history_summary = f"Demo Test archived with customer comment: {customer_comment}"
+        else:
+            history_summary = f"Demo Test moved to {next_status}"
         append_evaluation_history(doc, "Status", history_summary, previous_status, next_status)
         request = frappe.get_doc("CRM Demo Request", doc.demo_request)
-        if next_status == "Accepted":
-            if request.opportunity:
-                advance_opportunity_for_demo_event(request.opportunity, "evaluation_accepted")
+        # Archiving is the only way out of Customer Review, so the Opportunity's stage
+        # must never block it. Only an Opportunity still at the Demo gate is advanced;
+        # one Sales has closed as Lost, or moved back after the Demo Request was
+        # converted, stays where it is instead of holding the Demo Test in Customer
+        # Review for good. The row lock keeps this read consistent with the advance.
+        if next_status == "Accepted" and request.opportunity and frappe.db.get_value(
+            "CRM Opportunity", request.opportunity, "stage", for_update=True,
+        ) == DEMO_EVENT_TRANSITIONS["evaluation_accepted"][0]:
+            advance_opportunity_for_demo_event(request.opportunity, "evaluation_accepted")
         _update_request_tracking(doc, history_summary)
         _notify_status_change(doc, request, previous_status)
     except Exception:
@@ -407,7 +489,10 @@ def add_evaluation_run(name: str, payload: dict[str, Any]) -> dict[str, Any]:
     savepoint = f"crm_test_run_{frappe.generate_hash(length=8)}"
     frappe.db.savepoint(savepoint)
     try:
-        run = frappe.get_doc({"doctype": "CRM Test Run", "evaluation": doc.name, **values}).insert(ignore_permissions=True)
+        # The controller stamps ``test_round`` from the parent on insert.
+        run = frappe.get_doc({
+            "doctype": "CRM Test Run", "evaluation": doc.name, **values,
+        }).insert(ignore_permissions=True)
         doc.save(ignore_permissions=True)
         append_evaluation_history(
             doc, "Test Run", f"{run.status} Test Run {run.name}", "", run.name,
@@ -507,7 +592,11 @@ def _workflow_timeline(
 
     engineer_completed = transition("Manager Approval")
     manager_completed = transition("Converted")
-    completed_runs = [run for run in (evaluation["runs"] if evaluation else []) if run["status"] == "Completed"]
+    current_round = int((evaluation or {}).get("testRound") or 1)
+    completed_runs = [
+        run for run in (evaluation["runs"] if evaluation else [])
+        if run["status"] == "Completed" and int(run.get("round") or 1) == current_round
+    ]
     run_date = completed_runs[-1]["date"] if completed_runs else ""
 
     return [
@@ -636,7 +725,12 @@ def list_demo_workflows(query: dict[str, Any] | None = None):
                 "testPreparationCompletedAt": evaluation.get("testPreparationCompletedAt", ""),
             } if evaluation else None),
             "artifacts": list_demo_artifacts(request.name),
-            "conclusion": {"status": evaluation["acceptance"] if evaluation else "Pending"},
+            "conclusion": {
+                "status": evaluation["acceptance"] if evaluation else "Pending",
+                "customerFeedback": (evaluation.get("customerReviews") or [{}])[-1].get("comment", "") if evaluation else "",
+            },
+            "testRound": evaluation["testRound"] if evaluation else 1,
+            "customerReviews": evaluation.get("customerReviews", []) if evaluation else [],
             "approvals": [], "executions": [], "wafers": [],
             "testRuns": ([{
                 "id": run["id"], "date": run["date"], "recipe": run["lot"],

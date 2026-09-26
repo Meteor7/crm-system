@@ -64,6 +64,30 @@ describe('VisitModal business dates', () => {
     expect(wrapper.find('[aria-label="行动负责人"]').exists()).toBe(false)
   })
 
+  it('prefills the edit form from the Visit and emits only the editable basic fields', async () => {
+    const visit = {
+      id: 'V-100', accountId: accounts[0].id, accountName: accounts[0].name, segment: accounts[0].segment,
+      subject: '原定拜访', date: '2026-07-21', type: 'Video' as const, status: 'Planned' as const, owner: 'person002@crm.example.invalid',
+      objective: '确认样片', outcome: '', nextAction: '', actionOwner: '', due: '', actionDone: false, modified: '2026-07-20 10:00:00.000000',
+    }
+    const wrapper = mount(VisitModal, { props: { mode: 'edit', accounts: [], visit } })
+
+    expect(wrapper.text()).toContain('编辑拜访')
+    expect(wrapper.find('[aria-label="拜访客户"]').exists()).toBe(false)
+    expect(wrapper.find('input[type="file"]').exists()).toBe(false)
+    expect((wrapper.get('[aria-label="拜访主题"]').element as HTMLInputElement).value).toBe('原定拜访')
+    expect((wrapper.get('[aria-label="拜访日期"]').element as HTMLInputElement).value).toBe('2026-07-21')
+
+    await wrapper.get('[aria-label="拜访日期"]').setValue('2026-07-28')
+    await wrapper.get('[aria-label="拜访方式"]').setValue('On-site')
+    await wrapper.get('[aria-label="拜访目标"]').setValue('确认样片与参会人')
+    await wrapper.get('form').trigger('submit')
+
+    expect(wrapper.emitted('submit')![0]).toEqual([
+      { subject: '原定拜访', date: '2026-07-28', type: 'On-site', owner: 'person002@crm.example.invalid', objective: '确认样片与参会人' },
+    ])
+  })
+
   it('retains the Opportunity supplied by the cross-module create route', async () => {
     const wrapper = mount(VisitModal, {
       props: { mode: 'create', accounts, initialOpportunityId: 'CRM-OPP-00201' },

@@ -43,8 +43,21 @@ describe('TestReportUploadModal', () => {
     expect(releaseDemoTestReport).toHaveBeenCalledWith(evaluations[2].id, {
       internalFile: { fileName: 'results.txt', mimeType: 'text/plain', size: internal.size, blob: internal },
       externalFile: { fileName: 'customer-results.pdf', mimeType: 'application/pdf', size: external.size, blob: external },
+      expectedRound: 1,
     })
     expect(wrapper.emitted('uploaded')?.[0]).toEqual([uploadResult])
+  })
+
+  it('names the round on screen so a window left open across a retest cannot file into the new one', async () => {
+    const releaseDemoTestReport = vi.fn().mockResolvedValue({ data: uploadResult, warnings: [] })
+    const apiClient = { releaseDemoTestReport } as unknown as CrmApi
+    const wrapper = mount(TestReportUploadModal, { props: { evaluation: { ...evaluations[2], testRound: 3 }, apiClient } })
+    await choose(wrapper, '[data-internal-report]', new File(['internal'], 'internal.pdf', { type: 'application/pdf' }))
+    await choose(wrapper, '[data-external-report]', new File(['external'], 'external.pdf', { type: 'application/pdf' }))
+    await wrapper.get('[data-upload-test-report]').trigger('click')
+    await flushPromises()
+
+    expect(releaseDemoTestReport.mock.calls[0][1]).toMatchObject({ expectedRound: 3 })
   })
 
   it('rejects empty, oversized, and unsupported files before the API call', async () => {
@@ -59,6 +72,24 @@ describe('TestReportUploadModal', () => {
     await choose(wrapper, '[data-internal-report]', oversized)
     expect(wrapper.get('[role="alert"]').text()).toContain('100 MiB')
     expect(releaseDemoTestReport).not.toHaveBeenCalled()
+  })
+
+  it('accepts PPTX reports for both slots', async () => {
+    const { wrapper, releaseDemoTestReport } = setup()
+    const pptx = 'application/vnd.openxmlformats-officedocument.presentationml.presentation'
+    const internal = new File(['deck'], 'internal-review.pptx', { type: pptx })
+    const external = new File(['deck'], 'customer-review.pptx', { type: pptx })
+    await choose(wrapper, '[data-internal-report]', internal)
+    await choose(wrapper, '[data-external-report]', external)
+    expect(wrapper.find('[role="alert"]').exists()).toBe(false)
+
+    await wrapper.get('[data-upload-test-report]').trigger('click')
+    await flushPromises()
+    expect(releaseDemoTestReport).toHaveBeenCalledWith(evaluations[2].id, {
+      internalFile: { fileName: 'internal-review.pptx', mimeType: pptx, size: internal.size, blob: internal },
+      externalFile: { fileName: 'customer-review.pptx', mimeType: pptx, size: external.size, blob: external },
+      expectedRound: 1,
+    })
   })
 
   it('keeps close disabled while an upload is pending', async () => {

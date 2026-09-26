@@ -5,6 +5,7 @@ import type { CrmApi } from '@/api'
 import { mapRequestError } from '@/api/request-state'
 import type { DemoTestReportUploadResult, EvaluationDto } from '@/types/crm'
 import { useI18n, useLocaleMessage } from '@/i18n'
+import { REPORT_UPLOAD_MIME_TYPES, REPORT_UPLOAD_ACCEPT, REPORT_UPLOAD_MAX_BYTES } from './report-upload-formats'
 
 const props = defineProps<{ evaluation: EvaluationDto; apiClient: CrmApi }>()
 const emit = defineEmits<{ close: []; uploaded: [result: DemoTestReportUploadResult] }>()
@@ -15,7 +16,6 @@ const error = useLocaleMessage()
 const requestId = ref('')
 const { locale, t, message } = useI18n()
 const copy = (english: string, chinese: string) => locale.value === 'en-US' ? english : chinese
-const allowed = new Set(['application/pdf', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'text/csv', 'text/plain', 'image/png', 'image/jpeg'])
 
 function choose(kind: 'internal' | 'external', event: Event) {
   const selected = (event.target as HTMLInputElement).files?.[0] ?? null
@@ -24,8 +24,8 @@ function choose(kind: 'internal' | 'external', event: Event) {
   const target = kind === 'internal' ? internalFile : externalFile
   if (!selected) { target.value = null; return }
   if (!selected.size) { error.value = message('evaluationReport.emptyFile'); target.value = null; return }
-  if (selected.size > 100 * 1024 * 1024) { error.value = message('evaluationReport.maxFile'); target.value = null; return }
-  if (!allowed.has(selected.type)) { error.value = message('evaluationReport.fileTypes'); target.value = null; return }
+  if (selected.size > REPORT_UPLOAD_MAX_BYTES) { error.value = message('evaluationReport.maxFile'); target.value = null; return }
+  if (!REPORT_UPLOAD_MIME_TYPES.has(selected.type)) { error.value = message('evaluationReport.fileTypes'); target.value = null; return }
   target.value = selected
 }
 
@@ -36,6 +36,7 @@ async function upload() {
     const result = await props.apiClient.releaseDemoTestReport(props.evaluation.id, {
       internalFile: { fileName: internalFile.value.name, mimeType: internalFile.value.type, size: internalFile.value.size, blob: internalFile.value },
       externalFile: { fileName: externalFile.value.name, mimeType: externalFile.value.type, size: externalFile.value.size, blob: externalFile.value },
+      expectedRound: props.evaluation.testRound,
     })
     emit('uploaded', result.data)
   } catch (reason) {
@@ -53,8 +54,8 @@ async function upload() {
       <header><div><span>TEST REPORT</span><h2>{{ t('evaluationReport.uploadTitle') }}</h2></div><button type="button" :aria-label="t('detail.close')" :disabled="busy" @click="emit('close')"><X :size="18" /></button></header>
       <div class="body">
         <p>{{ evaluation.title }} · {{ evaluation.id }}</p>
-        <label>{{ copy('Internal Report', '内部报告') }}<input data-internal-report type="file" accept=".pdf,.docx,.xlsx,.csv,.txt,.png,.jpg,.jpeg" @change="choose('internal', $event)" /><small v-if="internalFile">{{ internalFile.name }}</small></label>
-        <label>{{ copy('External Report', '外部报告') }}<input data-external-report type="file" accept=".pdf,.docx,.xlsx,.csv,.txt,.png,.jpg,.jpeg" @change="choose('external', $event)" /><small v-if="externalFile">{{ externalFile.name }}</small></label>
+        <label>{{ copy('Internal Report', '内部报告') }}<input data-internal-report type="file" :accept="REPORT_UPLOAD_ACCEPT" @change="choose('internal', $event)" /><small v-if="internalFile">{{ internalFile.name }}</small></label>
+        <label>{{ copy('External Report', '外部报告') }}<input data-external-report type="file" :accept="REPORT_UPLOAD_ACCEPT" @change="choose('external', $event)" /><small v-if="externalFile">{{ externalFile.name }}</small></label>
         <small>{{ t('evaluationReport.hint') }}</small>
         <p v-if="error" class="error" role="alert">{{ error }}<small v-if="requestId">Request ID: {{ requestId }}</small></p>
       </div>

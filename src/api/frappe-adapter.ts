@@ -32,6 +32,7 @@ export const FRAPPE_METHODS = {
   createVisit: 'visits.create_visit',
   submitVisitRecord: 'visits.submit_visit_record',
   reviewVisit: 'visits.review_visit',
+  updateVisit: 'visits.update_visit',
   updateVisitMeetingRecord: 'visits.update_meeting_record',
   getVisitAttachment: 'visits.download_attachment',
   listContacts: 'contacts.list_contacts',
@@ -73,6 +74,7 @@ export const FRAPPE_METHODS = {
   saveDemoArtifact: 'demo_artifacts.save_artifact',
   getDemoArtifact: 'demo_artifacts.download_artifact',
   releaseDemoTestReport: 'evaluations.release_demo_test_report',
+  uploadCustomerReport: 'evaluations.upload_customer_report',
   listContracts: 'read_only_views.list_contracts',
   listQuotationCatalog: 'quotations.list_catalog',
   listQuotations: 'quotations.list_quotations',
@@ -385,6 +387,8 @@ export function createFrappeApi(options: FrappeApiOptions = {}): CrmApi {
       return requestJson(FRAPPE_METHODS.submitVisitRecord, 'POST', undefined, form)
     },
     reviewVisit: (id, expectedModified) => post('reviewVisit', { id, expectedModified }),
+    // `command.type` is the backend command discriminator, so the visit type travels as `visitType`.
+    updateVisit: (id, { type, ...rest }, expectedModified) => post('updateVisit', { id, command: { type: 'edit', ...rest, visitType: type }, expectedModified }),
     updateVisitMeetingRecord: (id, input, expectedModified) => post('updateVisitMeetingRecord', { id, input, expectedModified }),
     getVisitAttachment: (fileId) => requestBinary(FRAPPE_METHODS.getVisitAttachment, { fileId }, 'meeting-record-file'),
     listContacts: (query) => get('listContacts', query as RequestValues),
@@ -447,6 +451,7 @@ export function createFrappeApi(options: FrappeApiOptions = {}): CrmApi {
     async releaseDemoTestReport(id, input) {
       const form = new FormData()
       appendValue(form, 'id', id)
+      appendValue(form, 'expectedRound', input.expectedRound)
       for (const [field, file] of [['internalFile', input.internalFile], ['externalFile', input.externalFile]] as const) {
         // Snapshot application-visible plaintext before multipart serialization.
         const content = await file.blob.arrayBuffer()
@@ -454,6 +459,16 @@ export function createFrappeApi(options: FrappeApiOptions = {}): CrmApi {
         appendMultipartFile(form, field, { ...file, blob: snapshot, size: snapshot.size })
       }
       return requestJson(FRAPPE_METHODS.releaseDemoTestReport, 'POST', undefined, form)
+    },
+    async uploadCustomerReport(id, input) {
+      const form = new FormData()
+      appendValue(form, 'id', id)
+      appendValue(form, 'expectedRound', input.expectedRound)
+      // Snapshot application-visible plaintext before multipart serialization.
+      const content = await input.file.blob.arrayBuffer()
+      const snapshot = new Blob([content], { type: input.file.mimeType })
+      appendMultipartFile(form, 'file', { ...input.file, blob: snapshot, size: snapshot.size })
+      return requestJson(FRAPPE_METHODS.uploadCustomerReport, 'POST', undefined, form)
     },
     listContracts: (query) => get('listContracts', query as RequestValues),
     listQuotationCatalog: () => get('listQuotationCatalog'),

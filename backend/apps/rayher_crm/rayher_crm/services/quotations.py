@@ -760,7 +760,7 @@ def render_quotation_pdf(master, version) -> bytes:
 
 
 def _release_pdf(master, version, pdf_content: bytes) -> str:
-    from frappe.utils.file_manager import save_file
+    from rayher_crm.services.private_file_lifecycle import save_private_file as save_file
     filename = f"{master.ref_no}-V{int(version.version_no)}.pdf"
     return save_file(filename, pdf_content, "CRM Quotation Version", version.name, is_private=1).file_url
 

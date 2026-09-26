@@ -166,6 +166,30 @@ describe('Demo project-cycle mapping', () => {
     })
   })
 
+  it.each([false, true])('uses only the current retest round for timeline dates (new run: %s)', (hasCurrentRun) => {
+    const firstRun = {
+      id: 'RUN-1', date: '2026-09-01', lot: 'Round 1', round: 1,
+      wafers: 1, status: 'Completed' as const, summary: '',
+      capture: null, falsePositive: null, wph: null,
+    }
+    const runs = [firstRun]
+    if (hasCurrentRun) runs.push({ ...firstRun, id: 'RUN-2', date: '2026-09-18', round: 2 })
+    const item = workflow({
+      stage: 'Test Execution', testRound: 2,
+      evaluation: { id: 'EVAL-1', status: 'Testing', owner: 'Engineer', testRunDeadline: '', runs },
+    })
+
+    const timeline = buildDemoProjectTimeline(item)
+    expect(timeline.find(step => step.key === 'test-execution')).toMatchObject({
+      state: 'Current', date: hasCurrentRun ? '2026-09-18' : undefined,
+    })
+    expect(timeline.find(step => step.key === 'internal-review')).toMatchObject({
+      state: 'Waiting', date: hasCurrentRun ? '2026-09-18' : undefined,
+    })
+    expect(item.evaluation?.runs[0]).toEqual(firstRun)
+    expect(item.evaluation?.runs).toHaveLength(hasCurrentRun ? 2 : 1)
+  })
+
   it('opens the preparation gate only after both parallel branches are done', () => {
     expect(preparationGateState([
       { key: 'wafer-preparation', label: 'Wafer Preparation', state: 'Done' },

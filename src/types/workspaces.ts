@@ -38,6 +38,7 @@ export interface OpportunityActionDto {
   owner: string
   due: string
   status: OpportunityActionStatus
+  remark?: string
 }
 
 export type CreateOpportunityStakeholderInput = Omit<OpportunityStakeholderDto, 'id' | 'name' | 'title'>
@@ -210,6 +211,8 @@ export interface DemoWorkflowDto {
       id: string
       date: string
       lot: string
+      /** Retest round the run belongs to; earlier rounds stay in the archive next to the current one. */
+      round: number
       wafers: number
       status: 'Planned' | 'Completed'
       summary: string
@@ -220,10 +223,11 @@ export interface DemoWorkflowDto {
   }
   artifacts?: Array<{
     id: string
-    type: 'Demo Request DOCX' | 'Test Report'
+    type: 'Demo Request DOCX' | 'Test Report' | 'Customer Report'
     fileName: string
     mimeType?: string
     version: number
+    round?: number
     createdBy?: string
     createdAt: string
     visibility?: 'Internal' | 'Customer Review'
@@ -246,6 +250,8 @@ export interface DemoWorkflowDto {
   preparedBy?: string
   approvedBy?: string
   conclusion: { status: 'Pending' | 'Accepted' | 'Rejected'; summary?: string; customerFeedback?: string; confirmedBy?: string; confirmedAt?: string; followUpAction?: string }
+  customerReviews?: Array<{ id: string; round: number; comment: string; author: string; createdAt: string }>
+  testRound?: number
   approvals: Array<{ label: string; actor: string; status: 'Done' | 'Current' | 'Waiting' }>
   executions: Array<{ id: string; tool: string; window: string; engineer: string; status: string }>
   wafers: Array<{ id: string; lot: string; material: string; diameter: string; thickness: string; status: string }>

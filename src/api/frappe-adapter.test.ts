@@ -44,6 +44,7 @@ describe('Frappe method contract', () => {
       createVisit: 'visits.create_visit',
       submitVisitRecord: 'visits.submit_visit_record',
       reviewVisit: 'visits.review_visit',
+      updateVisit: 'visits.update_visit',
       updateVisitMeetingRecord: 'visits.update_meeting_record',
       getVisitAttachment: 'visits.download_attachment',
       listContacts: 'contacts.list_contacts',
@@ -86,6 +87,7 @@ describe('Frappe method contract', () => {
       saveDemoArtifact: 'demo_artifacts.save_artifact',
       getDemoArtifact: 'demo_artifacts.download_artifact',
       releaseDemoTestReport: 'evaluations.release_demo_test_report',
+      uploadCustomerReport: 'evaluations.upload_customer_report',
       listContracts: 'read_only_views.list_contracts',
       listQuotations: 'quotations.list_quotations',
       listQuotationCatalog: 'quotations.list_catalog',
@@ -202,6 +204,21 @@ describe('Frappe JSON transport', () => {
     const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit]
     expect(url).toBe('/api/method/rayher_crm.api.v1.accounts.list_account_cities')
     expect(init).toMatchObject({ method: 'GET', credentials: 'same-origin' })
+  })
+
+  it('sends a Visit edit as the backend edit command with the visit type renamed to visitType', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(success({ id: 'CRM-VIS-00001' }))
+    const api = createFrappeApi({ fetchImpl: fetchMock })
+
+    await api.updateVisit('CRM-VIS-00001', { subject: '改期后拜访', date: '2026-07-28', type: 'On-site', owner: 'sales@example.com', objective: '确认样片' }, '2026-08-04 12:00:00.000000')
+
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit]
+    const body = new URLSearchParams(String(init.body))
+    expect(url).toContain('rayher_crm.api.v1.visits.update_visit')
+    expect(body.get('id')).toBe('CRM-VIS-00001')
+    // `command.type` is the command discriminator; the visit type must not overwrite it.
+    expect(JSON.parse(body.get('command')!)).toEqual({ type: 'edit', subject: '改期后拜访', date: '2026-07-28', visitType: 'On-site', owner: 'sales@example.com', objective: '确认样片' })
+    expect(body.get('expectedModified')).toBe('2026-08-04 12:00:00.000000')
   })
 
   it('JSON-serializes complex POST fields and sends the Frappe CSRF token', async () => {
@@ -405,6 +422,7 @@ describe('Frappe multipart and binary transport', () => {
     await createFrappeApi({ fetchImpl: fetchMock }).releaseDemoTestReport('EVAL-1', {
       internalFile: { blob: internalBlob, fileName: 'internal.pdf', mimeType: 'application/pdf', size: internalBlob.size },
       externalFile: { blob: externalBlob, fileName: 'external.pdf', mimeType: 'application/pdf', size: externalBlob.size },
+      expectedRound: 2,
     })
     expect(internalReadSpy).toHaveBeenCalledOnce()
     expect(externalReadSpy).toHaveBeenCalledOnce()
@@ -412,6 +430,7 @@ describe('Frappe multipart and binary transport', () => {
     expect(init.body).toBeInstanceOf(FormData)
     const form = init.body as FormData
     expect(form.get('id')).toBe('EVAL-1')
+    expect(form.get('expectedRound')).toBe('2')
     expect((form.get('internalFile') as File).name).toBe('internal.pdf')
     expect((form.get('externalFile') as File).name).toBe('external.pdf')
   })
@@ -424,6 +443,7 @@ describe('Frappe multipart and binary transport', () => {
     await createFrappeApi({ fetchImpl: fetchMock }).releaseDemoTestReport('EVAL-1', {
       internalFile: { blob, fileName: 'report.pdf', mimeType: 'application/pdf', size: blob.size },
       externalFile: { blob, fileName: 'customer-report.pdf', mimeType: 'application/pdf', size: blob.size },
+      expectedRound: 1,
     })
 
     const [, init] = fetchMock.mock.calls[0] as [string, RequestInit]
