@@ -10,8 +10,9 @@ class CRMVisitMeetingRecord(Document):
     and that the Manager has not reviewed it yet -- and a complete record then
     submits the visit for review. The service writes with ``ignore_permissions``;
     a write or delete through the standard document API (REST, Desk, import) does
-    not, and is refused. These DocPerms come from the DocType JSON, which
-    ``bench migrate`` does not re-sync for an existing site, so the rule lives here.
+    not, and is refused. The DocPerms installed by ``install_crm_doc_permissions``
+    grant no write or delete either, and scope reads to the visit; this rule is the
+    second line behind them, so a widened DocPerm cannot reopen the document API.
     """
 
     def validate(self):

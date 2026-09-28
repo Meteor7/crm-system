@@ -670,6 +670,56 @@ class TestVisitApi(FrappeTestCase):
         moved = update_visit(visit["id"], {"type": "edit", "subject": "Fab review (moved)"}, visit["modified"])
         self.assertEqual(moved["subject"], "Fab review (moved)")
 
+    def test_meeting_records_are_readable_only_within_visit_scope(self):
+        from frappe.client import get as client_get
+
+        account, contact = self._records(self.sales, "RecordScope")
+        frappe.set_user(self.sales)
+        visit = create_visit(self._input(account, contact, self.sales))
+        update_meeting_record(visit["id"], {
+            "meetingStart": "", "meetingEnd": "",
+            "purpose": "Review", "attendees": "Customer A", "agenda": "Agenda",
+            "summary": "Summary", "conclusion": "Customer will drop vendor X", "followup": "Send plan",
+        })
+        name = frappe.db.get_value("CRM Visit Meeting Record", {"visit": visit["id"]}, "name")
+        record_filter = {"visit": visit["id"]}
+
+        # The record carries the minutes, so it is read exactly where its visit is:
+        # never by an Engineer, and by Sales only for a visit in their scope. The
+        # standard document API (REST list and get) must apply the same rule.
+        frappe.set_user(self.engineer)
+        with self.assertRaises(frappe.PermissionError):
+            frappe.get_list("CRM Visit Meeting Record", filters=record_filter, fields=["conclusion"])
+        # The account is Private to self.sales: a colleague reaches neither the visit nor its record.
+        frappe.set_user(self.other_sales)
+        self.assertEqual(frappe.get_list("CRM Visit", filters={"name": visit["id"]}, fields=["name"]), [])
+        self.assertEqual(frappe.get_list("CRM Visit Meeting Record", filters=record_filter, fields=["conclusion"]), [])
+        self.assertFalse(frappe.get_doc("CRM Visit Meeting Record", name).has_permission("read"))
+        with self.assertRaises(frappe.PermissionError):
+            client_get("CRM Visit Meeting Record", name)
+
+        # Once the colleague holds the visit's action on a Public account, the visit is
+        # in their scope and so is its record; the owner and a Manager read it too.
+        frappe.set_user("Administrator")
+        frappe.db.set_value("Customer", account["id"], "custom_crm_visibility", "Public")
+        frappe.set_user(self.sales)
+        update_visit(
+            visit["id"], {"type": "edit", "nextAction": "Bring samples", "actionOwner": self.other_sales},
+            get_visit(visit["id"])["modified"],
+        )
+        for user in (self.other_sales, self.sales, self.manager):
+            frappe.set_user(user)
+            rows = frappe.get_list("CRM Visit Meeting Record", filters=record_filter, fields=["conclusion"])
+            self.assertEqual([row.conclusion for row in rows], ["Customer will drop vendor X"], user)
+            self.assertTrue(frappe.get_doc("CRM Visit Meeting Record", name).has_permission("read"), user)
+
+        # The DocPerms behind this are installed by install_crm_doc_permissions, so an
+        # existing site picks them up on migrate: Sales read only, Engineers nothing.
+        roles = {row.role: row for row in frappe.get_meta("CRM Visit Meeting Record").permissions}
+        self.assertTrue(roles["CRM Sales"].read)
+        self.assertFalse(bool(roles["CRM Sales"].write) or bool(roles["CRM Sales"].create))
+        self.assertFalse(bool(roles["CRM Engineer"].read))
+
     def test_only_manager_can_delete_visit(self):
         account, contact = self._records(self.other_sales, "Delete")
         visit = create_visit(self._input(account, contact, self.other_sales))

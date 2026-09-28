@@ -11,7 +11,7 @@ from rayher_crm.permissions.roles import capabilities_for_role, resolve_crm_role
 SCOPED_DOCTYPES = (
     "Customer", "Contact", "Lead", "CRM Opportunity", "CRM Booking", "CRM Installed Tool",
     "CRM Demo Request", "CRM Evaluation", "CRM Evaluation Customer Review", "CRM Visit",
-    "CRM Contact File", "CRM Demo Artifact", "CRM Notification Event",
+    "CRM Visit Meeting Record", "CRM Contact File", "CRM Demo Artifact", "CRM Notification Event",
     "CRM Quotation", "CRM Quotation Version", "CRM Quotation Approval",
     "CRM RFQ", "CRM RFQ Version",
 )
@@ -56,6 +56,14 @@ VISIT_DOCPERMS = {
     "CRM Sales": {"read", "report", "export", "print", "email"},
     "CRM Engineer": set(),
 }
+# A visit's meeting record is written only by the visit record service (its
+# controller refuses every other write) and carries the minutes, so it is read
+# exactly where its visit is: Sales within their visit scope, Engineers never.
+MEETING_RECORD_DOCPERMS = {
+    "CRM Manager": {"read", "report", "export"},
+    "CRM Sales": {"read", "report", "export"},
+    "CRM Engineer": set(),
+}
 CONTACT_FILE_DOCPERMS = {
     "CRM Manager": {"read", "write", "create", "report", "export"},
     "CRM Sales": {"read", "write", "create", "report", "export"},
@@ -86,6 +94,7 @@ DOCTYPES_TO_VIEW_CAPABILITY = {
     "CRM Opportunity": "deal:view", "CRM Booking": "deal:view", "CRM Installed Tool": "service:view",
     "CRM Demo Request": "demo_request:view", "CRM Evaluation": "evaluation:view",
     "CRM Evaluation Customer Review": "evaluation:view", "CRM Visit": "visit:view",
+    "CRM Visit Meeting Record": "visit:view",
     "CRM Contact File": "stakeholder:view", "CRM Demo Artifact": "demo_request:view",
     "CRM Notification Event": "dashboard:view", "CRM Quotation": "quotation:view",
     "CRM Quotation Version": "quotation:view", "CRM Quotation Approval": "quotation:view",
@@ -100,6 +109,7 @@ def _permissions_for_doctype(doctype: str, role: str) -> set[str]:
         "CRM Evaluation": EVALUATION_DOCPERMS,
         "CRM Evaluation Customer Review": CUSTOMER_REVIEW_DOCPERMS,
         "CRM Visit": VISIT_DOCPERMS,
+        "CRM Visit Meeting Record": MEETING_RECORD_DOCPERMS,
         "CRM Contact File": CONTACT_FILE_DOCPERMS,
         "CRM Demo Artifact": ARTIFACT_DOCPERMS,
         "CRM Notification Event": NOTIFICATION_DOCPERMS,
@@ -132,6 +142,7 @@ def install_crm_doc_permissions() -> None:
             "CRM Evaluation": EVALUATION_DOCPERMS,
             "CRM Evaluation Customer Review": CUSTOMER_REVIEW_DOCPERMS,
             "CRM Visit": VISIT_DOCPERMS,
+            "CRM Visit Meeting Record": MEETING_RECORD_DOCPERMS,
             "CRM Contact File": CONTACT_FILE_DOCPERMS,
             "CRM Demo Artifact": ARTIFACT_DOCPERMS,
             "CRM Notification Event": NOTIFICATION_DOCPERMS,
@@ -306,6 +317,16 @@ def conditions_for_doctype(doctype: str, user: str | None = None) -> str:
             "EXISTS (SELECT 1 FROM `tabCRM Evaluation` "
             "WHERE `tabCRM Evaluation`.`name` = `tabCRM Evaluation Customer Review`.`evaluation` "
             f"AND ({evaluation_scope}))"
+        )
+    if doctype == "CRM Visit Meeting Record":
+        # The minutes are read exactly where their visit is. The visit condition
+        # references `tabCRM Visit` unaliased, so nesting it inside a correlated
+        # EXISTS on that table keeps it bound to the record's visit.
+        visit_scope = conditions_for_doctype("CRM Visit", resolved_user)
+        return (
+            "EXISTS (SELECT 1 FROM `tabCRM Visit` "
+            "WHERE `tabCRM Visit`.`name` = `tabCRM Visit Meeting Record`.`visit` "
+            f"AND ({visit_scope}))"
         )
     if doctype == "CRM Demo Artifact":
         escaped_user = frappe.db.escape(resolved_user)
@@ -549,6 +570,10 @@ def notification_query(user: str | None = None) -> str:
 
 def visit_query(user: str | None = None) -> str:
     return conditions_for_doctype("CRM Visit", user)
+
+
+def visit_meeting_record_query(user: str | None = None) -> str:
+    return conditions_for_doctype("CRM Visit Meeting Record", user)
 
 
 def quotation_query(user: str | None = None) -> str:
