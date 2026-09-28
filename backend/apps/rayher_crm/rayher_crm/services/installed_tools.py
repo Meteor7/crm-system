@@ -12,7 +12,12 @@ import frappe
 from rayher_crm.api.v1.errors import CrmApiException
 from rayher_crm.permissions.roles import assert_capability, resolve_crm_role
 from rayher_crm.permissions.scope import conditions_for_doctype, has_crm_permission
-from rayher_crm.services.bookings import _require_booking, serialize_booking
+from rayher_crm.services.bookings import (
+    _lock_source_opportunity,
+    _require_booking,
+    serialize_booking,
+    touch_source_opportunity,
+)
 from rayher_crm.services.common import normalize_pagination, required_text, to_iso_timestamp
 from rayher_crm.services.concurrency import lock_document
 from rayher_crm.services.notifications import create_notification
@@ -340,6 +345,7 @@ def convert_booking_to_installed_tool(
     if current.status != "Confirmed":
         raise CrmApiException("BOOKING_NOT_CONFIRMED", "Only Confirmed Booking can be converted.")
 
+    _lock_source_opportunity(current)
     booking = lock_document("CRM Booking", booking_id, expected_modified, "NOT_FOUND")
     if not frappe.has_permission("CRM Booking", "read", doc=booking, user=frappe.session.user):
         raise CrmApiException("SCOPE_DENIED", "The Booking is outside the current user scope.")
@@ -404,6 +410,7 @@ def convert_booking_to_installed_tool(
         booking.installed_tool = tool.name
         booking.installed_tool_converted_at = frappe.utils.now_datetime()
         booking.save(ignore_permissions=True)
+        touch_source_opportunity(booking)
         if booking.source_opportunity:
             frappe.get_doc({
                 "doctype": "CRM Opportunity History", "opportunity": booking.source_opportunity,

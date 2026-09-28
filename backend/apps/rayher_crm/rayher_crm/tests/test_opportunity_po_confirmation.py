@@ -218,8 +218,9 @@ class TestOpportunityPoConfirmation(FrappeTestCase):
         self.assertEqual(booking_still_live.exception.code, "CONFLICT")
 
         update_booking(pending_id, {"status": "Cancelled"}, get_booking(pending_id)["modified"])
+        # The cancellation moved the Opportunity version, so the rollback needs the current one.
         quoted_again = rollback_opportunity_stage(
-            quoted["id"], "quotation_sent", "Stop production", back_to_validation["modified"],
+            quoted["id"], "quotation_sent", "Stop production", get_strategy_opportunity(quoted["id"])["modified"],
         )
         self.assertEqual((quoted_again["stage"], quoted_again["liveBooking"]), ("quotation_sent", None))
 
@@ -372,7 +373,9 @@ class TestOpportunityPoConfirmation(FrappeTestCase):
         }, approved["modified"])
         booking_id = received["liveBooking"]["id"]
         update_booking(booking_id, {"status": "Cancelled"}, get_booking(booking_id)["modified"])
-        switched = update_strategy_opportunity(quoted["id"], {"saleType": "Service"}, received["modified"])
+        switched = update_strategy_opportunity(
+            quoted["id"], {"saleType": "Service"}, get_strategy_opportunity(quoted["id"])["modified"],
+        )
         self.assertEqual((switched["stage"], switched["liveBooking"]), ("po_received", None))
         frappe.set_user(self.manager)
         with self.assertRaises(CrmApiException) as back:
@@ -380,6 +383,47 @@ class TestOpportunityPoConfirmation(FrappeTestCase):
         self.assertEqual(back.exception.code, "INVALID_TRANSITION")
         quoted_again = rollback_opportunity_stage(quoted["id"], "quotation_sent", "PO withdrawn", switched["modified"])
         self.assertEqual((quoted_again["stage"], quoted_again["saleType"]), ("quotation_sent", "Service"))
+
+    def test_a_change_to_the_opportunity_booking_moves_the_opportunity_version(self):
+        # The live Booking is part of the Opportunity's state, so editing, reassigning or cancelling it
+        # moves the Opportunity version: an action prepared on the older view answers VERSION_CONFLICT
+        # even when it carries no Booking version at all.
+        _, contact, quoted = self._quoted("PoVersion")
+        approved = self._approved_validation(quoted, contact)
+        pending_id = approved["liveBooking"]["id"]
+        stale_form = {"booking": self._booking(contact)}
+
+        frappe.set_user(self.sales)
+        edited = update_booking(pending_id, {"note": "Dock 3"}, get_booking(pending_id)["modified"])
+        after_edit = get_strategy_opportunity(quoted["id"])
+        self.assertNotEqual(after_edit["modified"], approved["modified"])
+        self.assertEqual(after_edit["liveBooking"]["modified"], edited["modified"])
+        for payload in (stale_form, {**stale_form, "expectedBookingModified": approved["liveBooking"]["modified"]}):
+            with self.subTest(payload=payload), self.assertRaises(CrmApiException) as stale:
+                confirm_po(quoted["id"], payload, approved["modified"])
+            self.assertEqual(stale.exception.code, "VERSION_CONFLICT")
+
+        frappe.set_user(self.manager)
+        reassigned = update_booking(pending_id, {"owner": self.other_sales}, edited["modified"])
+        after_reassign = get_strategy_opportunity(quoted["id"])
+        self.assertNotEqual(after_reassign["modified"], after_edit["modified"])
+
+        update_booking(pending_id, {"status": "Cancelled"}, reassigned["modified"])
+        after_cancel = get_strategy_opportunity(quoted["id"])
+        self.assertNotEqual(after_cancel["modified"], after_reassign["modified"])
+        self.assertIsNone(after_cancel["liveBooking"])
+        with self.assertRaises(CrmApiException) as rollback:
+            rollback_opportunity_stage(quoted["id"], "quotation_sent", "Stop production", after_reassign["modified"])
+        self.assertEqual(rollback.exception.code, "VERSION_CONFLICT")
+        frappe.set_user(self.sales)
+        with self.assertRaises(CrmApiException) as confirm:
+            confirm_po(quoted["id"], stale_form, after_reassign["modified"])
+        self.assertEqual(confirm.exception.code, "VERSION_CONFLICT")
+        self.assertEqual(self._booking_count(quoted["id"]), 1)
+
+        # A refreshed client carries on: the current version creates the replacement Booking.
+        received = confirm_po(quoted["id"], stale_form, after_cancel["modified"])
+        self.assertEqual((received["stage"], self._booking_count(quoted["id"])), ("po_received", 2))
 
     def test_cancelled_validation_booking_is_replaced_and_completed_booking_blocks_rollback(self):
         _, contact, quoted = self._quoted("PoReplaced")
@@ -393,11 +437,14 @@ class TestOpportunityPoConfirmation(FrappeTestCase):
 
         frappe.set_user(self.sales)
         current = get_strategy_opportunity(quoted["id"])
-        self.assertEqual((current["modified"], current["liveBooking"]), (approved["modified"], None))
-        # The old form was confirming this Pending Booking, not creating its replacement.
-        with self.assertRaises(CrmApiException) as cancelled:
-            confirm_po(quoted["id"], old_input, approved["modified"])
-        self.assertEqual(cancelled.exception.code, "VERSION_CONFLICT")
+        # Cancelling the Booking moved the Opportunity version, so a form prepared on the old view is
+        # refused whether or not it carries the Pending Booking's version.
+        self.assertNotEqual(current["modified"], approved["modified"])
+        self.assertIsNone(current["liveBooking"])
+        for payload in (old_input, {"booking": self._booking(contact)}):
+            with self.subTest(payload=payload), self.assertRaises(CrmApiException) as cancelled:
+                confirm_po(quoted["id"], payload, approved["modified"])
+            self.assertEqual(cancelled.exception.code, "VERSION_CONFLICT")
         unchanged = get_strategy_opportunity(quoted["id"])
         self.assertEqual((unchanged["stage"], unchanged["modified"]), ("internal_validation", current["modified"]))
         self.assertEqual(unchanged["stageHistory"], current["stageHistory"])

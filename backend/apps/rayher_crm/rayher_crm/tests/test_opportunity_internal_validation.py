@@ -231,7 +231,10 @@ class TestOpportunityInternalValidation(FrappeTestCase):
             mark_opportunity_lost(quoted["id"], {"lostReason": "Customer cancelled"}, approved["modified"])
         self.assertEqual(booking_live.exception.code, "CONFLICT")
         update_booking(booking_id, {"status": "Cancelled"}, get_booking(booking_id)["modified"])
-        lost = mark_opportunity_lost(quoted["id"], {"lostReason": "Customer cancelled"}, approved["modified"])
+        # The cancellation moved the Opportunity version, so marking lost needs the current one.
+        lost = mark_opportunity_lost(
+            quoted["id"], {"lostReason": "Customer cancelled"}, get_strategy_opportunity(quoted["id"])["modified"],
+        )
         self.assertEqual((lost["stage"], lost["lostAtStage"]), ("lost", "internal_validation"))
 
         frappe.set_user(self.manager)

@@ -40,7 +40,7 @@ class TestBookingApi(FrappeTestCase):
             "enabled": 1, "send_welcome_email": 0, "roles": [{"role": role}],
         }).insert(ignore_permissions=True).name
 
-    def _records(self, owner: str, suffix: str, stage: str = PO_RECEIVED):
+    def _records(self, owner: str, suffix: str, stage: str = PO_RECEIVED, sale_type: str = "New Equipment"):
         frappe.set_user(owner)
         account = create_account({
             "name": f"Booking {suffix}", "shortName": suffix, "segment": "Frontend",
@@ -59,7 +59,7 @@ class TestBookingApi(FrappeTestCase):
             "accountId": account["id"], "siteId": site["id"], "title": f"{suffix} Opportunity",
             "owner": owner, "stage": QUALIFIED_OPPORTUNITY, "forecast": "Pipeline",
             "amount": 200000, "intentScore": 80, "qualificationConfirmed": True,
-            "poDate": "2026-12-31", "toolType": "Inspection", "saleType": "New Equipment",
+            "poDate": "2026-12-31", "toolType": "Inspection", "saleType": sale_type,
             "subRegion": "华东", "currency": "CNY", "originalAmount": 200000,
         })
         # Opportunity Bookings are only created by the PO confirmation that reaches po_received.
@@ -165,7 +165,10 @@ class TestBookingApi(FrappeTestCase):
         with self.assertRaises(CrmApiException) as restored:
             update_booking(first["id"], {"status": "Confirmed"}, cancelled["modified"])
         self.assertEqual(restored.exception.code, "INVALID_TRANSITION")
-        replacement = confirm_po(won["id"], {"booking": self._booking_draft(contact, self.sales)}, won["modified"])
+        # Cancelling the Booking moved the Opportunity version; the replacement needs the current one.
+        replacement = confirm_po(
+            won["id"], {"booking": self._booking_draft(contact, self.sales)}, get_strategy_opportunity(won["id"])["modified"],
+        )
         self.assertEqual(replacement["stage"], PO_RECEIVED)
         self.assertNotEqual(replacement["liveBooking"]["id"], first["id"])
 
@@ -272,3 +275,11 @@ class TestBookingApi(FrappeTestCase):
         with self.assertRaises(CrmApiException) as invalid_type:
             complete_service_booking(equipment["id"], equipment["modified"])
         self.assertEqual(invalid_type.exception.code, "INVALID_TRANSITION")
+
+        # Completing the Service Booking of a Service Opportunity moves the Opportunity version.
+        _, _, _, service_deal = self._records(self.sales, "ServiceDeal", sale_type="Service")
+        service_booking = get_booking(service_deal["liveBooking"]["id"])
+        self.assertEqual(service_booking["bookingType"], "Service")
+        completed_deal = complete_service_booking(service_booking["id"], service_booking["modified"])
+        self.assertEqual(completed_deal["status"], "Completed")
+        self.assertNotEqual(get_strategy_opportunity(service_deal["id"])["modified"], service_deal["modified"])

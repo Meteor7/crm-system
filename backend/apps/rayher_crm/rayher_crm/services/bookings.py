@@ -184,6 +184,39 @@ def _require_booking(name: str):
     return doc
 
 
+def _lock_source_opportunity(booking) -> None:
+    """Take the source Opportunity's row lock before the Booking's.
+
+    The Opportunity services lock the Opportunity first and its Booking second; taking the same
+    order here keeps a Booking change and an Opportunity action from deadlocking on each other.
+    """
+
+    if booking.source == "Opportunity" and booking.source_opportunity:
+        frappe.db.sql(
+            "SELECT `name` FROM `tabCRM Opportunity` WHERE `name` = %s FOR UPDATE",
+            (booking.source_opportunity,),
+        )
+
+
+def touch_source_opportunity(booking) -> None:
+    """Move the source Opportunity's version after one of its Bookings changed.
+
+    The live Booking is part of the Opportunity's state: the Opportunity page shows it and PO
+    confirmation, rollback and marking lost decide on it. Editing, reassigning, cancelling,
+    completing or converting the Booking therefore has to invalidate the version a client holds,
+    so an action prepared on the older view answers VERSION_CONFLICT instead of acting on a
+    Booking that changed underneath it, whether or not the action carries a Booking version.
+    """
+
+    if booking.source != "Opportunity" or not booking.source_opportunity:
+        return
+    frappe.db.sql(
+        "UPDATE `tabCRM Opportunity` SET `modified` = %s, `modified_by` = %s WHERE `name` = %s",
+        (frappe.utils.now(), frappe.session.user, booking.source_opportunity),
+    )
+    frappe.clear_document_cache("CRM Opportunity", booking.source_opportunity)
+
+
 def list_bookings(query: dict[str, Any] | None = None):
     assert_capability("deal:view")
     where_parts = [f"({conditions_for_doctype('CRM Booking')})"]
@@ -298,6 +331,7 @@ def update_booking(name: str, payload: dict[str, Any], expected_modified: Any) -
     current = _require_booking(name)
     if current.installed_tool or current.status == "Completed":
         raise CrmApiException("BOOKING_LOCKED", "Converted Booking cannot be edited.")
+    _lock_source_opportunity(current)
     doc = lock_document("CRM Booking", name, expected_modified, "NOT_FOUND")
     if not frappe.has_permission("CRM Booking", "read", doc=doc, user=frappe.session.user):
         raise CrmApiException("SCOPE_DENIED", "The Booking is outside the current user scope.")
@@ -318,6 +352,7 @@ def update_booking(name: str, payload: dict[str, Any], expected_modified: Any) -
         setattr(doc, fieldname, value)
     try:
         doc.save(ignore_permissions=True)
+        touch_source_opportunity(doc)
         if previous_owner != doc.booking_owner and doc.booking_owner != frappe.session.user:
             create_notification(
                 recipient=doc.booking_owner, category="Booking", title="Booking reassigned",
@@ -342,6 +377,7 @@ def complete_service_booking(name: str, expected_modified: Any) -> dict[str, Any
     if current.status != "Confirmed":
         raise CrmApiException("BOOKING_NOT_CONFIRMED", "Only Confirmed Service Booking can be completed.")
 
+    _lock_source_opportunity(current)
     doc = lock_document("CRM Booking", name, expected_modified, "NOT_FOUND")
     if not frappe.has_permission("CRM Booking", "read", doc=doc, user=frappe.session.user):
         raise CrmApiException("SCOPE_DENIED", "The Booking is outside the current user scope.")
@@ -353,5 +389,6 @@ def complete_service_booking(name: str, expected_modified: Any) -> dict[str, Any
         raise CrmApiException("BOOKING_NOT_CONFIRMED", "Only Confirmed Service Booking can be completed.")
     doc.status = "Completed"
     doc.save(ignore_permissions=True)
+    touch_source_opportunity(doc)
     doc.reload()
     return serialize_booking(doc)

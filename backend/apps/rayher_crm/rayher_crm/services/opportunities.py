@@ -960,14 +960,16 @@ def confirm_po(name: str, payload: dict[str, Any], expected_modified: Any) -> di
     booking = live_booking(doc.name, for_update=True)
     if booking and (doc.stage != INTERNAL_VALIDATION or booking.status != "Pending"):
         raise CrmApiException("CONFLICT", "The Opportunity already has a live Booking.")
-    # Cancelling the Pending Booking leaves the Opportunity version unchanged.
+    # A form prefilled from a Pending Booking that is gone now was prepared on an older view. The
+    # Opportunity version check above normally catches that already (cancelling the Booking moves
+    # the Opportunity's modified); this keeps the refusal explicit for a client that sent the token.
     if not booking and payload.get("expectedBookingModified") is not None:
         raise CrmApiException("VERSION_CONFLICT", "The Pending Booking was cancelled. Reload before confirming the PO.")
     if booking:
         # The PO details replace those of the Pending Booking, so the caller must see its current
         # details (a Sales user cannot read a Booking assigned to another Sales user) and the Booking
-        # must still be the version the form was prefilled from; Booking edits do not move the
-        # Opportunity's modified, so the Opportunity version alone does not catch them.
+        # must still be the version the form was prefilled from. Booking edits also move the
+        # Opportunity's modified, so this is a second check behind the Opportunity version.
         if not has_crm_permission(booking, user=frappe.session.user, permission_type="read"):
             raise CrmApiException("SCOPE_DENIED", "The Pending Booking is outside the current user scope.")
         expected_booking_modified = payload.get("expectedBookingModified")

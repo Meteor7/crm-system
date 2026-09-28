@@ -26,7 +26,7 @@ from rayher_crm.services.installed_tools import (
     transition_installed_tool,
     update_installed_tool,
 )
-from rayher_crm.services.opportunities import create_strategy_opportunity
+from rayher_crm.services.opportunities import create_strategy_opportunity, get_strategy_opportunity
 from rayher_crm.services.opportunity_stages import PO_RECEIVED, QUALIFIED_OPPORTUNITY
 from rayher_crm.services.sites import create_site
 from rayher_crm.tests._opportunity_fixtures import advance_opportunity_fixture
@@ -155,9 +155,12 @@ class TestInstalledToolApi(FrappeTestCase):
         )
     def test_detail_is_real_ordered_and_exposes_server_permissions(self):
         _, site, _, booking = self._booking(self.sales, "Detail")
+        before_conversion = get_strategy_opportunity(booking["sourceOpportunityId"])["modified"]
         converted = convert_booking_to_installed_tool(
             booking["id"], self._input(site, f"DETAIL-{frappe.generate_hash(length=8)}"), booking["modified"]
         )
+        # Converting the live Booking changes the Opportunity's state, so it moves the Opportunity version.
+        self.assertNotEqual(get_strategy_opportunity(booking["sourceOpportunityId"])["modified"], before_conversion)
         tool = converted["installedTool"]
         frappe.set_user("Administrator")
         older = frappe.get_doc({
