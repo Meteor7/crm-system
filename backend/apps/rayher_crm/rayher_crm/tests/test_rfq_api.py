@@ -10,7 +10,21 @@ from pypdf import PdfWriter
 
 from rayher_crm.api.v1.errors import CrmApiException
 from rayher_crm.services.accounts import create_account
-from rayher_crm.services.opportunities import create_strategy_opportunity, get_strategy_opportunity, rollback_opportunity_stage, update_strategy_opportunity
+from rayher_crm.services.opportunities import (
+    create_strategy_opportunity,
+    get_strategy_opportunity,
+    mark_opportunity_lost,
+    rollback_opportunity_stage,
+    update_strategy_opportunity,
+)
+from rayher_crm.services.opportunity_stages import (
+    CUSTOMER_BUDGET_APPROVED,
+    DEMO_DONE,
+    LOST,
+    QUALIFIED_OPPORTUNITY,
+    QUOTATION_SENT,
+    RFQ_VALIDATED,
+)
 from rayher_crm.services.rfqs import (
     create_rfq,
     download_rfq_file,
@@ -23,6 +37,7 @@ from rayher_crm.services.rfqs import (
 )
 from rayher_crm.services.sites import create_site
 from rayher_crm.services.file_security import TIPRAY_HEADER
+from rayher_crm.tests._opportunity_fixtures import advance_opportunity_fixture
 
 
 class CleanScanner:
@@ -79,16 +94,19 @@ class TestRfqApi(FrappeTestCase):
         })
         return create_strategy_opportunity({
             "accountId": account["id"], "siteId": site["id"], "title": f"RFQ Project {suffix}",
-            "owner": self.sales, "stage": "需求发现", "forecast": "Pipeline", "amount": "100000.00",
+            "owner": self.sales, "stage": QUALIFIED_OPPORTUNITY, "forecast": "Pipeline", "amount": "100000.00",
             "probability": 20, "intentScore": 70, "poDate": "2026-12-31", "toolType": "Inspection",
             "saleType": "New Equipment", "subRegion": "East China", "currency": "CNY",
             "originalAmount": "100000.00", "paymentMilestones": [], "strengths": [],
-            "redFlags": [], "informationNeeded": [],
+            "redFlags": [], "informationNeeded": [], "qualificationConfirmed": True,
         })
 
     def test_complete_workflow_scope_revision_and_opportunity_gate(self):
         opportunity = self._opportunity()
-        frappe.db.set_value("CRM Opportunity", opportunity["id"], {"stage": "设备规格确认", "probability": 75})
+        with self.assertRaises(CrmApiException) as too_early:
+            create_rfq({"opportunityId": opportunity["id"], "engineerId": self.engineer}, pdf_part(), CleanScanner())
+        self.assertEqual(too_early.exception.code, "INVALID_TRANSITION")
+        opportunity = advance_opportunity_fixture(opportunity, CUSTOMER_BUDGET_APPROVED)
         created = create_rfq(
             {"opportunityId": opportunity["id"], "engineerId": self.engineer, "note": "Customer RFQ"},
             pdf_part(), CleanScanner(),
@@ -121,10 +139,9 @@ class TestRfqApi(FrappeTestCase):
         self.assertEqual(list_rfqs({"page": 1, "pageSize": 20})[0], [])
 
         frappe.set_user(self.sales)
-        frappe.db.set_value("CRM Opportunity", opportunity["id"], {"stage": "设备规格确认", "probability": 75})
         specified = get_strategy_opportunity(opportunity["id"])
         with self.assertRaises(CrmApiException) as required:
-            update_strategy_opportunity(opportunity["id"], {"stage": "报价"}, specified["modified"])
+            update_strategy_opportunity(opportunity["id"], {"stage": RFQ_VALIDATED}, specified["modified"])
         self.assertEqual(required.exception.code, "INVALID_TRANSITION")
 
         frappe.set_user(self.engineer)
@@ -172,22 +189,31 @@ class TestRfqApi(FrappeTestCase):
             review_rfq(created["id"], "Approved", "Again", approved["modified"])
         self.assertEqual(decided.exception.code, "INVALID_TRANSITION")
 
-        self.assertEqual(frappe.db.get_value("CRM Opportunity", opportunity["id"], "stage"), "报价")
+        self.assertEqual(frappe.db.get_value("CRM Opportunity", opportunity["id"], "stage"), RFQ_VALIDATED)
+        approval_moves = frappe.get_all(
+            "CRM Opportunity Stage History",
+            filters={"opportunity": opportunity["id"], "event": "rfq_approved"},
+            fields=["from_stage", "to_stage", "reference_doctype", "reference_name"],
+        )
+        self.assertEqual(
+            [(row.from_stage, row.to_stage, row.reference_doctype, row.reference_name) for row in approval_moves],
+            [(CUSTOMER_BUDGET_APPROVED, RFQ_VALIDATED, "CRM RFQ", created["id"])],
+        )
         frappe.set_user(self.sales)
         with self.assertRaises(CrmApiException) as locked:
             revise_rfq(created["id"], pdf_part("late.pdf"), approved["modified"], CleanScanner())
         self.assertEqual(locked.exception.code, "INVALID_TRANSITION")
         latest = get_strategy_opportunity(opportunity["id"])
         with self.assertRaises(CrmApiException) as manual:
-            update_strategy_opportunity(opportunity["id"], {"stage": "采购流程"}, latest["modified"])
+            update_strategy_opportunity(opportunity["id"], {"stage": QUOTATION_SENT}, latest["modified"])
         self.assertEqual(manual.exception.code, "INVALID_TRANSITION")
 
         frappe.set_user(self.manager)
         rollback_reason = "Customer changed the equipment specification."
         rolled_back = rollback_opportunity_stage(
-            opportunity["id"], "设备规格确认", rollback_reason, latest["modified"],
+            opportunity["id"], CUSTOMER_BUDGET_APPROVED, rollback_reason, latest["modified"],
         )
-        self.assertEqual(rolled_back["stage"], "设备规格确认")
+        self.assertEqual(rolled_back["stage"], CUSTOMER_BUDGET_APPROVED)
         reopened = get_rfq(created["id"])
         self.assertEqual(reopened["status"], "Sales Revision")
         self.assertEqual(reopened["currentVersion"]["status"], "Returned")
@@ -199,9 +225,42 @@ class TestRfqApi(FrappeTestCase):
         self.assertEqual(revised_after_rollback["status"], "Engineer Review")
         self.assertEqual(revised_after_rollback["currentVersion"]["uploadedBy"], self.manager)
 
+    def test_manager_approval_needs_a_budget_approved_open_opportunity(self):
+        opportunity = advance_opportunity_fixture(self._opportunity(), CUSTOMER_BUDGET_APPROVED)
+        created = create_rfq(
+            {"opportunityId": opportunity["id"], "engineerId": self.engineer}, pdf_part(), CleanScanner(),
+        )
+        frappe.set_user(self.engineer)
+        commented = submit_engineer_comment(created["id"], "Specification is feasible.", created["modified"])
+
+        # Test data only: the Opportunity is back before its budget approval when the Manager decides.
+        frappe.db.set_value("CRM Opportunity", opportunity["id"], "stage", DEMO_DONE)
+        frappe.set_user(self.manager)
+        with self.assertRaises(CrmApiException) as early:
+            review_rfq(created["id"], "Approved", "", commented["modified"])
+        self.assertEqual(early.exception.code, "CONFLICT")
+        self.assertEqual(get_rfq(created["id"])["status"], "Manager Approval")
+        self.assertEqual(frappe.db.get_value("CRM Opportunity", opportunity["id"], "stage"), DEMO_DONE)
+
+        frappe.db.set_value("CRM Opportunity", opportunity["id"], "stage", CUSTOMER_BUDGET_APPROVED)
+        frappe.set_user(self.sales)
+        lost = mark_opportunity_lost(
+            opportunity["id"], {"lostReason": "Customer selected another supplier."},
+            get_strategy_opportunity(opportunity["id"])["modified"],
+        )
+        self.assertEqual((lost["stage"], lost["lostAtStage"]), (LOST, CUSTOMER_BUDGET_APPROVED))
+        frappe.set_user(self.manager)
+        with self.assertRaises(CrmApiException) as lost_deal:
+            review_rfq(created["id"], "Approved", "", commented["modified"])
+        self.assertEqual(lost_deal.exception.code, "INVALID_TRANSITION")
+        self.assertEqual(get_rfq(created["id"])["status"], "Manager Approval")
+        self.assertFalse(frappe.db.exists(
+            "CRM Opportunity Stage History", {"opportunity": opportunity["id"], "event": "rfq_approved"},
+        ))
+
     def test_manager_can_upload_an_initial_rfq_for_the_opportunity_owner(self):
         opportunity = self._opportunity()
-        frappe.db.set_value("CRM Opportunity", opportunity["id"], {"stage": "设备规格确认", "probability": 75})
+        frappe.db.set_value("CRM Opportunity", opportunity["id"], "stage", CUSTOMER_BUDGET_APPROVED)
         frappe.set_user(self.manager)
 
         created = create_rfq(
@@ -216,8 +275,7 @@ class TestRfqApi(FrappeTestCase):
     def test_private_parent_blocks_assigned_sales_from_rfq_list_detail_and_files(self):
         opportunity = self._opportunity()
         frappe.db.set_value("CRM Opportunity", opportunity["id"], {
-            "stage": "设备规格确认",
-            "probability": 75,
+            "stage": CUSTOMER_BUDGET_APPROVED,
             "opportunity_owner": self.other_sales,
         })
         frappe.set_user(self.manager)
@@ -254,18 +312,21 @@ class TestRfqApi(FrappeTestCase):
 
     def test_failed_preview_generation_rolls_back_create(self):
         opportunity = self._opportunity()
+        # At the RFQ stage, so the create gets past the stage gate and fails in the preview step.
+        frappe.db.set_value("CRM Opportunity", opportunity["id"], "stage", CUSTOMER_BUDGET_APPROVED)
         before = frappe.db.count("CRM RFQ")
         with patch("rayher_crm.services.rfqs._preview", side_effect=CrmApiException("VALIDATION_ERROR", "conversion failed")):
-            with self.assertRaises(CrmApiException):
+            with self.assertRaises(CrmApiException) as failure:
                 create_rfq(
                     {"opportunityId": opportunity["id"], "engineerId": self.engineer},
                     pdf_part(), CleanScanner(),
                 )
+        self.assertEqual(str(failure.exception), "conversion failed")
         self.assertEqual(frappe.db.count("CRM RFQ"), before)
 
     def test_tipray_file_can_be_created_and_downloaded_without_preview(self):
         opportunity = self._opportunity()
-        frappe.db.set_value("CRM Opportunity", opportunity["id"], {"stage": "设备规格确认", "probability": 75})
+        frappe.db.set_value("CRM Opportunity", opportunity["id"], "stage", CUSTOMER_BUDGET_APPROVED)
         before = frappe.db.count("CRM RFQ")
         content = TIPRAY_HEADER + bytes(range(256))
 

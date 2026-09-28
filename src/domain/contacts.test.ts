@@ -26,11 +26,19 @@ const legacyOpportunity = (stakeholders: LegacyStrategyOpportunityDto['stakehold
   account: 'Example account',
   site: 'Example site',
   owner: 'person002@crm.example.invalid',
-  stage: '需求发现',
-  forecast: 'Pipeline',
+  stage: 'qualified_opportunity',
+  stageChangedAt: '',
+  budgetApprovedOn: '',
+  lostAtStage: '',
+  lostAt: '',
+  lostBy: '',
+  stageHistory: [],
+  internalValidation: null,
+  liveBooking: null,
   amount: '100.00',
   currency: 'CNY',
-  probability: 20,
+  probabilityLevel: '',
+  probabilityHistory: [],
   poDate: '2026-12-01',
   updated: '2026-07-28',
   score: 1,
@@ -224,7 +232,7 @@ describe('contact master migration', () => {
     const migrated = migrateSalesSnapshot(snapshot)
     const repository = createMemorySalesRepository(snapshot)
 
-    expect(migrated).toMatchObject({ version: 5 })
+    expect(migrated).toMatchObject({ version: 7 })
     expect(migrated.opportunities[0].stakeholders[0].contactId).toBe('CT-MIG-STK-SNAPSHOT')
     expect(repository.snapshot).toEqual(migrated)
   })

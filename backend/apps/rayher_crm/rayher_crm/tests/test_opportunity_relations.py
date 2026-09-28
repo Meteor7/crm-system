@@ -17,6 +17,7 @@ from rayher_crm.services.opportunities import (
     update_opportunity_action,
     update_opportunity_stakeholder,
 )
+from rayher_crm.services.opportunity_stages import QUALIFIED_OPPORTUNITY
 from rayher_crm.services.sites import create_site
 
 
@@ -58,10 +59,10 @@ class TestOpportunityRelations(FrappeTestCase):
         })
         opportunity = create_strategy_opportunity({
             "accountId": account["id"], "siteId": site["id"], "title": f"{suffix} Opportunity",
-            "owner": owner, "stage": "需求发现", "forecast": "Pipeline", "amount": 100000,
+            "owner": owner, "stage": QUALIFIED_OPPORTUNITY, "forecast": "Pipeline", "amount": 100000,
             "probability": 20, "intentScore": 20, "poDate": "2026-12-31", "toolType": "Inspection",
             "saleType": "New Equipment", "subRegion": "华东", "currency": "CNY",
-            "originalAmount": 100000,
+            "originalAmount": 100000, "qualificationConfirmed": True,
         })
         contact = create_contact({
             "accountId": account["id"], "name": f"{suffix} Contact", "title": "Director",

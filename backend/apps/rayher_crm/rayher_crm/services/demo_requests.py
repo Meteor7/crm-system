@@ -24,7 +24,7 @@ from rayher_crm.services.common import (
 from rayher_crm.services.concurrency import lock_document
 from rayher_crm.services.contacts import _contact_account
 from rayher_crm.services.notifications import active_crm_users, create_notification
-from rayher_crm.services.opportunities import advance_opportunity_for_demo_event
+from rayher_crm.services.opportunity_stages import DEMO_REQUEST_STAGES
 
 
 EDITABLE_STATUSES = {"Draft", "Engineer Returned", "Manager Rejected"}
@@ -96,10 +96,10 @@ def _validate_opportunity(opportunity_id: Any, account_id: str) -> str:
     if frappe.db.get_value("CRM Opportunity", opportunity_id, "account") != account_id:
         raise CrmApiException("LINK_MISMATCH", "Opportunity must belong to the Demo Request Account.")
     stage = frappe.db.get_value("CRM Opportunity", opportunity_id, "stage")
-    if stage not in {"需求发现", "Wafer Demo确认"}:
+    if stage not in DEMO_REQUEST_STAGES:
         raise CrmApiException(
             "INVALID_TRANSITION",
-            "Demo Request can only be created for an Opportunity in 需求发现 or Wafer Demo确认.",
+            "Demo Request can only be created for an Opportunity in qualified_opportunity or demo_done.",
         )
     return opportunity_id
 
@@ -373,7 +373,17 @@ def create_demo_request(
     frappe.db.savepoint(savepoint)
     try:
         if values["opportunity"]:
-            advance_opportunity_for_demo_event(values["opportunity"], "request_created")
+            # Lock the Opportunity so two requests cannot both pass the active-request check,
+            # and re-check its stage under that lock.
+            locked = frappe.db.sql(
+                "SELECT `stage` FROM `tabCRM Opportunity` WHERE `name` = %s FOR UPDATE",
+                (values["opportunity"],),
+            )
+            if not locked or locked[0][0] not in DEMO_REQUEST_STAGES:
+                raise CrmApiException(
+                    "INVALID_TRANSITION",
+                    "Demo Request can only be created for an Opportunity in qualified_opportunity or demo_done.",
+                )
             active_request = frappe.db.get_value(
                 "CRM Demo Request",
                 {
@@ -638,8 +648,6 @@ def transition_demo_request(
             )
             if failure_injector:
                 failure_injector("after_evaluation_insert")
-            if doc.opportunity:
-                advance_opportunity_for_demo_event(doc.opportunity, "request_approved")
             doc.status = "Converted"
             doc.manager_decision = "Approved"
             doc.manager_comment = _transition_comment(command, required=False)

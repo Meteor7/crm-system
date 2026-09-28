@@ -124,12 +124,11 @@ try {
         phone='13800000011';email="stage5e-contact-$stamp@example.invalid";relationship='Developing';status='Active';owner=$created.Sales
     }}
     $created.Contact = $contact.data.id
-    $discoveryStage = -join ([char[]]@(0x9700, 0x6C42, 0x53D1, 0x73B0))
-    $waferDemoStage = 'Wafer Demo' + (-join ([char[]]@(0x786E, 0x8BA4)))
-    $budgetApprovalStage = -join ([char[]]@(0x9884, 0x7B97, 0x5BA1, 0x6279))
-    $opportunity = Invoke-CrmPost $sessions.Sales 'rayher_crm.api.v1.opportunities.create_strategy_opportunity' @{input=@{
+    $qualifiedStage = 'qualified_opportunity'
+    $demoDoneStage = 'demo_done'
+    $opportunity = Invoke-CrmPost $sessions.Sales 'rayher_crm.api.v1.opportunities.create_strategy_opportunity' @{input=@{probabilityLevel='pipeline';
         accountId=$created.Account;siteId=$created.Site;title="Stage 5E Opportunity $stamp";owner=$created.Sales
-        stage=$discoveryStage;forecast='Pipeline';amount='300000.00';probability=50;intentScore=85;poDate='2026-12-31'
+        stage=$qualifiedStage;qualificationConfirmed=$true;forecast='Pipeline';amount='300000.00';probability=50;intentScore=85;poDate='2026-12-31'
         toolType='Inspection';saleType='New Equipment';subRegion='East China';currency='CNY';originalAmount='300000.00'
     }}
     $created.Opportunity = $opportunity.data.id
@@ -153,7 +152,7 @@ try {
     if ($request.data.status -ne 'Draft' -or $request.data.createdBy -ne $created.Sales) { throw 'HTTP Draft create did not preserve server identity/state.' }
     if ($request.data.formData.contactPerson -eq 'forged') { throw 'HTTP Demo contact display trusted client text.' }
     $opportunityAfterRequest = (Invoke-RestMethod -Uri "$BaseUrl/api/method/rayher_crm.api.v1.opportunities.get_strategy_opportunity?id=$([Uri]::EscapeDataString($created.Opportunity))" -WebSession $sessions.Sales).message.data
-    if ($opportunityAfterRequest.stage -ne $waferDemoStage) { throw "Demo Request creation did not advance Opportunity to $waferDemoStage." }
+    if ($opportunityAfterRequest.stage -ne $qualifiedStage) { throw "Demo Request creation moved the Opportunity to $($opportunityAfterRequest.stage)." }
 
     $conflictStatus = 0
     $updatedInput = $requestInput.Clone(); $updatedInput.submit = $false
@@ -229,7 +228,17 @@ try {
     if ($current.testRound -ne 1) { throw 'HTTP Evaluation did not report its test round.' }
     if ($current.acceptance -ne 'Accepted') { throw 'HTTP Evaluation acceptance was not derived.' }
     $opportunityAfterAcceptance = (Invoke-RestMethod -Uri "$BaseUrl/api/method/rayher_crm.api.v1.opportunities.get_strategy_opportunity?id=$([Uri]::EscapeDataString($created.Opportunity))" -WebSession $sessions.Sales).message.data
-    if ($opportunityAfterAcceptance.stage -ne $budgetApprovalStage) { throw "Accepted Evaluation did not advance Opportunity to $budgetApprovalStage." }
+    if ($opportunityAfterAcceptance.stage -ne $demoDoneStage) { throw "Customer Review did not advance Opportunity to $demoDoneStage (got $($opportunityAfterAcceptance.stage))." }
+    $reviewMoves = @($opportunityAfterAcceptance.stageHistory | Where-Object { $_.event -eq 'demo_customer_review' })
+    if ($reviewMoves.Count -ne 1 -or $reviewMoves[0].referenceName -ne $created.Evaluation) { throw 'Customer Review did not record exactly one demo_customer_review stage event for the Evaluation.' }
+
+    $leveled = Invoke-CrmPost $sessions.Sales 'rayher_crm.api.v1.opportunities.update_strategy_opportunity' @{id=$created.Opportunity;input=@{probabilityLevel='upside'};expectedModified=$opportunityAfterAcceptance.modified}
+    $approvedOn = (Get-Date).AddDays(-1).ToString('yyyy-MM-dd')
+    $budgetStale = 0
+    try { Invoke-CrmPost $sessions.Sales 'rayher_crm.api.v1.opportunities.confirm_budget_approved' @{id=$created.Opportunity;input=@{approvedOn=$approvedOn};expectedModified=$opportunityAfterAcceptance.modified} | Out-Null } catch { $budgetStale = [int]$_.Exception.Response.StatusCode }
+    if ($budgetStale -ne 409) { throw "Expected stale budget approval HTTP 409, got $budgetStale." }
+    $budgetApproved = Invoke-CrmPost $sessions.Sales 'rayher_crm.api.v1.opportunities.confirm_budget_approved' @{id=$created.Opportunity;input=@{approvedOn=$approvedOn};expectedModified=$leveled.data.modified}
+    if ($budgetApproved.data.stage -ne 'customer_budget_approved' -or $budgetApproved.data.budgetApprovedOn -ne $approvedOn) { throw "HTTP budget approval mismatch: stage=$($budgetApproved.data.stage), approvedOn=$($budgetApproved.data.budgetApprovedOn)." }
 
     $workflow = Invoke-RestMethod -Uri "$BaseUrl/api/method/rayher_crm.api.v1.evaluations.list_demo_workflows" -WebSession $sessions.Sales
     $workflowRow = @($workflow.message.data.items | Where-Object {$_.id -eq $created.Request})[0]
@@ -246,7 +255,7 @@ try {
         } catch { Start-Sleep -Seconds 2 }
     }
     if (-not $persisted -or $persisted.acceptance -ne 'Accepted' -or $persisted.wafers -ne 5) { throw 'Stage 5E data did not persist through runtime restart.' }
-    Write-Output 'Stage 5E authenticated HTTP acceptance passed: create/update/409/comment/roles/atomic-convert/scope/zero-run-report-upload/optional-test-runs/article-workflow/restart-persistence.'
+    Write-Output 'Stage 5E authenticated HTTP acceptance passed: create/update/409/comment/roles/atomic-convert/scope/zero-run-report-upload/optional-test-runs/customer-review-demo-done/budget-approval/article-workflow/restart-persistence.'
 } finally {
     $adminPassword=$null; $passwords=$null
     if ($created.Request) {
@@ -269,7 +278,9 @@ try {
     Remove-TestChildren 'CRM Demo Comment' 'demo_request' $created.Request
     Remove-TestChildren 'CRM Demo Request History' 'demo_request' $created.Request
     Remove-TestDoc 'CRM Demo Request' $created.Request
-    Remove-TestChildren 'CRM Opportunity History' 'opportunity' $created.Opportunity
+    foreach ($docType in @('CRM Opportunity History', 'CRM Opportunity Stage History', 'CRM Opportunity Probability History', 'CRM Opportunity Internal Validation')) {
+        Remove-TestChildren $docType 'opportunity' $created.Opportunity
+    }
     Remove-TestDoc 'CRM Opportunity' $created.Opportunity
     Remove-TestDoc 'Contact' $created.Contact
     Remove-TestDoc 'Address' $created.Site

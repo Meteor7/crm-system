@@ -3,16 +3,19 @@ import { createMemorySalesRepository, migrateSalesSnapshot } from './sales-repos
 import { createMockApi } from '@/api/mock-adapter'
 
 describe('sales repository Contact cleanup', () => {
-  it('keeps every Equipment Booking linked to a Won Opportunity for the same Account', () => {
+  it('keeps every Opportunity Booking linked to an Opportunity of the same Account that reached a Booking stage', () => {
     const snapshot = createMemorySalesRepository().snapshot
 
     for (const booking of snapshot.bookings.filter((item) => item.source === 'Opportunity')) {
       expect(snapshot.opportunities.find((item) =>
         item.id === booking.sourceOpportunityId &&
         item.accountId === booking.accountId &&
-        item.stage === 'Won',
+        ['internal_validation', 'po_received'].includes(item.stage),
       )).toBeDefined()
     }
+    expect(snapshot.internalValidations).toEqual([
+      expect.objectContaining({ id: 'CRM-VAL-00001', opportunityId: 'OPP-008', status: 'approved', bookingId: 'BKG-003' }),
+    ])
   })
 
   it('physically removes retired Needs Review Contacts and keeps Bookings on valid master Contacts', () => {
@@ -25,7 +28,7 @@ describe('sales repository Contact cleanup', () => {
     expect(snapshot.bookings.find((booking) => booking.id === 'BKG-002')?.primaryContactId).toBe('CON-006')
   })
 
-  it('migrates the current version-3 snapshot to version 5 with seeded Accounts, Sites, and Leads', () => {
+  it('migrates the current version-3 snapshot to version 7 with seeded Accounts, Sites, and Leads', () => {
     const current = createMemorySalesRepository().snapshot
     const legacy = {
       version: 3 as const,
@@ -37,7 +40,7 @@ describe('sales repository Contact cleanup', () => {
 
     const migrated = migrateSalesSnapshot(legacy)
 
-    expect(migrated.version).toBe(5)
+    expect(migrated.version).toBe(7)
     expect(migrated.accounts.length).toBeGreaterThanOrEqual(7)
     expect(Object.keys(migrated.sites).length).toBeGreaterThan(0)
     expect(migrated.leads.length).toBeGreaterThanOrEqual(6)
@@ -97,17 +100,17 @@ describe('sales repository Contact cleanup', () => {
 
     expect(opportunity.amount).toBe('9800000.00')
     expect(opportunity.originalAmount).toBe('9800000.00')
-    expect(opportunity.stage).toBe('Wafer Demo确认')
+    expect(opportunity.stage).toBe('qualified_opportunity')
     await expect(createMockApi({ latency: 0, salesRepository: repository }).getDashboard({ range: 'quarter' }))
       .resolves.toBeDefined()
   })
 
   it('keeps Opportunity normalization when the cache also triggers retired Contact cleanup', () => {
     const cached = structuredClone(createMemorySalesRepository().snapshot)
-    const staleOpportunity = cached.opportunities[0] as unknown as { forecast: string; amount: number; stage: string }
-    staleOpportunity.forecast = 'Upside'
-    staleOpportunity.amount = 9800000
-    staleOpportunity.stage = 'Demo 验证'
+    const staleOpportunity = cached.opportunities[0] as unknown as Record<string, unknown>
+    Object.assign(staleOpportunity, { forecast: 'Upside', probability: 79, amount: 9800000, stage: 'Demo 验证' })
+    delete staleOpportunity.probabilityLevel
+    delete staleOpportunity.probabilityHistory
     cached.contacts.push({
       ...structuredClone(cached.contacts[0]!),
       id: 'CON-RETIRED',
@@ -117,9 +120,79 @@ describe('sales repository Contact cleanup', () => {
 
     const opportunity = createMemorySalesRepository(cached).snapshot.opportunities[0]!
 
-    expect(opportunity.forecast).toBe('Best Case')
+    expect(opportunity).not.toHaveProperty('forecast')
+    expect(opportunity).not.toHaveProperty('probability')
+    expect(opportunity).toMatchObject({ probabilityLevel: '', probabilityHistory: [] })
     expect(opportunity.amount).toBe('9800000.00')
-    expect(opportunity.stage).toBe('Wafer Demo确认')
+    expect(opportunity.stage).toBe('qualified_opportunity')
+  })
+
+  it('migrates a version-5 cache to the current version by retiring the percentage probability and forecast', () => {
+    const current = createMemorySalesRepository().snapshot
+    const cached = structuredClone(current) as unknown as { version: number; opportunities: Array<Record<string, unknown>> }
+    cached.version = 5
+    const [kept, withoutLevel, invalidLevel] = cached.opportunities
+    Object.assign(withoutLevel!, { forecast: 'Best Case', probability: 68 })
+    delete withoutLevel!.probabilityLevel
+    delete withoutLevel!.probabilityHistory
+    Object.assign(invalidLevel!, {
+      probabilityLevel: 'certain',
+      history: [{ at: '2026-07-16 17:20', actor: 'Demo Staff 01', field: 'probability', from: '72', to: '79' }],
+    })
+
+    const migrated = migrateSalesSnapshot(cached as unknown as Parameters<typeof migrateSalesSnapshot>[0])
+
+    expect(migrated.version).toBe(7)
+    expect(migrated.opportunities[0]).toMatchObject({ probabilityLevel: kept!.probabilityLevel, probabilityHistory: kept!.probabilityHistory })
+    expect(migrated.opportunities[0]!.probabilityHistory).toHaveLength(2)
+    expect(migrated.opportunities[1]).toMatchObject({ probabilityLevel: '', probabilityHistory: [] })
+    expect(migrated.opportunities[1]).not.toHaveProperty('forecast')
+    expect(migrated.opportunities[1]).not.toHaveProperty('probability')
+    expect(migrated.opportunities[2]).toMatchObject({ probabilityLevel: '', history: [] })
+  })
+
+  it('migrates a version-6 cache onto the seven milestone stages without inventing stage history', () => {
+    const current = createMemorySalesRepository().snapshot
+    const cached = structuredClone(current) as unknown as {
+      version: number
+      internalValidations?: unknown
+      bookings: Array<Record<string, unknown>>
+      opportunities: Array<Record<string, unknown>>
+    }
+    cached.version = 6
+    delete cached.internalValidations
+    cached.bookings = cached.bookings.filter((booking) => booking.source !== 'Opportunity')
+    const template = cached.opportunities.find((item) => item.id === 'OPP-001')!
+    const legacyStages = ['需求发现', 'Wafer Demo确认', '预算审批', '设备规格确认', '报价', '采购流程', 'Won', 'Lost']
+    cached.opportunities = legacyStages.map((stage, index) => {
+      const legacy = structuredClone(template)
+      for (const field of ['stageChangedAt', 'budgetApprovedOn', 'lostAtStage', 'lostAt', 'lostBy', 'stageHistory', 'internalValidation', 'liveBooking']) delete legacy[field]
+      return {
+        ...legacy,
+        id: `OPP-L${index + 1}`,
+        stage,
+        lostReason: stage === 'Lost' ? '预算冻结' : '',
+        history: [
+          { at: '2026-07-01 10:00', actor: 'person002@crm.example.invalid', field: 'Stage', from: '需求发现', to: stage },
+          { at: '2026-07-02 10:00', actor: 'person002@crm.example.invalid', field: 'Amount', from: '¥100万', to: '¥120万' },
+        ],
+      }
+    })
+
+    const migrated = migrateSalesSnapshot(cached as unknown as Parameters<typeof migrateSalesSnapshot>[0])
+
+    expect(migrated.version).toBe(7)
+    expect(migrated.internalValidations).toEqual([])
+    expect(migrated.opportunities.map((item) => item.stage)).toEqual([
+      'qualified_opportunity', 'qualified_opportunity', 'demo_done', 'customer_budget_approved', 'rfq_validated', 'quotation_sent', 'po_received', 'lost',
+    ])
+    for (const opportunity of migrated.opportunities) {
+      expect(opportunity).toMatchObject({
+        stageChangedAt: '', budgetApprovedOn: '', lostAtStage: '', lostAt: '', lostBy: '', stageHistory: [], internalValidation: null, liveBooking: null,
+      })
+      expect(opportunity.history.map((entry) => entry.field)).toEqual(['Amount'])
+    }
+    expect(migrated.opportunities[7]).toMatchObject({ lostReason: '预算冻结' })
   })
 
   it('reconstructs a missing converted Account and Site when migrating a version-4 cache', () => {

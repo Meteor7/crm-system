@@ -193,6 +193,7 @@ try {
         opportunityCloseDate = '2026-12-31'
         opportunityOwner = 'Administrator'
         toolType = 'Inspection'
+        qualificationConfirmed = $true
     }
     $assignmentStatus = 0
     try {
@@ -233,7 +234,9 @@ try {
         & docker compose @composeArgs exec -T backend bench --site $SiteName execute frappe.db.set_value --args $setValueArgs | Out-Null
         if ($LASTEXITCODE -ne 0) { throw 'Cleanup failed while unlinking the converted Opportunity.' }
     }
-    Remove-TestChildren 'CRM Opportunity History' 'opportunity' $created.Opportunity
+    foreach ($docType in @('CRM Opportunity History', 'CRM Opportunity Stage History', 'CRM Opportunity Probability History', 'CRM Opportunity Internal Validation')) {
+        Remove-TestChildren $docType 'opportunity' $created.Opportunity
+    }
     Remove-TestDoc 'CRM Opportunity' $created.Opportunity
     Remove-TestDoc 'Lead' $created.Lead
     Remove-TestDoc 'Contact' $created.ConversionContact

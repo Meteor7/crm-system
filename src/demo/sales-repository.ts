@@ -1,10 +1,12 @@
 import type { AccountSummaryDto, BookingDto, ContactDto, LeadDto, SiteDto, VisitDto } from '@/types/crm'
-import { OPPORTUNITY_FORECASTS, STRATEGY_OPPORTUNITY_STAGES, type InstalledToolDto, type LegacyStrategyOpportunityDto, type OpportunityForecast, type StrategyOpportunityDto, type StrategyOpportunityStage } from '@/types/workspaces'
+import type { InstalledToolDto, LegacyStrategyOpportunityDto, OpportunityInternalValidationDto, StrategyOpportunityDto } from '@/types/workspaces'
 import { accounts, bookings, contacts, sites, visits } from '@/api/mock-data'
-import { installedTools as installedToolSeeds, opportunities } from '@/demo/operations-data'
+import { installedTools as installedToolSeeds, opportunities, opportunityInternalValidations } from '@/demo/operations-data'
 import { leads } from '@/demo/leads-data'
 import { migrateLegacyOpportunityContacts, migrateLegacyPrimaryContacts } from '@/domain/contacts'
 import { normalizeMoney } from '@/domain/money'
+import { isOpportunityProbabilityLevelValue } from '@/domain/opportunity-probability'
+import { isOpenOpportunityStage, isOpportunityStage, type OpportunityStage } from '@/domain/opportunity-stages'
 import { migrateLegacyUserId, migrateOptionalLegacyUserId } from './identity-migration'
 
 const STORAGE_KEY = 'semicrm:sales-workspace:v1'
@@ -39,6 +41,21 @@ export type LegacyBookingDto = Omit<BookingDto, 'primaryContactId' | 'source' | 
   directReason?: string
 }
 
+/** Internal validation requests kept by the browser mock; the API exposes only the latest one per Opportunity. */
+export interface StoredOpportunityInternalValidation extends OpportunityInternalValidationDto {
+  opportunityId: string
+}
+
+type SevenStageOpportunityFields = 'stageChangedAt' | 'budgetApprovedOn' | 'lostAtStage' | 'lostAt' | 'lostBy' | 'stageHistory' | 'internalValidation' | 'liveBooking'
+
+/**
+ * Opportunity rows cached before the seven milestone stages. They may still carry a legacy stage,
+ * the retired percentage probability and forecast, and no stage history.
+ */
+export type CachedLegacyStrategyOpportunityDto = Omit<StrategyOpportunityDto, 'stage' | 'probabilityLevel' | 'probabilityHistory' | SevenStageOpportunityFields>
+  & Partial<Pick<StrategyOpportunityDto, 'probabilityLevel' | 'probabilityHistory' | SevenStageOpportunityFields>>
+  & { stage: string; probability?: number; forecast?: string }
+
 export interface SalesSnapshotV1 {
   version: 1
   bookings: LegacyBookingDto[]
@@ -51,7 +68,7 @@ export interface SalesSnapshotV2 {
   contacts: ContactDto[]
   bookings: LegacyBookingDto[]
   visits: VisitDto[]
-  opportunities: StrategyOpportunityDto[]
+  opportunities: CachedLegacyStrategyOpportunityDto[]
 }
 
 export interface SalesSnapshotV3 {
@@ -59,7 +76,7 @@ export interface SalesSnapshotV3 {
   contacts: ContactDto[]
   bookings: LegacyBookingDto[]
   visits: VisitDto[]
-  opportunities: StrategyOpportunityDto[]
+  opportunities: CachedLegacyStrategyOpportunityDto[]
 }
 
 export interface SalesSnapshotV4 {
@@ -68,10 +85,10 @@ export interface SalesSnapshotV4 {
   contacts: ContactDto[]
   bookings: LegacyBookingDto[]
   visits: VisitDto[]
-  opportunities: StrategyOpportunityDto[]
+  opportunities: CachedLegacyStrategyOpportunityDto[]
 }
 
-export interface SalesSnapshot {
+export interface SalesSnapshotV5 {
   version: 5
   accounts: AccountSummaryDto[]
   sites: Record<string, SiteDto[]>
@@ -80,8 +97,37 @@ export interface SalesSnapshot {
   bookings: BookingDto[]
   installedTools: InstalledToolDto[]
   visits: VisitDto[]
-  opportunities: StrategyOpportunityDto[]
+  opportunities: CachedLegacyStrategyOpportunityDto[]
 }
+
+/** Version 6 replaced the Opportunity percentage probability and forecast with an owner-set level and its history. */
+export interface SalesSnapshotV6 {
+  version: 6
+  accounts: AccountSummaryDto[]
+  sites: Record<string, SiteDto[]>
+  leads: LeadDto[]
+  contacts: ContactDto[]
+  bookings: BookingDto[]
+  installedTools: InstalledToolDto[]
+  visits: VisitDto[]
+  opportunities: CachedLegacyStrategyOpportunityDto[]
+}
+
+/** Version 7 moved Opportunities onto the seven milestone stages, with stage history and internal validation requests. */
+export interface SalesSnapshot {
+  version: 7
+  accounts: AccountSummaryDto[]
+  sites: Record<string, SiteDto[]>
+  leads: LeadDto[]
+  contacts: ContactDto[]
+  bookings: BookingDto[]
+  installedTools: InstalledToolDto[]
+  visits: VisitDto[]
+  opportunities: StrategyOpportunityDto[]
+  internalValidations: StoredOpportunityInternalValidation[]
+}
+
+export type StoredSalesSnapshot = SalesSnapshotV1 | SalesSnapshotV2 | SalesSnapshotV3 | SalesSnapshotV4 | SalesSnapshotV5 | SalesSnapshotV6 | SalesSnapshot
 
 export interface SalesRepository {
   snapshot: SalesSnapshot
@@ -105,6 +151,7 @@ function migrateSalesIdentityReferences(snapshot: SalesSnapshot): SalesSnapshot 
   migrated.opportunities.forEach((item) => {
     item.owner = migrateLegacyUserId(item.owner, 'opportunity.owner')
     item.history.forEach((entry) => { entry.actor = migrateLegacyUserId(entry.actor, 'opportunity.history.actor') })
+    item.probabilityHistory.forEach((entry) => { entry.actor = migrateLegacyUserId(entry.actor, 'opportunity.probabilityHistory.actor') })
     item.actions.forEach((action) => { action.owner = migrateLegacyUserId(action.owner, 'opportunity.action.owner') })
   })
   return migrated
@@ -121,25 +168,49 @@ function normalizeBooking(booking: LegacyBookingDto | BookingDto): BookingDto {
   }
 }
 
-function normalizeOpportunity(opportunity: StrategyOpportunityDto): StrategyOpportunityDto {
-  const legacyStages: Record<string, StrategyOpportunityStage> = {
-    'Demo验证': 'Wafer Demo确认',
-    'Demo 验证': 'Wafer Demo确认',
-    '技术确认': '设备规格确认',
-  }
-  const stage = STRATEGY_OPPORTUNITY_STAGES.includes(opportunity.stage)
-    ? opportunity.stage
-    : legacyStages[String(opportunity.stage)] ?? '需求发现'
-  const legacyForecasts: Record<string, OpportunityForecast> = { Upside: 'Best Case' }
-  const forecast = OPPORTUNITY_FORECASTS.includes(opportunity.forecast)
-    ? opportunity.forecast
-    : legacyForecasts[String(opportunity.forecast)] ?? 'Pipeline'
+// The percentage probability and forecast are retired, and stage moves now live in the stage history,
+// so their generic change-history rows are dropped together with the retired values.
+const RETIRED_OPPORTUNITY_HISTORY_FIELDS = new Set(['probability', 'forecast', 'stage', 'stagerollback'])
+
+// Stages cached before the seven milestones, including the aliases the older vocabulary had already absorbed.
+const LEGACY_OPPORTUNITY_STAGES: Record<string, OpportunityStage> = {
+  '需求发现': 'qualified_opportunity',
+  'Wafer Demo确认': 'qualified_opportunity',
+  '预算审批': 'demo_done',
+  '设备规格确认': 'customer_budget_approved',
+  '报价': 'rfq_validated',
+  '采购流程': 'quotation_sent',
+  Won: 'po_received',
+  Lost: 'lost',
+  'Demo验证': 'qualified_opportunity',
+  'Demo 验证': 'qualified_opportunity',
+  '技术确认': 'qualified_opportunity',
+}
+
+function normalizeOpportunity(opportunity: CachedLegacyStrategyOpportunityDto | StrategyOpportunityDto): StrategyOpportunityDto {
+  const cachedStage = String(opportunity.stage)
+  const stage: OpportunityStage = isOpportunityStage(cachedStage)
+    ? cachedStage
+    : LEGACY_OPPORTUNITY_STAGES[cachedStage] ?? 'qualified_opportunity'
+  const { probability: _retiredProbability, forecast: _retiredForecast, ...current } = opportunity as CachedLegacyStrategyOpportunityDto
+  const lost = stage === 'lost'
   return {
-    ...opportunity,
+    ...current,
     stage,
-    forecast,
-    amount: normalizeMoney(String(opportunity.amount)),
-    originalAmount: normalizeMoney(String(opportunity.originalAmount)),
+    stageChangedAt: current.stageChangedAt ?? '',
+    budgetApprovedOn: current.budgetApprovedOn ?? '',
+    // A cached loss has no record of the stage it was lost at; reopening then stops at quotation sent.
+    lostAtStage: lost && isOpenOpportunityStage(current.lostAtStage) ? current.lostAtStage : '',
+    lostAt: lost ? current.lostAt ?? '' : '',
+    lostBy: lost ? current.lostBy ?? '' : '',
+    stageHistory: Array.isArray(current.stageHistory) ? current.stageHistory : [],
+    internalValidation: current.internalValidation ?? null,
+    liveBooking: current.liveBooking ?? null,
+    probabilityLevel: isOpportunityProbabilityLevelValue(current.probabilityLevel) ? current.probabilityLevel : '',
+    probabilityHistory: Array.isArray(current.probabilityHistory) ? current.probabilityHistory : [],
+    history: current.history.filter((entry) => !RETIRED_OPPORTUNITY_HISTORY_FIELDS.has(String(entry.field).toLowerCase())),
+    amount: normalizeMoney(String(current.amount)),
+    originalAmount: normalizeMoney(String(current.originalAmount)),
   }
 }
 
@@ -201,8 +272,7 @@ function restoreBookingSourceOpportunities(snapshot: SalesSnapshot): SalesSnapsh
     if (!booking.sourceOpportunityId || restored.opportunities.some((item) => item.id === booking.sourceOpportunityId)) continue
     const source = canonical.find((item) =>
       item.id === booking.sourceOpportunityId &&
-      item.accountId === booking.accountId &&
-      item.stage === 'Won',
+      item.accountId === booking.accountId,
     )
     if (source) restored.opportunities.push(source)
   }
@@ -222,8 +292,26 @@ function restoreCanonicalSites(snapshot: SalesSnapshot): SalesSnapshot {
   return restored
 }
 
+// Seeded internal validations belong to seeded records only: the Opportunity and Booking must be the seeded ones.
+function restoreCanonicalInternalValidations(snapshot: SalesSnapshot): SalesSnapshot {
+  const restored = structuredClone(snapshot)
+  restored.internalValidations = Array.isArray(restored.internalValidations) ? restored.internalValidations : []
+  const canonicalOpportunities = seededOpportunities()
+  for (const validation of opportunityInternalValidations) {
+    if (restored.internalValidations.some((item) => item.id === validation.id)) continue
+    const canonical = canonicalOpportunities.find((item) => item.id === validation.opportunityId)
+    const opportunity = restored.opportunities.find((item) => item.id === validation.opportunityId)
+    if (!canonical || opportunity?.accountId !== canonical.accountId) continue
+    if (validation.bookingId && !restored.bookings.some((item) =>
+      item.id === validation.bookingId && item.sourceOpportunityId === validation.opportunityId,
+    )) continue
+    restored.internalValidations.push(structuredClone(validation))
+  }
+  return restored
+}
+
 function removeRetiredLocalContacts(snapshot: SalesSnapshot): SalesSnapshot {
-  snapshot = restoreCanonicalSites(restoreBookingSourceOpportunities(snapshot))
+  snapshot = restoreCanonicalInternalValidations(restoreCanonicalSites(restoreBookingSourceOpportunities(snapshot)))
   const storedTools = (snapshot as SalesSnapshot & { installedTools?: InstalledToolDto[] }).installedTools
   snapshot = { ...snapshot, installedTools: storedTools?.length ? structuredClone(storedTools) : seededInstalledTools() }
   const normalizedBookings = snapshot.bookings.map(normalizeBooking)
@@ -332,35 +420,47 @@ function legacySeed(): SalesSnapshotV1 {
   }
 }
 
-export function migrateSalesSnapshot(snapshot: SalesSnapshotV1 | SalesSnapshotV2 | SalesSnapshotV3 | SalesSnapshotV4 | SalesSnapshot): SalesSnapshot {
-  if (snapshot.version === 5) return migrateSalesIdentityReferences(removeRetiredLocalContacts(restoreConvertedAccounts(snapshot)))
+export function migrateSalesSnapshot(snapshot: StoredSalesSnapshot): SalesSnapshot {
+  if (snapshot.version === 7) return migrateSalesIdentityReferences(removeRetiredLocalContacts(restoreConvertedAccounts(snapshot)))
+  if (snapshot.version === 6 || snapshot.version === 5) {
+    return migrateSalesIdentityReferences(removeRetiredLocalContacts(restoreConvertedAccounts({
+      ...structuredClone(snapshot),
+      version: 7,
+      opportunities: snapshot.opportunities.map(normalizeOpportunity),
+      internalValidations: [],
+    })))
+  }
   if (snapshot.version === 4) {
     return migrateSalesIdentityReferences(removeRetiredLocalContacts(restoreConvertedAccounts({
       ...structuredClone(snapshot),
-      version: 5,
+      version: 7,
       accounts: structuredClone(accounts),
       sites: structuredClone(sites),
       installedTools: seededInstalledTools(),
       bookings: snapshot.bookings.map(normalizeBooking),
+      opportunities: snapshot.opportunities.map(normalizeOpportunity),
+      internalValidations: [],
     })))
   }
   if (snapshot.version === 3) {
     return migrateSalesIdentityReferences(removeRetiredLocalContacts({
       ...structuredClone(snapshot),
-      version: 5,
+      version: 7,
       accounts: structuredClone(accounts),
       sites: structuredClone(sites),
       leads: structuredClone(leads),
       installedTools: seededInstalledTools(),
       bookings: snapshot.bookings.map(normalizeBooking),
+      opportunities: snapshot.opportunities.map(normalizeOpportunity),
+      internalValidations: [],
     }))
   }
-  const opportunityMigration = snapshot.version === 1
+  const opportunityMigration: { contacts: ContactDto[]; opportunities: Array<CachedLegacyStrategyOpportunityDto | StrategyOpportunityDto> } = snapshot.version === 1
     ? migrateLegacyOpportunityContacts(contacts, snapshot.opportunities)
     : { contacts: snapshot.contacts, opportunities: snapshot.opportunities }
   const primaryMigration = migrateLegacyPrimaryContacts(opportunityMigration.contacts, snapshot.bookings, [])
   return migrateSalesIdentityReferences(removeRetiredLocalContacts({
-    version: 5,
+    version: 7,
     accounts: structuredClone(accounts),
     sites: structuredClone(sites),
     leads: structuredClone(leads),
@@ -368,7 +468,8 @@ export function migrateSalesSnapshot(snapshot: SalesSnapshotV1 | SalesSnapshotV2
     bookings: primaryMigration.bookings.map(normalizeBooking),
     installedTools: seededInstalledTools(),
     visits: structuredClone(snapshot.visits),
-    opportunities: opportunityMigration.opportunities,
+    opportunities: opportunityMigration.opportunities.map(normalizeOpportunity),
+    internalValidations: [],
   }))
 }
 
@@ -376,18 +477,20 @@ function seed(): SalesSnapshot {
   return migrateSalesSnapshot(legacySeed())
 }
 
-export function createMemorySalesRepository(snapshot: SalesSnapshotV1 | SalesSnapshotV2 | SalesSnapshotV3 | SalesSnapshotV4 | SalesSnapshot = seed()): SalesRepository {
+export function createMemorySalesRepository(snapshot: StoredSalesSnapshot = seed()): SalesRepository {
   return { snapshot: migrateSalesSnapshot(snapshot), save() {} }
 }
 
 let sharedRepository: SalesRepository | undefined
 
-function isStoredSalesSnapshot(value: unknown): value is SalesSnapshotV1 | SalesSnapshotV2 | SalesSnapshotV3 | SalesSnapshotV4 | SalesSnapshot {
+function isStoredSalesSnapshot(value: unknown): value is StoredSalesSnapshot {
   if (!value || typeof value !== 'object') return false
-  const snapshot = value as { version?: number; accounts?: unknown; sites?: unknown; leads?: unknown; bookings?: unknown; visits?: unknown; opportunities?: unknown }
-  return (snapshot.version === 1 || snapshot.version === 2 || snapshot.version === 3 || snapshot.version === 4 || snapshot.version === 5)
-    && (snapshot.version < 4 || Array.isArray(snapshot.leads))
-    && (snapshot.version !== 5 || (Array.isArray(snapshot.accounts) && Boolean(snapshot.sites) && typeof snapshot.sites === 'object'))
+  const snapshot = value as { version?: unknown; accounts?: unknown; sites?: unknown; leads?: unknown; bookings?: unknown; visits?: unknown; opportunities?: unknown; internalValidations?: unknown }
+  const version = snapshot.version
+  return typeof version === 'number' && Number.isInteger(version) && version >= 1 && version <= 7
+    && (version < 4 || Array.isArray(snapshot.leads))
+    && (version < 5 || (Array.isArray(snapshot.accounts) && Boolean(snapshot.sites) && typeof snapshot.sites === 'object'))
+    && (version < 7 || Array.isArray(snapshot.internalValidations))
     && Array.isArray(snapshot.bookings)
     && Array.isArray(snapshot.visits)
     && Array.isArray(snapshot.opportunities)

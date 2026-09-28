@@ -157,16 +157,16 @@ describe('AccountProfile request identity', () => {
 it('translates loaded Account 360 stages without modifying its snapshot or refetching', async () => {
   const apiClient = createMockApi({ latency: 0 })
   const snapshot = await apiClient.getAccount360('ACC-001')
-  snapshot.data.opportunities[0].stage = '需求发现'
+  snapshot.data.opportunities[0].stage = 'demo_done'
   const raw = JSON.stringify(snapshot)
   const read = vi.spyOn(apiClient, 'getAccount360').mockResolvedValue(snapshot)
   const wrapper = mount(AccountProfile, { props: { accountId: 'ACC-001', apiClient }, global: { plugins: [createPinia()] } })
   await flushPromises()
-  expect(wrapper.get('.project-section').text()).toContain('需求发现')
+  expect(wrapper.get('.project-section').text()).toContain('Demo 完成')
   setLocale('en-US')
   await flushPromises()
-  expect(wrapper.get('.project-section').text()).toContain('Discovery')
-  expect(wrapper.get('.project-section').text()).not.toContain('需求发现')
+  expect(wrapper.get('.project-section').text()).toContain('Demo done')
+  expect(wrapper.get('.project-section').text()).not.toContain('Demo 完成')
   expect(read).toHaveBeenCalledTimes(1)
   expect(JSON.stringify(snapshot)).toBe(raw)
   wrapper.unmount()

@@ -32,6 +32,15 @@ BOOKING_TYPES = {"Equipment", "Service"}
 
 
 def delete_booking(name: str) -> dict[str, str]:
+    assert_capability("deal:write")
+    if resolve_crm_role() != "Manager":
+        raise frappe.PermissionError("CRM Manager role is required.")
+    if frappe.db.get_value("CRM Booking", name, "source") == "Opportunity":
+        # The Booking is the PO record behind a po_received Opportunity; the stage rules (live
+        # booking, rollback, loss) rely on it, so it can only be cancelled, never deleted.
+        raise CrmApiException(
+            "BOOKING_SOURCE_INVALID", "An Opportunity Booking cannot be deleted; cancel it instead.",
+        )
     return delete_manager_scoped_document("CRM Booking", name, "deal:write", "BOOKING_NOT_FOUND")
 
 
@@ -76,12 +85,9 @@ def _validate_source(account_id: str, source: str, source_opportunity: str, book
             raise CrmApiException("BOOKING_SOURCE_INVALID", "Upsell Booking must not reference an Opportunity.")
         return None
     if not source_opportunity:
-        raise CrmApiException("BOOKING_SOURCE_REQUIRED", "Opportunity Booking requires a Won Opportunity.")
-    opportunity = frappe.db.get_value(
-        "CRM Opportunity", source_opportunity, ["account", "stage"], as_dict=True
-    )
-    if not opportunity or opportunity.account != account_id or opportunity.stage != "Won":
-        raise CrmApiException("BOOKING_SOURCE_INVALID", "Source Opportunity must be Won and belong to the Account.")
+        raise CrmApiException("BOOKING_SOURCE_REQUIRED", "Opportunity Booking requires a source Opportunity.")
+    if frappe.db.get_value("CRM Opportunity", source_opportunity, "account") != account_id:
+        raise CrmApiException("BOOKING_SOURCE_INVALID", "Source Opportunity must belong to the Account.")
     duplicate = frappe.db.sql(
         """SELECT `name` FROM `tabCRM Booking`
         WHERE `source_opportunity` = %s AND `status` != 'Cancelled' AND (%s IS NULL OR `name` != %s)
@@ -89,7 +95,7 @@ def _validate_source(account_id: str, source: str, source_opportunity: str, book
         (source_opportunity, booking_id, booking_id),
     )
     if duplicate:
-        raise CrmApiException("BOOKING_ALREADY_EXISTS", "The Won Opportunity already has a live Booking.")
+        raise CrmApiException("BOOKING_ALREADY_EXISTS", "The Opportunity already has a live Booking.")
     return source_opportunity
 
 
@@ -132,14 +138,6 @@ def _validate_booking(payload: dict[str, Any], booking_id: str | None = None) ->
         "live_source_opportunity": source_opportunity if source_opportunity and status != "Cancelled" else None,
         "note": str(payload.get("note") or "").strip(),
     }
-
-
-def _lock_booking_source(payload: dict[str, Any]) -> None:
-    if str(payload.get("source") or "").strip() != "Opportunity":
-        return
-    source_opportunity = str(payload.get("sourceOpportunityId") or "").strip()
-    if source_opportunity:
-        frappe.db.sql("SELECT `name` FROM `tabCRM Opportunity` WHERE `name` = %s FOR UPDATE", source_opportunity)
 
 
 def serialize_booking(doc) -> dict[str, Any]:
@@ -236,7 +234,11 @@ def get_booking(name: str) -> dict[str, Any]:
 def create_booking(payload: dict[str, Any]) -> dict[str, Any]:
     assert_capability("deal:write")
     ensure_server_generated_id(payload)
-    _lock_booking_source(payload)
+    if str(payload.get("source") or "").strip() == "Opportunity":
+        raise CrmApiException(
+            "BOOKING_SOURCE_INVALID",
+            "Opportunity Bookings are created by confirming the PO or approving an internal validation.",
+        )
     values = _validate_booking(payload)
     savepoint = f"crm_booking_create_{frappe.generate_hash(length=8)}"
     frappe.db.savepoint(savepoint)
@@ -252,7 +254,7 @@ def create_booking(payload: dict[str, Any]) -> dict[str, Any]:
             )
     except (frappe.UniqueValidationError, frappe.DuplicateEntryError) as exc:
         frappe.db.rollback(save_point=savepoint)
-        raise CrmApiException("CONFLICT", "The Won Opportunity already has a live Booking.") from exc
+        raise CrmApiException("CONFLICT", "The Opportunity already has a live Booking.") from exc
     except Exception:
         frappe.db.rollback(save_point=savepoint)
         raise
@@ -272,6 +274,25 @@ def _current_input(doc) -> dict[str, Any]:
     }
 
 
+def _assert_opportunity_booking_edit(doc, merged: dict[str, Any]) -> None:
+    """An Opportunity Booking follows its Opportunity: only its details and a manual cancel change."""
+
+    fixed = {
+        "accountId": doc.account,
+        "source": doc.source,
+        "sourceOpportunityId": doc.source_opportunity or "",
+        "bookingType": doc.booking_type or "Equipment",
+    }
+    if any(str(merged.get(key) or "") != value for key, value in fixed.items()):
+        raise CrmApiException(
+            "BOOKING_SOURCE_INVALID",
+            "Account, source, Opportunity and type of an Opportunity Booking cannot change.",
+        )
+    status = merged.get("status")
+    if status != doc.status and (status != "Cancelled" or doc.status == "Cancelled"):
+        raise CrmApiException("BOOKING_STATUS_INVALID", "An Opportunity Booking can only be changed to Cancelled.")
+
+
 def update_booking(name: str, payload: dict[str, Any], expected_modified: Any) -> dict[str, Any]:
     assert_capability("deal:write")
     current = _require_booking(name)
@@ -284,6 +305,12 @@ def update_booking(name: str, payload: dict[str, Any], expected_modified: Any) -
         raise CrmApiException("BOOKING_LOCKED", "Converted Booking cannot be edited.")
     merged = _current_input(doc)
     merged.update(payload)
+    if str(merged.get("source") or "").strip() != doc.source:
+        # Opportunity Bookings only come from PO confirmation or internal validation, so an
+        # Upsell Booking cannot be relabelled as one later.
+        raise CrmApiException("BOOKING_SOURCE_INVALID", "A Booking's source cannot change.")
+    if doc.source == "Opportunity":
+        _assert_opportunity_booking_edit(doc, merged)
     previous_owner = doc.booking_owner
     savepoint = f"crm_booking_update_{frappe.generate_hash(length=8)}"
     frappe.db.savepoint(savepoint)
@@ -299,7 +326,7 @@ def update_booking(name: str, payload: dict[str, Any], expected_modified: Any) -
             )
     except (frappe.UniqueValidationError, frappe.DuplicateEntryError) as exc:
         frappe.db.rollback(save_point=savepoint)
-        raise CrmApiException("CONFLICT", "The Won Opportunity already has a live Booking.") from exc
+        raise CrmApiException("CONFLICT", "The Opportunity already has a live Booking.") from exc
     except Exception:
         frappe.db.rollback(save_point=savepoint)
         raise

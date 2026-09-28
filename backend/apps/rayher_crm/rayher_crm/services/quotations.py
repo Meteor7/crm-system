@@ -22,9 +22,10 @@ from rayher_crm.services.contacts import _contact_account
 from rayher_crm.services.money import decimal_string
 from rayher_crm.services.notifications import create_notification
 from rayher_crm.services.quotation_rules import QuotationRuleError, calculate_totals, validate_payment_terms
+from rayher_crm.services.opportunity_stages import PUBLISHABLE_QUOTATION_STAGES
 from rayher_crm.services.sites import can_read_site_data
 
-PUBLISHABLE_OPPORTUNITY_STAGES = {"报价", "采购流程"}
+PUBLISHABLE_OPPORTUNITY_STAGES = set(PUBLISHABLE_QUOTATION_STAGES)
 DECISION_STATUSES = {"Accepted", "Rejected"}
 APPROVAL_DECISIONS = {"Approved", "Rejected"}
 FIXED_INCOTERM = "FOB上海  FOB Shanghai"
@@ -785,9 +786,12 @@ def _publish_locked(master, version, approval_status: str) -> None:
             if prior.status in {"Published", "Expired", "Accepted", "Rejected"}: prior.status = "Superseded"; prior.save(ignore_permissions=True)
         master.current_published_version = version.name; master.current_version = version.name; master.status = "Published"; master.save(ignore_permissions=True)
         if master.opportunity:
-            from rayher_crm.services.opportunities import advance_opportunity_for_commercial_event
+            from rayher_crm.services.opportunities import advance_opportunity_for_event
 
-            advance_opportunity_for_commercial_event(master.opportunity, "quotation_published")
+            advance_opportunity_for_event(
+                master.opportunity, "quotation_published",
+                reference_doctype="CRM Quotation Version", reference_name=version.name,
+            )
     except Exception:
         if released_file and frappe.db.exists("File", released_file):
             frappe.delete_doc("File", released_file, ignore_permissions=True, force=True)

@@ -9,11 +9,12 @@ import frappe
 
 from rayher_crm.api.v1.errors import CrmApiException
 from rayher_crm.permissions.roles import assert_capability, resolve_crm_role
-from rayher_crm.permissions.scope import conditions_for_doctype, has_crm_permission
+from rayher_crm.permissions.scope import OPPORTUNITY_CHILD_DOCTYPES, conditions_for_doctype, has_crm_permission
 from rayher_crm.services.accounts import _require_account
 from rayher_crm.services.common import (
     delete_manager_scoped_document,
     ensure_server_generated_id,
+    normalize_expected_modified,
     normalize_pagination,
     optional_date,
     required_text,
@@ -25,34 +26,58 @@ from rayher_crm.services.concurrency import lock_document
 from rayher_crm.services.sites import _require_site, can_read_site_data
 from rayher_crm.services.contacts import _contact_account
 from rayher_crm.services.money import MoneyValidationError, as_decimal, decimal_string
-from rayher_crm.services.notifications import create_notification
+from rayher_crm.services.notifications import active_crm_users, create_notification
+from rayher_crm.services.opportunity_bookings import (
+    booking_amount,
+    confirm_pending_booking,
+    create_opportunity_booking,
+    live_booking,
+    validate_booking_draft,
+)
+from rayher_crm.services.opportunity_stages import (
+    AUTOMATIC_STAGE_EVENTS,
+    CLOSED_STAGES,
+    CUSTOMER_BUDGET_APPROVED,
+    DEMO_DONE,
+    INTERNAL_VALIDATION,
+    LOST,
+    MILESTONE_STAGES,
+    OPEN_STAGES,
+    OPPORTUNITY_STAGES,
+    PO_CONFIRMABLE_STAGES,
+    PO_RECEIVED,
+    PROBABILITY_LEVEL_CHOICES,
+    QUALIFIED_OPPORTUNITY,
+    QUOTATION_SENT,
+    stage_index,
+)
 
 
-OPPORTUNITY_STAGES = ("需求发现", "Wafer Demo确认", "预算审批", "设备规格确认", "报价", "采购流程", "Won", "Lost")
-DEMO_EVENT_TRANSITIONS = {
-    "request_created": ("需求发现", "Wafer Demo确认"),
-    "request_approved": ("Wafer Demo确认", "Wafer Demo确认"),
-    "evaluation_accepted": ("Wafer Demo确认", "预算审批"),
-}
-COMMERCIAL_EVENT_TRANSITIONS = {
-    "rfq_approved": ("设备规格确认", "报价"),
-    "quotation_published": ("报价", "采购流程"),
-}
-MANUAL_STAGE_TRANSITIONS = {
-    ("预算审批", "设备规格确认"),
-    ("采购流程", "Won"),
-}
-STAGE_PROBABILITIES = {
-    "需求发现": 15, "Wafer Demo确认": 55, "预算审批": 70, "设备规格确认": 75,
-    "报价": 80, "采购流程": 90, "Won": 100, "Lost": 0,
-}
-FORECASTS = {"Pipeline", "Best Case", "Commit", "Closed"}
 SALE_TYPES = {"New Equipment", "Repeat Order", "Service"}
 LIST_FIELDS = ("payment_milestones", "strengths", "red_flags", "information_needed")
 
 
 def delete_strategy_opportunity(name: str) -> dict[str, str]:
-    return delete_manager_scoped_document("CRM Opportunity", name, "deal:write", "OPPORTUNITY_NOT_FOUND")
+    savepoint = f"crm_opportunity_delete_{frappe.generate_hash(length=8)}"
+    frappe.db.savepoint(savepoint)
+    try:
+        # History and internal validation rows link to the Opportunity; remove them first or
+        # the link check in frappe.delete_doc reports the Opportunity as still referenced.
+        # The field history, stakeholders and actions belong to this Opportunity alone (the
+        # relation APIs only archive their rows), so they go with it too.
+        for doctype in (
+            *OPPORTUNITY_CHILD_DOCTYPES,
+            "CRM Opportunity History",
+            "CRM Opportunity Stakeholder",
+            "CRM Opportunity Action",
+        ):
+            frappe.db.delete(doctype, {"opportunity": name})
+        return delete_manager_scoped_document("CRM Opportunity", name, "deal:write", "OPPORTUNITY_NOT_FOUND")
+    except Exception:
+        frappe.db.rollback(save_point=savepoint)
+        raise
+
+
 STAKEHOLDER_ROLES = (
     "Decision Maker", "Economic Buyer", "Technical Buyer", "User Buyer", "Coach",
     "Procurement", "Influencer", "Champion", "Technical Champion", "Primary Contact",
@@ -82,14 +107,6 @@ def _percentage(value: Any, fieldname: str) -> int:
     if str(value).strip() != str(parsed) or not 0 <= parsed <= 100:
         raise CrmApiException("VALIDATION_ERROR", f"{fieldname} must be an integer from 0 to 100.")
     return parsed
-
-
-def _calculate_opportunity_probability(stage: str, score: int) -> int:
-    if stage == "Won":
-        return 100
-    if stage == "Lost":
-        return 0
-    return max(0, min(100, (STAGE_PROBABILITIES[stage] * 6 + score * 4 + 5) // 10))
 
 
 def _string_list(value: Any, fieldname: str) -> list[str]:
@@ -129,17 +146,16 @@ def _validate_opportunity(payload: dict[str, Any]) -> dict[str, Any]:
     original_amount = _positive_money(payload.get("originalAmount", amount), "originalAmount")
     stage = validate_choice(payload.get("stage"), "stage", OPPORTUNITY_STAGES)
     score = _percentage(payload.get("intentScore", 20), "intentScore")
-    if "probability" in payload:
-        _percentage(payload.get("probability"), "probability")
     return {
         "account": account_id,
         "site": site_id,
         "title": required_text(payload, "title"),
         "opportunity_owner": resolve_write_owner(payload.get("owner")),
         "stage": stage,
-        "forecast": validate_choice(payload.get("forecast"), "forecast", FORECASTS),
+        "probability_level": validate_choice(
+            payload.get("probabilityLevel") or "", "probabilityLevel", PROBABILITY_LEVEL_CHOICES,
+        ),
         "amount": amount,
-        "probability": _calculate_opportunity_probability(stage, score),
         "score": score,
         "po_date": po_date,
         "tool_type": required_text(payload, "toolType"),
@@ -176,6 +192,111 @@ def _history_for_opportunity(opportunity_id: str) -> list[dict[str, Any]]:
         }
         for row in rows
     ]
+
+
+def _probability_history_for_opportunity(opportunity_id: str) -> list[dict[str, Any]]:
+    rows = frappe.get_all(
+        "CRM Opportunity Probability History",
+        filters={"opportunity": opportunity_id},
+        fields=["name", "actor", "changed_at", "from_level", "to_level"],
+        order_by="changed_at desc, creation desc",
+    )
+    return [
+        {
+            "id": row.name,
+            "from": row.from_level or "",
+            "to": row.to_level or "",
+            "actor": row.actor,
+            "at": to_iso_timestamp(row.changed_at),
+        }
+        for row in rows
+    ]
+
+
+def _stage_history_for_opportunity(opportunity_id: str) -> list[dict[str, Any]]:
+    rows = frappe.get_all(
+        "CRM Opportunity Stage History",
+        filters={"opportunity": opportunity_id},
+        fields=[
+            "name", "from_stage", "to_stage", "source", "event", "reference_doctype", "reference_name",
+            "reason", "actor", "recorded_at", "reached_at", "reached_at_basis",
+        ],
+        order_by="recorded_at desc, creation desc",
+    )
+    return [
+        {
+            "id": row.name,
+            "from": row.from_stage or "",
+            "to": row.to_stage,
+            "source": row.source,
+            "event": row.event,
+            "referenceDoctype": row.reference_doctype or "",
+            "referenceName": row.reference_name or "",
+            "reason": row.reason or "",
+            "actor": row.actor,
+            "recordedAt": to_iso_timestamp(row.recorded_at),
+            "reachedAt": to_iso_timestamp(row.reached_at) if row.reached_at else "",
+            "reachedAtBasis": row.reached_at_basis,
+        }
+        for row in rows
+    ]
+
+
+def _latest_internal_validation(opportunity_id: str) -> dict[str, Any] | None:
+    rows = frappe.get_all(
+        "CRM Opportunity Internal Validation",
+        filters={"opportunity": opportunity_id},
+        fields=[
+            "name", "attempt_no", "status", "reason", "expected_po_date", "booking_draft", "requested_by",
+            "requested_at", "decided_by", "decided_at", "decision_comment", "booking", "cancelled_by",
+            "cancelled_at", "cancel_reason",
+        ],
+        order_by="attempt_no desc",
+        limit=1,
+    )
+    if not rows:
+        return None
+    row = rows[0]
+    return {
+        "id": row.name,
+        "attemptNo": int(row.attempt_no or 0),
+        "status": row.status,
+        "reason": row.reason or "",
+        "expectedPoDate": str(row.expected_po_date or ""),
+        "booking": _decode_object(row.booking_draft),
+        "requestedBy": row.requested_by,
+        "requestedAt": to_iso_timestamp(row.requested_at),
+        "decidedBy": row.decided_by or "",
+        "decidedAt": to_iso_timestamp(row.decided_at) if row.decided_at else "",
+        "decisionComment": row.decision_comment or "",
+        "bookingId": row.booking or "",
+        "cancelledBy": row.cancelled_by or "",
+        "cancelledAt": to_iso_timestamp(row.cancelled_at) if row.cancelled_at else "",
+        "cancelReason": row.cancel_reason or "",
+    }
+
+
+def _live_booking_summary(opportunity_id: str) -> dict[str, Any] | None:
+    booking = live_booking(opportunity_id)
+    if not booking:
+        return None
+    summary: dict[str, Any] = {"id": booking.name, "status": booking.status}
+    # The Booking can belong to another Sales user; its details stay within Booking scope. The PO
+    # confirmation form is prefilled from this summary, so it carries every field Sales can edit on
+    # the Pending Booking; otherwise confirming would write the approval draft back over the edits.
+    if has_crm_permission(booking, user=frappe.session.user, permission_type="read"):
+        summary.update({
+            "primaryContactId": booking.primary_contact,
+            "equipment": booking.equipment,
+            "quantity": int(booking.quantity or 0),
+            "ddl": str(booking.ddl or ""),
+            "amount": booking_amount(booking.name),
+            "currency": booking.currency,
+            "owner": booking.booking_owner,
+            "note": booking.note or "",
+            "modified": to_iso_timestamp(booking.modified),
+        })
+    return summary
 
 
 def _stakeholders_for_opportunity(opportunity_id: str) -> list[dict[str, Any]]:
@@ -241,9 +362,13 @@ def serialize_opportunity(doc) -> dict[str, Any]:
         "site": (frappe.db.get_value("Address", doc.site, "address_title") or doc.site) if can_read_site else "",
         "owner": doc.opportunity_owner,
         "stage": doc.stage,
-        "forecast": doc.forecast,
+        "stageChangedAt": to_iso_timestamp(doc.stage_changed_at) if doc.stage_changed_at else "",
+        "budgetApprovedOn": str(doc.budget_approved_on or ""),
+        "lostAtStage": doc.lost_at_stage or "",
+        "lostAt": to_iso_timestamp(doc.lost_at) if doc.lost_at else "",
+        "lostBy": doc.lost_by or "",
+        "probabilityLevel": doc.probability_level or "",
         "amount": decimal_string(exact.amount if exact else doc.amount or 0),
-        "probability": int(doc.probability or 0),
         "poDate": str(doc.po_date or ""),
         "updated": to_iso_timestamp(doc.modified),
         "modified": to_iso_timestamp(doc.modified),
@@ -260,6 +385,10 @@ def serialize_opportunity(doc) -> dict[str, Any]:
         "winReason": doc.win_reason or "",
         "lostReason": doc.lost_reason or "",
         "history": _history_for_opportunity(doc.name),
+        "probabilityHistory": _probability_history_for_opportunity(doc.name),
+        "stageHistory": _stage_history_for_opportunity(doc.name),
+        "internalValidation": _latest_internal_validation(doc.name),
+        "liveBooking": _live_booking_summary(doc.name),
         "strengths": _decode_list(doc.strengths),
         "redFlags": _decode_list(doc.red_flags),
         "informationNeeded": _decode_list(doc.information_needed),
@@ -308,11 +437,17 @@ def list_strategy_opportunities(query: dict[str, Any] | None = None):
         else:
             where_parts.append("(`name` LIKE %s OR `title` LIKE %s OR `account` LIKE %s OR `site` LIKE %s)")
             values.extend([pattern, pattern, pattern, pattern])
-    for input_name, column in (("status", "stage"), ("forecast", "forecast"), ("owner", "opportunity_owner"), ("accountId", "account")):
+    for input_name, column in (("status", "stage"), ("owner", "opportunity_owner"), ("accountId", "account")):
         value = str(query.get(input_name) or "").strip()
         if value and value != "All":
             where_parts.append(f"`{column}` = %s")
             values.append(value)
+    probability_level = str(query.get("probabilityLevel") or "").strip()
+    if probability_level == "pending":
+        where_parts.append("COALESCE(`probability_level`, '') = ''")
+    elif probability_level and probability_level != "All":
+        where_parts.append("`probability_level` = %s")
+        values.append(probability_level)
     contact_id = str(query.get("contactId") or "").strip()
     if contact_id:
         where_parts.append("EXISTS (SELECT 1 FROM `tabCRM Opportunity Stakeholder` stakeholder WHERE stakeholder.`opportunity` = `tabCRM Opportunity`.`name` AND stakeholder.`contact` = %s AND stakeholder.`archived` = 0)")
@@ -343,12 +478,23 @@ def opportunities_for_account(account_id: str) -> list[dict[str, Any]]:
 def create_strategy_opportunity(payload: dict[str, Any]) -> dict[str, Any]:
     assert_capability("deal:write")
     ensure_server_generated_id(payload)
-    values = _validate_opportunity(payload)
-    if values["stage"] != OPPORTUNITY_STAGES[0]:
-        raise CrmApiException("INVALID_TRANSITION", f"New Opportunity must start at {OPPORTUNITY_STAGES[0]}.")
+    assert_qualification_confirmed(payload)
+    values = _validate_opportunity({**payload, "stage": payload.get("stage") or QUALIFIED_OPPORTUNITY})
+    if values["stage"] != QUALIFIED_OPPORTUNITY:
+        raise CrmApiException("INVALID_TRANSITION", f"New Opportunity must start at {QUALIFIED_OPPORTUNITY}.")
+    if values["probability_level"]:
+        _assert_probability_level_owner(values["opportunity_owner"])
     for fieldname in LIST_FIELDS:
         values[fieldname] = json.dumps(values[fieldname], ensure_ascii=False)
-    doc = frappe.get_doc({"doctype": "CRM Opportunity", **values}).insert(ignore_permissions=True)
+    savepoint = f"crm_opportunity_create_{frappe.generate_hash(length=8)}"
+    frappe.db.savepoint(savepoint)
+    try:
+        doc = insert_qualified_opportunity(values, event="created")
+        if doc.probability_level:
+            _append_probability_history(doc.name, "", doc.probability_level)
+    except Exception:
+        frappe.db.rollback(save_point=savepoint)
+        raise
     return serialize_opportunity(doc)
 
 
@@ -364,9 +510,8 @@ def _current_input(doc) -> dict[str, Any]:
         "title": doc.title,
         "owner": doc.opportunity_owner,
         "stage": doc.stage,
-        "forecast": doc.forecast,
+        "probabilityLevel": doc.probability_level or "",
         "amount": exact_amount[0],
-        "probability": doc.probability,
         "intentScore": doc.score,
         "poDate": str(doc.po_date or ""),
         "toolType": doc.tool_type,
@@ -402,37 +547,64 @@ def update_strategy_opportunity(name: str, payload: dict[str, Any], expected_mod
     merged = _current_input(doc)
     merged.update(payload)
     values = _validate_opportunity(merged)
-    next_stage = values["stage"]
-    if next_stage == "Lost" and not values["lost_reason"]:
-        raise CrmApiException("VALIDATION_ERROR", "Lost Reason is required when closing an Opportunity as Lost.", field_errors={"lostReason": "Required"})
-    if next_stage != doc.stage:
-        if doc.stage in {"Won", "Lost"}:
-            raise CrmApiException("INVALID_TRANSITION", "A closed Opportunity stage cannot be changed.")
-        if next_stage != "Lost" and (doc.stage, next_stage) not in MANUAL_STAGE_TRANSITIONS:
-            raise CrmApiException("INVALID_TRANSITION", f"Opportunity cannot move from {doc.stage} to {next_stage}.")
+    if values["stage"] != doc.stage:
+        raise CrmApiException(
+            "INVALID_TRANSITION", "Opportunity stages change only through their workflow actions.",
+        )
+    if doc.stage == LOST and not values["lost_reason"]:
+        raise CrmApiException(
+            "VALIDATION_ERROR", "Lost Reason is required for a lost Opportunity.",
+            field_errors={"lostReason": "Required"},
+        )
 
-    changes: list[tuple[str, Any, Any]] = []
-    for fieldname, value in values.items():
-        current = _decode_list(getattr(doc, fieldname)) if fieldname in LIST_FIELDS else getattr(doc, fieldname)
-        stored = json.dumps(value, ensure_ascii=False) if fieldname in LIST_FIELDS else value
-        changed = current != value if fieldname in LIST_FIELDS else str(current or "") != str(value or "")
-        if changed:
-            changes.append((fieldname, current, value))
-            setattr(doc, fieldname, stored)
+    previous_level = doc.probability_level or ""
+    if values["probability_level"] != previous_level:
+        _assert_probability_level_owner(doc.opportunity_owner)
+        if doc.stage in CLOSED_STAGES:
+            raise CrmApiException(
+                "INVALID_TRANSITION",
+                "The probability level is frozen once the PO is received or the Opportunity is lost.",
+            )
+        if not values["probability_level"] and stage_index(doc.stage) >= stage_index(DEMO_DONE):
+            raise CrmApiException(
+                "VALIDATION_ERROR", "probabilityLevel cannot be cleared once the demo is done.",
+                field_errors={"probabilityLevel": "Required"},
+            )
+    if values["account"] != doc.account or values["sale_type"] != doc.sale_type:
+        if live_booking(doc.name):
+            raise CrmApiException(
+                "CONFLICT", "Account and sale type cannot change while the Opportunity has a live Booking.",
+            )
+        if doc.stage == INTERNAL_VALIDATION:
+            # The approval that brought the Opportunity here was given for this account's equipment
+            # deal; with its Booking cancelled the stage still stands until a Manager rolls it back,
+            # and a Service Opportunity must never sit at internal validation.
+            raise CrmApiException(
+                "CONFLICT", "Account and sale type cannot change while the Opportunity is at internal validation.",
+            )
 
-    doc.save(ignore_permissions=True)
-    for fieldname, before, after in changes:
-        frappe.get_doc(
-            {
-                "doctype": "CRM Opportunity History",
-                "opportunity": doc.name,
-                "actor": frappe.session.user,
-                "at": frappe.utils.now_datetime(),
-                "field": fieldname,
-                "from_value": _history_value(before),
-                "to_value": _history_value(after),
-            }
-        ).insert(ignore_permissions=True)
+    savepoint = f"crm_opportunity_update_{frappe.generate_hash(length=8)}"
+    frappe.db.savepoint(savepoint)
+    try:
+        changes: list[tuple[str, Any, Any]] = []
+        for fieldname, value in values.items():
+            current = _decode_list(getattr(doc, fieldname)) if fieldname in LIST_FIELDS else getattr(doc, fieldname)
+            stored = json.dumps(value, ensure_ascii=False) if fieldname in LIST_FIELDS else value
+            changed = current != value if fieldname in LIST_FIELDS else str(current or "") != str(value or "")
+            if changed:
+                setattr(doc, fieldname, stored)
+                # Probability level changes are audited in their own table.
+                if fieldname != "probability_level":
+                    changes.append((fieldname, current, value))
+
+        doc.save(ignore_permissions=True)
+        for fieldname, before, after in changes:
+            _append_history(doc.name, fieldname, before, after)
+        if values["probability_level"] != previous_level:
+            _append_probability_history(doc.name, previous_level, values["probability_level"])
+    except Exception:
+        frappe.db.rollback(save_point=savepoint)
+        raise
     doc.reload()
     return serialize_opportunity(doc)
 
@@ -449,51 +621,206 @@ def _append_history(opportunity_id: str, fieldname: str, before: Any, after: Any
     }).insert(ignore_permissions=True)
 
 
-def rollback_opportunity_stage(
-    name: str,
-    target_stage: Any,
-    reason: Any,
-    expected_modified: Any,
-) -> dict[str, Any]:
-    assert_capability("deal:rollback")
-    target = validate_choice(target_stage, "targetStage", OPPORTUNITY_STAGES)
-    rollback_reason = required_text({"reason": reason}, "reason")
+def _append_probability_history(opportunity_id: str, before: str, after: str) -> None:
+    frappe.get_doc({
+        "doctype": "CRM Opportunity Probability History",
+        "opportunity": opportunity_id,
+        "from_level": before,
+        "to_level": after,
+        "actor": frappe.session.user,
+        "changed_at": frappe.utils.now_datetime(),
+    }).insert(ignore_permissions=True)
+
+
+def _assert_probability_level_owner(owner: str) -> None:
+    if owner != frappe.session.user:
+        raise CrmApiException(
+            "PERMISSION_DENIED", "Only the Opportunity owner can set the probability level.",
+        )
+
+
+def assert_qualification_confirmed(payload: dict[str, Any]) -> None:
+    """Creating an Opportunity requires Sales to confirm the customer need and budget owner."""
+
+    if payload.get("qualificationConfirmed") is not True:
+        raise CrmApiException(
+            "VALIDATION_ERROR",
+            "Confirm the customer need and the budget owner before creating the Opportunity.",
+            field_errors={"qualificationConfirmed": "Required"},
+        )
+
+
+def insert_qualified_opportunity(
+    values: dict[str, Any],
+    *,
+    event: str,
+    reference_doctype: str | None = None,
+    reference_name: str | None = None,
+):
+    """Insert an Opportunity at its first milestone and record how it got there."""
+
+    now = frappe.utils.now_datetime()
+    doc = frappe.get_doc({
+        "doctype": "CRM Opportunity", **values, "stage": QUALIFIED_OPPORTUNITY, "stage_changed_at": now,
+    }).insert(ignore_permissions=True)
+    append_stage_history(
+        doc.name, "", QUALIFIED_OPPORTUNITY, source="creation", event=event, at=now,
+        reference_doctype=reference_doctype, reference_name=reference_name,
+    )
+    return doc
+
+
+def append_stage_history(
+    opportunity_id: str,
+    from_stage: str,
+    to_stage: str,
+    *,
+    source: str,
+    event: str,
+    at: Any,
+    reference_doctype: str | None = None,
+    reference_name: str | None = None,
+    reason: str = "",
+    reached_at: Any = None,
+    reached_at_basis: str = "recorded",
+) -> None:
+    frappe.get_doc({
+        "doctype": "CRM Opportunity Stage History",
+        "opportunity": opportunity_id,
+        "from_stage": from_stage,
+        "to_stage": to_stage,
+        "source": source,
+        "event": event,
+        "reference_doctype": reference_doctype,
+        "reference_name": reference_name,
+        "reason": reason,
+        "actor": frappe.session.user,
+        "recorded_at": at,
+        "reached_at": at if reached_at is None else reached_at,
+        "reached_at_basis": reached_at_basis,
+    }).insert(ignore_permissions=True)
+
+
+def _move_stage(
+    doc,
+    to_stage: str,
+    *,
+    source: str,
+    event: str,
+    at: Any = None,
+    reference_doctype: str | None = None,
+    reference_name: str | None = None,
+    reason: str = "",
+    reached_at: Any = None,
+    reached_at_basis: str = "recorded",
+) -> None:
+    """Change the stage and append its history row in the same transaction."""
+
+    recorded_at = at or frappe.utils.now_datetime()
+    from_stage = doc.stage
+    doc.stage = to_stage
+    # Follows the business time of the arrival, e.g. the budget approval date Sales declared.
+    doc.stage_changed_at = recorded_at if reached_at is None else reached_at
+    doc.save(ignore_permissions=True)
+    append_stage_history(
+        doc.name, from_stage, to_stage, source=source, event=event, at=recorded_at,
+        reference_doctype=reference_doctype, reference_name=reference_name, reason=reason,
+        reached_at=reached_at, reached_at_basis=reached_at_basis,
+    )
+
+
+def _lock_opportunity_for_action(name: str, expected_modified: Any):
     _require_opportunity(name)
     doc = lock_document("CRM Opportunity", name, expected_modified, "NOT_FOUND")
     if not has_crm_permission(doc, user=frappe.session.user, permission_type="read"):
         raise CrmApiException("SCOPE_DENIED", "The Opportunity is outside the current user scope.")
-    if target in {"Won", "Lost"} or OPPORTUNITY_STAGES.index(target) >= OPPORTUNITY_STAGES.index(doc.stage):
+    return doc
+
+
+def _require_stage(doc, stages: tuple[str, ...], action: str) -> None:
+    if doc.stage not in stages:
+        raise CrmApiException("INVALID_TRANSITION", f"{action} is not available at {doc.stage}.")
+
+
+def _require_probability_level(doc) -> None:
+    if not doc.probability_level:
         raise CrmApiException(
-            "INVALID_TRANSITION",
-            "Rollback target must be an earlier actionable stage.",
-        )
-    if target == "需求发现" and frappe.db.exists(
-        "CRM Demo Request",
-        {"opportunity": doc.name, "status": ["not in", ["Cancelled", "Converted"]]},
-    ):
-        raise CrmApiException(
-            "CONFLICT",
-            "Cancel the active Demo Request before rolling the Opportunity back to 需求发现.",
+            "VALIDATION_ERROR", "Set the probability level before this step.",
+            field_errors={"probabilityLevel": "Required"},
         )
 
-    savepoint = f"crm_opportunity_rollback_{frappe.generate_hash(length=8)}"
+
+def _decode_object(value: Any) -> dict[str, Any]:
+    if isinstance(value, dict):
+        return value
+    try:
+        parsed = json.loads(value or "{}")
+    except (TypeError, json.JSONDecodeError):
+        return {}
+    return parsed if isinstance(parsed, dict) else {}
+
+
+def _notify_opportunity_users(
+    recipients: set[str], doc, *, title: str, message: str, source_doctype: str, source_name: str,
+) -> None:
+    for recipient in sorted(recipients - {frappe.session.user, None, ""}):
+        # A disabled user or one without exactly one CRM role must not abort the business action.
+        if not frappe.db.get_value("User", recipient, "enabled"):
+            continue
+        try:
+            resolve_crm_role(recipient)
+        except frappe.PermissionError:
+            continue
+        create_notification(
+            recipient=recipient, category="Opportunity", title=title, message=message[:1000],
+            route=f"/opportunities/{doc.name}", source_doctype=source_doctype, source_name=source_name,
+        )
+
+
+def _lock_internal_validations(opportunity_id: str) -> None:
+    frappe.db.sql(
+        "SELECT `name` FROM `tabCRM Opportunity Internal Validation` WHERE `opportunity` = %s FOR UPDATE",
+        (opportunity_id,),
+    )
+
+
+def _cancel_pending_internal_validation(opportunity_id: str, reason: str) -> None:
+    name = frappe.db.get_value(
+        "CRM Opportunity Internal Validation", {"opportunity": opportunity_id, "status": "pending"}, "name",
+    )
+    if not name:
+        return
+    validation = frappe.get_doc("CRM Opportunity Internal Validation", name)
+    validation.status = "cancelled"
+    validation.cancelled_by = frappe.session.user
+    validation.cancelled_at = frappe.utils.now_datetime()
+    validation.cancel_reason = reason
+    validation.save(ignore_permissions=True)
+    _append_history(opportunity_id, "internalValidationCancelled", name, reason)
+
+
+def confirm_budget_approved(name: str, payload: dict[str, Any], expected_modified: Any) -> dict[str, Any]:
+    assert_capability("deal:write")
+    doc = _lock_opportunity_for_action(name, expected_modified)
+    _require_stage(doc, (DEMO_DONE,), "Budget approval")
+    approved_on = optional_date(payload.get("approvedOn"), "approvedOn")
+    if not approved_on:
+        raise CrmApiException("VALIDATION_ERROR", "approvedOn is required.", field_errors={"approvedOn": "Required"})
+    if approved_on > frappe.utils.today():
+        raise CrmApiException(
+            "VALIDATION_ERROR", "approvedOn cannot be in the future.",
+            field_errors={"approvedOn": "Cannot be in the future"},
+        )
+    _require_probability_level(doc)
+
+    savepoint = f"crm_opportunity_budget_{frappe.generate_hash(length=8)}"
     frappe.db.savepoint(savepoint)
     try:
-        previous_stage = doc.stage
-        previous_probability = int(doc.probability or 0)
-        doc.stage = target
-        doc.probability = _calculate_opportunity_probability(target, int(doc.score or 0))
-        doc.save(ignore_permissions=True)
-        if (
-            OPPORTUNITY_STAGES.index(previous_stage) >= OPPORTUNITY_STAGES.index("报价")
-            and OPPORTUNITY_STAGES.index(target) <= OPPORTUNITY_STAGES.index("设备规格确认")
-        ):
-            from rayher_crm.services.rfqs import reopen_approved_rfq_for_stage_rollback
-
-            reopen_approved_rfq_for_stage_rollback(doc.name, rollback_reason)
-        _append_history(doc.name, "stageRollback", previous_stage, f"{target} | {rollback_reason}")
-        if int(doc.probability or 0) != previous_probability:
-            _append_history(doc.name, "probability", previous_probability, int(doc.probability or 0))
+        doc.budget_approved_on = approved_on
+        _move_stage(
+            doc, CUSTOMER_BUDGET_APPROVED, source="manual", event="budget_confirmed",
+            reached_at=frappe.utils.get_datetime(approved_on), reached_at_basis="declared",
+        )
     except Exception:
         frappe.db.rollback(save_point=savepoint)
         raise
@@ -501,11 +828,314 @@ def rollback_opportunity_stage(
     return serialize_opportunity(doc)
 
 
-def _advance_opportunity_for_event(
+def request_internal_validation(name: str, payload: dict[str, Any], expected_modified: Any) -> dict[str, Any]:
+    assert_capability("deal:write")
+    doc = _lock_opportunity_for_action(name, expected_modified)
+    _require_stage(doc, (QUOTATION_SENT,), "Internal validation")
+    if doc.sale_type == "Service":
+        raise CrmApiException(
+            "INVALID_TRANSITION", "Internal validation is only available for equipment Opportunities.",
+        )
+    _require_probability_level(doc)
+    reason = required_text(payload, "reason")
+    expected_po_date = optional_date(payload.get("expectedPoDate"), "expectedPoDate")
+    if not expected_po_date:
+        raise CrmApiException(
+            "VALIDATION_ERROR", "expectedPoDate is required.", field_errors={"expectedPoDate": "Required"},
+        )
+    booking = validate_booking_draft(doc, payload.get("booking"))
+    _lock_internal_validations(doc.name)
+    if frappe.db.exists("CRM Opportunity Internal Validation", {"opportunity": doc.name, "status": "pending"}):
+        raise CrmApiException("CONFLICT", "The Opportunity already has a pending internal validation.")
+    reviewers = {user for user in active_crm_users("Manager") if user != frappe.session.user}
+    if not reviewers:
+        raise CrmApiException("CONFLICT", "No other active Manager can review this internal validation.")
+
+    savepoint = f"crm_opportunity_validation_{frappe.generate_hash(length=8)}"
+    frappe.db.savepoint(savepoint)
+    try:
+        validation = frappe.get_doc({
+            "doctype": "CRM Opportunity Internal Validation",
+            "opportunity": doc.name,
+            "attempt_no": frappe.db.count("CRM Opportunity Internal Validation", {"opportunity": doc.name}) + 1,
+            "status": "pending",
+            "reason": reason,
+            "expected_po_date": expected_po_date,
+            "booking_draft": json.dumps(booking, ensure_ascii=False),
+            "requested_by": frappe.session.user,
+            "requested_at": frappe.utils.now_datetime(),
+        }).insert(ignore_permissions=True)
+        # The stage does not change; saving still moves modified so stale clients see the request.
+        doc.save(ignore_permissions=True)
+        _append_history(doc.name, "internalValidationRequested", "", validation.name)
+        _notify_opportunity_users(
+            reviewers, doc, title="Internal validation requested", message=f"{doc.title}: {reason}",
+            source_doctype="CRM Opportunity Internal Validation", source_name=validation.name,
+        )
+    except (frappe.UniqueValidationError, frappe.DuplicateEntryError) as exc:
+        frappe.db.rollback(save_point=savepoint)
+        raise CrmApiException("CONFLICT", "The Opportunity already has a pending internal validation.") from exc
+    except Exception:
+        frappe.db.rollback(save_point=savepoint)
+        raise
+    doc.reload()
+    return serialize_opportunity(doc)
+
+
+def review_internal_validation(name: str, payload: dict[str, Any], expected_modified: Any) -> dict[str, Any]:
+    assert_capability("deal:internal_validation_approve")
+    doc = _lock_opportunity_for_action(name, expected_modified)
+    validation_id = required_text(payload, "validationId")
+    decision = validate_choice(payload.get("decision"), "decision", {"approved", "rejected"})
+    comment = str(payload.get("comment") or "").strip()
+    if decision == "rejected" and not comment:
+        raise CrmApiException(
+            "VALIDATION_ERROR", "A comment is required to reject an internal validation.",
+            field_errors={"comment": "Required"},
+        )
+    _lock_internal_validations(doc.name)
+    if frappe.db.get_value("CRM Opportunity Internal Validation", validation_id, "opportunity") != doc.name:
+        raise CrmApiException("INTERNAL_VALIDATION_NOT_FOUND", "Internal validation was not found.")
+    validation = frappe.get_doc("CRM Opportunity Internal Validation", validation_id)
+    if validation.status != "pending":
+        raise CrmApiException("INVALID_TRANSITION", "The internal validation was already decided or cancelled.")
+    if validation.requested_by == frappe.session.user:
+        raise CrmApiException("PERMISSION_DENIED", "Managers cannot review their own internal validation.")
+    _require_stage(doc, (QUOTATION_SENT,), "Internal validation review")
+    booking_values = None
+    if decision == "approved":
+        if doc.sale_type == "Service":
+            raise CrmApiException(
+                "INVALID_TRANSITION", "Internal validation is only available for equipment Opportunities.",
+            )
+        # The request may be days old: its contact, owner and currency must still be valid now.
+        booking_values = validate_booking_draft(doc, _decode_object(validation.booking_draft))
+        if live_booking(doc.name, for_update=True):
+            raise CrmApiException("CONFLICT", "The Opportunity already has a live Booking.")
+
+    savepoint = f"crm_opportunity_validation_review_{frappe.generate_hash(length=8)}"
+    frappe.db.savepoint(savepoint)
+    try:
+        validation.status = decision
+        validation.decided_by = frappe.session.user
+        validation.decided_at = frappe.utils.now_datetime()
+        validation.decision_comment = comment
+        booking = create_opportunity_booking(doc, booking_values, "Pending") if booking_values else None
+        if booking:
+            validation.booking = booking.name
+        validation.save(ignore_permissions=True)
+        if booking:
+            _move_stage(
+                doc, INTERNAL_VALIDATION, source="approval", event="internal_validation_approved",
+                reference_doctype="CRM Opportunity Internal Validation", reference_name=validation.name,
+            )
+        else:
+            doc.save(ignore_permissions=True)
+        _append_history(
+            doc.name, f"internalValidation{decision.title()}", validation.name, booking.name if booking else comment,
+        )
+        _notify_opportunity_users(
+            {validation.requested_by, doc.opportunity_owner}, doc,
+            title=f"Internal validation {decision}",
+            message=f"{doc.title}: {comment}" if comment else f"{doc.title}: internal validation {decision}.",
+            source_doctype="CRM Opportunity Internal Validation", source_name=validation.name,
+        )
+    except Exception:
+        frappe.db.rollback(save_point=savepoint)
+        raise
+    doc.reload()
+    return serialize_opportunity(doc)
+
+
+def confirm_po(name: str, payload: dict[str, Any], expected_modified: Any) -> dict[str, Any]:
+    assert_capability("deal:write")
+    doc = _lock_opportunity_for_action(name, expected_modified)
+    # At po_received the only thing left is to replace a Booking that was cancelled by hand.
+    replacing = doc.stage == PO_RECEIVED
+    if not replacing:
+        _require_stage(doc, PO_CONFIRMABLE_STAGES, "PO confirmation")
+        _require_probability_level(doc)
+    booking_values = validate_booking_draft(doc, payload.get("booking"))
+    _lock_internal_validations(doc.name)
+    booking = live_booking(doc.name, for_update=True)
+    if booking and (doc.stage != INTERNAL_VALIDATION or booking.status != "Pending"):
+        raise CrmApiException("CONFLICT", "The Opportunity already has a live Booking.")
+    # Cancelling the Pending Booking leaves the Opportunity version unchanged.
+    if not booking and payload.get("expectedBookingModified") is not None:
+        raise CrmApiException("VERSION_CONFLICT", "The Pending Booking was cancelled. Reload before confirming the PO.")
+    if booking:
+        # The PO details replace those of the Pending Booking, so the caller must see its current
+        # details (a Sales user cannot read a Booking assigned to another Sales user) and the Booking
+        # must still be the version the form was prefilled from; Booking edits do not move the
+        # Opportunity's modified, so the Opportunity version alone does not catch them.
+        if not has_crm_permission(booking, user=frappe.session.user, permission_type="read"):
+            raise CrmApiException("SCOPE_DENIED", "The Pending Booking is outside the current user scope.")
+        expected_booking_modified = payload.get("expectedBookingModified")
+        if not isinstance(expected_booking_modified, str) or not expected_booking_modified.strip():
+            raise CrmApiException(
+                "VALIDATION_ERROR", "expectedBookingModified is required.",
+                field_errors={"expectedBookingModified": "Required"},
+            )
+        if to_iso_timestamp(booking.modified) != normalize_expected_modified(expected_booking_modified):
+            raise CrmApiException("VERSION_CONFLICT", "The Pending Booking was changed by another request.")
+
+    savepoint = f"crm_opportunity_po_{frappe.generate_hash(length=8)}"
+    frappe.db.savepoint(savepoint)
+    try:
+        if doc.stage == QUOTATION_SENT:
+            _cancel_pending_internal_validation(doc.name, "PO received before the internal validation was decided.")
+        if booking:
+            confirm_pending_booking(booking, booking_values)
+        else:
+            booking = create_opportunity_booking(doc, booking_values, "Confirmed")
+        if replacing:
+            doc.save(ignore_permissions=True)
+            _append_history(doc.name, "bookingReplaced", "", booking.name)
+        else:
+            _move_stage(
+                doc, PO_RECEIVED, source="manual", event="po_confirmed",
+                reference_doctype="CRM Booking", reference_name=booking.name,
+            )
+            _append_history(doc.name, "poConfirmed", "", booking.name)
+    except Exception:
+        frappe.db.rollback(save_point=savepoint)
+        raise
+    doc.reload()
+    return serialize_opportunity(doc)
+
+
+def mark_opportunity_lost(name: str, payload: dict[str, Any], expected_modified: Any) -> dict[str, Any]:
+    assert_capability("deal:write")
+    doc = _lock_opportunity_for_action(name, expected_modified)
+    _require_stage(doc, OPEN_STAGES, "Marking the Opportunity lost")
+    lost_reason = required_text(payload, "lostReason")
+    _lock_internal_validations(doc.name)
+    if live_booking(doc.name, for_update=True):
+        raise CrmApiException("CONFLICT", "Cancel the Booking before marking the Opportunity lost.")
+
+    now = frappe.utils.now_datetime()
+    savepoint = f"crm_opportunity_lost_{frappe.generate_hash(length=8)}"
+    frappe.db.savepoint(savepoint)
+    try:
+        _cancel_pending_internal_validation(doc.name, "Opportunity marked lost.")
+        doc.lost_reason = lost_reason
+        doc.lost_at_stage = doc.stage
+        doc.lost_at = now
+        doc.lost_by = frappe.session.user
+        _move_stage(doc, LOST, source="lost", event="marked_lost", at=now, reason=lost_reason)
+    except Exception:
+        frappe.db.rollback(save_point=savepoint)
+        raise
+    doc.reload()
+    return serialize_opportunity(doc)
+
+
+def rollback_opportunity_stage(
+    name: str,
+    target_stage: Any,
+    reason: Any,
+    expected_modified: Any,
+) -> dict[str, Any]:
+    assert_capability("deal:rollback")
+    target = validate_choice(target_stage, "targetStage", set(MILESTONE_STAGES))
+    rollback_reason = required_text({"reason": reason}, "reason")
+    _require_opportunity(name)
+    # Locks are taken RFQ -> Opportunity -> internal validation -> Booking. review_rfq locks the
+    # RFQ before the Opportunity too, so a rollback cannot deadlock against an RFQ approval.
+    rfq = frappe.db.sql(
+        "SELECT `status` FROM `tabCRM RFQ` WHERE `opportunity` = %s FOR UPDATE", (name,), as_dict=True,
+    )
+    doc = lock_document("CRM Opportunity", name, expected_modified, "NOT_FOUND")
+    if not has_crm_permission(doc, user=frappe.session.user, permission_type="read"):
+        raise CrmApiException("SCOPE_DENIED", "The Opportunity is outside the current user scope.")
+    reopening = doc.stage == LOST
+    if reopening:
+        # Without a recorded loss stage, reopening stops below internal validation, which would
+        # claim a Manager approval nobody can vouch for.
+        ceiling = doc.lost_at_stage or QUOTATION_SENT
+        if stage_index(target) > stage_index(ceiling):
+            raise CrmApiException(
+                "INVALID_TRANSITION", f"A lost Opportunity can only reopen at or below {ceiling}.",
+            )
+    elif stage_index(target) >= stage_index(doc.stage):
+        raise CrmApiException("INVALID_TRANSITION", "Rollback target must be an earlier stage.")
+    _lock_internal_validations(doc.name)
+    booking = live_booking(doc.name, for_update=True)
+    if booking and booking.status == "Completed":
+        raise CrmApiException("CONFLICT", "A completed Booking blocks stage rollback.")
+    if target == INTERNAL_VALIDATION:
+        approved = frappe.get_all(
+            "CRM Opportunity Internal Validation",
+            filters={"opportunity": doc.name, "status": "approved"},
+            pluck="booking", order_by="attempt_no desc", limit=1,
+        )
+        latest_booking = frappe.get_all(
+            "CRM Booking", filters={"source_opportunity": doc.name},
+            pluck="name", order_by="creation desc", limit=1,
+        )
+        # Only the Booking the approval created may carry the Opportunity back to internal
+        # validation; a PO confirmed straight from quotation_sent never had that approval.
+        if not approved or not latest_booking or latest_booking[0] != approved[0]:
+            raise CrmApiException(
+                "INVALID_TRANSITION",
+                "internal_validation requires the Booking created by an approved internal validation.",
+            )
+        # The approval was given for this account's equipment deal. Once its Booking is cancelled the
+        # account and sale type can change at po_received or lost, so the Opportunity may only come
+        # back under that approval while both still match it.
+        if doc.sale_type == "Service":
+            raise CrmApiException(
+                "INVALID_TRANSITION", "Internal validation is only available for equipment Opportunities.",
+            )
+        if frappe.db.get_value("CRM Booking", approved[0], "account") != doc.account:
+            raise CrmApiException(
+                "INVALID_TRANSITION", "The approved internal validation was given for another account.",
+            )
+    elif booking:
+        raise CrmApiException("CONFLICT", "Cancel the Booking before rolling the Opportunity back.")
+
+    savepoint = f"crm_opportunity_rollback_{frappe.generate_hash(length=8)}"
+    frappe.db.savepoint(savepoint)
+    try:
+        if doc.stage == QUOTATION_SENT:
+            _cancel_pending_internal_validation(doc.name, f"Opportunity rolled back to {target}.")
+        if booking and booking.status == "Confirmed":
+            # Production carries on under the internal validation, but the PO is no longer confirmed.
+            booking.status = "Pending"
+            booking.save(ignore_permissions=True)
+        if stage_index(target) <= stage_index(CUSTOMER_BUDGET_APPROVED) and rfq and rfq[0].status == "Approved":
+            from rayher_crm.services.rfqs import reopen_approved_rfq_for_stage_rollback
+
+            reopen_approved_rfq_for_stage_rollback(doc.name, rollback_reason)
+        if stage_index(target) < stage_index(CUSTOMER_BUDGET_APPROVED):
+            doc.budget_approved_on = None
+        if reopening:
+            doc.lost_reason = ""
+            doc.lost_at_stage = None
+            doc.lost_at = None
+            doc.lost_by = None
+        _move_stage(
+            doc, target, source="rollback", event="reopened" if reopening else "rollback", reason=rollback_reason,
+        )
+    except Exception:
+        frappe.db.rollback(save_point=savepoint)
+        raise
+    doc.reload()
+    return serialize_opportunity(doc)
+
+
+def advance_opportunity_for_event(
     opportunity_id: str,
     event: str,
-    transitions: dict[str, tuple[str, str]],
+    *,
+    reference_doctype: str,
+    reference_name: str,
 ) -> None:
+    """Move an Opportunity to the milestone a server workflow has just reached."""
+
+    if event not in AUTOMATIC_STAGE_EVENTS:
+        raise ValueError(f"Unknown opportunity stage event: {event}")
+    required_stage, target_stage = AUTOMATIC_STAGE_EVENTS[event]
     rows = frappe.db.sql(
         "SELECT `name` FROM `tabCRM Opportunity` WHERE `name` = %s FOR UPDATE",
         (opportunity_id,),
@@ -513,44 +1143,22 @@ def _advance_opportunity_for_event(
     if not rows:
         raise CrmApiException("OPPORTUNITY_NOT_FOUND", "Opportunity was not found.")
     doc = frappe.get_doc("CRM Opportunity", opportunity_id)
-    expected_stage, target_stage = transitions[event]
-    if doc.stage == "Lost":
-        raise CrmApiException("INVALID_TRANSITION", "A Lost Opportunity cannot be advanced by workflow completion.")
-    if doc.stage == target_stage:
+    if doc.stage == LOST:
+        if event == "demo_customer_review":
+            # Customer feedback on a lost deal is still recorded; it does not reopen the deal.
+            return
+        raise CrmApiException("INVALID_TRANSITION", "A lost Opportunity cannot be advanced by workflow completion.")
+    if stage_index(doc.stage) >= stage_index(target_stage):
         return
-    current_index = OPPORTUNITY_STAGES.index(doc.stage)
-    target_index = OPPORTUNITY_STAGES.index(target_stage)
-    if current_index > target_index:
-        return
-    if doc.stage != expected_stage:
+    if doc.stage != required_stage:
         raise CrmApiException(
             "CONFLICT",
-            f"Opportunity must be in {expected_stage} before workflow completion can move it to {target_stage}.",
+            f"Opportunity must be at {required_stage} before workflow completion can move it to {target_stage}.",
         )
-
-    before_probability = int(doc.probability or 0)
-    doc.stage = target_stage
-    doc.probability = _calculate_opportunity_probability(target_stage, int(doc.score or 0))
-    doc.save(ignore_permissions=True)
-    _append_history(doc.name, "stage", expected_stage, target_stage)
-    if int(doc.probability or 0) != before_probability:
-        _append_history(doc.name, "probability", before_probability, int(doc.probability or 0))
-
-
-def advance_opportunity_for_demo_event(opportunity_id: str, event: str) -> None:
-    """Advance one server-owned Demo gate without exposing a target stage to clients."""
-
-    if event not in DEMO_EVENT_TRANSITIONS:
-        raise ValueError(f"Unknown Demo opportunity event: {event}")
-    _advance_opportunity_for_event(opportunity_id, event, DEMO_EVENT_TRANSITIONS)
-
-
-def advance_opportunity_for_commercial_event(opportunity_id: str, event: str) -> None:
-    """Advance an RFQ or quotation gate only after its server workflow completes."""
-
-    if event not in COMMERCIAL_EVENT_TRANSITIONS:
-        raise ValueError(f"Unknown commercial opportunity event: {event}")
-    _advance_opportunity_for_event(opportunity_id, event, COMMERCIAL_EVENT_TRANSITIONS)
+    _move_stage(
+        doc, target_stage, source="event", event=event,
+        reference_doctype=reference_doctype, reference_name=reference_name,
+    )
 
 
 def _lock_relation(doctype: str, name: str, opportunity_id: str, missing_code: str):

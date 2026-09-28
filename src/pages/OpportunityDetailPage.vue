@@ -2,29 +2,56 @@
 import { systemValueLabel } from '@/features/shared/system-labels'
 import { personnelDisplayName } from '@/demo/personnel'
 import { computed, onMounted, ref, watch } from 'vue'
-import { ArrowLeft, Building2, Check, CircleDollarSign, FileText, PackageCheck, Pencil, Plus, Target, Trash2, Users } from '@lucide/vue'
+import { ArrowLeft, Building2, CalendarClock, CircleDollarSign, ClipboardCheck, FileCheck2, FileText, PackageCheck, Pencil, Plus, RotateCcw, ShieldCheck, Target, Trash2, Users } from '@lucide/vue'
 import { useRoute, useRouter } from 'vue-router'
 import { api as defaultApi, CrmApiError, type CrmApi } from '@/api'
 import { mapRequestError } from '@/api/request-state'
 import DataState from '@/design-system/DataState.vue'
 import ModalShell from '@/design-system/ModalShell.vue'
 import RequiredMark from '@/design-system/RequiredMark.vue'
+import StatusBadge from '@/design-system/StatusBadge.vue'
 import ContactModal from '@/features/contacts/ContactModal.vue'
 import ActionEditorModal from '@/features/opportunities/ActionEditorModal.vue'
+import BudgetApprovalModal from '@/features/opportunities/BudgetApprovalModal.vue'
+import InternalValidationPanel from '@/features/opportunities/InternalValidationPanel.vue'
+import InternalValidationRequestModal from '@/features/opportunities/InternalValidationRequestModal.vue'
 import OpportunityEditorModal from '@/features/opportunities/OpportunityEditorModal.vue'
+import OpportunityMilestoneBar from '@/features/opportunities/OpportunityMilestoneBar.vue'
+import OpportunityStageTimeline from '@/features/opportunities/OpportunityStageTimeline.vue'
+import PoConfirmationModal from '@/features/opportunities/PoConfirmationModal.vue'
 import StakeholderEditorModal from '@/features/opportunities/StakeholderEditorModal.vue'
-import BookingEditorModal from '@/features/opportunities/BookingEditorModal.vue'
 import { useAppStore } from '@/stores/app'
-import type { AccountSummaryDto, BookingDto, ContactSummaryDto, CreateContactInput, SiteDto, UpsertBookingInput } from '@/types/crm'
-import { STRATEGY_OPPORTUNITY_STAGES, type CreateOpportunityActionInput, type CreateOpportunityStakeholderInput, type CreateStrategyOpportunityInput, type OpportunityActionDto, type OpportunityStakeholderDto, type OpportunityStakeholderStance, type StrategyOpportunityDto } from '@/types/workspaces'
+import type { AccountSummaryDto, ContactSummaryDto, CreateContactInput, SiteDto } from '@/types/crm'
+import type {
+  ConfirmBudgetApprovedInput,
+  ConfirmPoInput,
+  CreateOpportunityActionInput,
+  CreateOpportunityStakeholderInput,
+  CreateStrategyOpportunityInput,
+  OpportunityActionDto,
+  OpportunityStakeholderDto,
+  OpportunityStakeholderStance,
+  RequestInternalValidationInput,
+  ReviewInternalValidationInput,
+  StrategyOpportunityDto,
+} from '@/types/workspaces'
 import { formatMoney } from '@/domain/money'
-import { formatDisplayDate } from '@/domain/time'
-import { getOpportunityStageBaseProbability } from '@/domain/opportunity-probability'
+import { formatDisplayDate, formatDisplayDateTime } from '@/domain/time'
+import { opportunityProbabilityLevelLabel, opportunityProbabilityLevelTone } from '@/domain/opportunity-probability'
+import {
+  canConfirmPoAt,
+  canCreateRfqAt,
+  canWorkQuotationAt,
+  isOpenOpportunityStage,
+  opportunityRollbackOptions,
+  opportunityRollbackTargets,
+  opportunityStageLabel,
+  opportunityStageTone,
+  type OpportunityMilestoneStage,
+} from '@/domain/opportunity-stages'
 import { readAllPages } from '@/features/shared/read-all-pages'
 import { useI18n, useLocaleMessage, localeMessage } from '@/i18n'
 import { salesEnumLabel } from '@/features/shared/sales-i18n'
-
-const OPPORTUNITY_STAGES = STRATEGY_OPPORTUNITY_STAGES
 
 const props = withDefaults(defineProps<{ apiClient?: CrmApi }>(), { apiClient: () => defaultApi })
 const { locale, t } = useI18n()
@@ -32,7 +59,6 @@ const app = useAppStore()
 const route = useRoute()
 const router = useRouter()
 const selected = ref<StrategyOpportunityDto | null>(null)
-const bookings = ref<BookingDto[]>([])
 const quotationId = ref('')
 const rfqId = ref('')
 const rfqStatus = ref('')
@@ -46,16 +72,19 @@ const denied = ref(false)
 const notFound = ref(false)
 const busy = ref(false)
 const modalError = useLocaleMessage()
+const validationError = useLocaleMessage()
 const opportunityModal = ref(false)
 const stakeholderModal = ref(false)
 const actionModal = ref(false)
 const contactModal = ref(false)
-const bookingModal = ref(false)
+const budgetModal = ref(false)
+const validationRequestModal = ref(false)
+const poModal = ref<'confirm' | 'replace' | null>(null)
 const lostModal = ref(false)
 const lostReason = ref('')
 const rollbackModal = ref(false)
 const rollbackReason = ref('')
-const rollbackTarget = ref('')
+const rollbackTarget = ref<OpportunityMilestoneStage | ''>('')
 const rollbackErrors = ref<Record<string, string>>({})
 const deleting = ref(false), deleteError = useLocaleMessage(), deleteRequestId = ref('')
 const editingStakeholder = ref<OpportunityStakeholderDto | null>(null)
@@ -64,12 +93,32 @@ const selectedContactId = ref('')
 const bookingContactId = ref('')
 const contactAccountId = ref('')
 const contactContext = ref<'stakeholder' | 'booking'>('stakeholder')
+const currentUserId = computed(() => app.bootstrap?.user.id ?? '')
 const canWrite = computed(() => app.can('deal:write'))
 const canMutateOpportunity = computed(() => canWrite.value && !selected.value?.siteRestricted)
 const canDelete = computed(() => app.bootstrap?.user.role === 'Manager')
-const canMarkLost = computed(() => canMutateOpportunity.value && Boolean(selected.value) && !['Won', 'Lost'].includes(selected.value?.stage ?? ''))
+const stage = computed(() => selected.value?.stage ?? '')
+const liveBooking = computed(() => selected.value?.liveBooking ?? null)
+const internalValidation = computed(() => selected.value?.internalValidation ?? null)
+const levelMissing = computed(() => !selected.value?.probabilityLevel)
+// Each workflow action belongs to the milestone the Opportunity has reached.
+const canConfirmBudget = computed(() => canMutateOpportunity.value && stage.value === 'demo_done')
+const canRequestValidation = computed(() => canMutateOpportunity.value
+  && stage.value === 'quotation_sent'
+  && selected.value?.saleType !== 'Service'
+  && internalValidation.value?.status !== 'pending')
+const canConfirmPo = computed(() => canMutateOpportunity.value && canConfirmPoAt(stage.value))
+// At PO received a Booking cancelled by hand can be replaced; the stage stays.
+const canReplaceBooking = computed(() => canMutateOpportunity.value && stage.value === 'po_received' && !liveBooking.value)
+const canMarkLost = computed(() => canMutateOpportunity.value && isOpenOpportunityStage(stage.value))
+const stageRollbackTargets = computed(() => selected.value ? opportunityRollbackTargets(selected.value.stage, selected.value.lostAtStage) : [])
+const rollbackOptions = computed(() => selected.value ? opportunityRollbackOptions(selected.value) : { targets: [], blocker: null })
+const canRollback = computed(() => app.can('deal:rollback') && stageRollbackTargets.value.length > 0)
+const canReviewValidation = computed(() => app.can('deal:internal_validation_approve'))
+// A Sales user can only assign a Booking to themselves.
+const lockedBookingOwner = computed(() => app.bootstrap?.user.role === 'Sales' ? currentUserId.value : '')
+const defaultBookingOwner = computed(() => lockedBookingOwner.value || selected.value?.owner || currentUserId.value)
 const siteDisplay = computed(() => selected.value?.siteRestricted ? t('contacts.ownerOnly') : (selected.value?.site || t('detail.notSpecified')))
-const lostHistory = computed(() => selected.value?.history.find((item) => item.field === 'stage' && item.to === 'Lost'))
 async function deleteOpportunity() {
   if (!selected.value || deleting.value || !window.confirm(t('detail.confirmDeleteOpportunity', { title: selected.value.title }))) return
   deleting.value = true
@@ -90,38 +139,7 @@ const routeOpportunityId = computed(() => typeof route.params.opportunityId === 
 const contactSites = computed(() => Object.entries(sitesByAccount.value).flatMap(([accountId, sites]) =>
   sites.map((site) => ({ ...site, accountId })),
 ))
-const currentStageIndex = computed(() => {
-  if (!selected.value) return -1
-  return OPPORTUNITY_STAGES.indexOf(selected.value.stage as typeof OPPORTUNITY_STAGES[number])
-})
-const nextStage = computed(() => {
-  if (!selected.value || selected.value.stage === 'Lost' || currentStageIndex.value < 0) return ''
-  return OPPORTUNITY_STAGES[currentStageIndex.value + 1] ?? ''
-})
-const canAdvanceManually = computed(() => canMutateOpportunity.value
-  && Boolean(nextStage.value)
-  && ['预算审批', '采购流程'].includes(selected.value?.stage ?? ''))
-const rollbackTargets = computed(() => OPPORTUNITY_STAGES
-  .slice(0, Math.max(0, currentStageIndex.value))
-  .filter((stage) => stage !== 'Won' && stage !== 'Lost'))
-const canRollback = computed(() => app.can('deal:rollback') && rollbackTargets.value.length > 0)
 const nextAction = computed(() => selected.value?.actions.find((item) => item.status === 'Open'))
-function stageLabel(value: string) {
-  const key: Record<string, string> = {
-    '需求发现': 'opportunities.stage.discovery',
-    'Wafer Demo确认': 'opportunities.stage.waferDemo',
-    '预算审批': 'opportunities.stage.budget',
-    '设备规格确认': 'opportunities.stage.specification',
-    '报价': 'opportunities.stage.quotation',
-    '采购流程': 'opportunities.stage.procurement',
-    Won: 'opportunities.stage.won',
-    Lost: 'opportunities.stage.lost',
-  }
-  return t(key[value] || value)
-}
-const existingBooking = computed(() =>
-  bookings.value.find((booking) => booking.sourceOpportunityId === selected.value?.id && booking.status !== 'Cancelled'),
-)
 function stanceClass(stance: OpportunityStakeholderStance) {
   if (stance === 'Support') return 'positive'
   if (stance === 'Against') return 'danger'
@@ -177,33 +195,15 @@ async function loadReferences() {
   const contactRowsPromise = app.can('contact:view')
     ? readAllPages((page, pageSize) => props.apiClient.listContacts({ page, pageSize }))
     : Promise.resolve([] as ContactSummaryDto[])
-  const [accountRows, contactRows, pipelineResult] = await Promise.all([
-    accountRowsPromise,
-    contactRowsPromise,
-    props.apiClient.listPipeline({}),
-  ])
+  const [accountRows, contactRows] = await Promise.all([accountRowsPromise, contactRowsPromise])
   accounts.value = accountRows
   contacts.value = contactRows
-  bookings.value = pipelineResult.data.bookings
   if (!app.can('contact:view')) {
     sitesByAccount.value = {}
     return
   }
   const details = await Promise.all(accounts.value.map((account) => props.apiClient.getAccount360(account.id)))
   sitesByAccount.value = Object.fromEntries(details.map((detail) => [detail.data.account.id, detail.data.sites]))
-}
-async function saveBooking(input: UpsertBookingInput) {
-  busy.value = true
-  modalError.value = ''
-  try {
-    await props.apiClient.createBooking(input)
-    bookingModal.value = false
-    await loadReferences()
-  } catch (reason) {
-    { const mapped = mapRequestError(reason); modalError.value = mapped.localizedMessage ?? mapped.message }
-  } finally {
-    busy.value = false
-  }
 }
 async function saveOpportunity(input: CreateStrategyOpportunityInput) {
   if (!selected.value) return
@@ -219,46 +219,91 @@ async function saveOpportunity(input: CreateStrategyOpportunityInput) {
     busy.value = false
   }
 }
+// Workflow actions send the loaded version, close their modal on success and reload the Opportunity.
+async function runOpportunityAction(action: (opportunity: StrategyOpportunityDto) => Promise<unknown>, close: () => void) {
+  if (!selected.value || busy.value) return
+  busy.value = true
+  modalError.value = ''
+  try {
+    await action(selected.value)
+    close()
+    await loadOpportunity()
+  } catch (reason) {
+    const mapped = mapRequestError(reason)
+    modalError.value = mapped.localizedMessage ?? mapped.message
+  } finally {
+    busy.value = false
+  }
+}
+function openBudgetModal() {
+  modalError.value = ''
+  budgetModal.value = true
+}
+function confirmBudget(input: ConfirmBudgetApprovedInput) {
+  return runOpportunityAction(
+    (opportunity) => props.apiClient.confirmBudgetApproved(opportunity.id, input, opportunity.modified),
+    () => { budgetModal.value = false },
+  )
+}
+function openValidationRequest() {
+  modalError.value = ''
+  bookingContactId.value = ''
+  validationRequestModal.value = true
+}
+function requestValidation(input: RequestInternalValidationInput) {
+  return runOpportunityAction(
+    (opportunity) => props.apiClient.requestInternalValidation(opportunity.id, input, opportunity.modified),
+    () => { validationRequestModal.value = false },
+  )
+}
+function openPoModal(mode: 'confirm' | 'replace') {
+  modalError.value = ''
+  bookingContactId.value = ''
+  poModal.value = mode
+}
+function confirmPo(input: ConfirmPoInput) {
+  return runOpportunityAction(
+    (opportunity) => props.apiClient.confirmPo(opportunity.id, input, opportunity.modified),
+    () => { poModal.value = null },
+  )
+}
+async function reviewValidation(input: Omit<ReviewInternalValidationInput, 'validationId'>) {
+  if (!selected.value || !internalValidation.value || busy.value) return
+  busy.value = true
+  validationError.value = ''
+  try {
+    await props.apiClient.reviewInternalValidation(
+      selected.value.id,
+      { ...input, validationId: internalValidation.value.id },
+      selected.value.modified,
+    )
+    await loadOpportunity()
+  } catch (reason) {
+    const mapped = mapRequestError(reason)
+    validationError.value = mapped.localizedMessage ?? mapped.message
+  } finally {
+    busy.value = false
+  }
+}
 function openLostModal() {
   lostReason.value = selected.value?.lostReason ?? ''
   modalError.value = ''
   lostModal.value = true
 }
 async function markLost() {
-  if (!selected.value) return
   const reason = lostReason.value.trim()
   if (!reason) {
-    modalError.value = localeMessage('Enter a lost reason', '请填写 Lost Reason')
+    modalError.value = localeMessage('Enter a lost reason', '请填写丢单原因')
     return
   }
-  busy.value = true
-  modalError.value = ''
-  try {
-    await props.apiClient.updateStrategyOpportunity(selected.value.id, { stage: 'Lost', lostReason: reason }, selected.value.modified)
-    lostModal.value = false
-    await loadOpportunity()
-  } catch (reason) {
-    { const mapped = mapRequestError(reason); modalError.value = mapped.localizedMessage ?? mapped.message }
-  } finally {
-    busy.value = false
-  }
-}
-async function advanceStage() {
-  if (!selected.value || !canAdvanceManually.value || busy.value) return
-  busy.value = true
-  error.value = ''
-  try {
-    await props.apiClient.updateStrategyOpportunity(selected.value.id, { stage: nextStage.value as typeof OPPORTUNITY_STAGES[number] }, selected.value.modified)
-    await loadOpportunity()
-  } catch (reason) {
-    { const mapped = mapRequestError(reason); error.value = mapped.localizedMessage ?? mapped.message }
-  } finally {
-    busy.value = false
-  }
+  await runOpportunityAction(
+    (opportunity) => props.apiClient.markOpportunityLost(opportunity.id, { lostReason: reason }, opportunity.modified),
+    () => { lostModal.value = false },
+  )
 }
 function openRollback() {
   rollbackReason.value = ''
-  rollbackTarget.value = rollbackTargets.value.at(-1) ?? ''
+  rollbackTarget.value = rollbackOptions.value.targets.at(-1) ?? ''
   rollbackErrors.value = {}
   modalError.value = ''
   rollbackModal.value = true
@@ -267,24 +312,14 @@ async function rollbackStage() {
   if (!selected.value || busy.value) return
   rollbackErrors.value = {}
   const reason = rollbackReason.value.trim()
-  if (!rollbackTarget.value) rollbackErrors.value.rollbackTarget = locale.value === 'en-US' ? 'Select a rollback stage' : '请选择回退阶段'
+  const target = rollbackTarget.value
+  if (!target) rollbackErrors.value.rollbackTarget = locale.value === 'en-US' ? 'Select a rollback stage' : '请选择回退阶段'
   if (!reason) rollbackErrors.value.rollbackReason = locale.value === 'en-US' ? 'Enter a rollback reason' : '请填写阶段回退原因'
-  if (Object.keys(rollbackErrors.value).length) return
-  busy.value = true
-  modalError.value = ''
-  try {
-    await props.apiClient.rollbackOpportunityStage(selected.value.id, {
-      targetStage: rollbackTarget.value as typeof OPPORTUNITY_STAGES[number],
-      reason,
-    }, selected.value.modified)
-    rollbackModal.value = false
-    await loadOpportunity()
-  } catch (reason) {
-    const mapped = mapRequestError(reason)
-    modalError.value = mapped.localizedMessage ?? mapped.message
-  } finally {
-    busy.value = false
-  }
+  if (!target || !reason) return
+  await runOpportunityAction(
+    (opportunity) => props.apiClient.rollbackOpportunityStage(opportunity.id, { targetStage: target, reason }, opportunity.modified),
+    () => { rollbackModal.value = false },
+  )
 }
 function openStakeholder(stakeholder: OpportunityStakeholderDto | null = null) {
   modalError.value = ''
@@ -366,12 +401,6 @@ function openBookingContact() {
   contactAccountId.value = selected.value?.accountId ?? ''
   contactModal.value = true
 }
-function openBooking() {
-  modalError.value = ''
-  bookingContactId.value = contacts.value.find((contact) =>
-    contact.accountId === selected.value?.accountId && contact.status === 'Active')?.id ?? ''
-  bookingModal.value = true
-}
 async function saveContact(input: CreateContactInput) {
   busy.value = true
   modalError.value = ''
@@ -422,11 +451,10 @@ onMounted(async () => {
         </div>
         <div class="record-actions">
           <RouterLink v-if="quotationId" class="secondary-button" data-testid="opportunity-quotation-link" :to="{ name: 'quotation-detail', params: { quotationId } }"><FileText :size="14" />{{ t('detail.viewQuotation') }}</RouterLink>
-          <RouterLink v-else-if="app.can('quotation:write') && canMutateOpportunity && selected.stage === '报价'" class="secondary-button" data-testid="create-quotation-from-opportunity" :to="{ name: 'quotations', query: { opportunityId: selected.id } }"><FileText :size="14" />{{ t('detail.newQuotation') }}</RouterLink>
+          <RouterLink v-else-if="app.can('quotation:write') && canMutateOpportunity && canWorkQuotationAt(selected.stage)" class="secondary-button" data-testid="create-quotation-from-opportunity" :to="{ name: 'quotations', query: { opportunityId: selected.id } }"><FileText :size="14" />{{ t('detail.newQuotation') }}</RouterLink>
           <RouterLink v-if="rfqId" class="secondary-button" data-testid="opportunity-rfq-link" :to="{ name: 'rfq-detail', params: { rfqId } }"><FileText :size="14" />RFQ · {{ salesEnumLabel(rfqStatus, locale) }}</RouterLink>
-          <RouterLink v-else-if="app.can('rfq:view') && selected.stage === '设备规格确认'" class="secondary-button" data-testid="opportunity-rfq-center-link" :to="{ name: 'rfqs', query: { opportunityId: selected.id } }"><FileText :size="14" />{{ t('detail.rfqNotCreated') }}</RouterLink>
-          <RouterLink v-if="existingBooking" class="secondary-button" data-testid="opportunity-booking-link" :to="{ name: 'booking' }"><PackageCheck :size="14" />Booking · {{ existingBooking.id }}</RouterLink>
-          <button v-else-if="canMutateOpportunity && selected.stage === 'Won'" class="primary-button" type="button" data-testid="create-booking-from-opportunity" @click="openBooking"><PackageCheck :size="14" />{{ t('detail.generateBooking') }}</button>
+          <RouterLink v-else-if="app.can('rfq:view') && canCreateRfqAt(selected.stage)" class="secondary-button" data-testid="opportunity-rfq-center-link" :to="{ name: 'rfqs', query: { opportunityId: selected.id } }"><FileText :size="14" />{{ t('detail.rfqNotCreated') }}</RouterLink>
+          <RouterLink v-if="liveBooking" class="secondary-button" data-testid="opportunity-booking-link" :to="{ name: 'booking-detail', params: { bookingId: liveBooking.id } }"><PackageCheck :size="14" />Booking · {{ liveBooking.id }} · {{ salesEnumLabel(liveBooking.status, locale) }}</RouterLink>
           <button v-if="canWrite" class="secondary-button" type="button" data-testid="new-opportunity-action" @click="openAction()"><Plus :size="14" />{{ t('detail.newAction') }}</button>
           <button v-if="canMutateOpportunity" class="primary-button" type="button" data-testid="edit-opportunity" @click="opportunityModal = true"><Pencil :size="14" />{{ t('detail.edit') }}</button>
           <button v-if="canMarkLost" class="secondary-button lost-action-button" type="button" data-testid="mark-opportunity-lost" @click="openLostModal">{{ t('detail.markLost') }}</button>
@@ -435,38 +463,16 @@ onMounted(async () => {
       </header>
       <p v-if="deleteError" class="inline-error" data-delete-error>{{ deleteError }}<small v-if="deleteRequestId">{{ locale === 'en-US' ? 'Request ID' : '请求编号' }} {{ deleteRequestId }}</small></p>
 
-      <section class="opportunity-path" :aria-label="locale === 'en-US' ? 'Opportunity stage path' : '商机阶段路径'">
-        <div class="path-scroll">
-          <ol>
-            <li
-              v-for="(item, index) in OPPORTUNITY_STAGES.slice(0, 6)"
-              :key="item"
-              :data-stage-path="item"
-              :class="{ 'is-complete': index < currentStageIndex, 'is-current': index === currentStageIndex }"
-            >
-              <Check v-if="index < currentStageIndex" :size="14" />
-              <span>{{ stageLabel(item) }}</span>
-            </li>
-          </ol>
+      <section class="opportunity-path" :aria-label="t('detail.stagePath')">
+        <div class="path-scroll"><OpportunityMilestoneBar :opportunity="selected" /></div>
+        <span v-if="selected.stage === 'lost'" class="lost-outcome" data-testid="opportunity-lost-outcome">{{ opportunityStageLabel('lost', locale) }}</span>
+        <div v-if="canConfirmBudget || canRequestValidation || canConfirmPo || canReplaceBooking || canRollback" class="path-actions">
+          <button v-if="canConfirmBudget" class="path-primary" type="button" data-testid="confirm-budget-approved" :disabled="busy" @click="openBudgetModal"><ClipboardCheck :size="14" />{{ t('detail.confirmBudget') }}</button>
+          <button v-if="canRequestValidation" class="path-secondary" type="button" data-testid="request-internal-validation" :disabled="busy" @click="openValidationRequest"><ShieldCheck :size="14" />{{ t('detail.requestInternalValidation') }}</button>
+          <button v-if="canConfirmPo" class="path-primary" type="button" data-testid="confirm-po" :disabled="busy" @click="openPoModal('confirm')"><FileCheck2 :size="14" />{{ t('detail.confirmPo') }}</button>
+          <button v-if="canReplaceBooking" class="path-primary" type="button" data-testid="replace-booking" :disabled="busy" @click="openPoModal('replace')"><PackageCheck :size="14" />{{ t('detail.replaceBooking') }}</button>
+          <button v-if="canRollback" class="path-secondary" type="button" data-testid="rollback-opportunity-stage" :disabled="busy" @click="openRollback"><RotateCcw :size="14" />{{ t('detail.stageRollback') }}</button>
         </div>
-        <div class="opportunity-outcomes" :aria-label="locale === 'en-US' ? 'Opportunity result' : '商机结果'">
-          <div v-for="item in OPPORTUNITY_STAGES.slice(6)" :key="item" class="opportunity-outcome">
-            <span class="outcome-label">{{ stageLabel(item) }}</span>
-            <span
-              :data-stage-path="item"
-              :class="['outcome-node', { 'is-current': selected.stage === item }]"
-            >
-              <Check v-if="selected.stage === item" :size="14" />
-              <span>{{ stageLabel(item) }}</span>
-            </span>
-          </div>
-        </div>
-        <button v-if="canAdvanceManually" type="button" data-testid="advance-opportunity-stage" :disabled="busy" @click="advanceStage">
-          <Check :size="14" />{{ nextStage ? (locale === 'en-US' ? `Advance to ${stageLabel(nextStage)}` : `推进到 ${stageLabel(nextStage)}`) : selected.stage === 'Won' ? (locale === 'en-US' ? 'Won' : '已赢单') : (locale === 'en-US' ? 'Stage closed' : '阶段已关闭') }}
-        </button>
-        <button v-if="canRollback" type="button" data-testid="rollback-opportunity-stage" :disabled="busy" @click="openRollback">
-          {{ t('detail.stageRollback') }}
-        </button>
       </section>
 
       <p v-if="error" class="inline-error">{{ error }}</p>
@@ -489,14 +495,38 @@ onMounted(async () => {
           <section class="detail-card">
             <header><Target :size="16" /><h2>{{ t('detail.status') }}</h2></header>
             <dl class="field-list">
-              <div><dt>{{ t('oppEditor.stage') }}</dt><dd>{{ stageLabel(selected.stage) }}</dd></div>
-              <div><dt>{{ locale === 'en-US' ? 'Win probability' : '成交概率' }}</dt><dd data-testid="opportunity-probability">{{ selected.probability }}%</dd></div>
-              <div><dt>{{ t('oppEditor.forecast') }}</dt><dd>{{ salesEnumLabel(selected.forecast, locale) }}</dd></div>
+              <div><dt>{{ t('oppEditor.stage') }}</dt><dd data-testid="opportunity-stage"><StatusBadge :label="opportunityStageLabel(selected.stage, locale)" :tone="opportunityStageTone(selected.stage)" /></dd></div>
+              <div v-if="selected.stageChangedAt"><dt>{{ t('detail.stageChangedAt') }}</dt><dd>{{ formatDisplayDateTime(selected.stageChangedAt) }}</dd></div>
+              <div v-if="selected.budgetApprovedOn"><dt>{{ t('detail.budgetApprovedOn') }}</dt><dd data-testid="opportunity-budget-approved-on">{{ formatDisplayDate(selected.budgetApprovedOn) }}</dd></div>
+              <div><dt>{{ t('oppEditor.probabilityLevel') }}</dt><dd data-testid="opportunity-probability-level"><StatusBadge :label="opportunityProbabilityLevelLabel(selected.probabilityLevel, locale)" :tone="opportunityProbabilityLevelTone(selected.probabilityLevel)" /></dd></div>
               <div><dt>{{ t('detail.purchaseIntent') }}</dt><dd data-testid="opportunity-intent">{{ selected.score }}/100</dd></div>
               <div><dt>{{ t('detail.nextStep') }}</dt><dd>{{ nextAction?.title || t('detail.noOpenAction') }}</dd></div>
               <div><dt>{{ t('detail.updated') }}</dt><dd>{{ formatDisplayDate(selected.updated) }}</dd></div>
             </dl>
-            <p class="probability-explanation" data-testid="opportunity-probability-explanation">{{ t('opportunities.probabilityExplanation', { base: getOpportunityStageBaseProbability(selected.stage), intent: selected.score }) }}</p>
+          </section>
+
+          <InternalValidationPanel
+            v-if="internalValidation"
+            :validation="internalValidation"
+            :stage="selected.stage"
+            :current-user-id="currentUserId"
+            :can-review="canReviewValidation"
+            :busy="busy"
+            :error="validationError"
+            @review="reviewValidation"
+          />
+
+          <OpportunityStageTimeline :history="selected.stageHistory" />
+
+          <section class="detail-card probability-history-card" data-testid="opportunity-probability-history">
+            <header><CalendarClock :size="16" /><h2>{{ t('detail.probabilityHistory') }}</h2><span>{{ selected.probabilityHistory.length }}</span></header>
+            <ol v-if="selected.probabilityHistory.length" class="probability-history-list">
+              <li v-for="entry in selected.probabilityHistory" :key="entry.id" :data-probability-history-id="entry.id">
+                <strong>{{ opportunityProbabilityLevelLabel(entry.from, locale) }} → {{ opportunityProbabilityLevelLabel(entry.to, locale) }}</strong>
+                <span>{{ personnelDisplayName(entry.actor) }} · <time :datetime="entry.at">{{ formatDisplayDateTime(entry.at) }}</time></span>
+              </li>
+            </ol>
+            <p v-else class="empty-copy">{{ t('detail.noProbabilityHistory') }}</p>
           </section>
         </div>
         <section class="opportunity-strategy-shell" data-testid="blue-sheet">
@@ -527,16 +557,17 @@ onMounted(async () => {
               <div><small>{{ t('oppEditor.shipmentDate') }} / {{ t('oppEditor.fatDate') }}</small><strong>{{ formatDisplayDate(selected.shipmentDate) }} · {{ formatDisplayDate(selected.fatDate) }}</strong></div>
               <div><small>{{ t('oppEditor.payment') }}</small><strong>{{ selected.paymentMilestones.join(' · ') }}</strong></div>
               <div><small>{{ t('oppEditor.competition') }}</small><strong>{{ selected.competition }}</strong></div>
-              <div v-if="selected.stage === 'Lost'" class="wide lost-reason-field"><small>{{ t('detail.lostReason') }}</small><strong>{{ selected.lostReason || (locale === 'en-US' ? 'Not provided' : '未填写') }}</strong></div>
+              <div v-if="selected.stage === 'lost'" class="wide lost-reason-field"><small>{{ t('detail.lostReason') }}</small><strong>{{ selected.lostReason || (locale === 'en-US' ? 'Not provided' : '未填写') }}</strong></div>
               <div v-else class="wide"><small>{{ locale === 'en-US' ? 'Win reason' : '赢单原因' }}</small><strong>{{ selected.winReason || (locale === 'en-US' ? 'Pending confirmation' : '待确认') }}</strong></div>
             </div>
           </section>
-          <section v-if="selected.stage === 'Lost'" class="detail-card lost-detail-card" data-testid="lost-detail">
+          <section v-if="selected.stage === 'lost'" class="detail-card lost-detail-card" data-testid="lost-detail">
             <header><h2>{{ t('detail.lostInfo') }}</h2><span>{{ t('detail.closed') }}</span></header>
             <dl class="field-list">
               <div><dt>{{ t('detail.lostReason') }}</dt><dd>{{ selected.lostReason || (locale === 'en-US' ? 'Not provided' : '未填写') }}</dd></div>
-              <div><dt>{{ t('detail.setBy') }}</dt><dd>{{ lostHistory ? personnelDisplayName(lostHistory.actor) : (locale === 'en-US' ? 'History unavailable' : '历史记录不可用') }}</dd></div>
-              <div><dt>{{ t('detail.setAt') }}</dt><dd>{{ lostHistory ? formatDisplayDate(lostHistory.at) : (locale === 'en-US' ? 'History unavailable' : '历史记录不可用') }}</dd></div>
+              <div><dt>{{ t('detail.lostAtStage') }}</dt><dd data-testid="lost-at-stage">{{ selected.lostAtStage ? opportunityStageLabel(selected.lostAtStage, locale) : (locale === 'en-US' ? 'Not recorded' : '未记录') }}</dd></div>
+              <div><dt>{{ t('detail.setBy') }}</dt><dd>{{ selected.lostBy ? personnelDisplayName(selected.lostBy) : (locale === 'en-US' ? 'Not recorded' : '未记录') }}</dd></div>
+              <div><dt>{{ t('detail.setAt') }}</dt><dd>{{ selected.lostAt ? formatDisplayDateTime(selected.lostAt) : (locale === 'en-US' ? 'Not recorded' : '未记录') }}</dd></div>
             </dl>
           </section>
         </div>
@@ -573,37 +604,54 @@ onMounted(async () => {
         </section>
       </main>
 
-      <OpportunityEditorModal v-if="opportunityModal && canMutateOpportunity" :opportunity="selected" :accounts="accounts" :sites-by-account="sitesByAccount" :default-owner="app.bootstrap?.user.id ?? ''" :busy="busy" :error="modalError" @close="opportunityModal = false" @submit="saveOpportunity" />
+      <OpportunityEditorModal v-if="opportunityModal && canMutateOpportunity" :opportunity="selected" :accounts="accounts" :sites-by-account="sitesByAccount" :default-owner="currentUserId" :current-user-id="currentUserId" :busy="busy" :error="modalError" @close="opportunityModal = false" @submit="saveOpportunity" />
       <StakeholderEditorModal v-if="stakeholderModal && selected" :stakeholder="editingStakeholder" :contacts="contacts" :account-id="selected.accountId" :selected-contact-id="selectedContactId" :busy="busy" :error="modalError" @close="stakeholderModal = false" @create-contact="openContact" @submit="saveStakeholder" />
       <ContactModal v-if="contactModal" :accounts="accounts" :sites="contactSites" :contacts="contacts" :fixed-account-id="contactAccountId" :busy="busy" :error="modalError" @close="contactModal = false" @submit="saveContact" />
-      <ActionEditorModal v-if="actionModal" :action="editingAction" :default-owner="app.bootstrap?.user.id ?? ''" :busy="busy" :error="modalError" @close="actionModal = false" @submit="saveAction" />
-      <BookingEditorModal
-        v-if="bookingModal && selected"
-        :accounts="accounts"
-        :opportunities="[selected]"
+      <ActionEditorModal v-if="actionModal" :action="editingAction" :default-owner="currentUserId" :busy="busy" :error="modalError" @close="actionModal = false" @submit="saveAction" />
+      <BudgetApprovalModal v-if="budgetModal" :busy="busy" :error="modalError" :level-missing="levelMissing" @close="budgetModal = false" @submit="confirmBudget" />
+      <InternalValidationRequestModal
+        v-if="validationRequestModal"
+        :opportunity="selected"
         :contacts="contacts"
         :selected-contact-id="bookingContactId"
-        :source-opportunity-id="selected.id"
-        :default-owner="selected.owner"
+        :default-owner="defaultBookingOwner"
+        :locked-owner="lockedBookingOwner"
         :busy="busy"
         :error="modalError"
-        @close="bookingModal = false"
+        @close="validationRequestModal = false"
         @create-contact="openBookingContact"
-        @submit="saveBooking"
+        @submit="requestValidation"
       />
-      <ModalShell v-if="lostModal" :title="t('detail.markLostTitle')" eyebrow="OPPORTUNITY RESULT" :busy="busy" @close="lostModal = false" @submit="markLost">
+      <PoConfirmationModal
+        v-if="poModal"
+        :opportunity="selected"
+        :contacts="contacts"
+        :selected-contact-id="bookingContactId"
+        :default-owner="defaultBookingOwner"
+        :locked-owner="lockedBookingOwner"
+        :replacing="poModal === 'replace'"
+        :busy="busy"
+        :error="modalError"
+        @close="poModal = null"
+        @create-contact="openBookingContact"
+        @submit="confirmPo"
+      />
+      <ModalShell v-if="lostModal" :title="t('detail.markLostTitle')" eyebrow="OPPORTUNITY RESULT" :busy="busy" :submit-disabled="Boolean(liveBooking)" @close="lostModal = false" @submit="markLost">
         <p v-if="modalError" class="form-error">{{ modalError }}</p>
+        <p v-if="liveBooking" class="form-warning" data-testid="lost-blocked-by-booking">{{ t('detail.lostBlockedBooking') }}</p>
         <div class="lost-form">
           <p>{{ locale === 'en-US' ? 'Current account: ' : '当前账号：' }}{{ app.bootstrap?.user.name || app.bootstrap?.user.id || (locale === 'en-US' ? 'Current user' : '当前登录用户') }}{{ locale === 'en-US' ? ' (' : '（' }}{{ app.bootstrap?.user.role || (locale === 'en-US' ? 'Unknown role' : '未知角色') }}{{ locale === 'en-US' ? ')' : '）' }}</p>
           <label><span>{{ t('detail.lostReason') }}<RequiredMark /></span><textarea v-model="lostReason" :aria-label="t('detail.lostReason')" rows="4" required :placeholder="locale === 'en-US' ? 'Enter the main reason the customer did not close' : '请填写客户未成交的主要原因'" /></label>
         </div>
       </ModalShell>
-      <ModalShell v-if="rollbackModal" :title="t('detail.rollbackOpportunity')" eyebrow="MANAGER CONTROL" :busy="busy" @close="rollbackModal = false" @submit="rollbackStage">
+      <ModalShell v-if="rollbackModal" :title="t('detail.rollbackOpportunity')" eyebrow="MANAGER CONTROL" :busy="busy" :submit-disabled="!rollbackOptions.targets.length" @close="rollbackModal = false" @submit="rollbackStage">
         <p v-if="modalError" class="form-error">{{ modalError }}</p>
+        <p v-if="selected.stage === 'lost'" class="form-hint" data-testid="rollback-reopen-hint">{{ t('detail.reopenHint') }}</p>
+        <p v-if="rollbackOptions.blocker" class="form-warning" :data-rollback-blocker="rollbackOptions.blocker">{{ rollbackOptions.blocker === 'completed_booking' ? t('detail.rollbackBlockedCompleted') : t('detail.rollbackBlockedBooking') }}</p>
         <div class="rollback-form">
           <label><span>{{ t('detail.targetStage') }}<RequiredMark /></span>
             <select v-model="rollbackTarget" :aria-label="locale === 'en-US' ? 'Rollback stage' : '阶段回退目标'" required>
-              <option v-for="stage in rollbackTargets" :key="stage" :value="stage">{{ stageLabel(stage) }}</option>
+              <option v-for="target in rollbackOptions.targets" :key="target" :value="target">{{ opportunityStageLabel(target, locale) }}</option>
             </select>
             <small v-if="rollbackErrors.rollbackTarget" data-field-error="rollbackTarget">{{ rollbackErrors.rollbackTarget }}</small>
           </label>
@@ -619,25 +667,29 @@ onMounted(async () => {
 
 <style scoped>
 .action-remark{margin:7px 0 0;color:var(--crm-text-muted);font-size:9px;line-height:1.6;white-space:pre-wrap;overflow-wrap:anywhere}
-.opportunity-detail-page{display:grid;gap:14px}.detail-state{padding:28px;color:var(--crm-text-muted);background:#fff;border:1px solid var(--crm-line);border-radius:12px}.opportunity-record-header{display:grid;grid-template-columns:1fr auto;gap:10px 18px;align-items:end}.back-opportunities{grid-column:1/-1;display:inline-flex;width:fit-content;align-items:center;gap:6px;color:var(--crm-teal);font-size:10px;font-weight:800}.record-identity{display:flex;align-items:center;gap:12px}.record-identity>span{display:grid;width:46px;height:46px;place-items:center;color:var(--crm-brand-ink);background:var(--crm-brand-soft);border-radius:13px}.record-identity small{color:var(--crm-text-muted);font-size:9px}.record-identity h1{margin:2px 0 3px;color:var(--crm-navy);font-size:clamp(23px,2.3vw,32px);letter-spacing:-.03em}.record-identity p{margin:0;color:var(--crm-text-muted);font-size:10px}.record-actions{display:flex;gap:7px}.record-actions button{display:flex;align-items:center;gap:6px}.opportunity-path{display:flex;align-items:center;gap:12px;padding:11px 12px;background:#fff;border:1px solid var(--crm-line);border-radius:13px}.path-scroll{min-width:0;flex:1;overflow-x:auto}.opportunity-path ol{display:grid;min-width:620px;grid-template-columns:repeat(6,1fr);margin:0;padding:0;list-style:none}.opportunity-path li{display:flex;height:36px;align-items:center;justify-content:center;gap:5px;margin-right:-8px;padding:0 18px;color:var(--crm-text-muted);background:#eeeae4;clip-path:polygon(0 0,calc(100% - 12px) 0,100% 50%,calc(100% - 12px) 100%,0 100%,12px 50%);font-size:9px;font-weight:800}.opportunity-path li:first-child{clip-path:polygon(0 0,calc(100% - 12px) 0,100% 50%,calc(100% - 12px) 100%,0 100%)}.opportunity-path li.is-complete{color:#24633f;background:#dff3e8}.opportunity-path li.is-current{position:relative;color:var(--crm-brand-ink);background:var(--crm-brand);z-index:1}.opportunity-path>button{display:flex;min-height:36px;align-items:center;gap:6px;padding:0 13px;color:var(--crm-brand-ink);background:var(--crm-brand);border:1px solid var(--crm-brand);border-radius:9px;font:inherit;font-size:9px;font-weight:800;white-space:nowrap;cursor:pointer}.opportunity-path>button:disabled{color:var(--crm-text-muted);background:var(--crm-surface-muted);border-color:var(--crm-line);cursor:not-allowed}.inline-error{margin:0;padding:10px 12px;color:var(--crm-danger);background:var(--crm-danger-soft);border:1px solid rgba(200,78,78,.2);border-radius:9px;font-size:10px}.opportunity-detail-grid{display:grid;grid-template-columns:minmax(260px,.78fr) minmax(0,2.22fr);gap:14px;align-items:start}.opportunity-strategy-shell{min-width:0;overflow:hidden;background:var(--crm-surface);border:1px solid var(--crm-line);border-radius:12px}.strategy-shell-header{display:flex;min-height:50px;align-items:center;gap:8px;padding:0 14px;color:var(--crm-teal);background:#fff;border-bottom:1px solid var(--crm-line)}.strategy-shell-header h2{margin:0;color:var(--crm-navy);font-size:13px}.strategy-shell-grid{display:grid;grid-template-columns:minmax(0,1.34fr) minmax(230px,.88fr);gap:14px;padding:14px;align-items:start}.detail-column{display:grid;gap:14px}.detail-card{overflow:hidden;background:#fff;border:1px solid var(--crm-line);border-radius:12px;box-shadow:0 8px 24px rgba(31,35,41,.035)}.detail-card>header{display:flex;min-height:50px;align-items:center;gap:8px;padding:0 14px;background:#faf9f7;border-bottom:1px solid var(--crm-line)}.detail-card>header>div{display:flex;align-items:center;gap:8px}.detail-card>header h2{margin:0;color:var(--crm-navy);font-size:12px}.detail-card>header>span{margin-left:auto;color:var(--crm-text-muted);font-size:9px}.detail-card>header button{display:flex;align-items:center;gap:4px;margin-left:auto;padding:6px 8px;color:var(--crm-teal);background:#fff;border:1px solid var(--crm-line);border-radius:7px;font:inherit;font-size:8px;font-weight:800;cursor:pointer}.field-list{display:grid;margin:0;padding:2px 14px 10px}.field-list>div{display:grid;gap:4px;padding:10px 0;border-bottom:1px solid var(--crm-line)}.field-list>div:last-child{border-bottom:0}.field-list dt{color:var(--crm-text-muted);font-size:8px;font-weight:700}.field-list dd{margin:0;color:var(--crm-text);font-size:10px;line-height:1.45}.probability-explanation{margin:0 14px 13px;padding:8px 9px;color:var(--crm-teal);background:var(--crm-teal-soft);border-radius:8px;font-size:8px;line-height:1.45}.activity-list{display:grid}.activity-list article{display:grid;grid-template-columns:auto minmax(0,1fr) auto auto;align-items:center;gap:9px;padding:12px 14px;border-bottom:1px solid var(--crm-line)}.activity-list article:last-child{border-bottom:0}.activity-list i{width:10px;height:10px;border:2px solid var(--crm-warning);border-radius:50%}.activity-list i.done{background:var(--crm-positive);border-color:var(--crm-positive)}.activity-list article>div:nth-child(2){display:grid;gap:4px}.activity-list strong{color:var(--crm-text);font-size:10px}.activity-list span{color:var(--crm-text-muted);font-size:8px}.activity-list article>b{padding:4px 7px;color:#8a651d;background:var(--crm-warning-soft);border-radius:999px;font-size:7px}.activity-list article>b.done{color:var(--crm-positive-ink);background:#e8f5ed}.compact-actions{display:flex!important;gap:4px!important}.compact-actions button{display:grid;width:25px;height:25px;place-items:center;padding:0;color:var(--crm-teal);background:#fff;border:1px solid var(--crm-line);border-radius:6px;cursor:pointer}.compact-actions button:last-child{color:var(--crm-danger)}.empty-copy{margin:0;padding:22px;color:var(--crm-text-muted);font-size:9px;text-align:center}.history-list{display:grid;padding:0 14px}.history-list article{display:grid;grid-template-columns:110px 90px minmax(0,1fr) 80px;gap:10px;padding:11px 0;border-bottom:1px solid var(--crm-line);font-size:8px}.history-list article:last-child{border-bottom:0}.history-list time,.history-list small{color:var(--crm-text-muted)}.history-list strong{color:var(--crm-navy)}.commercial-grid{display:grid;grid-template-columns:1fr 1fr;gap:1px;background:var(--crm-line)}.commercial-grid>div{display:grid;gap:5px;padding:13px;background:#fff}.commercial-grid .wide{grid-column:1/-1}.commercial-grid small,.commercial-grid span{color:var(--crm-text-muted);font-size:8px}.commercial-grid strong{color:var(--crm-text);font-size:9px;line-height:1.45}.influence-list{display:grid;padding:8px}.influence-list article{position:relative;display:grid;gap:5px;padding:10px 62px 10px 10px;border-bottom:1px solid var(--crm-line)}.influence-list article:last-child{border-bottom:0}.influence-list a{display:grid;gap:3px;color:var(--crm-teal)}.influence-list a strong{font-size:10px}.influence-list a span,.influence-list small,.influence-list p{color:var(--crm-text-muted);font-size:8px}.influence-list p{margin:0;line-height:1.45}.influence-list article>b{position:absolute;top:10px;right:10px;padding:4px 6px;border-radius:999px;font-size:7px}.influence-list article>b.positive{color:var(--crm-positive-ink);background:#e8f5ed}.influence-list article>b.warning{color:#8a651d;background:var(--crm-warning-soft)}.influence-list article>b.danger{color:var(--crm-danger);background:var(--crm-danger-soft)}.influence-list .compact-actions{position:absolute;right:8px;bottom:9px}.evidence-card ul{display:grid;gap:8px;margin:0;padding:13px 16px 15px 29px}.evidence-card li{color:var(--crm-text);font-size:9px;line-height:1.5}.strength-card li::marker{color:var(--crm-positive)}.risk-card li::marker{color:var(--crm-danger)}.information-card li::marker{color:var(--crm-warning)}@media(max-width:1180px){.opportunity-detail-grid{grid-template-columns:minmax(250px,.8fr) minmax(0,1.2fr)}.strategy-shell-grid{grid-template-columns:1fr}.detail-right{grid-column:1/-1;grid-template-columns:repeat(3,1fr)}.detail-right .influence-card{grid-column:1/-1}}@media(max-width:780px){.opportunity-record-header{grid-template-columns:1fr}.record-actions{flex-wrap:wrap}.opportunity-path{align-items:stretch;flex-direction:column}.opportunity-path>button{justify-content:center}.opportunity-detail-grid{grid-template-columns:1fr}.detail-right{grid-column:auto;grid-template-columns:1fr}.history-list article{grid-template-columns:1fr 1fr}.commercial-grid{grid-template-columns:1fr}.commercial-grid .wide{grid-column:auto}}@media(max-width:520px){.record-identity{align-items:flex-start}.record-identity h1{font-size:22px}.record-actions button{flex:1;justify-content:center}.strategy-shell-grid{padding:10px}}
-.path-scroll{overflow-x:hidden}
-@media(max-width:640px){.path-scroll{overflow-x:auto}}
+.opportunity-detail-page{display:grid;gap:14px}.detail-state{padding:28px;color:var(--crm-text-muted);background:#fff;border:1px solid var(--crm-line);border-radius:12px}.opportunity-record-header{display:grid;grid-template-columns:1fr auto;gap:10px 18px;align-items:end}.back-opportunities{grid-column:1/-1;display:inline-flex;width:fit-content;align-items:center;gap:6px;color:var(--crm-teal);font-size:10px;font-weight:800}.record-identity{display:flex;align-items:center;gap:12px}.record-identity>span{display:grid;width:46px;height:46px;place-items:center;color:var(--crm-brand-ink);background:var(--crm-brand-soft);border-radius:13px}.record-identity small{color:var(--crm-text-muted);font-size:9px}.record-identity h1{margin:2px 0 3px;color:var(--crm-navy);font-size:clamp(23px,2.3vw,32px);letter-spacing:-.03em}.record-identity p{margin:0;color:var(--crm-text-muted);font-size:10px}.record-actions{display:flex;flex-wrap:wrap;justify-content:flex-end;gap:7px}.record-actions button,.record-actions a{display:flex;align-items:center;gap:6px}.inline-error{margin:0;padding:10px 12px;color:var(--crm-danger);background:var(--crm-danger-soft);border:1px solid rgba(200,78,78,.2);border-radius:9px;font-size:10px}.opportunity-detail-grid{display:grid;grid-template-columns:minmax(260px,.78fr) minmax(0,2.22fr);gap:14px;align-items:start}.opportunity-strategy-shell{min-width:0;overflow:hidden;background:var(--crm-surface);border:1px solid var(--crm-line);border-radius:12px}.strategy-shell-header{display:flex;min-height:50px;align-items:center;gap:8px;padding:0 14px;color:var(--crm-teal);background:#fff;border-bottom:1px solid var(--crm-line)}.strategy-shell-header h2{margin:0;color:var(--crm-navy);font-size:13px}.strategy-shell-grid{display:grid;grid-template-columns:minmax(0,1.34fr) minmax(230px,.88fr);gap:14px;padding:14px;align-items:start}.detail-column{display:grid;gap:14px}.detail-card{overflow:hidden;background:#fff;border:1px solid var(--crm-line);border-radius:12px;box-shadow:0 8px 24px rgba(31,35,41,.035)}.detail-card>header{display:flex;min-height:50px;align-items:center;gap:8px;padding:0 14px;background:#faf9f7;border-bottom:1px solid var(--crm-line)}.detail-card>header>div{display:flex;align-items:center;gap:8px}.detail-card>header h2{margin:0;color:var(--crm-navy);font-size:12px}.detail-card>header>span{margin-left:auto;color:var(--crm-text-muted);font-size:9px}.detail-card>header button{display:flex;align-items:center;gap:4px;margin-left:auto;padding:6px 8px;color:var(--crm-teal);background:#fff;border:1px solid var(--crm-line);border-radius:7px;font:inherit;font-size:8px;font-weight:800;cursor:pointer}.field-list{display:grid;margin:0;padding:2px 14px 10px}.field-list>div{display:grid;gap:4px;padding:10px 0;border-bottom:1px solid var(--crm-line)}.field-list>div:last-child{border-bottom:0}.field-list dt{color:var(--crm-text-muted);font-size:8px;font-weight:700}.field-list dd{margin:0;color:var(--crm-text);font-size:10px;line-height:1.45}.activity-list{display:grid}.activity-list article{display:grid;grid-template-columns:auto minmax(0,1fr) auto auto;align-items:center;gap:9px;padding:12px 14px;border-bottom:1px solid var(--crm-line)}.activity-list article:last-child{border-bottom:0}.activity-list i{width:10px;height:10px;border:2px solid var(--crm-warning);border-radius:50%}.activity-list i.done{background:var(--crm-positive);border-color:var(--crm-positive)}.activity-list article>div:nth-child(2){display:grid;gap:4px}.activity-list strong{color:var(--crm-text);font-size:10px}.activity-list span{color:var(--crm-text-muted);font-size:8px}.activity-list article>b{padding:4px 7px;color:#8a651d;background:var(--crm-warning-soft);border-radius:999px;font-size:7px}.activity-list article>b.done{color:var(--crm-positive-ink);background:#e8f5ed}.compact-actions{display:flex!important;gap:4px!important}.compact-actions button{display:grid;width:25px;height:25px;place-items:center;padding:0;color:var(--crm-teal);background:#fff;border:1px solid var(--crm-line);border-radius:6px;cursor:pointer}.compact-actions button:last-child{color:var(--crm-danger)}.empty-copy{margin:0;padding:22px;color:var(--crm-text-muted);font-size:9px;text-align:center}.commercial-grid{display:grid;grid-template-columns:1fr 1fr;gap:1px;background:var(--crm-line)}.commercial-grid>div{display:grid;gap:5px;padding:13px;background:#fff}.commercial-grid .wide{grid-column:1/-1}.commercial-grid small,.commercial-grid span{color:var(--crm-text-muted);font-size:8px}.commercial-grid strong{color:var(--crm-text);font-size:9px;line-height:1.45}.influence-list{display:grid;padding:8px}.influence-list article{position:relative;display:grid;gap:5px;padding:10px 62px 10px 10px;border-bottom:1px solid var(--crm-line)}.influence-list article:last-child{border-bottom:0}.influence-list a{display:grid;gap:3px;color:var(--crm-teal)}.influence-list a strong{font-size:10px}.influence-list a span,.influence-list small,.influence-list p{color:var(--crm-text-muted);font-size:8px}.influence-list p{margin:0;line-height:1.45}.influence-list article>b{position:absolute;top:10px;right:10px;padding:4px 6px;border-radius:999px;font-size:7px}.influence-list article>b.positive{color:var(--crm-positive-ink);background:#e8f5ed}.influence-list article>b.warning{color:#8a651d;background:var(--crm-warning-soft)}.influence-list article>b.danger{color:var(--crm-danger);background:var(--crm-danger-soft)}.influence-list .compact-actions{position:absolute;right:8px;bottom:9px}.evidence-card ul{display:grid;gap:8px;margin:0;padding:13px 16px 15px 29px}.evidence-card li{color:var(--crm-text);font-size:9px;line-height:1.5}.strength-card li::marker{color:var(--crm-positive)}.risk-card li::marker{color:var(--crm-danger)}.information-card li::marker{color:var(--crm-warning)}@media(max-width:1180px){.opportunity-detail-grid{grid-template-columns:minmax(250px,.8fr) minmax(0,1.2fr)}.strategy-shell-grid{grid-template-columns:1fr}.detail-right{grid-column:1/-1;grid-template-columns:repeat(3,1fr)}.detail-right .influence-card{grid-column:1/-1}}@media(max-width:780px){.opportunity-record-header{grid-template-columns:1fr}.record-actions{justify-content:flex-start}.opportunity-detail-grid{grid-template-columns:1fr}.detail-right{grid-column:auto;grid-template-columns:1fr}.commercial-grid{grid-template-columns:1fr}.commercial-grid .wide{grid-column:auto}}@media(max-width:520px){.record-identity{align-items:flex-start}.record-identity h1{font-size:22px}.record-actions button,.record-actions a{flex:1;justify-content:center}.strategy-shell-grid{padding:10px}}
+.opportunity-path{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;gap:10px 12px;padding:11px 12px;background:#fff;border:1px solid var(--crm-line);border-radius:13px}
+.path-scroll{min-width:0;overflow-x:auto}
+.lost-outcome{display:flex;min-height:44px;box-sizing:border-box;align-items:center;padding:0 14px;color:#fff;background:var(--crm-danger);border-radius:9px;font-size:10px;font-weight:800;white-space:nowrap}
+.path-actions{display:flex;flex-wrap:wrap;justify-content:flex-end;gap:7px;grid-column:1/-1}
+.path-actions button{display:flex;min-height:34px;align-items:center;gap:6px;padding:0 12px;border-radius:9px;font:inherit;font-size:9px;font-weight:800;white-space:nowrap;cursor:pointer}
+.path-actions .path-primary{color:var(--crm-brand-ink);background:var(--crm-brand);border:1px solid var(--crm-brand)}
+.path-actions .path-secondary{color:var(--crm-teal);background:#fff;border:1px solid var(--crm-line)}
+.path-actions button:disabled{color:var(--crm-text-muted);background:var(--crm-surface-muted);border-color:var(--crm-line);cursor:not-allowed}
 .rollback-form{display:grid;gap:13px}.rollback-form label{display:grid;gap:6px;color:var(--crm-text-muted);font-size:9px;font-weight:700}.rollback-form select,.rollback-form textarea{box-sizing:border-box;width:100%;padding:9px 10px;background:#fff;border:1px solid var(--crm-line);border-radius:8px;font:inherit}.rollback-form small{color:var(--crm-danger)}.form-error{margin:0 0 12px;padding:10px;color:var(--crm-danger);background:var(--crm-danger-soft);border-radius:8px;font-size:9px}
-</style>
-<style scoped>
-.opportunity-path ol{grid-template-columns:repeat(8, minmax(86px, 1fr));}
-.opportunity-path ol{grid-template-columns:repeat(6, minmax(86px, 1fr));}
-.opportunity-outcomes{display:flex;align-items:stretch;gap:8px;flex:0 0 auto;padding-left:8px;border-left:1px solid var(--crm-line)}
-.opportunity-outcome{display:grid;justify-items:center;gap:4px;min-width:58px;padding:0 4px}
-.outcome-label{color:var(--crm-text-muted);font-size:8px;font-weight:800;white-space:nowrap}
-.outcome-node{display:flex;height:36px;box-sizing:border-box;align-items:center;justify-content:center;gap:4px;width:100%;padding:0 8px;color:var(--crm-text-muted);background:#eeeae4;border:1px solid var(--crm-line);border-radius:8px;font-size:9px;font-weight:800;white-space:nowrap}
-.outcome-node.is-current{color:var(--crm-brand-ink);background:var(--crm-brand);border-color:var(--crm-brand)}
+.form-warning{margin:0 0 12px;padding:9px 10px;color:#8a651d;background:var(--crm-warning-soft);border-radius:8px;font-size:9px;line-height:1.5}
+.form-hint{margin:0 0 12px;color:var(--crm-text-muted);font-size:9px;line-height:1.5}
 .lost-reason-field{background:#fff5f2!important}
 .lost-reason-field strong{color:var(--crm-danger)!important}
 .lost-action-button{color:var(--crm-danger)!important;border-color:rgba(200,78,78,.35)!important}
 .lost-detail-card{border-color:rgba(200,78,78,.35)}
 .lost-detail-card>header{background:#fff5f2}
 .lost-detail-card>header h2,.lost-detail-card>header span{color:var(--crm-danger)}
+.probability-history-list{display:grid;margin:0;padding:2px 14px 10px;list-style:none}
+.probability-history-list li{display:grid;gap:4px;padding:10px 0;border-bottom:1px solid var(--crm-line)}
+.probability-history-list li:last-child{border-bottom:0}
+.probability-history-list strong{color:var(--crm-text);font-size:10px}
+.probability-history-list span{color:var(--crm-text-muted);font-size:8px}
 .lost-form{display:grid;gap:13px}.lost-form>p{margin:0;padding:9px 10px;color:var(--crm-text-muted);background:var(--crm-surface-muted);border-radius:8px;font-size:9px}.lost-form label{display:grid;gap:6px;color:var(--crm-text-muted);font-size:9px;font-weight:700}.lost-form textarea{box-sizing:border-box;width:100%;padding:9px 10px;border:1px solid var(--crm-line);border-radius:8px;font:inherit;resize:vertical}
-@media(max-width:780px){.opportunity-outcomes{padding-top:8px;padding-left:0;border-top:1px solid var(--crm-line);border-left:0}.opportunity-outcome{flex:1}.outcome-node{justify-content:center}}
+@media(max-width:780px){.opportunity-path{grid-template-columns:1fr}.path-actions{justify-content:stretch}.path-actions button{flex:1;justify-content:center}}
 </style>

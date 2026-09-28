@@ -42,9 +42,11 @@ function Remove-TestDoc {
 function Remove-OpportunityHistory {
     param([string]$OpportunityId)
     if ([string]::IsNullOrWhiteSpace($OpportunityId)) { return }
-    $pythonArgs = "['CRM Opportunity History',{'opportunity':$(ConvertTo-PythonStringLiteral $OpportunityId)}]"
-    & docker compose @composeArgs exec -T backend bench --site $SiteName execute frappe.db.delete --args $pythonArgs | Out-Null
-    if ($LASTEXITCODE -ne 0) { throw 'Cleanup failed for Opportunity History.' }
+    foreach ($docType in @('CRM Opportunity History', 'CRM Opportunity Stage History', 'CRM Opportunity Probability History', 'CRM Opportunity Internal Validation')) {
+        $pythonArgs = "[$(ConvertTo-PythonStringLiteral $docType),{'opportunity':$(ConvertTo-PythonStringLiteral $OpportunityId)}]"
+        & docker compose @composeArgs exec -T backend bench --site $SiteName execute frappe.db.delete --args $pythonArgs | Out-Null
+        if ($LASTEXITCODE -ne 0) { throw "Cleanup failed for $docType." }
+    }
 }
 
 function Remove-InstalledToolHistory {
@@ -93,26 +95,33 @@ try {
 
     $contact = Invoke-CrmPost $salesSession 'rayher_crm.api.v1.contacts.create_contact' @{input=@{accountId=$created.Account;siteId=$created.Site;name="Stage 5D Contact $stamp";title='Director';department='Engineering';phone='13800000010';email="stage5d-contact-$stamp@example.invalid";relationship='Developing';status='Active';owner=$created.Sales}}
     $created.Contact = $contact.data.id
-    $stageDiscovery = -join [char[]](0x9700,0x6C42,0x53D1,0x73B0)
-    $opportunity = Invoke-CrmPost $salesSession 'rayher_crm.api.v1.opportunities.create_strategy_opportunity' @{input=@{accountId=$created.Account;siteId=$created.Site;title="Stage 5D Opportunity $stamp";owner=$created.Sales;stage=$stageDiscovery;forecast='Pipeline';amount='300000.00';probability=20;intentScore=90;poDate='2026-12-31';toolType='Inspection';saleType='New Equipment';subRegion='East China';currency='CNY';originalAmount='300000.00'}}
+    $opportunity = Invoke-CrmPost $salesSession 'rayher_crm.api.v1.opportunities.create_strategy_opportunity' @{input=@{probabilityLevel='pipeline';accountId=$created.Account;siteId=$created.Site;title="Stage 5D Opportunity $stamp";owner=$created.Sales;stage='qualified_opportunity';qualificationConfirmed=$true;forecast='Pipeline';amount='300000.00';probability=20;intentScore=90;poDate='2026-12-31';toolType='Inspection';saleType='New Equipment';subRegion='East China';currency='CNY';originalAmount='300000.00'}}
     $created.Opportunity = $opportunity.data.id
-    $fixtureArgs = "[$(ConvertTo-PythonStringLiteral $created.Opportunity),'Won',{'forecast':'Closed'}]"
+    $fixtureArgs = "[$(ConvertTo-PythonStringLiteral $created.Opportunity),'quotation_sent']"
     & docker compose @composeArgs exec -T backend bench --site $SiteName execute rayher_crm.tests._opportunity_fixtures.advance_opportunity_fixture_by_id --args $fixtureArgs | Out-Null
-    if ($LASTEXITCODE -ne 0) { throw 'Dedicated test fixture could not prepare the Won Opportunity.' }
+    if ($LASTEXITCODE -ne 0) { throw 'Dedicated test fixture could not prepare the quotation_sent Opportunity.' }
 
-    $bookingInput = @{accountId=$created.Account;primaryContactId=$created.Contact;equipment='Inspection 5000';quantity=1;ddl='2027-01-31';amount='300000.00';currency='CNY';status='Confirmed';owner=$created.Sales;source='Opportunity';sourceOpportunityId=$created.Opportunity;note='HTTP acceptance'}
+    $bookingDraft = @{primaryContactId=$created.Contact;equipment='Inspection 5000';quantity=1;ddl='2027-01-31';amount='300000.00';currency='CNY';owner=$created.Sales;note='HTTP acceptance'}
+    $manualInput = $bookingDraft.Clone(); $manualInput.accountId = $created.Account; $manualInput.status = 'Confirmed'; $manualInput.source = 'Opportunity'; $manualInput.sourceOpportunityId = $created.Opportunity
     $sourceStatus = 0
-    $invalidSource = $bookingInput.Clone(); $invalidSource.source = 'Upsell'
-    try { Invoke-CrmPost $salesSession 'rayher_crm.api.v1.bookings.create_booking' @{input=$invalidSource} | Out-Null } catch { $sourceStatus = [int]$_.Exception.Response.StatusCode }
-    if ($sourceStatus -ne 409) { throw "Expected invalid source transition HTTP 409, got $sourceStatus." }
+    try { Invoke-CrmPost $salesSession 'rayher_crm.api.v1.bookings.create_booking' @{input=$manualInput} | Out-Null } catch { $sourceStatus = [int]$_.Exception.Response.StatusCode }
+    if ($sourceStatus -ne 409) { throw "Expected manual Opportunity Booking HTTP 409, got $sourceStatus." }
 
-    $booking = Invoke-CrmPost $salesSession 'rayher_crm.api.v1.bookings.create_booking' @{input=$bookingInput}
-    $created.Booking = $booking.data.id
+    $quoted = (Invoke-RestMethod -Uri "$BaseUrl/api/method/rayher_crm.api.v1.opportunities.get_strategy_opportunity?id=$([Uri]::EscapeDataString($created.Opportunity))" -WebSession $salesSession).message.data
+    if ($quoted.stage -ne 'quotation_sent') { throw "Fixture left the Opportunity at $($quoted.stage) instead of quotation_sent." }
+    $confirmed = Invoke-CrmPost $salesSession 'rayher_crm.api.v1.opportunities.confirm_po' @{id=$created.Opportunity;input=@{booking=$bookingDraft};expectedModified=$quoted.modified}
+    $created.Booking = $confirmed.data.liveBooking.id
+    if ($confirmed.data.stage -ne 'po_received' -or -not $created.Booking -or $confirmed.data.liveBooking.status -ne 'Confirmed') { throw 'HTTP PO confirmation did not create a Confirmed Opportunity Booking.' }
+    $booking = (Invoke-RestMethod -Uri "$BaseUrl/api/method/rayher_crm.api.v1.bookings.get_booking?id=$([Uri]::EscapeDataString($created.Booking))" -WebSession $salesSession).message
+    if ($booking.data.source -ne 'Opportunity' -or $booking.data.sourceOpportunityId -ne $created.Opportunity) { throw 'PO Booking did not keep its Opportunity source.' }
     $staleModified = $booking.data.modified
     $updated = Invoke-CrmPost $salesSession 'rayher_crm.api.v1.bookings.update_booking' @{id=$created.Booking;input=@{note='Updated over HTTP'};expectedModified=$staleModified}
     $conflictStatus = 0
     try { Invoke-CrmPost $salesSession 'rayher_crm.api.v1.bookings.update_booking' @{id=$created.Booking;input=@{note='stale'};expectedModified=$staleModified} | Out-Null } catch { $conflictStatus = [int]$_.Exception.Response.StatusCode }
     if ($conflictStatus -ne 409) { throw "Expected Booking stale HTTP 409, got $conflictStatus." }
+    $statusChangeStatus = 0
+    try { Invoke-CrmPost $salesSession 'rayher_crm.api.v1.bookings.update_booking' @{id=$created.Booking;input=@{status='Pending'};expectedModified=$updated.data.modified} | Out-Null } catch { $statusChangeStatus = [int]$_.Exception.Response.StatusCode }
+    if ($statusChangeStatus -ne 409) { throw "Expected Opportunity Booking status change HTTP 409, got $statusChangeStatus." }
 
     $serial = "HTTP-SERIAL-$stamp"
     $converted = Invoke-CrmPost $salesSession 'rayher_crm.api.v1.installed_tools.convert_booking_to_installed_tool' @{id=$created.Booking;input=@{siteId=$created.Site;engineerOwner=$created.Engineer;serial=$serial;model='Model X';location='Fab 1';salesOrder='SO-REF';contract='CT-REF';software='1.0';firmware='2.0';configuration='Standard'};expectedModified=$updated.data.modified}
@@ -166,7 +175,7 @@ try {
         } catch { Start-Sleep -Seconds 2 }
     }
     if (-not $persisted -or $persisted.engineerOwner -ne $created.OtherEngineer) { throw 'Reassigned Tool did not persist through runtime restart.' }
-    Write-Output 'Stage 5D authenticated HTTP acceptance passed: booking/source/409/convert/repeat/scope/reassign/lifecycle/version/service/audit/restart-persistence.'
+    Write-Output 'Stage 5D authenticated HTTP acceptance passed: po-confirmation-booking/manual-source-409/stale-409/status-409/convert/repeat/scope/reassign/lifecycle/version/service/audit/restart-persistence.'
 } finally {
     $adminPassword=$null; $salesPassword=$null; $engineerPassword=$null; $otherEngineerPassword=$null
     if ($created.Booking) {

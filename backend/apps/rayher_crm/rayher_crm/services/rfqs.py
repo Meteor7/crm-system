@@ -32,6 +32,7 @@ from rayher_crm.services.file_security import (
     validate_and_scan,
 )
 from rayher_crm.services.notifications import active_crm_users, create_notification
+from rayher_crm.services.opportunity_stages import CUSTOMER_BUDGET_APPROVED
 from rayher_crm.services.sites import can_read_site_data
 
 ALLOWED_MIME_TYPES = {PDF_MIME, PNG_MIME, JPEG_MIME, DOCX_MIME, XLSX_MIME, PPTX_MIME}
@@ -340,8 +341,10 @@ def create_rfq(payload: Mapping[str, Any], part: Mapping[str, Any], scanner: Mal
     opportunity = frappe.get_doc("CRM Opportunity", opportunity_id)
     if not has_crm_permission(opportunity, user=frappe.session.user, permission_type="read"):
         raise CrmApiException("SCOPE_DENIED", "Opportunity is outside the current user scope.")
-    if opportunity.stage != "设备规格确认":
-        raise CrmApiException("INVALID_TRANSITION", "RFQ can only be created when the Opportunity is in 设备规格确认.")
+    if opportunity.stage != CUSTOMER_BUDGET_APPROVED:
+        raise CrmApiException(
+            "INVALID_TRANSITION", "RFQ can only be created when the Opportunity is at customer_budget_approved.",
+        )
     engineer = _active_engineer(payload.get("engineerId"))
     savepoint = f"crm_rfq_create_{frappe.generate_hash(length=8)}"
     frappe.db.savepoint(savepoint)
@@ -452,9 +455,11 @@ def review_rfq(name: Any, decision: Any, comment: Any, expected_modified: Any) -
         master.approved_at = now_datetime() if normalized == "Approved" else None
         master.save(ignore_permissions=True)
         if normalized == "Approved":
-            from rayher_crm.services.opportunities import advance_opportunity_for_commercial_event
+            from rayher_crm.services.opportunities import advance_opportunity_for_event
 
-            advance_opportunity_for_commercial_event(master.opportunity, "rfq_approved")
+            advance_opportunity_for_event(
+                master.opportunity, "rfq_approved", reference_doctype="CRM RFQ", reference_name=master.name,
+            )
         _notify(
             {master.sales_owner, master.engineer_owner}, master,
             f"RFQ {normalized}",

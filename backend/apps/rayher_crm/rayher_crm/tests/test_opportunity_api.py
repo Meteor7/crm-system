@@ -2,25 +2,34 @@ from __future__ import annotations
 
 import frappe
 from frappe.tests.utils import FrappeTestCase
-from rayher_crm.services import opportunities as opportunity_services
 
+from rayher_crm.api.v1.errors import CrmApiException
 from rayher_crm.api.v1.opportunities import (
     create_strategy_opportunity as create_strategy_opportunity_endpoint,
     get_strategy_opportunity as get_strategy_opportunity_endpoint,
     list_strategy_opportunities as list_strategy_opportunities_endpoint,
+    mark_opportunity_lost as mark_opportunity_lost_endpoint,
     update_strategy_opportunity as update_strategy_opportunity_endpoint,
 )
-from rayher_crm.api.v1.errors import CrmApiException
 from rayher_crm.services.accounts import create_account, get_account_360
+from rayher_crm.services.common import to_iso_timestamp
+from rayher_crm.services.contacts import create_contact
 from rayher_crm.services.opportunities import (
-    _calculate_opportunity_probability,
+    advance_opportunity_for_event,
+    confirm_budget_approved,
+    create_opportunity_action,
+    create_opportunity_stakeholder,
     create_strategy_opportunity,
+    delete_opportunity_action,
     delete_strategy_opportunity,
     get_strategy_opportunity,
     list_strategy_opportunities,
+    mark_opportunity_lost,
+    rollback_opportunity_stage,
     update_strategy_opportunity,
 )
 from rayher_crm.services.sites import create_site
+from rayher_crm.tests._opportunity_fixtures import advance_opportunity_fixture
 
 
 class TestOpportunityApi(FrappeTestCase):
@@ -60,20 +69,46 @@ class TestOpportunityApi(FrappeTestCase):
     def _input(self, account: dict, site: dict, owner: str, **overrides):
         payload = {
             "accountId": account["id"], "siteId": site["id"], "title": "Inspection Project",
-            "owner": owner, "stage": "需求发现", "forecast": "Pipeline", "amount": "125000.25",
-            "probability": 20, "intentScore": 35, "poDate": "2026-12-31", "toolType": "Inspection",
+            "owner": owner, "amount": "125000.25",
+            "intentScore": 35, "poDate": "2026-12-31", "toolType": "Inspection",
             "saleType": "New Equipment", "subRegion": "华东", "currency": "CNY",
             "originalAmount": "125000.25", "paymentMilestones": ["30% PO", "70% FAT"],
             "strengths": ["Local service"], "redFlags": [], "informationNeeded": ["Budget"],
+            "qualificationConfirmed": True,
         }
         payload.update(overrides)
         return payload
 
+    def _probability_history_count(self, opportunity_id: str) -> int:
+        return frappe.db.count("CRM Opportunity Probability History", {"opportunity": opportunity_id})
+
+    def _stage_rows(self, opportunity: dict) -> list[tuple[str, str, str, str]]:
+        return [(row["from"], row["to"], row["source"], row["event"]) for row in opportunity["stageHistory"]]
+
+    def _demo_done(self, opportunity: dict) -> dict:
+        advance_opportunity_for_event(
+            opportunity["id"], "demo_customer_review",
+            reference_doctype="CRM Evaluation", reference_name="CRM-EVAL-TEST",
+        )
+        return get_strategy_opportunity(opportunity["id"])
+
+    def _days_ago(self, days: int) -> str:
+        return frappe.utils.add_days(frappe.utils.today(), -days)
+
     def test_create_list_update_history_and_account_360(self):
         account, site = self._account_site(self.sales, "Core")
         with self.assertRaises(CrmApiException) as terminal_create:
-            create_strategy_opportunity(self._input(account, site, self.sales, stage="Won"))
+            create_strategy_opportunity(self._input(account, site, self.sales, stage="po_received"))
         self.assertEqual(terminal_create.exception.code, "INVALID_TRANSITION")
+        unconfirmed = self._input(account, site, self.sales)
+        unconfirmed.pop("qualificationConfirmed")
+        with self.assertRaises(CrmApiException) as unqualified:
+            create_strategy_opportunity(unconfirmed)
+        self.assertEqual(
+            (unqualified.exception.code, unqualified.exception.field_errors),
+            ("VALIDATION_ERROR", {"qualificationConfirmed": "Required"}),
+        )
+
         created = create_strategy_opportunity(self._input(account, site, self.sales))
         self.assertRegex(created["id"], r"^CRM-OPP-\d{5}$")
         self.assertEqual(created["account"], account["name"])
@@ -81,7 +116,21 @@ class TestOpportunityApi(FrappeTestCase):
         self.assertEqual(created["owner"], self.sales)
         self.assertEqual(created["paymentMilestones"], ["30% PO", "70% FAT"])
         self.assertRegex(created["modified"], r"Z$")
-        self.assertEqual(created["probability"], 23)
+        self.assertEqual((created["stage"], created["probabilityLevel"], created["probabilityHistory"]), (
+            "qualified_opportunity", "", [],
+        ))
+        self.assertEqual(self._stage_rows(created), [("", "qualified_opportunity", "creation", "created")])
+        creation = created["stageHistory"][0]
+        self.assertEqual((creation["actor"], creation["reachedAtBasis"]), (self.sales, "recorded"))
+        self.assertEqual(created["stageChangedAt"], creation["reachedAt"])
+        self.assertEqual(
+            (created["budgetApprovedOn"], created["lostAtStage"], created["lostAt"], created["lostBy"]),
+            ("", "", "", ""),
+        )
+        self.assertIsNone(created["internalValidation"])
+        self.assertIsNone(created["liveBooking"])
+        self.assertNotIn("probability", created)
+        self.assertNotIn("forecast", created)
 
         before_modified = frappe.db.get_value("CRM Opportunity", created["id"], "modified")
         listed = list_strategy_opportunities()
@@ -91,41 +140,209 @@ class TestOpportunityApi(FrappeTestCase):
         })
         self.assertEqual((len(page), total, page_number, page_size), (1, 1, 1, 1))
         filtered, filtered_total, _, _ = list_strategy_opportunities({
-            "search": "Inspection", "status": "需求发现", "accountId": account["id"],
+            "search": "Inspection", "status": "qualified_opportunity", "accountId": account["id"],
             "page": 1, "pageSize": 20,
         })
         self.assertEqual(([item["id"] for item in filtered], filtered_total), ([created["id"]], 1))
         self.assertEqual(frappe.db.get_value("CRM Opportunity", created["id"], "modified"), before_modified)
 
         with self.assertRaises(CrmApiException) as stale:
-            update_strategy_opportunity(created["id"], {"stage": "Wafer Demo确认"}, "2000-01-01T00:00:00Z")
+            update_strategy_opportunity(created["id"], {"title": "Stale"}, "2000-01-01T00:00:00Z")
         self.assertEqual(stale.exception.code, "VERSION_CONFLICT")
 
-        with self.assertRaises(CrmApiException) as skipped_stage:
-            update_strategy_opportunity(created["id"], {"stage": "预算审批"}, created["modified"])
-        self.assertEqual(skipped_stage.exception.code, "INVALID_TRANSITION")
+        for stage in ("demo_done", "customer_budget_approved", "po_received", "lost"):
+            with self.subTest(stage=stage), self.assertRaises(CrmApiException) as direct_stage:
+                update_strategy_opportunity(created["id"], {"stage": stage}, created["modified"])
+            self.assertEqual(direct_stage.exception.code, "INVALID_TRANSITION")
 
-        with self.assertRaises(CrmApiException) as automatic_gate:
-            update_strategy_opportunity(created["id"], {"stage": "Wafer Demo确认"}, created["modified"])
-        self.assertEqual(automatic_gate.exception.code, "INVALID_TRANSITION")
-
-        frappe.db.set_value("CRM Opportunity", created["id"], {
-            "stage": "预算审批", "probability": 70,
-        })
-        budget = get_strategy_opportunity(created["id"])
-        specified = update_strategy_opportunity(created["id"], {"stage": "设备规格确认"}, budget["modified"])
-        self.assertEqual((specified["stage"], specified["probability"]), ("设备规格确认", 59))
-        with self.assertRaises(CrmApiException) as rfq_gate:
-            update_strategy_opportunity(created["id"], {"stage": "报价"}, specified["modified"])
-        self.assertEqual(rfq_gate.exception.code, "INVALID_TRANSITION")
-
-        frappe.db.set_value("CRM Opportunity", created["id"], {"stage": "报价", "probability": 62})
-        quoted = get_strategy_opportunity(created["id"])
-        with self.assertRaises(CrmApiException) as quotation_gate:
-            update_strategy_opportunity(created["id"], {"stage": "采购流程"}, quoted["modified"])
-        self.assertEqual(quotation_gate.exception.code, "INVALID_TRANSITION")
-        self.assertEqual({row["actor"] for row in quoted["history"]}, {self.sales})
+        renamed = update_strategy_opportunity(created["id"], {"title": "Inspection Project II"}, created["modified"])
+        self.assertEqual((renamed["title"], renamed["stage"]), ("Inspection Project II", "qualified_opportunity"))
+        self.assertEqual({row["actor"] for row in renamed["history"]}, {self.sales})
+        self.assertNotIn("stage", {row["field"] for row in renamed["history"]})
         self.assertEqual(get_account_360(account["id"])["opportunities"][0]["id"], created["id"])
+
+    def test_owner_sets_probability_level_and_each_change_is_audited(self):
+        account, site = self._account_site(self.sales, "Probability")
+        created = create_strategy_opportunity(self._input(account, site, self.sales, probabilityLevel="pipeline"))
+        self.assertEqual(created["probabilityLevel"], "pipeline")
+        self.assertEqual(
+            [(row["from"], row["to"], row["actor"]) for row in created["probabilityHistory"]],
+            [("", "pipeline", self.sales)],
+        )
+
+        raised = update_strategy_opportunity(created["id"], {"probabilityLevel": "upside"}, created["modified"])
+        self.assertEqual(raised["probabilityLevel"], "upside")
+        self.assertEqual(
+            [(row["from"], row["to"]) for row in raised["probabilityHistory"]],
+            [("pipeline", "upside"), ("", "pipeline")],
+        )
+        self.assertNotIn("probability_level", {row["field"] for row in raised["history"]})
+
+        intent_only = update_strategy_opportunity(created["id"], {"intentScore": 90}, raised["modified"])
+        self.assertEqual((intent_only["probabilityLevel"], intent_only["score"]), ("upside", 90))
+        self.assertEqual(self._probability_history_count(created["id"]), 2)
+
+        self._demo_done(created)
+        budget = confirm_budget_approved(
+            created["id"], {"approvedOn": self._days_ago(3)}, get_strategy_opportunity(created["id"])["modified"],
+        )
+        self.assertEqual((budget["stage"], budget["probabilityLevel"]), ("customer_budget_approved", "upside"))
+        self.assertEqual(self._probability_history_count(created["id"]), 2)
+
+        with self.assertRaises(CrmApiException) as cleared:
+            update_strategy_opportunity(created["id"], {"probabilityLevel": ""}, budget["modified"])
+        self.assertEqual(
+            (cleared.exception.code, cleared.exception.field_errors),
+            ("VALIDATION_ERROR", {"probabilityLevel": "Required"}),
+        )
+        with self.assertRaises(CrmApiException) as invalid:
+            update_strategy_opportunity(created["id"], {"probabilityLevel": "certain"}, budget["modified"])
+        self.assertEqual(invalid.exception.code, "VALIDATION_ERROR")
+
+        frappe.set_user(self.manager)
+        with self.assertRaises(CrmApiException) as not_owner:
+            update_strategy_opportunity(created["id"], {"probabilityLevel": "low_probability"}, budget["modified"])
+        self.assertEqual(not_owner.exception.code, "PERMISSION_DENIED")
+        renamed = update_strategy_opportunity(
+            created["id"], {"title": "Manager edit keeps the level"}, budget["modified"],
+        )
+        self.assertEqual((renamed["title"], renamed["probabilityLevel"]), ("Manager edit keeps the level", "upside"))
+        with self.assertRaises(CrmApiException) as manager_create:
+            create_strategy_opportunity(
+                self._input(account, site, self.sales, title="Manager chosen level", probabilityLevel="committed"),
+            )
+        self.assertEqual(manager_create.exception.code, "PERMISSION_DENIED")
+
+        pending = create_strategy_opportunity(self._input(account, site, self.sales, title="Pending level"))
+        upside_rows, upside_total, _, _ = list_strategy_opportunities({
+            "accountId": account["id"], "probabilityLevel": "upside", "page": 1, "pageSize": 20,
+        })
+        self.assertEqual(([item["id"] for item in upside_rows], upside_total), ([created["id"]], 1))
+        pending_rows, pending_total, _, _ = list_strategy_opportunities({
+            "accountId": account["id"], "probabilityLevel": "pending", "page": 1, "pageSize": 20,
+        })
+        self.assertEqual(([item["id"] for item in pending_rows], pending_total), ([pending["id"]], 1))
+
+    def test_budget_confirmation_is_a_declared_date_and_needs_a_level(self):
+        account, site = self._account_site(self.sales, "Budget")
+        opportunity = create_strategy_opportunity(self._input(account, site, self.sales))
+        with self.assertRaises(CrmApiException) as too_early:
+            confirm_budget_approved(opportunity["id"], {"approvedOn": self._days_ago(1)}, opportunity["modified"])
+        self.assertEqual(too_early.exception.code, "INVALID_TRANSITION")
+
+        demo_done = self._demo_done(opportunity)
+        self.assertEqual(
+            self._stage_rows(demo_done)[0], ("qualified_opportunity", "demo_done", "event", "demo_customer_review"),
+        )
+        with self.assertRaises(CrmApiException) as no_level:
+            confirm_budget_approved(opportunity["id"], {"approvedOn": self._days_ago(1)}, demo_done["modified"])
+        self.assertEqual(
+            (no_level.exception.code, no_level.exception.field_errors),
+            ("VALIDATION_ERROR", {"probabilityLevel": "Required"}),
+        )
+
+        leveled = update_strategy_opportunity(opportunity["id"], {"probabilityLevel": "pipeline"}, demo_done["modified"])
+        for payload in ({}, {"approvedOn": frappe.utils.add_days(frappe.utils.today(), 1)}, {"approvedOn": "2026-02-30"}):
+            with self.subTest(payload=payload), self.assertRaises(CrmApiException) as invalid:
+                confirm_budget_approved(opportunity["id"], payload, leveled["modified"])
+            self.assertEqual(invalid.exception.code, "VALIDATION_ERROR")
+
+        declared_on = self._days_ago(10)
+        approved = confirm_budget_approved(opportunity["id"], {"approvedOn": declared_on}, leveled["modified"])
+        self.assertEqual((approved["stage"], approved["budgetApprovedOn"]), ("customer_budget_approved", declared_on))
+        latest = approved["stageHistory"][0]
+        self.assertEqual(
+            (latest["from"], latest["to"], latest["source"], latest["event"], latest["reachedAtBasis"], latest["actor"]),
+            ("demo_done", "customer_budget_approved", "manual", "budget_confirmed", "declared", self.sales),
+        )
+        self.assertEqual(latest["reachedAt"], to_iso_timestamp(frappe.utils.get_datetime(declared_on)))
+        self.assertEqual(approved["stageChangedAt"], latest["reachedAt"])
+        self.assertNotEqual(latest["recordedAt"], latest["reachedAt"])
+
+        with self.assertRaises(CrmApiException) as twice:
+            confirm_budget_approved(opportunity["id"], {"approvedOn": declared_on}, approved["modified"])
+        self.assertEqual(twice.exception.code, "INVALID_TRANSITION")
+
+    def test_workflow_events_advance_once_and_leave_lost_opportunities_alone(self):
+        account, site = self._account_site(self.sales, "Events")
+        opportunity = create_strategy_opportunity(self._input(account, site, self.sales))
+        self._demo_done(opportunity)
+        advanced = self._demo_done(opportunity)
+        self.assertEqual(advanced["stage"], "demo_done")
+        self.assertEqual(
+            [(row["to"], row["event"], row["referenceDoctype"], row["referenceName"]) for row in advanced["stageHistory"]],
+            [
+                ("demo_done", "demo_customer_review", "CRM Evaluation", "CRM-EVAL-TEST"),
+                ("qualified_opportunity", "created", "", ""),
+            ],
+        )
+        with self.assertRaises(CrmApiException) as behind:
+            advance_opportunity_for_event(
+                opportunity["id"], "rfq_approved", reference_doctype="CRM RFQ", reference_name="CRM-RFQ-TEST",
+            )
+        self.assertEqual(behind.exception.code, "CONFLICT")
+        with self.assertRaises(ValueError):
+            advance_opportunity_for_event(
+                opportunity["id"], "po_confirmed", reference_doctype="CRM Booking", reference_name="CRM-BKG-TEST",
+            )
+
+        lost = mark_opportunity_lost(opportunity["id"], {"lostReason": "Budget frozen"}, advanced["modified"])
+        self._demo_done(opportunity)
+        self.assertEqual(get_strategy_opportunity(opportunity["id"])["stageHistory"], lost["stageHistory"])
+        with self.assertRaises(CrmApiException) as lost_rfq:
+            advance_opportunity_for_event(
+                opportunity["id"], "rfq_approved", reference_doctype="CRM RFQ", reference_name="CRM-RFQ-TEST",
+            )
+        self.assertEqual(lost_rfq.exception.code, "INVALID_TRANSITION")
+
+    def test_marking_lost_records_the_stage_and_reopening_stays_below_it(self):
+        account, site = self._account_site(self.sales, "Lost")
+        opportunity = self._demo_done(create_strategy_opportunity(self._input(account, site, self.sales)))
+        with self.assertRaises(CrmApiException) as no_reason:
+            mark_opportunity_lost(opportunity["id"], {"lostReason": "  "}, opportunity["modified"])
+        self.assertEqual(no_reason.exception.code, "VALIDATION_ERROR")
+        frappe.set_user(self.engineer)
+        with self.assertRaises(frappe.PermissionError):
+            mark_opportunity_lost(opportunity["id"], {"lostReason": "Engineers cannot close"}, opportunity["modified"])
+
+        frappe.set_user(self.sales)
+        lost = mark_opportunity_lost(opportunity["id"], {"lostReason": "Competitor won"}, opportunity["modified"])
+        self.assertEqual(
+            (lost["stage"], lost["lostAtStage"], lost["lostBy"], lost["lostReason"]),
+            ("lost", "demo_done", self.sales, "Competitor won"),
+        )
+        self.assertRegex(lost["lostAt"], r"Z$")
+        self.assertEqual(lost["lostAt"], lost["stageChangedAt"])
+        latest = lost["stageHistory"][0]
+        self.assertEqual(
+            (latest["from"], latest["to"], latest["source"], latest["event"], latest["reason"]),
+            ("demo_done", "lost", "lost", "marked_lost", "Competitor won"),
+        )
+        with self.assertRaises(CrmApiException) as twice:
+            mark_opportunity_lost(opportunity["id"], {"lostReason": "Again"}, lost["modified"])
+        self.assertEqual(twice.exception.code, "INVALID_TRANSITION")
+        with self.assertRaises(CrmApiException) as frozen:
+            update_strategy_opportunity(opportunity["id"], {"probabilityLevel": "committed"}, lost["modified"])
+        self.assertEqual(frozen.exception.code, "INVALID_TRANSITION")
+        with self.assertRaises(CrmApiException) as reason_required:
+            update_strategy_opportunity(opportunity["id"], {"lostReason": ""}, lost["modified"])
+        self.assertEqual(reason_required.exception.code, "VALIDATION_ERROR")
+
+        frappe.set_user(self.manager)
+        with self.assertRaises(CrmApiException) as above_loss:
+            rollback_opportunity_stage(opportunity["id"], "customer_budget_approved", "Reopen higher", lost["modified"])
+        self.assertEqual(above_loss.exception.code, "INVALID_TRANSITION")
+        reopened = rollback_opportunity_stage(opportunity["id"], "demo_done", "Customer came back", lost["modified"])
+        self.assertEqual(
+            (reopened["stage"], reopened["lostAtStage"], reopened["lostAt"], reopened["lostBy"], reopened["lostReason"]),
+            ("demo_done", "", "", "", ""),
+        )
+        latest = reopened["stageHistory"][0]
+        self.assertEqual(
+            (latest["from"], latest["to"], latest["source"], latest["event"], latest["reason"], latest["actor"]),
+            ("lost", "demo_done", "rollback", "reopened", "Customer came back", self.manager),
+        )
+        self.assertEqual(reopened["stageHistory"][1]["event"], "marked_lost")
 
     def test_owner_scope_assignment_and_account_site_integrity(self):
         account, site = self._account_site(self.sales, "Owned")
@@ -147,6 +364,9 @@ class TestOpportunityApi(FrappeTestCase):
         with self.assertRaises(CrmApiException) as outside_scope:
             get_strategy_opportunity(owned["id"])
         self.assertEqual(outside_scope.exception.code, "SCOPE_DENIED")
+        with self.assertRaises(CrmApiException) as outside_action:
+            mark_opportunity_lost(owned["id"], {"lostReason": "Not mine"}, owned["modified"])
+        self.assertEqual(outside_action.exception.code, "SCOPE_DENIED")
         with self.assertRaises(CrmApiException) as missing:
             get_strategy_opportunity("CRM-OPP-NOT-FOUND")
         self.assertEqual(missing.exception.code, "NOT_FOUND")
@@ -189,24 +409,13 @@ class TestOpportunityApi(FrappeTestCase):
             update_strategy_opportunity(opportunity["id"], {"title": "Cannot retain a hidden Site"}, detail["modified"])
         self.assertEqual(site_write.exception.code, "SCOPE_DENIED")
 
-    def test_probability_is_derived_from_stage_and_purchase_intent(self):
-        cases = [
-            ("需求发现", 50, 29), ("Wafer Demo确认", 80, 65),
-            ("预算审批", 80, 74), ("设备规格确认", 80, 77),
-            ("报价", 80, 80), ("采购流程", 86, 88),
-            ("Won", 0, 100), ("Lost", 100, 0),
-        ]
-        for stage, score, expected in cases:
-            with self.subTest(stage=stage, score=score):
-                self.assertEqual(_calculate_opportunity_probability(stage, score), expected)
-
     def test_validation_rejects_invalid_money_date_ranges_and_enums(self):
         account, site = self._account_site(self.sales, "Validation")
         cases = [
             ({"amount": 0}, "amount"), ({"amount": "1.001"}, "amount"),
-            ({"probability": 101}, "probability"), ({"intentScore": -1}, "intentScore"),
-            ({"poDate": "2026-02-30"}, "poDate"), ({"stage": "Open"}, "stage"),
-            ({"forecast": "Maybe"}, "forecast"), ({"currency": "ZZZ"}, "currency"),
+            ({"intentScore": -1}, "intentScore"), ({"poDate": "2026-02-30"}, "poDate"),
+            ({"stage": "Open"}, "stage"), ({"stage": "需求发现"}, "stage"),
+            ({"probabilityLevel": "certain"}, "probabilityLevel"), ({"currency": "ZZZ"}, "currency"),
         ]
         for overrides, fieldname in cases:
             with self.subTest(fieldname=fieldname), self.assertRaises(CrmApiException) as invalid:
@@ -228,64 +437,68 @@ class TestOpportunityApi(FrappeTestCase):
 
         blocked = update_strategy_opportunity_endpoint(
             created["data"]["id"],
-            {"stage": "Wafer Demo确认"},
+            {"stage": "demo_done"},
             created["data"]["modified"],
         )
         self.assertIsNone(blocked["data"])
         self.assertEqual(blocked["error"]["code"], "INVALID_TRANSITION")
 
-    def test_only_manager_can_rollback_stage_with_reason_and_fresh_version(self):
-        rollback = getattr(opportunity_services, "rollback_opportunity_stage", None)
-        self.assertIsNotNone(rollback, "rollback_opportunity_stage must be implemented")
+        lost = mark_opportunity_lost_endpoint(
+            created["data"]["id"], {"lostReason": "Project cancelled"}, created["data"]["modified"],
+        )
+        self.assertEqual((lost["data"]["stage"], lost["data"]["lostAtStage"]), ("lost", "qualified_opportunity"))
+        again = mark_opportunity_lost_endpoint(
+            created["data"]["id"], {"lostReason": "Again"}, lost["data"]["modified"],
+        )
+        self.assertIsNone(again["data"])
+        self.assertEqual(again["error"]["code"], "INVALID_TRANSITION")
 
+    def test_only_manager_can_rollback_stage_with_reason_and_fresh_version(self):
         account, site = self._account_site(self.sales, "Rollback")
         opportunity = create_strategy_opportunity(self._input(account, site, self.sales))
-        frappe.db.set_value("CRM Opportunity", opportunity["id"], {
-            "stage": "报价", "probability": 80,
-        })
-        current = get_strategy_opportunity(opportunity["id"])
+        current = advance_opportunity_fixture(opportunity, "rfq_validated")
+        self.assertTrue(current["budgetApprovedOn"])
 
         frappe.set_user(self.sales)
         with self.assertRaises(frappe.PermissionError):
-            rollback(opportunity["id"], "Wafer Demo确认", "Need another technical review", current["modified"])
+            rollback_opportunity_stage(opportunity["id"], "demo_done", "Need another technical review", current["modified"])
         frappe.set_user(self.engineer)
         with self.assertRaises(frappe.PermissionError):
-            rollback(opportunity["id"], "Wafer Demo确认", "Need another technical review", current["modified"])
+            rollback_opportunity_stage(opportunity["id"], "demo_done", "Need another technical review", current["modified"])
 
         frappe.set_user(self.manager)
-        with self.assertRaises(CrmApiException) as missing_reason:
-            rollback(opportunity["id"], "Wafer Demo确认", "   ", current["modified"])
-        self.assertEqual(missing_reason.exception.code, "VALIDATION_ERROR")
-        with self.assertRaises(CrmApiException) as forward:
-            rollback(opportunity["id"], "采购流程", "Not a rollback", current["modified"])
-        self.assertEqual(forward.exception.code, "INVALID_TRANSITION")
-        with self.assertRaises(CrmApiException) as same_stage:
-            rollback(opportunity["id"], "报价", "Not an earlier stage", current["modified"])
-        self.assertEqual(same_stage.exception.code, "INVALID_TRANSITION")
-
-        terminal = create_strategy_opportunity(self._input(account, site, self.sales, title="Terminal rollback"))
-        frappe.db.set_value("CRM Opportunity", terminal["id"], {"stage": "Lost", "probability": 0})
-        terminal = get_strategy_opportunity(terminal["id"])
-        with self.assertRaises(CrmApiException) as terminal_target:
-            rollback(terminal["id"], "Won", "Terminal states are not rollback targets", terminal["modified"])
-        self.assertEqual(terminal_target.exception.code, "INVALID_TRANSITION")
-
+        cases = [
+            ("demo_done", "   ", "VALIDATION_ERROR"),
+            ("lost", "Lost is not a rollback target", "VALIDATION_ERROR"),
+            ("设备规格确认", "Legacy stages are not accepted", "VALIDATION_ERROR"),
+            ("quotation_sent", "Not a rollback", "INVALID_TRANSITION"),
+            ("rfq_validated", "Not an earlier stage", "INVALID_TRANSITION"),
+        ]
+        for target, reason, code in cases:
+            with self.subTest(target=target), self.assertRaises(CrmApiException) as invalid:
+                rollback_opportunity_stage(opportunity["id"], target, reason, current["modified"])
+            self.assertEqual(invalid.exception.code, code)
         with self.assertRaises(CrmApiException) as stale:
-            rollback(opportunity["id"], "Wafer Demo确认", "Need another technical review", "2000-01-01T00:00:00Z")
+            rollback_opportunity_stage(
+                opportunity["id"], "demo_done", "Need another technical review", "2000-01-01T00:00:00Z",
+            )
         self.assertEqual(stale.exception.code, "VERSION_CONFLICT")
 
-        rolled_back = rollback(
-            opportunity["id"], "Wafer Demo确认", "Need another technical review", current["modified"],
+        rolled_back = rollback_opportunity_stage(
+            opportunity["id"], "demo_done", "Need another technical review", current["modified"],
         )
-        self.assertEqual(rolled_back["stage"], "Wafer Demo确认")
-        history = next(row for row in rolled_back["history"] if row["field"] == "stageRollback")
-        self.assertEqual(history["from"], "报价")
-        self.assertEqual(history["to"], "Wafer Demo确认 | Need another technical review")
+        self.assertEqual((rolled_back["stage"], rolled_back["budgetApprovedOn"]), ("demo_done", ""))
+        latest = rolled_back["stageHistory"][0]
+        self.assertEqual(
+            (latest["from"], latest["to"], latest["source"], latest["event"], latest["reason"], latest["actor"]),
+            ("rfq_validated", "demo_done", "rollback", "rollback", "Need another technical review", self.manager),
+        )
+        self.assertEqual(rolled_back["stageChangedAt"], latest["reachedAt"])
+        self.assertNotIn("stageRollback", {row["field"] for row in rolled_back["history"]})
 
-    def test_cannot_rollback_to_discovery_while_demo_request_is_active(self):
+    def test_rollback_to_the_first_stage_no_longer_waits_for_demo_requests(self):
         account, site = self._account_site(self.sales, "ActiveRequestRollback")
-        opportunity = create_strategy_opportunity(self._input(account, site, self.sales))
-        frappe.db.set_value("CRM Opportunity", opportunity["id"], {"stage": "Wafer Demo确认", "probability": 38})
+        opportunity = self._demo_done(create_strategy_opportunity(self._input(account, site, self.sales)))
         request = frappe.get_doc({
             "doctype": "CRM Demo Request",
             "account": account["id"],
@@ -308,24 +521,59 @@ class TestOpportunityApi(FrappeTestCase):
         })
         request.flags.ignore_links = True
         request.insert(ignore_permissions=True)
-        current = get_strategy_opportunity(opportunity["id"])
 
         frappe.set_user(self.manager)
-        with self.assertRaises(CrmApiException) as blocked:
-            opportunity_services.rollback_opportunity_stage(
-                opportunity["id"], "需求发现", "Requirements changed", current["modified"],
-            )
-        self.assertEqual(blocked.exception.code, "CONFLICT")
-        self.assertEqual(get_strategy_opportunity(opportunity["id"])["stage"], "Wafer Demo确认")
+        rolled_back = rollback_opportunity_stage(
+            opportunity["id"], "qualified_opportunity", "Requirements changed", opportunity["modified"],
+        )
+        self.assertEqual(rolled_back["stage"], "qualified_opportunity")
+        self.assertEqual(frappe.db.get_value("CRM Demo Request", request.name, "status"), "Engineer Review")
 
     def test_only_manager_can_delete_strategy_opportunity(self):
         account, site = self._account_site(self.other_sales, "Delete")
-        opportunity = create_strategy_opportunity(self._input(account, site, self.other_sales))
+        opportunity = create_strategy_opportunity(
+            self._input(account, site, self.other_sales, probabilityLevel="pipeline"),
+        )
+        stage_rows = {"opportunity": opportunity["id"]}
+        self.assertEqual(self._probability_history_count(opportunity["id"]), 1)
+        self.assertEqual(frappe.db.count("CRM Opportunity Stage History", stage_rows), 1)
+        # Stakeholders and actions link to the Opportunity too, and their APIs only archive them.
+        contact = create_contact({
+            "accountId": account["id"], "name": "Delete Contact", "title": "Director",
+            "department": "Engineering", "phone": "13800000002",
+            "email": "delete-contact@example.invalid", "relationship": "Developing",
+            "owner": self.other_sales, "status": "Active",
+        })
+        create_opportunity_stakeholder(opportunity["id"], {
+            "contactId": contact["id"], "role": "Decision Maker", "influence": "High",
+            "stance": "Support", "coverage": "Monthly", "isCoach": True,
+            "winResult": "Budget approved", "opportunityNotes": "Confirm FAT attendees",
+        })
+        action = create_opportunity_action(
+            opportunity["id"],
+            {"title": "Confirm scope", "owner": self.other_sales, "due": "2026-09-01", "status": "Open"},
+        )
+        delete_opportunity_action(opportunity["id"], action["id"])
+
+        def relation_counts() -> tuple[int, int]:
+            return (
+                frappe.db.count("CRM Opportunity Stakeholder", stage_rows),
+                frappe.db.count("CRM Opportunity Action", stage_rows),
+            )
+
+        self.assertEqual(relation_counts(), (1, 1))
+        # An edit leaves a field-history row, which also links to the Opportunity.
+        frappe.set_user("Administrator")
+        update_strategy_opportunity(opportunity["id"], {"title": "Delete II"}, opportunity["modified"])
+        self.assertGreaterEqual(frappe.db.count("CRM Opportunity History", stage_rows), 1)
 
         frappe.set_user(self.sales)
         with self.assertRaises(frappe.PermissionError):
             delete_strategy_opportunity(opportunity["id"])
         self.assertTrue(frappe.db.exists("CRM Opportunity", opportunity["id"]))
+        self.assertEqual(self._probability_history_count(opportunity["id"]), 1)
+        self.assertEqual(frappe.db.count("CRM Opportunity Stage History", stage_rows), 1)
+        self.assertEqual(relation_counts(), (1, 1))
 
         frappe.set_user("Administrator")
         self.assertEqual(
@@ -333,3 +581,7 @@ class TestOpportunityApi(FrappeTestCase):
             {"id": opportunity["id"], "status": "Deleted"},
         )
         self.assertFalse(frappe.db.exists("CRM Opportunity", opportunity["id"]))
+        self.assertEqual(self._probability_history_count(opportunity["id"]), 0)
+        self.assertEqual(frappe.db.count("CRM Opportunity Stage History", stage_rows), 0)
+        self.assertEqual(frappe.db.count("CRM Opportunity History", stage_rows), 0)
+        self.assertEqual(relation_counts(), (0, 0))

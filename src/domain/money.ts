@@ -22,13 +22,6 @@ export function addMoney(values: DecimalAmount[]): DecimalAmount {
   return fromCents(values.reduce((total, value) => total + cents(value), 0n))
 }
 
-export function weightedMoney(value: DecimalAmount, probability: number): DecimalAmount {
-  if (!Number.isInteger(probability) || probability < 0 || probability > 100) {
-    throw new Error('Probability must be an integer from 0 to 100')
-  }
-  return fromCents((cents(value) * BigInt(probability) + 50n) / 100n)
-}
-
 export function moneyByCurrency<T extends { currency: string; amount: DecimalAmount }>(rows: T[]) {
   const buckets = new Map<string, DecimalAmount[]>()
   rows.forEach((row) => {

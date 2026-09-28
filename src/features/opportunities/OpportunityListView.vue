@@ -6,18 +6,25 @@ import { BriefcaseBusiness, Kanban, List, Plus } from '@lucide/vue'
 import { useRoute, useRouter } from 'vue-router'
 import { api as defaultApi, type CrmApi } from '@/api'
 import { mapRequestError } from '@/api/request-state'
-import { OPPORTUNITY_STAGES } from '@/domain/opportunity-probability'
+import {
+  OPPORTUNITY_PROBABILITY_LEVELS,
+  PENDING_PROBABILITY_LEVEL_FILTER,
+  matchesOpportunityProbabilityLevelFilter,
+  normalizeOpportunityProbabilityLevelFilter,
+  opportunityProbabilityLevelLabel,
+  opportunityProbabilityLevelTone,
+} from '@/domain/opportunity-probability'
+import { OPPORTUNITY_STAGES, OPTIONAL_OPPORTUNITY_STAGE, isOpportunityStage, opportunityStageLabel } from '@/domain/opportunity-stages'
 import DataState from '@/design-system/DataState.vue'
 import StatusBadge from '@/design-system/StatusBadge.vue'
 import PaginationControls from '@/features/shared/PaginationControls.vue'
 import { readAllPages } from '@/features/shared/read-all-pages'
 import OpportunityEditorModal from './OpportunityEditorModal.vue'
 import { useAppStore } from '@/stores/app'
-import type { AccountSummaryDto, SiteDto, Tone } from '@/types/crm'
-import type { CreateStrategyOpportunityInput, StrategyOpportunityDto } from '@/types/workspaces'
+import type { AccountSummaryDto, SiteDto } from '@/types/crm'
+import type { CreateStrategyOpportunityInput, OpportunityProbabilityLevelFilter, StrategyOpportunityDto } from '@/types/workspaces'
 import { formatMoney, moneyByCurrency } from '@/domain/money'
 import { useI18n, useLocaleMessage } from '@/i18n'
-import { salesEnumLabel } from '@/features/shared/sales-i18n'
 
 const props = withDefaults(defineProps<{ apiClient?: CrmApi }>(), { apiClient: () => defaultApi })
 const app = useAppStore()
@@ -38,12 +45,11 @@ const busy = ref(false)
 const modalError = useLocaleMessage()
 const editorOpen = ref(false)
 const layout = ref<'list' | 'board'>('list')
-const stage = ref(typeof route.query.status === 'string' ? route.query.status : 'All')
-const forecast = ref(typeof route.query.forecast === 'string' ? route.query.forecast : 'All')
+const stage = ref(normalizeStageFilter(route.query.status))
+const probabilityLevel = ref<OpportunityProbabilityLevelFilter>(normalizeOpportunityProbabilityLevelFilter(route.query.probabilityLevel))
 const owner = ref(typeof route.query.owner === 'string' ? route.query.owner : 'All')
 let sequence = 0
 const canWrite = computed(() => app.can('deal:write'))
-const forecasts = computed(() => [...new Set(rows.value.map((item) => item.forecast))].sort())
 const owners = computed(() => [...new Set(rows.value.map((item) => item.owner))].sort())
 const requestedAccountId = computed(() => typeof route.query.accountId === 'string' ? route.query.accountId : '')
 const requestedOpportunityId = computed(() => typeof route.query.opportunityId === 'string' ? route.query.opportunityId : '')
@@ -54,7 +60,7 @@ const opportunityAccounts = computed(() => {
 const visibleRows = computed(() => {
   return rows.value.filter((item) =>
     (stage.value === 'All' || item.stage === stage.value) &&
-    (forecast.value === 'All' || item.forecast === forecast.value) &&
+    matchesOpportunityProbabilityLevelFilter(item.probabilityLevel, probabilityLevel.value) &&
     (owner.value === 'All' || item.owner === owner.value),
   )
 })
@@ -68,14 +74,12 @@ const visibleBoardRows = computed(() => Object.fromEntries(
 function loadMoreStage(stageName: (typeof OPPORTUNITY_STAGES)[number]) { boardLimits.value[stageName] += 5 }
 function resetBoardLimits() { OPPORTUNITY_STAGES.forEach((item) => { boardLimits.value[item] = 5 }) }
 
-function forecastTone(value: string): Tone {
-  if (value === 'Commit') return 'positive'
-  if (value === 'Best Case') return 'warning'
-  return 'info'
+// A bookmarked link may still carry a retired stage name; it falls back to all stages.
+function normalizeStageFilter(value: unknown): string {
+  return isOpportunityStage(value) ? value : 'All'
 }
 function stageLabel(value: string) {
-  const key: Record<string, string> = { '需求发现': 'opportunities.stage.discovery', 'Wafer Demo确认': 'opportunities.stage.waferDemo', '预算审批': 'opportunities.stage.budget', '设备规格确认': 'opportunities.stage.specification', '报价': 'opportunities.stage.quotation', '采购流程': 'opportunities.stage.procurement', Won: 'opportunities.stage.won', Lost: 'opportunities.stage.lost' }
-  return t(key[value] || value)
+  return opportunityStageLabel(value, locale.value)
 }
 function stageMoney(items: StrategyOpportunityDto[]) {
   return moneyByCurrency(items).map((item) => formatMoney(item.amount, item.currency)).join(' · ')
@@ -83,11 +87,11 @@ function stageMoney(items: StrategyOpportunityDto[]) {
 function resetFilters() {
   page.value = 1
   stage.value = 'All'
-  forecast.value = 'All'
+  probabilityLevel.value = 'All'
   owner.value = 'All'
 }
 let restoringRoute = false
-function syncUrl() { if (!restoringRoute) void router.replace({ query: { ...route.query, page: String(page.value), pageSize: String(pageSize.value), status: stage.value === 'All' ? undefined : stage.value, forecast: forecast.value === 'All' ? undefined : forecast.value, owner: owner.value === 'All' ? undefined : owner.value } }) }
+function syncUrl() { if (!restoringRoute) void router.replace({ query: { ...route.query, page: String(page.value), pageSize: String(pageSize.value), status: stage.value === 'All' ? undefined : stage.value, probabilityLevel: probabilityLevel.value === 'All' ? undefined : probabilityLevel.value, owner: owner.value === 'All' ? undefined : owner.value } }) }
 function goPage(target: number) { page.value = target; syncUrl(); void load() }
 function changePageSize(value: number) { pageSize.value = value; page.value = 1; syncUrl(); void load() }
 function reloadFromFirstPage() { if (restoringRoute) return; page.value = 1; resetBoardLimits(); syncUrl(); void load() }
@@ -98,7 +102,7 @@ async function load() {
   error.value = ''
   try {
     const [opportunityResult, accountRows] = await Promise.all([
-      props.apiClient.listStrategyOpportunities({ page: page.value, pageSize: pageSize.value, status: stage.value, forecast: forecast.value, owner: owner.value, accountId: requestedAccountId.value, contactId: typeof route.query.contactId === 'string' ? route.query.contactId : '', opportunityId: requestedOpportunityId.value }),
+      props.apiClient.listStrategyOpportunities({ page: page.value, pageSize: pageSize.value, status: stage.value, probabilityLevel: probabilityLevel.value, owner: owner.value, accountId: requestedAccountId.value, contactId: typeof route.query.contactId === 'string' ? route.query.contactId : '', opportunityId: requestedOpportunityId.value }),
       readAllPages((currentPage, currentPageSize) => props.apiClient.listAccounts({ page: currentPage, pageSize: currentPageSize })),
     ])
     if (current !== sequence) return
@@ -146,13 +150,14 @@ onMounted(async () => {
   await load()
   if (route.query.create === '1' && canWrite.value) editorOpen.value = true
 })
-watch([stage, forecast, owner], reloadFromFirstPage, { flush: 'sync' })
-watch(() => [route.query.page, route.query.pageSize, route.query.status, route.query.forecast, route.query.owner], ([nextPage, nextSize, nextStage, nextForecast, nextOwner]) => {
+watch([stage, probabilityLevel, owner], reloadFromFirstPage, { flush: 'sync' })
+watch(() => [route.query.page, route.query.pageSize, route.query.status, route.query.probabilityLevel, route.query.owner], ([nextPage, nextSize, nextStage, nextLevel, nextOwner]) => {
   const restoredPage = typeof nextPage === 'string' && Number(nextPage) > 0 ? Number(nextPage) : 1
   const restoredSize = typeof nextSize === 'string' && [10, 12, 25, 50].includes(Number(nextSize)) ? Number(nextSize) : 12
-  const values = [typeof nextStage === 'string' ? nextStage : 'All', typeof nextForecast === 'string' ? nextForecast : 'All', typeof nextOwner === 'string' ? nextOwner : 'All']
-  if (restoredPage === page.value && restoredSize === pageSize.value && values[0] === stage.value && values[1] === forecast.value && values[2] === owner.value) return
-  restoringRoute = true; page.value = restoredPage; pageSize.value = restoredSize; stage.value = values[0]!; forecast.value = values[1]!; owner.value = values[2]!; restoringRoute = false; resetBoardLimits(); void load()
+  const values = [normalizeStageFilter(nextStage), typeof nextOwner === 'string' ? nextOwner : 'All']
+  const restoredLevel = normalizeOpportunityProbabilityLevelFilter(nextLevel)
+  if (restoredPage === page.value && restoredSize === pageSize.value && values[0] === stage.value && restoredLevel === probabilityLevel.value && values[1] === owner.value) return
+  restoringRoute = true; page.value = restoredPage; pageSize.value = restoredSize; stage.value = values[0]!; probabilityLevel.value = restoredLevel; owner.value = values[1]!; restoringRoute = false; resetBoardLimits(); void load()
 })
 </script>
 
@@ -170,7 +175,7 @@ watch(() => [route.query.page, route.query.pageSize, route.query.status, route.q
 
     <div class="opportunity-list-toolbar">
       <select v-model="stage" :aria-label="t('opportunities.allStages')"><option value="All">{{ t('opportunities.allStages') }}</option><option v-for="item in OPPORTUNITY_STAGES" :key="item" :value="item">{{ stageLabel(item) }}</option></select>
-      <select v-model="forecast" :aria-label="t('opportunities.allForecasts')"><option value="All">{{ t('opportunities.allForecasts') }}</option><option v-for="item in forecasts" :key="item" :value="item">{{ salesEnumLabel(item, locale) }}</option></select>
+      <select v-model="probabilityLevel" :aria-label="t('opportunities.allProbabilityLevels')"><option value="All">{{ t('opportunities.allProbabilityLevels') }}</option><option v-for="level in OPPORTUNITY_PROBABILITY_LEVELS" :key="level" :value="level">{{ opportunityProbabilityLevelLabel(level, locale) }}</option><option :value="PENDING_PROBABILITY_LEVEL_FILTER">{{ opportunityProbabilityLevelLabel('', locale) }}</option></select>
       <select v-model="owner" :aria-label="t('opportunities.allOwners')"><option value="All">{{ t('opportunities.allOwners') }}</option><option v-for="item in owners" :key="item" :value="item">{{ personnelDisplayName(item) }}</option></select>
       <div class="opportunity-layout-switch" :aria-label="t('opportunities.viewMode')">
         <button type="button" data-opportunity-layout="list" :class="{ active: layout === 'list' }" :aria-label="t('opportunities.listView')" @click="layout = 'list'"><List :size="14" />{{ t('opportunities.list') }}</button>
@@ -187,7 +192,7 @@ watch(() => [route.query.page, route.query.pageSize, route.query.status, route.q
       <DataState v-else-if="!visibleRows.length" type="empty" :title="t('opportunities.emptyTitle')" :message="t('opportunities.emptyMessage')" />
       <div v-else-if="layout === 'list'" class="table-scroll">
         <table class="crm-table opportunity-table">
-          <thead><tr><th data-testid="opportunity-number-header">{{ t('opportunities.number') }}</th><th>{{ t('oppEditor.name') }}</th><th>{{ t('detail.account') }} / {{ t('detail.site') }}</th><th>{{ t('oppEditor.stage') }}</th><th>{{ t('detail.closeDate') }}</th><th>{{ t('detail.amount') }}</th><th>{{ t('opportunities.winProbability') }}</th><th>{{ t('opportunities.purchaseIntent') }}</th><th>{{ t('oppEditor.forecast') }}</th><th>{{ t('detail.owner') }}</th><th>{{ t('detail.updated') }}</th></tr></thead>
+          <thead><tr><th data-testid="opportunity-number-header">{{ t('opportunities.number') }}</th><th>{{ t('oppEditor.name') }}</th><th>{{ t('detail.account') }} / {{ t('detail.site') }}</th><th>{{ t('oppEditor.stage') }}</th><th>{{ t('detail.closeDate') }}</th><th>{{ t('detail.amount') }}</th><th>{{ t('oppEditor.probabilityLevel') }}</th><th>{{ t('opportunities.purchaseIntent') }}</th><th>{{ t('detail.owner') }}</th><th>{{ t('detail.updated') }}</th></tr></thead>
           <tbody>
             <tr v-for="item in visibleRows" :key="item.id" :data-opportunity-id="item.id">
               <td class="opportunity-number" :data-opportunity-number="item.id">{{ item.id }}</td>
@@ -196,9 +201,8 @@ watch(() => [route.query.page, route.query.pageSize, route.query.status, route.q
               <td><strong>{{ stageLabel(item.stage) }}</strong></td>
               <td>{{ formatDisplayDate(item.poDate) }}</td>
               <td><strong>{{ formatMoney(item.amount, item.currency) }}</strong><small>{{ locale === 'en-US' ? 'Original' : '原始金额' }} {{ formatMoney(item.originalAmount, item.currency) }}</small></td>
-              <td data-opportunity-probability><strong class="calculated-probability">{{ item.probability }}%</strong><small>{{ t('opportunities.probabilityFormula') }}</small></td>
+              <td data-opportunity-probability-level><StatusBadge :label="opportunityProbabilityLevelLabel(item.probabilityLevel, locale)" :tone="opportunityProbabilityLevelTone(item.probabilityLevel)" /></td>
               <td data-opportunity-intent><strong class="purchase-intent">{{ item.score }}/100</strong><small>{{ item.score >= 70 ? t('opportunities.highIntent') : item.score >= 50 ? t('opportunities.mediumIntent') : t('opportunities.lowIntent') }}</small></td>
-              <td><StatusBadge :label="salesEnumLabel(item.forecast, locale)" :tone="forecastTone(item.forecast)" /></td>
               <td>{{ personnelDisplayName(item.owner) }}</td>
               <td>{{ formatDisplayDate(item.updated) }}</td>
             </tr>
@@ -209,17 +213,17 @@ watch(() => [route.query.page, route.query.pageSize, route.query.status, route.q
         <div class="opportunity-board">
           <section v-for="stageName in OPPORTUNITY_STAGES" :key="stageName" class="opportunity-board-column" :data-opportunity-stage="stageName">
             <header>
-              <div><strong>{{ stageLabel(stageName) }}</strong><span>{{ t('opportunities.count', { count: boardRows[stageName].length }) }}</span></div>
+              <div><strong>{{ stageLabel(stageName) }}<small v-if="stageName === OPTIONAL_OPPORTUNITY_STAGE" class="optional-stage-marker" data-stage-marker="optional">{{ t('detail.optionalStage') }}</small></strong><span>{{ t('opportunities.count', { count: boardRows[stageName].length }) }}</span></div>
               <em>{{ stageMoney(boardRows[stageName]) }}</em>
             </header>
             <div class="opportunity-board-cards">
               <article v-for="item in visibleBoardRows[stageName]" :key="item.id" class="opportunity-board-card" :data-opportunity-id="item.id">
-                <div class="board-card-topline"><span>{{ item.id }}</span><StatusBadge :label="salesEnumLabel(item.forecast, locale)" :tone="forecastTone(item.forecast)" /></div>
+                <div class="board-card-topline"><span>{{ item.id }}</span><StatusBadge :label="opportunityProbabilityLevelLabel(item.probabilityLevel, locale)" :tone="opportunityProbabilityLevelTone(item.probabilityLevel)" data-opportunity-board-probability-level /></div>
                 <RouterLink class="record-link" :to="{ name: 'opportunity-detail', params: { opportunityId: item.id } }" :data-opportunity-board-link="item.id">{{ item.title }}</RouterLink>
                 <p>{{ item.account }}<small>{{ item.site }}</small></p>
                 <dl>
                   <div><dt>{{ t('detail.amount') }}</dt><dd>{{ formatMoney(item.amount, item.currency) }}</dd></div>
-                  <div><dt>{{ t('opportunities.winProbability') }}</dt><dd>{{ item.probability }}%</dd></div>
+                  <div><dt>{{ t('opportunities.purchaseIntent') }}</dt><dd>{{ item.score }}/100</dd></div>
                 </dl>
                 <footer><span>{{ personnelDisplayName(item.owner) }}</span><time>{{ formatDisplayDate(item.poDate) }}</time></footer>
               </article>
@@ -231,12 +235,12 @@ watch(() => [route.query.page, route.query.pageSize, route.query.status, route.q
       <PaginationControls v-if="layout === 'list' && !denied && !error && total > pageSize" :page="page" :page-size="pageSize" :total="total" @change="goPage" @page-size-change="changePageSize" />
     </div>
 
-    <OpportunityEditorModal v-if="editorOpen" :accounts="opportunityAccounts" :sites-by-account="sitesByAccount" :default-owner="app.bootstrap?.user.id ?? ''" :busy="busy" :error="modalError" @close="editorOpen = false" @submit="saveOpportunity" />
+    <OpportunityEditorModal v-if="editorOpen" :accounts="opportunityAccounts" :sites-by-account="sitesByAccount" :default-owner="app.bootstrap?.user.id ?? ''" :current-user-id="app.bootstrap?.user.id ?? ''" :busy="busy" :error="modalError" @close="editorOpen = false" @submit="saveOpportunity" />
   </section>
 </template>
 
 <style scoped>
-.opportunity-list-view{display:grid;gap:12px}.opportunity-list-heading{display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;gap:12px;padding:14px 16px;background:#fff;border:1px solid var(--crm-line);border-radius:12px}.opportunity-title-mark{display:grid;width:42px;height:42px;place-items:center;color:var(--crm-brand-ink);background:var(--crm-brand-soft);border-radius:12px}.opportunity-list-heading>div:nth-child(2){display:grid;gap:3px}.opportunity-list-heading span{color:var(--crm-text-muted);font-size:8px;font-weight:800;letter-spacing:.12em}.opportunity-list-heading h2{margin:0;color:var(--crm-navy);font-size:19px;letter-spacing:-.02em}.opportunity-list-heading p{margin:0;color:var(--crm-text-muted);font-size:9px}.opportunity-list-heading .primary-button{display:flex;align-items:center;gap:6px}.opportunity-list-toolbar{display:flex;align-items:center;gap:8px;padding:11px 13px;background:#fff;border:1px solid var(--crm-line);border-radius:12px}.opportunity-list-toolbar select{height:38px;padding:0 10px;color:var(--crm-text);background:#fff;border:1px solid var(--crm-line);border-radius:10px;outline:0;font:inherit;font-size:9px}.opportunity-list-toolbar select:focus{border-color:rgba(254,153,0,.74);box-shadow:0 0 0 3px rgba(254,153,0,.1)}.opportunity-list-toolbar>span{margin-left:auto;color:var(--crm-text-muted);font-size:9px;white-space:nowrap}.opportunity-list-toolbar>button{padding:8px;color:var(--crm-teal);background:transparent;border:0;border-radius:8px;font:inherit;font-size:9px;font-weight:800;cursor:pointer}.opportunity-list-toolbar>button:hover{background:var(--crm-teal-soft)}.opportunity-table-card{min-height:310px;overflow:hidden;background:#fff;border:1px solid var(--crm-line);border-radius:12px}.opportunity-table{min-width:1260px}.opportunity-table th:first-child,.opportunity-table td:first-child{width:70px;text-align:center}.opportunity-table td>a,.opportunity-table td>strong,.opportunity-table td>small{display:block}.opportunity-table td>a{color:var(--crm-teal)}.opportunity-table td>a strong{font-size:10px}.opportunity-table td small,.opportunity-table td>a small{margin-top:4px;color:var(--crm-text-muted);font-size:8px}.opportunity-number{color:var(--crm-text-muted);font-size:9px;font-weight:800;white-space:nowrap}.calculated-probability,.purchase-intent{color:var(--crm-teal);font-size:12px;font-variant-numeric:tabular-nums}@media(max-width:980px){.opportunity-list-toolbar{align-items:stretch;flex-wrap:wrap}.opportunity-list-toolbar>span{margin-left:0}.opportunity-list-toolbar .crm-search-control{flex:1 1 100%}}@media(max-width:700px){.opportunity-list-heading{grid-template-columns:auto 1fr}.opportunity-list-heading .primary-button{grid-column:1/-1;justify-content:center}.opportunity-list-toolbar{display:grid}.opportunity-list-toolbar>span{margin:0}}
+.opportunity-list-view{display:grid;gap:12px}.opportunity-list-heading{display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;gap:12px;padding:14px 16px;background:#fff;border:1px solid var(--crm-line);border-radius:12px}.opportunity-title-mark{display:grid;width:42px;height:42px;place-items:center;color:var(--crm-brand-ink);background:var(--crm-brand-soft);border-radius:12px}.opportunity-list-heading>div:nth-child(2){display:grid;gap:3px}.opportunity-list-heading span{color:var(--crm-text-muted);font-size:8px;font-weight:800;letter-spacing:.12em}.opportunity-list-heading h2{margin:0;color:var(--crm-navy);font-size:19px;letter-spacing:-.02em}.opportunity-list-heading p{margin:0;color:var(--crm-text-muted);font-size:9px}.opportunity-list-heading .primary-button{display:flex;align-items:center;gap:6px}.opportunity-list-toolbar{display:flex;align-items:center;gap:8px;padding:11px 13px;background:#fff;border:1px solid var(--crm-line);border-radius:12px}.opportunity-list-toolbar select{height:38px;padding:0 10px;color:var(--crm-text);background:#fff;border:1px solid var(--crm-line);border-radius:10px;outline:0;font:inherit;font-size:9px}.opportunity-list-toolbar select:focus{border-color:rgba(254,153,0,.74);box-shadow:0 0 0 3px rgba(254,153,0,.1)}.opportunity-list-toolbar>span{margin-left:auto;color:var(--crm-text-muted);font-size:9px;white-space:nowrap}.opportunity-list-toolbar>button{padding:8px;color:var(--crm-teal);background:transparent;border:0;border-radius:8px;font:inherit;font-size:9px;font-weight:800;cursor:pointer}.opportunity-list-toolbar>button:hover{background:var(--crm-teal-soft)}.opportunity-table-card{min-height:310px;overflow:hidden;background:#fff;border:1px solid var(--crm-line);border-radius:12px}.opportunity-table{min-width:1260px}.opportunity-table th:first-child,.opportunity-table td:first-child{width:70px;text-align:center}.opportunity-table td>a,.opportunity-table td>strong,.opportunity-table td>small{display:block}.opportunity-table td>a{color:var(--crm-teal)}.opportunity-table td>a strong{font-size:10px}.opportunity-table td small,.opportunity-table td>a small{margin-top:4px;color:var(--crm-text-muted);font-size:8px}.opportunity-number{color:var(--crm-text-muted);font-size:9px;font-weight:800;white-space:nowrap}.purchase-intent{color:var(--crm-teal);font-size:12px;font-variant-numeric:tabular-nums}@media(max-width:980px){.opportunity-list-toolbar{align-items:stretch;flex-wrap:wrap}.opportunity-list-toolbar>span{margin-left:0}.opportunity-list-toolbar .crm-search-control{flex:1 1 100%}}@media(max-width:700px){.opportunity-list-heading{grid-template-columns:auto 1fr}.opportunity-list-heading .primary-button{grid-column:1/-1;justify-content:center}.opportunity-list-toolbar{display:grid}.opportunity-list-toolbar>span{margin:0}}
 </style>
 
 <style scoped>
@@ -249,6 +253,7 @@ watch(() => [route.query.page, route.query.pageSize, route.query.status, route.q
 .opportunity-board-column>header{display:grid;gap:7px;padding:12px 13px;background:#fff;border-top:3px solid var(--crm-teal)}
 .opportunity-board-column>header div{display:flex;align-items:center;justify-content:space-between;gap:8px}
 .opportunity-board-column>header strong{color:var(--crm-navy);font-size:10px}
+.optional-stage-marker{margin-left:6px;padding:1px 5px;color:var(--crm-text-muted);border:1px dashed #b9b2a8;border-radius:999px;font-size:7px;font-weight:700}
 .opportunity-board-column>header span{color:var(--crm-text-muted);font-size:8px}
 .opportunity-board-column>header em{color:var(--crm-teal);font-size:13px;font-style:normal;font-weight:800}
 .opportunity-board-cards{display:grid;align-content:start;gap:9px;padding:10px}

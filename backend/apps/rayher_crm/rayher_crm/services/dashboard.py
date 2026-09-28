@@ -14,6 +14,7 @@ from rayher_crm.services.accounts import list_accounts
 from rayher_crm.services.demo_requests import list_demo_requests
 from rayher_crm.services.evaluations import list_evaluations
 from rayher_crm.services.opportunities import list_strategy_opportunities
+from rayher_crm.services.opportunity_stages import OPEN_STAGES, PO_RECEIVED
 from rayher_crm.services.pipeline import actions_for_account, list_pipeline
 from rayher_crm.services.common import to_iso_timestamp
 from rayher_crm.services.visits import list_visits
@@ -45,13 +46,6 @@ def _money(value: Decimal) -> str:
 
 def _sum_amount(rows: list[dict]) -> Decimal:
     return sum((as_decimal(row["amount"]) for row in rows), Decimal("0.00"))
-
-
-def _weighted_amount(rows: list[dict]) -> Decimal:
-    return sum(
-        (as_decimal(row["amount"]) * Decimal(row["probability"]) / Decimal(100) for row in rows),
-        Decimal("0.00"),
-    )
 
 
 def _amount_by(rows: list[dict], read_label: Callable[[dict], str], read_amount: Callable[[dict], Any]) -> list[dict]:
@@ -90,12 +84,12 @@ def get_dashboard(query: dict[str, Any]) -> dict[str, Any]:
         if "visit:view" in capabilities_for_user()
         else []
     )
-    open_opportunities = [item for item in opportunities if item["stage"] not in {"Won", "Lost"}]
+    open_opportunities = [item for item in opportunities if item["stage"] in OPEN_STAGES]
     confirmed = [item for item in bookings if item["status"] == "Confirmed"]
     as_of = to_iso_timestamp(frappe.utils.now_datetime())
     today = as_of[:10]
 
-    stage_labels = ["需求发现", "Wafer Demo确认", "预算审批", "设备规格确认", "报价", "采购流程"]
+    stage_labels = list(OPEN_STAGES)
     funnel = []
     for stage in stage_labels:
         rows = [item for item in open_opportunities if item["stage"] == stage]
@@ -105,7 +99,6 @@ def get_dashboard(query: dict[str, Any]) -> dict[str, Any]:
                 "stage": stage,
                 "currency": currency,
                 "amount": _money(_sum_amount(currency_rows)),
-                "weightedAmount": _money(_weighted_amount(currency_rows)),
                 "count": len(currency_rows),
             })
     owners = sorted({item["owner"] for item in [*open_opportunities, *confirmed]})
@@ -118,7 +111,6 @@ def get_dashboard(query: dict[str, Any]) -> dict[str, Any]:
             owner_performance.append({
                 "owner": owner, "currency": currency,
                 "pipeline": _money(_sum_amount(owner_open)),
-                "weightedPipeline": _money(_weighted_amount(owner_open)),
                 "booking": _money(_sum_amount(owner_bookings)),
             })
     account_map = {item["id"]: item for item in accounts}
@@ -166,9 +158,8 @@ def get_dashboard(query: dict[str, Any]) -> dict[str, Any]:
             "moneyByCurrency": [{
                 "currency": currency,
                 "openPipeline": _money(_sum_amount([item for item in open_opportunities if item["currency"] == currency])),
-                "weightedPipeline": _money(_weighted_amount([item for item in open_opportunities if item["currency"] == currency])),
                 "confirmedBooking": _money(_sum_amount([item for item in confirmed if item["currency"] == currency])),
-                "cumulativeWon": _money(_sum_amount([item for item in opportunities if item["stage"] == "Won" and item["currency"] == currency])),
+                "cumulativeWon": _money(_sum_amount([item for item in opportunities if item["stage"] == PO_RECEIVED and item["currency"] == currency])),
             } for currency in sorted({item["currency"] for item in [*opportunities, *bookings]})],
             "overdueActions": sum(item["status"] == "Open" and item["due"] < today for item in actions),
             "pendingDemoRequests": sum(item["status"] in {"Engineer Review", "Manager Approval"} for item in demos),

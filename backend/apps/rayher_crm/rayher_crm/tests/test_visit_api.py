@@ -7,6 +7,7 @@ from rayher_crm.api.v1.errors import CrmApiException
 from rayher_crm.services.accounts import create_account
 from rayher_crm.services.contacts import create_contact
 from rayher_crm.services.opportunities import create_strategy_opportunity
+from rayher_crm.services.opportunity_stages import QUALIFIED_OPPORTUNITY
 from rayher_crm.services.sites import create_site
 from rayher_crm.services.visit_meetings import update_record as update_meeting_record
 from rayher_crm.services.visit_meetings import upload as upload_meeting_file
@@ -85,11 +86,11 @@ class TestVisitApi(FrappeTestCase):
         })
         opportunity = create_strategy_opportunity({
             "accountId": account["id"], "siteId": site["id"], "title": "CIS defect inspection",
-            "owner": self.sales, "stage": "需求发现", "forecast": "Pipeline", "amount": "4860000",
+            "owner": self.sales, "stage": QUALIFIED_OPPORTUNITY, "forecast": "Pipeline", "amount": "4860000",
             "probability": 20, "intentScore": 35, "poDate": "2026-12-31", "toolType": "Inspection",
             "saleType": "New Equipment", "subRegion": "East", "currency": "CNY",
             "originalAmount": "4860000", "paymentMilestones": [], "strengths": [],
-            "redFlags": [], "informationNeeded": [],
+            "redFlags": [], "informationNeeded": [], "qualificationConfirmed": True,
         })
         created = create_visit(self._input(account, contact, self.sales, opportunityId=opportunity["id"]))
         self.assertRegex(created["id"], r"^CRM-VIS-\d{5}$")

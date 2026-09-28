@@ -5,10 +5,10 @@ from frappe.tests.utils import FrappeTestCase
 
 from rayher_crm.api.v1.errors import CrmApiException
 from rayher_crm.services.accounts import create_account
-from rayher_crm.services.bookings import create_booking
 from rayher_crm.services.contacts import create_contact
 from rayher_crm.services.dashboard import get_dashboard
 from rayher_crm.services.opportunities import create_opportunity_action, create_strategy_opportunity
+from rayher_crm.services.opportunity_stages import PO_RECEIVED, QUALIFIED_OPPORTUNITY
 from rayher_crm.tests._opportunity_fixtures import advance_opportunity_fixture
 from rayher_crm.services.sites import create_site
 from rayher_crm.services.stakeholders import create_stakeholder, list_stakeholders, update_stakeholder
@@ -54,45 +54,50 @@ class TestStage5GDashboardStakeholders(FrappeTestCase):
         })
         return account, site, contact
 
-    def _opportunity(self, account: dict, site: dict, owner: str, title: str, stage: str, amount: int, probability: int):
+    def _opportunity(
+        self, account: dict, site: dict, owner: str, title: str, stage: str, amount: int,
+        booking: dict | None = None,
+    ):
         opportunity = create_strategy_opportunity({
             "accountId": account["id"], "siteId": site["id"], "title": title,
-            "owner": owner, "stage": "需求发现", "forecast": "Pipeline",
-            "amount": amount, "probability": probability, "intentScore": 70,
+            "owner": owner, "stage": QUALIFIED_OPPORTUNITY, "amount": amount, "intentScore": 70,
             "poDate": "2026-12-31", "toolType": "Inspection", "saleType": "New Equipment",
-            "subRegion": "East", "currency": "CNY", "originalAmount": amount,
+            "subRegion": "East", "currency": "CNY", "originalAmount": amount, "qualificationConfirmed": True,
         })
-        changes = {"forecast": "Closed"} if stage == "Won" else None
-        return advance_opportunity_fixture(opportunity, stage, changes)
+        return advance_opportunity_fixture(opportunity, stage, booking=booking)
 
     def test_dashboard_shape_aggregations_scope_and_query_validation(self):
         account, site, contact = self._base(self.sales, "Core")
-        opened = self._opportunity(account, site, self.sales, "Dashboard Open", "Wafer Demo确认", 1000, 25)
-        won = self._opportunity(account, site, self.sales, "Dashboard Won", "Won", 500, 100)
+        opened = self._opportunity(account, site, self.sales, "Dashboard Open", QUALIFIED_OPPORTUNITY, 1000)
+        won = self._opportunity(account, site, self.sales, "Dashboard Won", PO_RECEIVED, 500, booking={
+            "primaryContactId": contact["id"], "equipment": "Inspection", "quantity": 1, "ddl": "2026-12-31",
+            "amount": "500.00", "currency": "CNY", "owner": self.sales, "note": "",
+        })
         create_opportunity_action(opened["id"], {
             "title": "Overdue action", "owner": self.sales, "due": "2026-08-01", "status": "Open",
         })
         booking_date = "2026-08-20"
-        booking = create_booking({
-            "accountId": account["id"], "primaryContactId": contact["id"], "equipment": "Inspection",
-            "quantity": 1, "ddl": "2026-12-31", "amount": "500.00", "currency": "CNY", "status": "Confirmed",
-            "owner": self.sales, "source": "Opportunity", "sourceOpportunityId": won["id"], "note": "",
-        })
+        booking = won["liveBooking"]
         frappe.db.set_value("CRM Booking", booking["id"], "booking_date", booking_date)
         create_visit({
             "accountId": account["id"], "primaryContactId": contact["id"], "subject": "Dashboard Visit",
             "date": "2026-08-20", "type": "Video", "owner": self.sales, "objective": "Review",
         })
         foreign_account, foreign_site, _ = self._base(self.other_sales, "Foreign")
-        self._opportunity(foreign_account, foreign_site, self.other_sales, "Hidden Open", "Wafer Demo确认", 9000, 50)
+        self._opportunity(foreign_account, foreign_site, self.other_sales, "Hidden Open", QUALIFIED_OPPORTUNITY, 9000)
 
         frappe.set_user(self.sales)
         result = get_dashboard({"range": "month", "segment": "Frontend"})
         self.assertRegex(result["asOf"], r"Z$")
+        # A po_received Opportunity counts as won and leaves the open pipeline and the funnel.
         self.assertEqual(result["kpis"]["moneyByCurrency"], [{
-            "currency": "CNY", "openPipeline": "1000.00", "weightedPipeline": "610.00",
+            "currency": "CNY", "openPipeline": "1000.00",
             "confirmedBooking": "500.00", "cumulativeWon": "500.00",
         }])
+        self.assertEqual(
+            [(row["stage"], row["currency"], row["amount"], row["count"]) for row in result["funnel"]],
+            [(QUALIFIED_OPPORTUNITY, "CNY", "1000.00", 1)],
+        )
         self.assertEqual(result["kpis"]["overdueActions"], 1)
         self.assertEqual(result["process"]["requirementsByStatus"], [])
         self.assertEqual(result["process"]["budgetByStatus"], [])

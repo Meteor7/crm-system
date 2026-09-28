@@ -1,0 +1,17 @@
+{
+  "actions": [], "autoname": "hash", "creation": "2026-09-15 00:00:00.000000", "doctype": "DocType", "engine": "InnoDB",
+  "field_order": ["opportunity", "from_level", "to_level", "actor", "changed_at"],
+  "fields": [
+    {"fieldname": "opportunity", "fieldtype": "Link", "label": "Opportunity", "options": "CRM Opportunity", "reqd": 1},
+    {"fieldname": "from_level", "fieldtype": "Select", "label": "From Level", "options": "\nlow_probability\npipeline\nupside\ncommitted"},
+    {"fieldname": "to_level", "fieldtype": "Select", "label": "To Level", "options": "\nlow_probability\npipeline\nupside\ncommitted"},
+    {"fieldname": "actor", "fieldtype": "Link", "label": "Actor", "options": "User", "reqd": 1},
+    {"fieldname": "changed_at", "fieldtype": "Datetime", "label": "Changed At", "reqd": 1}
+  ],
+  "index_web_pages_for_search": 0, "modified": "2026-09-15 00:00:00.000000", "modified_by": "Administrator", "module": "Rayher CRM", "name": "CRM Opportunity Probability History", "naming_rule": "Random", "owner": "Administrator",
+  "permissions": [
+    {"read": 1, "role": "CRM Manager"},
+    {"read": 1, "role": "CRM Sales"},
+    {"read": 1, "role": "CRM Engineer"}
+  ], "sort_field": "changed_at", "sort_order": "DESC", "states": []
+}

@@ -17,9 +17,13 @@ import BookingEditorModal from '@/features/opportunities/BookingEditorModal.vue'
 import ContactModal from '@/features/contacts/ContactModal.vue'
 import { formatMoney, moneyByCurrency } from '@/domain/money'
 import { formatDisplayDate } from '@/domain/time'
+import { opportunityProbabilityLevelLabel, opportunityProbabilityLevelTone } from '@/domain/opportunity-probability'
+import { opportunityStageLabel } from '@/domain/opportunity-stages'
+import { useI18n } from '@/i18n'
 
 const props = withDefaults(defineProps<{ apiClient?: CrmApi; embedded?: boolean }>(), { apiClient: () => defaultApi, embedded: false })
 const app = useAppStore()
+const { locale } = useI18n()
 const route = useRoute()
 const router = useRouter()
 const opportunities = ref<StrategyOpportunityDto[]>([])
@@ -54,7 +58,7 @@ const contactSites = computed(() => Object.entries(sitesByAccount.value).flatMap
   sites.map((site) => ({ ...site, accountId })),
 ))
 const selected = computed(() => opportunities.value.find((item) => item.id === selectedId.value) ?? opportunities.value[0])
-const commitCount = computed(() => opportunities.value.filter((item) => item.forecast === 'Commit').length)
+const committedOpportunities = computed(() => opportunities.value.filter((item) => item.probabilityLevel === 'committed'))
 const coverageGapCount = computed(() => opportunities.value.reduce(
   (sum, item) => sum + item.stakeholders.filter((person) => !person.coverage || person.coverage === '尚未记录').length,
   0,
@@ -242,7 +246,7 @@ onMounted(async () => {
     <template v-else-if="mode === 'opportunity' && selected">
     <section class="workspace-metrics">
       <WorkspaceMetric label="重点机会金额" :value="currencyTotals(opportunities)" :detail="`${opportunities.length} 个重点机会`" delta="本季度" tone="info" :icon="CircleDollarSign" />
-      <WorkspaceMetric label="Commit" :value="currencyTotals(opportunities.filter((item) => item.forecast === 'Commit'))" detail="高确定性预测" :delta="`${commitCount} 个`" tone="positive" :icon="Target" />
+      <WorkspaceMetric :label="opportunityProbabilityLevelLabel('committed', locale)" :value="currencyTotals(committedOpportunities)" detail="高确定性预测" :delta="`${committedOpportunities.length} 个`" tone="positive" :icon="Target" />
       <WorkspaceMetric label="关系覆盖缺口" :value="String(coverageGapCount)" detail="尚无机会级覆盖证据" :delta="coverageGapCount ? '需管理介入' : '覆盖完整'" tone="warning" :icon="Users" />
       <WorkspaceMetric label="开放 Red Flag" :value="String(redFlagCount)" detail="当前已记录风险" :delta="redFlagCount ? '需本周处理' : '暂无风险记录'" tone="danger" :icon="AlertTriangle" />
       <WorkspaceMetric label="逾期 / 临期 Action" :value="String(nearDueActions.length)" detail="截至未来 7 天" :delta="`${nearDueOwnerCount} 位 Owner`" tone="warning" :icon="CalendarClock" />
@@ -253,19 +257,19 @@ onMounted(async () => {
         <header><h2>重点商机</h2><span>按管理优先级</span></header>
         <div class="workspace-panel-body workspace-list">
           <button v-for="item in opportunities" :key="item.id" class="workspace-select-card" :class="{ active: item.id === selected.id }" type="button" :data-opportunity-id="item.id" @click="selectedId = item.id">
-            <div class="card-line"><span class="workspace-badge" :class="item.forecast === 'Commit' ? 'positive' : item.forecast === 'Best Case' ? 'warning' : 'info'">{{ item.forecast }}</span></div>
+            <div class="card-line"><span class="workspace-badge" :class="opportunityProbabilityLevelTone(item.probabilityLevel)">{{ opportunityProbabilityLevelLabel(item.probabilityLevel, locale) }}</span></div>
             <strong>{{ item.title }}</strong><small>{{ item.account }} · {{ item.site }}</small>
-            <div class="card-line"><span>{{ formatMoney(item.amount, item.currency) }} · {{ item.probability }}%</span><em>{{ formatDisplayDate(item.updated) }}</em></div>
+            <div class="card-line"><span>{{ formatMoney(item.amount, item.currency) }}</span><em>{{ formatDisplayDate(item.updated) }}</em></div>
           </button>
         </div>
       </aside>
 
       <div class="strategy-main" data-testid="selected-opportunity">
         <section class="workspace-panel strategy-overview">
-          <header><div><span class="eyebrow">{{ selected.id }}</span><h2>{{ selected.title }}</h2></div><div class="inline-actions"><span class="workspace-badge" :class="selected.forecast === 'Commit' ? 'positive' : selected.forecast === 'Best Case' ? 'warning' : 'info'">{{ selected.forecast }}</span><button v-if="canWrite" class="secondary-button" type="button" data-testid="edit-opportunity" @click="openOpportunity('edit')"><Pencil :size="13" />编辑</button></div></header>
+          <header><div><span class="eyebrow">{{ selected.id }}</span><h2>{{ selected.title }}</h2></div><div class="inline-actions"><span class="workspace-badge" :class="opportunityProbabilityLevelTone(selected.probabilityLevel)">{{ opportunityProbabilityLevelLabel(selected.probabilityLevel, locale) }}</span><button v-if="canWrite" class="secondary-button" type="button" data-testid="edit-opportunity" @click="openOpportunity('edit')"><Pencil :size="13" />编辑</button></div></header>
           <div class="workspace-panel-body overview-grid">
             <div><small>Customer / Site</small><strong>{{ selected.account }}</strong><span>{{ selected.site }}</span></div>
-            <div><small>Stage / Probability</small><strong>{{ selected.stage }}</strong><span>{{ selected.probability }}%赢率</span></div>
+            <div><small>Stage / Probability</small><strong>{{ opportunityStageLabel(selected.stage, locale) }}</strong><span>{{ opportunityProbabilityLevelLabel(selected.probabilityLevel, locale) }}</span></div>
             <div><small>Amount</small><strong>{{ formatMoney(selected.amount, selected.currency) }}</strong><span>预计PO {{ formatDisplayDate(selected.poDate) }}</span></div>
             <div><small>Owner / Health</small><strong>{{ personnelDisplayName(selected.owner) }}</strong><span>策略评分 {{ selected.score }}/100</span></div>
           </div>
@@ -327,7 +331,7 @@ onMounted(async () => {
         </div>
       </section>
     </template>
-    <OpportunityEditorModal v-if="opportunityModal" :opportunity="opportunityModal === 'edit' ? selected : null" :accounts="opportunityAccounts" :sites-by-account="sitesByAccount" :default-owner="app.bootstrap?.user.id ?? ''" :busy="busy" :error="modalError" @close="opportunityModal = null" @submit="saveOpportunity" />
+    <OpportunityEditorModal v-if="opportunityModal" :opportunity="opportunityModal === 'edit' ? selected : null" :accounts="opportunityAccounts" :sites-by-account="sitesByAccount" :default-owner="app.bootstrap?.user.id ?? ''" :current-user-id="app.bootstrap?.user.id ?? ''" :busy="busy" :error="modalError" @close="opportunityModal = null" @submit="saveOpportunity" />
     <StakeholderEditorModal v-if="stakeholderModal && selected" :stakeholder="editingStakeholder" :contacts="contacts" :account-id="selected.accountId" :selected-contact-id="selectedContactId" :busy="busy" :error="modalError" @close="stakeholderModal = false" @create-contact="openContact" @submit="saveStakeholder" />
     <ContactModal v-if="contactModal" :accounts="accounts" :sites="contactSites" :contacts="contacts" :fixed-account-id="contactAccountId" :busy="busy" :error="modalError" @close="contactModal = false" @submit="saveContact" />
     <ActionEditorModal v-if="actionModal" :action="editingAction" :default-owner="app.bootstrap?.user.id ?? ''" :busy="busy" :error="modalError" @close="actionModal = false" @submit="saveAction" />

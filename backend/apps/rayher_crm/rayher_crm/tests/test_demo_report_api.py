@@ -15,6 +15,7 @@ from rayher_crm.services.evaluations import (
     update_evaluation_status,
 )
 from rayher_crm.services.opportunities import create_strategy_opportunity
+from rayher_crm.services.opportunity_stages import DEMO_DONE, QUALIFIED_OPPORTUNITY
 from rayher_crm.services.sites import create_site
 
 
@@ -74,10 +75,10 @@ class TestDemoReportApi(FrappeTestCase):
         opportunity = create_strategy_opportunity({
             "accountId": account.name, "siteId": site["id"],
             "title": f"Report Opportunity {unique}", "owner": self.sales,
-            "stage": "需求发现", "forecast": "Pipeline", "amount": 100000,
+            "stage": QUALIFIED_OPPORTUNITY, "forecast": "Pipeline", "amount": 100000,
             "intentScore": 70, "poDate": "2026-12-31", "toolType": "Inspection",
             "saleType": "New Equipment", "subRegion": "East China", "currency": "CNY",
-            "originalAmount": 100000,
+            "originalAmount": 100000, "qualificationConfirmed": True,
         })
         frappe.set_user("Administrator")
         request = frappe.get_doc({
@@ -549,10 +550,6 @@ class TestDemoReportApi(FrappeTestCase):
                 )
             self.assertEqual(missing.exception.code, "VALIDATION_ERROR")
 
-        current_user = frappe.session.user
-        frappe.set_user("Administrator")
-        frappe.db.set_value("CRM Opportunity", self.request.opportunity, "stage", "Wafer Demo确认")
-        frappe.set_user(current_user)
         archived = update_evaluation_status(
             self.evaluation.name,
             {"status": "Accepted", "customerComment": "Customer accepted the demo results"},
@@ -563,6 +560,8 @@ class TestDemoReportApi(FrappeTestCase):
             [(row["round"], row["comment"]) for row in archived["customerReviews"]],
             [(1, "Customer accepted the demo results")],
         )
+        # Customer Review already marked the demo as done; archiving does not move the Opportunity on.
+        self.assertEqual(frappe.db.get_value("CRM Opportunity", self.request.opportunity, "stage"), DEMO_DONE)
 
     def test_rejection_is_no_longer_reachable(self):
         evaluation = self._reach_customer_review(self.evaluation.name)

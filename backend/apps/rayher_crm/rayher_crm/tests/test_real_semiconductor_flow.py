@@ -7,7 +7,7 @@ from frappe.tests.utils import FrappeTestCase
 from pypdf import PdfWriter
 
 from rayher_crm.services.accounts import create_account, get_account_360
-from rayher_crm.services.bookings import create_booking, list_bookings
+from rayher_crm.services.bookings import get_booking, list_bookings
 from rayher_crm.services.contact_files import list_contact_files, upload_contact_files
 from rayher_crm.services.contacts import create_contact
 from rayher_crm.services.controlled_documents import render_controlled_document
@@ -29,7 +29,20 @@ from rayher_crm.services.installed_tools import (
     transition_installed_tool,
 )
 from rayher_crm.services.leads import create_lead, convert_lead
-from rayher_crm.services.opportunities import get_strategy_opportunity, update_strategy_opportunity
+from rayher_crm.services.opportunities import (
+    confirm_budget_approved,
+    confirm_po,
+    get_strategy_opportunity,
+    update_strategy_opportunity,
+)
+from rayher_crm.services.opportunity_stages import (
+    CUSTOMER_BUDGET_APPROVED,
+    DEMO_DONE,
+    PO_RECEIVED,
+    QUALIFIED_OPPORTUNITY,
+    QUOTATION_SENT,
+    RFQ_VALIDATED,
+)
 from rayher_crm.services.quotations import create_quotation, record_decision, review_approval, submit_for_approval
 from rayher_crm.services.rfqs import create_rfq, review_rfq, submit_engineer_comment
 from rayher_crm.services.sites import create_site
@@ -116,11 +129,11 @@ class TestRealSemiconductorFlow(FrappeTestCase):
             "accountId": account["id"], "contactId": procurement["id"], "siteId": site["id"],
             "opportunityTitle": "CIS 缺陷检测设备项目", "opportunityAmount": "4860000.00",
             "opportunityCloseDate": "2026-12-31", "opportunityOwner": self.sales,
-            "toolType": "CIS Wafer Defect Inspection",
+            "toolType": "CIS Wafer Defect Inspection", "qualificationConfirmed": True,
         })
         opportunity_id = converted["opportunityId"]
         opportunity = get_strategy_opportunity(opportunity_id)
-        self.assertEqual((opportunity["stage"], opportunity["amount"]), ("需求发现", "4860000.00"))
+        self.assertEqual((opportunity["stage"], opportunity["amount"]), (QUALIFIED_OPPORTUNITY, "4860000.00"))
 
         visit = create_visit({
             "accountId": account["id"], "primaryContactId": procurement["id"],
@@ -175,7 +188,8 @@ class TestRealSemiconductorFlow(FrappeTestCase):
                 } for index in range(1, 13)],
             },
         })
-        self.assertEqual(get_strategy_opportunity(opportunity_id)["stage"], "Wafer Demo确认")
+        # Requesting and approving the Demo does not move the Opportunity.
+        self.assertEqual(get_strategy_opportunity(opportunity_id)["stage"], QUALIFIED_OPPORTUNITY)
 
         frappe.set_user(self.engineer)
         engineering = transition_demo_request(request["id"], {
@@ -190,7 +204,7 @@ class TestRealSemiconductorFlow(FrappeTestCase):
             "type": "manager_approve", "comment": "批准进入 Demo Test",
         }, engineering["request"]["modified"])
         evaluation = approved["evaluation"]
-        self.assertEqual(get_strategy_opportunity(opportunity_id)["stage"], "Wafer Demo确认")
+        self.assertEqual(get_strategy_opportunity(opportunity_id)["stage"], QUALIFIED_OPPORTUNITY)
 
         frappe.set_user(self.engineer)
         for status in ("Scope Confirmed", "Sample Received", "Scheduled", "Testing"):
@@ -215,7 +229,8 @@ class TestRealSemiconductorFlow(FrappeTestCase):
                 command["customerComment"] = "客户确认 12 片 CIS 晶圆达到验收指标"
             evaluation = update_evaluation_status(evaluation["id"], command, evaluation["modified"])
         frappe.set_user(self.sales)
-        self.assertEqual(get_strategy_opportunity(opportunity_id)["stage"], "预算审批")
+        # Entering Customer Review marked the demo as done; the acceptance itself moves nothing.
+        self.assertEqual(get_strategy_opportunity(opportunity_id)["stage"], DEMO_DONE)
         workflow = get_demo_workflow(request["id"])
         self.assertEqual((workflow["evaluation"]["status"], workflow["testRuns"][0]["capture"]), ("Accepted", 96.8))
         report_ids = {item["id"] for item in workflow["artifacts"] if item["type"] == "Test Report"}
@@ -226,7 +241,11 @@ class TestRealSemiconductorFlow(FrappeTestCase):
         frappe.set_user(self.sales)
         opportunity = get_strategy_opportunity(opportunity_id)
         opportunity = update_strategy_opportunity(
-            opportunity_id, {"stage": "设备规格确认"}, opportunity["modified"],
+            opportunity_id, {"probabilityLevel": "upside"}, opportunity["modified"],
+        )
+        opportunity = confirm_budget_approved(opportunity_id, {"approvedOn": "2026-08-11"}, opportunity["modified"])
+        self.assertEqual(
+            (opportunity["stage"], opportunity["budgetApprovedOn"]), (CUSTOMER_BUDGET_APPROVED, "2026-08-11"),
         )
         rfq = create_rfq(
             {"opportunityId": opportunity_id, "engineerId": self.engineer},
@@ -239,7 +258,7 @@ class TestRealSemiconductorFlow(FrappeTestCase):
         frappe.set_user(self.manager)
         review_rfq(rfq["id"], "Approved", "技术规格确认通过。", rfq["modified"])
         frappe.set_user(self.sales)
-        self.assertEqual(get_strategy_opportunity(opportunity_id)["stage"], "报价")
+        self.assertEqual(get_strategy_opportunity(opportunity_id)["stage"], RFQ_VALIDATED)
         quotation = create_quotation({
             "quotationType": "Device", "opportunityId": opportunity_id,
             "primaryContactId": procurement["id"],
@@ -267,16 +286,17 @@ class TestRealSemiconductorFlow(FrappeTestCase):
         )
         self.assertEqual(quotation["version"]["status"], "Accepted")
         opportunity = get_strategy_opportunity(opportunity_id)
-        self.assertEqual(opportunity["stage"], "采购流程")
-        opportunity = update_strategy_opportunity(opportunity_id, {"stage": "Won", "forecast": "Closed"}, opportunity["modified"])
-
-        booking = create_booking({
-            "accountId": account["id"], "primaryContactId": procurement["id"],
+        self.assertEqual(opportunity["stage"], QUOTATION_SENT)
+        opportunity = confirm_po(opportunity_id, {"booking": {
+            "primaryContactId": procurement["id"],
             "equipment": "CIS Defect Inspector X8", "quantity": 1, "ddl": "2026-12-20",
-            "amount": "4860000.00", "currency": "CNY", "status": "Confirmed",
-            "owner": self.sales, "source": "Opportunity", "sourceOpportunityId": opportunity_id,
-            "note": f"runId={self.run_id}; dataOrigin=test-acceptance",
-        })
+            "amount": "4860000.00", "currency": "CNY",
+            "owner": self.sales, "note": f"runId={self.run_id}; dataOrigin=test-acceptance",
+        }}, opportunity["modified"])
+        self.assertEqual(opportunity["stage"], PO_RECEIVED)
+
+        booking = get_booking(opportunity["liveBooking"]["id"])
+        self.assertEqual((booking["status"], booking["sourceOpportunityId"]), ("Confirmed", opportunity_id))
         converted_tool = convert_booking_to_installed_tool(booking["id"], {
             "siteId": site["id"], "engineerOwner": self.engineer,
             "serial": f"HX-CIS-X8-{self.run_id}", "model": "CIS Defect Inspector X8",

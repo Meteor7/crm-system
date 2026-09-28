@@ -91,9 +91,15 @@ import type {
   UpdateOpportunityActionInput,
   OpportunityStakeholderDto,
   RollbackOpportunityStageInput,
+  ConfirmBudgetApprovedInput,
+  RequestInternalValidationInput,
+  ReviewInternalValidationInput,
+  ConfirmPoInput,
+  MarkOpportunityLostInput,
   CreateOpportunityStakeholderInput,
   UpdateOpportunityStakeholderInput,
   StrategyOpportunityDto,
+  StrategyOpportunityListQuery,
   TransitionInstalledToolInput,
   UpdateInstalledToolInput,
   UpdateStrategyOpportunityInput,
@@ -254,11 +260,22 @@ export interface CrmApi {
   reviewRfq(id: string, input: ReviewRfqInput, expectedModified: string): Promise<ApiResponse<RfqDetailDto>>
   previewRfqFile(id: string, versionId?: string): Promise<BinaryDownload>
   downloadRfqFile(id: string, versionId?: string): Promise<BinaryDownload>
-  listStrategyOpportunities(query?: ListQuery): Promise<ApiResponse<PageData<StrategyOpportunityDto>>>
+  listStrategyOpportunities(query?: StrategyOpportunityListQuery): Promise<ApiResponse<PageData<StrategyOpportunityDto>>>
   getStrategyOpportunity(id: string): Promise<ApiResponse<StrategyOpportunityDto>>
   createStrategyOpportunity(input: CreateStrategyOpportunityInput): Promise<ApiResponse<StrategyOpportunityDto>>
   updateStrategyOpportunity(id: string, input: UpdateStrategyOpportunityInput, expectedModified?: string): Promise<ApiResponse<StrategyOpportunityDto>>
+  /** Manager only (deal:rollback). A lost Opportunity reopens at or below the stage it was lost at. */
   rollbackOpportunityStage(id: string, input: RollbackOpportunityStageInput, expectedModified?: string): Promise<ApiResponse<StrategyOpportunityDto>>
+  /** demo_done -> customer_budget_approved with the declared approval date. */
+  confirmBudgetApproved(id: string, input: ConfirmBudgetApprovedInput, expectedModified?: string): Promise<ApiResponse<StrategyOpportunityDto>>
+  /** At quotation_sent; the stage does not change until another Manager approves. */
+  requestInternalValidation(id: string, input: RequestInternalValidationInput, expectedModified?: string): Promise<ApiResponse<StrategyOpportunityDto>>
+  /** deal:internal_validation_approve. Approval creates a Pending Booking and moves to internal_validation. */
+  reviewInternalValidation(id: string, input: ReviewInternalValidationInput, expectedModified?: string): Promise<ApiResponse<StrategyOpportunityDto>>
+  /** Confirms the PO from quotation_sent or internal_validation, or replaces a cancelled Booking at po_received. */
+  confirmPo(id: string, input: ConfirmPoInput, expectedModified?: string): Promise<ApiResponse<StrategyOpportunityDto>>
+  /** Only at the open stages and without a live Booking. */
+  markOpportunityLost(id: string, input: MarkOpportunityLostInput, expectedModified?: string): Promise<ApiResponse<StrategyOpportunityDto>>
   deleteStrategyOpportunity(id: string): Promise<ApiResponse<{ id: string; status: 'Deleted' }>>
   createOpportunityStakeholder(opportunityId: string, input: CreateOpportunityStakeholderInput): Promise<ApiResponse<OpportunityStakeholderDto>>
   updateOpportunityStakeholder(opportunityId: string, stakeholderId: string, input: UpdateOpportunityStakeholderInput): Promise<ApiResponse<OpportunityStakeholderDto>>

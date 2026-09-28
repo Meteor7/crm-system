@@ -129,7 +129,7 @@ describe('permission revocation', () => {
     await flushPromises()
     expect(wrapper.text()).toContain('南京缺陷检测设备')
 
-    await wrapper.get('[aria-label="商机阶段"]').setValue('Wafer Demo确认')
+    await wrapper.get('[aria-label="商机阶段"]').setValue('qualified_opportunity')
     await flushPromises()
     expect(wrapper.find('.state-denied').exists()).toBe(true)
     expect(wrapper.find('.pipeline-summary').exists()).toBe(false)

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { addMoney, formatMoney, moneyByCurrency, weightedMoney } from './money'
+import { addMoney, formatMoney, moneyByCurrency } from './money'
 
 describe('exact money contract', () => {
   it('adds decimal strings without IEEE-754 precision loss', () => {
@@ -15,10 +15,6 @@ describe('exact money contract', () => {
       { currency: 'CNY', amount: '4.04' },
       { currency: 'USD', amount: '2.02' },
     ])
-  })
-
-  it('rounds weighted money half up at the cent boundary', () => {
-    expect(weightedMoney('0.05', 50)).toBe('0.03')
   })
 
   it('rejects totals above DECIMAL(20,2) capacity', () => {

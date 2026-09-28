@@ -3,7 +3,7 @@ import { requestErrorMessage } from '@/api/request-state'
 import { personnelDisplayName } from '@/demo/personnel'
 import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { Banknote, BellRing, BriefcaseBusiness, CalendarDays, CircleDollarSign, Scale, UserRound } from '@lucide/vue'
+import { Banknote, BellRing, BriefcaseBusiness, CalendarDays, CircleDollarSign, UserRound } from '@lucide/vue'
 import type { EChartsOption } from 'echarts'
 import { api as defaultApi, type CrmApi } from '@/api'
 import { useAppStore } from '@/stores/app'
@@ -508,7 +508,6 @@ onMounted(async () => {
 
       <section v-if="managementView" class="kpi-grid" :aria-label="t('dashboard.kpiLabel')">
         <KpiCard class="kpi-value-pipeline" label="Open Pipeline" :value="formatMoney(activeMoney?.openPipeline ?? '0.00', activeCurrency)" :detail="t('dashboard.openPipelineDetail')" :icon="BriefcaseBusiness" tone="navy" />
-        <KpiCard class="kpi-value-weighted" label="Weighted Pipeline" :value="formatMoney(activeMoney?.weightedPipeline ?? '0.00', activeCurrency)" :detail="t('dashboard.weightedPipelineDetail')" :icon="Scale" tone="teal" />
         <KpiCard class="kpi-value-booking" label="Confirmed Booking" :value="formatMoney(activeMoney?.confirmedBooking ?? '0.00', activeCurrency)" :detail="t('dashboard.confirmedBookingDetail')" :icon="Banknote" tone="lime" />
         <KpiCard class="kpi-value-won" :label="t('dashboard.closedWon')" :value="formatMoney(activeMoney?.cumulativeWon ?? '0.00', activeCurrency)" :detail="t('dashboard.closedWonDetail')" :icon="CircleDollarSign" tone="amber" />
       </section>
@@ -742,13 +741,12 @@ onMounted(async () => {
 .dashboard-readable-type :deep(.section-card h2) { font-size: 16px; }
 .dashboard-readable-type :deep(.section-card > header p) { font-size: 12px; line-height: 1.45; }
 .kpi-grid :deep(.kpi-card.kpi-value-pipeline > strong) { color: #FE9900; }
-.kpi-grid :deep(.kpi-card.kpi-value-weighted > strong) { color: #0D9488; }
 .kpi-grid :deep(.kpi-card.kpi-value-booking > strong) { color: #6366F1; }
 .kpi-grid :deep(.kpi-card.kpi-value-won > strong) { color: var(--crm-navy); }
 .source-note { margin: -4px 0 14px; padding: 9px 12px; color: #557076; background: #f4f8f7; border: 1px solid var(--crm-line); border-radius: 9px; font-size: 11px; }
 .dashboard-dataset-card { height: 100%; }
 .dashboard-dataset-card :deep(.section-body) { display: grid; grid-template-rows: auto minmax(0, 1fr); }
-.kpi-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin-bottom: 14px; }
+.kpi-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin-bottom: 14px; }
 .management-primary-grid { display: grid; grid-template-columns: minmax(0, 2fr) minmax(290px, 1fr); gap: 14px; margin-bottom: 14px; }
 .team-schedule-list { display: grid; }
 .team-schedule-list > button { display: grid; grid-template-columns: 68px 34px minmax(0, 1fr) 116px; align-items: center; gap: 10px; min-height: 59px; padding: 8px 2px; color: inherit; background: #fff; border: 0; border-bottom: 1px solid var(--crm-line); text-align: left; cursor: pointer; }

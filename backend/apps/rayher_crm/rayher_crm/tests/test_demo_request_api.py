@@ -17,8 +17,10 @@ from rayher_crm.services.demo_requests import (
     transition_demo_request,
     update_demo_request,
 )
-from rayher_crm.services.opportunities import create_strategy_opportunity
+from rayher_crm.services.opportunities import create_strategy_opportunity, mark_opportunity_lost
+from rayher_crm.services.opportunity_stages import CUSTOMER_BUDGET_APPROVED, DEMO_DONE, QUALIFIED_OPPORTUNITY
 from rayher_crm.services.sites import create_site
+from rayher_crm.tests._opportunity_fixtures import advance_opportunity_fixture
 
 
 class TestDemoRequestApi(FrappeTestCase):
@@ -39,6 +41,34 @@ class TestDemoRequestApi(FrappeTestCase):
     def tearDown(self):
         frappe.set_user(self.original_user)
         super().tearDown()
+
+    def test_import_form_endpoint_gates_on_the_create_capability(self):
+        """The form import must not depend on table create/write, which no CRM role holds."""
+
+        from io import BytesIO
+
+        from werkzeug.datastructures import FileStorage, MultiDict
+
+        from rayher_crm.api.v1.demo_requests import import_form
+
+        def call_as(user: str) -> dict:
+            frappe.set_user(user)
+            previous = getattr(frappe.local, "request", None)
+            frappe.local.request = frappe._dict(files=MultiDict([(
+                "file", FileStorage(BytesIO(b""), filename="form.pdf", content_type="application/pdf"),
+            )]))
+            frappe.local.response = frappe._dict()
+            try:
+                return import_form()
+            finally:
+                frappe.local.request = previous
+
+        # Sales and Managers may create Demo Requests: the gate opens and the empty upload is
+        # rejected by the parser, not by permissions.
+        for user in (self.sales, self.manager):
+            self.assertEqual(call_as(user)["error"]["code"], "VALIDATION_ERROR", user)
+        # Engineers cannot create Demo Requests, so they are refused before any parsing.
+        self.assertEqual(call_as(self.engineer)["error"]["code"], "PERMISSION_DENIED")
 
     def _user(self, email: str, role: str) -> str:
         if frappe.db.exists("User", email):
@@ -71,10 +101,10 @@ class TestDemoRequestApi(FrappeTestCase):
         })
         opportunity = create_strategy_opportunity({
             "accountId": account["id"], "siteId": site["id"], "title": f"{suffix} Demo Opportunity",
-            "owner": owner, "stage": "需求发现", "forecast": "Pipeline", "amount": 200000,
+            "owner": owner, "stage": QUALIFIED_OPPORTUNITY, "forecast": "Pipeline", "amount": 200000,
             "probability": 40, "intentScore": 70, "poDate": "2026-12-31", "toolType": "Inspection",
             "saleType": "New Equipment", "subRegion": "East China", "currency": "CNY",
-            "originalAmount": 200000,
+            "originalAmount": 200000, "qualificationConfirmed": True,
         })
         return account, contact, opportunity
 
@@ -108,10 +138,10 @@ class TestDemoRequestApi(FrappeTestCase):
         return create_strategy_opportunity({
             "accountId": self.account["id"], "siteId": self.opportunity["siteId"],
             "title": f"Demo {suffix} Opportunity", "owner": self.sales,
-            "stage": "需求发现", "forecast": "Pipeline", "amount": 200000,
+            "stage": QUALIFIED_OPPORTUNITY, "forecast": "Pipeline", "amount": 200000,
             "intentScore": 70, "poDate": "2026-12-31", "toolType": "Inspection",
             "saleType": "New Equipment", "subRegion": "East China", "currency": "CNY",
-            "originalAmount": 200000,
+            "originalAmount": 200000, "qualificationConfirmed": True,
         })
 
     def test_create_draft_and_submit_are_server_owned_and_derive_contact(self):
@@ -129,18 +159,16 @@ class TestDemoRequestApi(FrappeTestCase):
         self.assertRegex(draft["modified"], r"Z$")
         self.assertEqual(draft["history"][-1]["actor"], self.sales)
         self.assertEqual(draft["history"][-1]["to"], "Draft")
+        # A Demo Request does not move the Opportunity; the Customer Review of its Demo Test does.
         self.assertEqual(
             frappe.db.get_value("CRM Opportunity", self.opportunity["id"], "stage"),
-            "Wafer Demo确认",
-        )
-        stage_history = frappe.get_all(
-            "CRM Opportunity History",
-            filters={"opportunity": self.opportunity["id"], "field": "stage"},
-            fields=["from_value", "to_value"],
+            QUALIFIED_OPPORTUNITY,
         )
         self.assertEqual(
-            [(row.from_value, row.to_value) for row in stage_history],
-            [("需求发现", "Wafer Demo确认")],
+            frappe.get_all(
+                "CRM Opportunity Stage History", filters={"opportunity": self.opportunity["id"]}, pluck="event",
+            ),
+            ["created"],
         )
 
         submitted = transition_demo_request(draft["id"], {"type": "submit"})["request"]
@@ -148,8 +176,8 @@ class TestDemoRequestApi(FrappeTestCase):
         self.assertEqual(submitted["feasibility"], "Pending")
         self.assertEqual(
             frappe.db.count(
-                "CRM Opportunity History",
-                {"opportunity": self.opportunity["id"], "field": "stage"},
+                "CRM Opportunity Stage History",
+                {"opportunity": self.opportunity["id"]},
             ),
             1,
         )
@@ -216,7 +244,7 @@ class TestDemoRequestApi(FrappeTestCase):
         )
         self.assertEqual(
             frappe.db.get_value("CRM Opportunity", self.opportunity["id"], "stage"),
-            "需求发现",
+            QUALIFIED_OPPORTUNITY,
         )
         self.assertEqual(
             frappe.db.count("CRM Opportunity History", {"opportunity": self.opportunity["id"]}),
@@ -237,6 +265,25 @@ class TestDemoRequestApi(FrappeTestCase):
         transition_demo_request(first["id"], {"type": "cancel", "comment": "Start a replacement request"})
         replacement = create_demo_request(self._input(requirementId="REQ-ACTIVE-3"))
         self.assertNotEqual(replacement["id"], first["id"])
+
+    def test_create_is_limited_to_qualified_and_demo_done_opportunities(self):
+        demo_done = advance_opportunity_fixture(self._new_opportunity("Demo done"), DEMO_DONE)
+        request = create_demo_request(self._input(requirementId="REQ-DEMO-DONE", opportunityId=demo_done["id"]))
+        self.assertEqual(request["opportunityId"], demo_done["id"])
+        self.assertEqual(frappe.db.get_value("CRM Opportunity", demo_done["id"], "stage"), DEMO_DONE)
+
+        budget_approved = advance_opportunity_fixture(
+            self._new_opportunity("Budget approved"), CUSTOMER_BUDGET_APPROVED,
+        )
+        lost = self._new_opportunity("Marked lost")
+        lost = mark_opportunity_lost(lost["id"], {"lostReason": "Customer stopped the project."}, lost["modified"])
+        for opportunity in (budget_approved, lost):
+            with self.subTest(stage=opportunity["stage"]), self.assertRaises(CrmApiException) as blocked:
+                create_demo_request(self._input(
+                    requirementId=f"REQ-{opportunity['stage']}", opportunityId=opportunity["id"],
+                ))
+            self.assertEqual(blocked.exception.code, "INVALID_TRANSITION")
+            self.assertEqual(frappe.db.count("CRM Demo Request", {"opportunity": opportunity["id"]}), 0)
 
     def test_self_test_requires_no_opportunity_and_preserves_opportunity_stages(self):
         frappe.set_user(self.sales)
@@ -452,7 +499,7 @@ class TestDemoRequestApi(FrappeTestCase):
         self.assertEqual(result["evaluation"]["owner"], self.other_engineer)
         self.assertEqual(
             frappe.db.get_value("CRM Opportunity", self.opportunity["id"], "stage"),
-            "Wafer Demo确认",
+            QUALIFIED_OPPORTUNITY,
         )
         with self.assertRaises(CrmApiException) as duplicate:
             transition_demo_request(request["id"], {"type": "manager_approve", "comment": "Again"})
@@ -505,7 +552,7 @@ class TestDemoRequestApi(FrappeTestCase):
             self.assertFalse(frappe.db.get_value("CRM Demo Request", request["id"], "evaluation"))
             self.assertEqual(
                 frappe.db.get_value("CRM Opportunity", linked_opportunity["id"], "stage"),
-                "Wafer Demo确认",
+                QUALIFIED_OPPORTUNITY,
             )
             self.assertEqual(
                 frappe.db.count("CRM Demo Request History", {"demo_request": request["id"]}), before_history,

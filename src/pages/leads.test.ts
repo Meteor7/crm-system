@@ -192,11 +192,19 @@ describe('Leads pages', () => {
     await toolTypeSelect.setValue('Aconca')
     await wrapper.get('[data-modal-submit]').trigger('submit')
     await flushPromises()
+    expect(convertLead).not.toHaveBeenCalled()
+    expect(wrapper.get('[data-field-error="qualificationConfirmed"]').text()).toBe('请先确认客户需求与预算负责人')
+
+    await wrapper.get('[data-testid="qualification-confirmed"]').setValue(true)
+    expect(wrapper.find('[data-field-error="qualificationConfirmed"]').exists()).toBe(false)
+    await wrapper.get('[data-modal-submit]').trigger('submit')
+    await flushPromises()
 
     expect(wrapper.text()).toContain('转换已完成')
     expect(convertLead).toHaveBeenCalledWith('LEAD-001', expect.objectContaining({
       newAccount: expect.objectContaining({ segment: 'Power Semiconductor' }),
       toolType: 'Aconca',
+      qualificationConfirmed: true,
     }))
     expect(wrapper.text()).toContain('OPP-')
     expect(wrapper.find('[data-testid="convert-lead"]').exists()).toBe(false)

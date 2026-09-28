@@ -10,7 +10,7 @@ export interface RoleProfile {
 export const ALL_CAPABILITIES: Capability[] = [
   'dashboard:view', 'account:view', 'account:write',
   'stakeholder:view', 'stakeholder:write', 'requirement:view', 'deal:view', 'deal:write',
-  'deal:rollback',
+  'deal:rollback', 'deal:internal_validation_approve',
   'contact:view', 'contact:write', 'contact:merge', 'contact:delete',
   'visit:view', 'visit:create', 'visit:write', 'visit:review', 'demo_request:view', 'demo_request:create',
   'demo_request:engineering_review', 'demo_request:manager_approve',

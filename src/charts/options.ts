@@ -1,22 +1,21 @@
 import type { EChartsOption } from 'echarts'
 import type { Locale } from '@/i18n'
 import type { DashboardDto } from '@/types/crm'
+import { opportunityStageLabel } from '@/domain/opportunity-stages'
 
 const DASHBOARD_SERIES_COLORS = {
   pipeline: '#FE9900',
-  weightedPipeline: '#0D9488',
+  accent: '#0D9488',
   booking: '#6366F1',
 } as const
 
 type ChartCopy = {
   pipeline: string
-  weightedPipeline: string
   booking: string
   amount: string
   openPipeline: string
   count: string
   stageAmount: string
-  weightedAmount: string
   opportunityCount: string
   opportunityCountUnit: string
   millionUnit: string
@@ -25,26 +24,22 @@ type ChartCopy = {
 const CHART_COPY: Record<Locale, ChartCopy> = {
   'zh-CN': {
     pipeline: '销售管道',
-    weightedPipeline: '加权销售管道',
     booking: '已确认订单',
     amount: '金额',
     openPipeline: '开放销售管道',
     count: '数量',
     stageAmount: '阶段金额',
-    weightedAmount: '加权金额',
     opportunityCount: '商机数量',
     opportunityCountUnit: '个',
     millionUnit: '百万',
   },
   'en-US': {
     pipeline: 'Pipeline',
-    weightedPipeline: 'Weighted pipeline',
     booking: 'Booking',
     amount: 'Amount',
     openPipeline: 'Open pipeline',
     count: 'Count',
     stageAmount: 'Stage amount',
-    weightedAmount: 'Weighted amount',
     opportunityCount: 'Opportunities',
     opportunityCountUnit: 'opportunities',
     millionUnit: 'M',
@@ -94,11 +89,12 @@ export function buildFunnelOption(data: DashboardDto['funnel'], locale: Locale =
         const row = point?.data as DashboardDto['funnel'][number] | undefined
         if (!row) return ''
         const count = numericValue(row.count)
-        return `<strong>${escapeHtml(row.stage)}</strong><br/>${copy.stageAmount} ${compactMoney(numericValue(row.amount), locale)}<br/>${copy.weightedAmount} ${compactMoney(numericValue(row.weightedAmount), locale)}<br/>${copy.opportunityCount} ${escapeHtml(count)} ${copy.opportunityCountUnit}`
+        return `<strong>${escapeHtml(opportunityStageLabel(row.stage, locale))}</strong><br/>${copy.stageAmount} ${compactMoney(numericValue(row.amount), locale)}<br/>${copy.opportunityCount} ${escapeHtml(count)} ${copy.opportunityCountUnit}`
       },
     },
     xAxis: { type: 'value', axisLabel: { formatter: (value: number) => compactMillions(value, locale), color: '#858991', fontSize: 10 }, splitLine: { lineStyle: { color: '#EEEAE4' } } },
-    yAxis: { type: 'category', inverse: true, axisTick: { show: false }, axisLine: { show: false }, axisLabel: { color: '#4B4F56', fontSize: 10, fontWeight: 600 } },
+    // Funnel rows keep the stage value; the axis shows its label in the current language.
+    yAxis: { type: 'category', inverse: true, axisTick: { show: false }, axisLine: { show: false }, axisLabel: { color: '#4B4F56', fontSize: 10, fontWeight: 600, formatter: (value: string) => opportunityStageLabel(value, locale) } },
     series: [{ name: copy.pipeline, type: 'bar', encode: { x: 'amount', y: 'stage' }, barWidth: 16, itemStyle: { color: DASHBOARD_SERIES_COLORS.pipeline, borderRadius: [0, 6, 6, 0] }, label: { show: true, position: 'right', color: '#6C7179', fontSize: 10, formatter: (params) => compactMoney(numericValue((params.data as DashboardDto['funnel'][number]).amount), locale) } }],
   }
 }
@@ -114,7 +110,6 @@ export function buildOwnerPerformanceOption(data: DashboardDto['ownerPerformance
     yAxis: { type: 'category', data: data.map((item) => item.owner), axisTick: { show: false }, axisLine: { show: false }, axisLabel: { color: '#4B4F56', fontSize: 10, fontWeight: 600 } },
     series: [
       { name: copy.pipeline, type: 'bar', data: data.map((item) => item.pipeline), barMaxWidth: 14, itemStyle: { color: DASHBOARD_SERIES_COLORS.pipeline, borderRadius: [0, 4, 4, 0] } },
-      { name: copy.weightedPipeline, type: 'bar', data: data.map((item) => item.weightedPipeline), barMaxWidth: 14, itemStyle: { color: DASHBOARD_SERIES_COLORS.weightedPipeline, borderRadius: [0, 4, 4, 0] } },
       { name: copy.booking, type: 'bar', data: data.map((item) => item.booking), barMaxWidth: 14, itemStyle: { color: DASHBOARD_SERIES_COLORS.booking, borderRadius: [0, 4, 4, 0] } },
     ],
   }
@@ -177,7 +172,7 @@ export function buildPipelineMixOption(data: DashboardDto['segmentDistribution']
   const total = rows.reduce((sum, item) => sum + numericValue(item.pipeline), 0)
   return {
     animationDuration: 500,
-    color: [DASHBOARD_SERIES_COLORS.pipeline, DASHBOARD_SERIES_COLORS.weightedPipeline, DASHBOARD_SERIES_COLORS.booking],
+    color: [DASHBOARD_SERIES_COLORS.pipeline, DASHBOARD_SERIES_COLORS.accent, DASHBOARD_SERIES_COLORS.booking],
     title: {
       text: compactMoney(total, locale),
       subtext: copy.openPipeline,

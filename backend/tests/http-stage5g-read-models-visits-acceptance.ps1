@@ -72,7 +72,7 @@ function Remove-TestChildren {
 function Remove-OpportunityChildren {
     param([string]$OpportunityId)
     if ([string]::IsNullOrWhiteSpace($OpportunityId)) { return }
-    foreach ($docType in @('CRM Opportunity Stakeholder', 'CRM Opportunity Action', 'CRM Opportunity History')) {
+    foreach ($docType in @('CRM Opportunity Stakeholder', 'CRM Opportunity Action', 'CRM Opportunity History', 'CRM Opportunity Stage History', 'CRM Opportunity Probability History', 'CRM Opportunity Internal Validation')) {
         $pythonArgs = "[$(ConvertTo-PythonStringLiteral $docType),{'opportunity':$(ConvertTo-PythonStringLiteral $OpportunityId)}]"
         & docker compose @composeArgs exec -T backend bench --site $SiteName execute frappe.db.delete --args $pythonArgs | Out-Null
         if ($LASTEXITCODE -ne 0) { throw "Cleanup failed for $docType children of $OpportunityId" }
@@ -157,10 +157,9 @@ try {
         throw 'Stakeholder compatibility update did not persist Contact fields.'
     }
 
-    $discoveryStage = -join @([char]0x9700, [char]0x6C42, [char]0x53D1, [char]0x73B0)
-    $opportunity = Invoke-CrmPost $salesSession 'rayher_crm.api.v1.opportunities.create_strategy_opportunity' @{ input = @{
+    $opportunity = Invoke-CrmPost $salesSession 'rayher_crm.api.v1.opportunities.create_strategy_opportunity' @{ input = @{probabilityLevel = 'pipeline'; 
         accountId = $created.Account; siteId = $created.Site; title = "Stage 5G Opportunity $stamp"
-        owner = $salesEmail; stage = $discoveryStage; forecast = 'Pipeline'; amount = '1000'
+        owner = $salesEmail; stage = 'qualified_opportunity'; qualificationConfirmed = $true; forecast = 'Pipeline'; amount = '1000'
         probability = 25; intentScore = 70; poDate = '2026-12-31'; toolType = 'Inspection'
         saleType = 'New Equipment'; subRegion = 'East China'; currency = 'CNY'; originalAmount = '1000'
     } }
@@ -239,17 +238,15 @@ try {
     if ($created.Visit -notin @($visitList.message.data.items | ForEach-Object { $_.id })) { throw 'Scoped Visit list omitted the reviewed Visit.' }
     $pipeline = Invoke-RestMethod -Uri "$BaseUrl/api/method/rayher_crm.api.v1.pipeline.list_pipeline?accountId=$($created.Account)" -WebSession $salesSession
     if ($created.Opportunity -notin @($pipeline.message.data.opportunities | ForEach-Object { $_.id })) { throw 'Pipeline omitted canonical Opportunity.' }
-    $expectedWeightedPipeline = [decimal]$opportunity.data.amount * [decimal]$opportunity.data.probability / 100
     $actualOpenPipeline = [decimal]$pipeline.message.data.totals.openPipeline
-    $actualWeightedPipeline = [decimal]$pipeline.message.data.totals.weightedPipeline
-    if ($actualOpenPipeline -ne [decimal]1000 -or $actualWeightedPipeline -ne $expectedWeightedPipeline) {
-        throw "Pipeline totals were not canonical: open=$actualOpenPipeline weighted=$actualWeightedPipeline expectedWeighted=$expectedWeightedPipeline."
+    if ($actualOpenPipeline -ne [decimal]1000 -or $null -ne $pipeline.message.data.totals.weightedPipeline) {
+        throw "Pipeline totals were not canonical: open=$actualOpenPipeline."
     }
     $detail = Invoke-RestMethod -Uri "$BaseUrl/api/method/rayher_crm.api.v1.accounts.get_account_360?id=$($created.Account)" -WebSession $salesSession
     if ($created.Visit -notin @($detail.message.data.visits | ForEach-Object { $_.id })) { throw 'Account360 omitted canonical Visit.' }
     $dashboard = Invoke-RestMethod -Uri "$BaseUrl/api/method/rayher_crm.api.v1.dashboard.get_dashboard?range=month&segment=Frontend" -WebSession $salesSession
     $cnyKpi = @($dashboard.message.data.kpis.moneyByCurrency | Where-Object { $_.currency -eq 'CNY' })[0]
-    if (-not $cnyKpi -or [decimal]$cnyKpi.openPipeline -ne [decimal]1000 -or [decimal]$cnyKpi.weightedPipeline -ne $expectedWeightedPipeline -or @($dashboard.message.data.process.requirementsByStatus).Count -ne 0) {
+    if (-not $cnyKpi -or [decimal]$cnyKpi.openPipeline -ne [decimal]1000 -or $null -ne $cnyKpi.weightedPipeline -or @($dashboard.message.data.process.requirementsByStatus).Count -ne 0) {
         throw 'Dashboard currency aggregation or empty Requirement boundary failed.'
     }
 

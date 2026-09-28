@@ -54,7 +54,7 @@ function Remove-TestDoc {
 function Remove-OpportunityChildren {
     param([string]$OpportunityId)
     if ([string]::IsNullOrWhiteSpace($OpportunityId)) { return }
-    foreach ($docType in @('CRM Opportunity Stakeholder', 'CRM Opportunity Action', 'CRM Opportunity History')) {
+    foreach ($docType in @('CRM Opportunity Stakeholder', 'CRM Opportunity Action', 'CRM Opportunity History', 'CRM Opportunity Stage History', 'CRM Opportunity Probability History', 'CRM Opportunity Internal Validation')) {
         $pythonArgs = "[$(ConvertTo-PythonStringLiteral $docType),{'opportunity':$(ConvertTo-PythonStringLiteral $OpportunityId)}]"
         & docker compose @composeArgs exec -T backend bench --site $SiteName execute frappe.db.delete --args $pythonArgs | Out-Null
         if ($LASTEXITCODE -ne 0) { throw "Cleanup failed for $docType children of $OpportunityId" }
@@ -129,17 +129,18 @@ try {
     } }
     $created.Contact = $contact.data.id
 
-    $discoveryStage = -join @([char]0x9700, [char]0x6C42, [char]0x53D1, [char]0x73B0)
+    $qualifiedStage = 'qualified_opportunity'
     $opportunityInput = @{
+        probabilityLevel = 'pipeline'
         accountId = $created.Account; siteId = $created.Site; title = "Stage 5C Opportunity $stamp"
-        owner = $salesEmail; stage = $discoveryStage; forecast = 'Pipeline'; amount = '123456.78'
+        owner = $salesEmail; stage = $qualifiedStage; qualificationConfirmed = $true; forecast = 'Pipeline'; amount = '123456.78'
         probability = 20; intentScore = 30; poDate = '2026-12-31'; toolType = 'Inspection'
         saleType = 'New Equipment'; subRegion = 'East China'; currency = 'CNY'; originalAmount = '123456.78'
         paymentMilestones = @('30% PO', '70% FAT'); strengths = @('Local support'); redFlags = @(); informationNeeded = @('Budget')
     }
     $opportunity = Invoke-CrmPost $salesSession 'rayher_crm.api.v1.opportunities.create_strategy_opportunity' @{ input = $opportunityInput }
     $created.Opportunity = $opportunity.data.id
-    if ($opportunity.data.owner -ne $salesEmail -or $opportunity.data.stage -ne $discoveryStage) {
+    if ($opportunity.data.owner -ne $salesEmail -or $opportunity.data.stage -ne $qualifiedStage) {
         throw 'HTTP Opportunity create returned an unexpected owner or stage.'
     }
 
@@ -160,16 +161,16 @@ try {
 
     $staleModified = $opportunity.data.modified
     $updated = Invoke-CrmPost $salesSession 'rayher_crm.api.v1.opportunities.update_strategy_opportunity' @{
-        id = $created.Opportunity; input = @{ forecast = 'Best Case'; intentScore = 40 }; expectedModified = $staleModified
+        id = $created.Opportunity; input = @{ probabilityLevel = 'upside'; intentScore = 40 }; expectedModified = $staleModified
     }
-    if ($updated.data.stage -ne $discoveryStage -or $updated.data.forecast -ne 'Best Case' -or $updated.data.score -ne 40) {
-        throw "HTTP Opportunity update mismatch: stage=$($updated.data.stage), forecast=$($updated.data.forecast), score=$($updated.data.score)."
+    if ($updated.data.stage -ne $qualifiedStage -or $updated.data.probabilityLevel -ne 'upside' -or $updated.data.score -ne 40) {
+        throw "HTTP Opportunity update mismatch: stage=$($updated.data.stage), probabilityLevel=$($updated.data.probabilityLevel), score=$($updated.data.score)."
     }
 
     $conflictStatus = 0
     try {
         Invoke-CrmPost $salesSession 'rayher_crm.api.v1.opportunities.update_strategy_opportunity' @{
-            id = $created.Opportunity; input = @{ forecast = 'Commit' }; expectedModified = $staleModified
+            id = $created.Opportunity; input = @{ probabilityLevel = 'committed' }; expectedModified = $staleModified
         } | Out-Null
     } catch {
         $conflictStatus = [int]$_.Exception.Response.StatusCode
@@ -179,12 +180,22 @@ try {
     $scopeStatus = 0
     try {
         Invoke-CrmPost $salesSession 'rayher_crm.api.v1.opportunities.update_strategy_opportunity' @{
-            id = $created.ForeignOpportunity; input = @{ forecast = 'Best Case' }; expectedModified = $foreignOpportunity.data.modified
+            id = $created.ForeignOpportunity; input = @{ probabilityLevel = 'upside' }; expectedModified = $foreignOpportunity.data.modified
         } | Out-Null
     } catch {
         $scopeStatus = [int]$_.Exception.Response.StatusCode
     }
     if ($scopeStatus -ne 403) { throw "Expected HTTP 403 for foreign Opportunity update, got $scopeStatus." }
+
+    $stageStatus = 0
+    try {
+        Invoke-CrmPost $salesSession 'rayher_crm.api.v1.opportunities.update_strategy_opportunity' @{
+            id = $created.Opportunity; input = @{ stage = 'demo_done' }; expectedModified = $updated.data.modified
+        } | Out-Null
+    } catch {
+        $stageStatus = [int]$_.Exception.Response.StatusCode
+    }
+    if ($stageStatus -ne 409) { throw "Expected HTTP 409 for a direct Opportunity stage change, got $stageStatus." }
 
     $stakeholder = Invoke-CrmPost $salesSession 'rayher_crm.api.v1.opportunities.create_opportunity_stakeholder' @{
         opportunityId = $created.Opportunity; input = @{
@@ -218,6 +229,22 @@ try {
         throw 'Archived relations remained visible in the HTTP Opportunity DTO.'
     }
 
+    $lostStaleStatus = 0
+    try {
+        Invoke-CrmPost $salesSession 'rayher_crm.api.v1.opportunities.mark_opportunity_lost' @{
+            id = $created.Opportunity; input = @{ lostReason = 'Customer postponed the project' }; expectedModified = $staleModified
+        } | Out-Null
+    } catch {
+        $lostStaleStatus = [int]$_.Exception.Response.StatusCode
+    }
+    if ($lostStaleStatus -ne 409) { throw "Expected HTTP 409 for a stale mark-lost, got $lostStaleStatus." }
+    $lost = Invoke-CrmPost $salesSession 'rayher_crm.api.v1.opportunities.mark_opportunity_lost' @{
+        id = $created.Opportunity; input = @{ lostReason = 'Customer postponed the project' }; expectedModified = $current.modified
+    }
+    if ($lost.data.stage -ne 'lost' -or $lost.data.lostAtStage -ne $qualifiedStage -or $lost.data.lostReason -ne 'Customer postponed the project') {
+        throw "HTTP mark-lost mismatch: stage=$($lost.data.stage), lostAtStage=$($lost.data.lostAtStage), lostReason=$($lost.data.lostReason)."
+    }
+
     & docker compose @composeArgs restart backend frontend queue-short queue-long scheduler websocket | Out-Null
     if ($LASTEXITCODE -ne 0) { throw 'Runtime service restart failed.' }
     $persisted = $null
@@ -232,7 +259,7 @@ try {
     }
     if (-not $persisted) { throw 'Opportunity did not remain readable after runtime service restart.' }
 
-    Write-Output 'Stage 5C authenticated HTTP acceptance passed: create/list/update/409/scope-403/relations/soft-delete/restart-persistence.'
+    Write-Output 'Stage 5C authenticated HTTP acceptance passed: create/list/update/409/scope-403/stage-change-409/relations/soft-delete/mark-lost/restart-persistence.'
 } finally {
     $adminPassword = $null
     $salesPassword = $null

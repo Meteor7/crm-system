@@ -90,7 +90,7 @@ describe('PR4 review regressions', () => {
   it('uses the selected language before confirming a protected RFQ revision', async () => {
     const repository = createMemorySalesRepository()
     const opportunity = repository.snapshot.opportunities.find((item) => item.owner === 'person002@crm.example.invalid')!
-    opportunity.stage = '设备规格确认'
+    opportunity.stage = 'customer_budget_approved'
     repository.save()
     const api = createMockApi({ latency: 0, role: 'Sales', userId: opportunity.owner, salesRepository: repository })
     const blob = new Blob(['%PDF mock'], { type: 'application/pdf' })

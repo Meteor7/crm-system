@@ -1,30 +1,64 @@
-import { STRATEGY_OPPORTUNITY_STAGES, type StrategyOpportunityStage } from '@/types/workspaces'
+import type { Locale } from '@/i18n'
+import type { Tone } from '@/types/crm'
+import {
+  OPPORTUNITY_PROBABILITY_LEVELS,
+  type OpportunityProbabilityLevel,
+  type OpportunityProbabilityLevelFilter,
+  type OpportunityProbabilityLevelValue,
+} from '@/types/workspaces'
 
-export const OPPORTUNITY_STAGES = STRATEGY_OPPORTUNITY_STAGES
+export { OPPORTUNITY_PROBABILITY_LEVELS } from '@/types/workspaces'
+export type { OpportunityProbabilityLevel, OpportunityProbabilityLevelFilter, OpportunityProbabilityLevelValue } from '@/types/workspaces'
 
-const STAGE_PROBABILITIES: Record<StrategyOpportunityStage, number> = {
-  '需求发现': 15,
-  'Wafer Demo确认': 55,
-  '预算审批': 70,
-  '设备规格确认': 75,
-  '报价': 80,
-  '采购流程': 90,
-  Won: 100,
-  Lost: 0,
+/** List filter value for Opportunities whose owner has not set a level yet. */
+export const PENDING_PROBABILITY_LEVEL_FILTER = 'pending'
+
+// Level copy stays apart from salesEnumLabel, where "Pipeline" is the retired forecast and "Low" is stakeholder influence.
+const PROBABILITY_LEVEL_LABELS: Record<OpportunityProbabilityLevelValue, Record<Locale, string>> = {
+  low_probability: { 'zh-CN': '低', 'en-US': 'Low probability' },
+  pipeline: { 'zh-CN': '在途', 'en-US': 'Pipeline' },
+  upside: { 'zh-CN': '有望', 'en-US': 'Upside' },
+  committed: { 'zh-CN': '确定', 'en-US': 'Committed' },
+  '': { 'zh-CN': '待销售确认', 'en-US': 'Pending sales confirmation' },
 }
 
-export function getOpportunityStageBaseProbability(stage: StrategyOpportunityStage) {
-  return STAGE_PROBABILITIES[stage]
+const PROBABILITY_LEVEL_TONES: Record<OpportunityProbabilityLevelValue, Tone> = {
+  low_probability: 'danger',
+  pipeline: 'info',
+  upside: 'warning',
+  committed: 'positive',
+  '': 'neutral',
 }
 
-export function calculateOpportunityProbability(stage: StrategyOpportunityStage, purchaseIntent: number) {
-  const base = getOpportunityStageBaseProbability(stage)
-  if (stage === 'Won') return 100
-  if (stage === 'Lost') return 0
-  const intent = Number(purchaseIntent) || 0
-  return Math.max(0, Math.min(100, Math.round(base * 0.6 + intent * 0.4)))
+export function isOpportunityProbabilityLevel(value: unknown): value is OpportunityProbabilityLevel {
+  return typeof value === 'string' && (OPPORTUNITY_PROBABILITY_LEVELS as readonly string[]).includes(value)
 }
 
-export function opportunityProbabilityExplanation(stage: StrategyOpportunityStage, purchaseIntent: number) {
-  return `阶段基础概率 ${getOpportunityStageBaseProbability(stage)}% × 60% + 购买意愿 ${Number(purchaseIntent) || 0} × 40%`
+/** A stored level is valid when it is one of the four levels or empty (pending sales confirmation). */
+export function isOpportunityProbabilityLevelValue(value: unknown): value is OpportunityProbabilityLevelValue {
+  return value === '' || isOpportunityProbabilityLevel(value)
+}
+
+/** Orders levels from low to high: pending is 0, then low_probability 1 through committed 4. */
+export function opportunityProbabilityLevelRank(level: OpportunityProbabilityLevelValue) {
+  return level ? OPPORTUNITY_PROBABILITY_LEVELS.indexOf(level) + 1 : 0
+}
+
+export function opportunityProbabilityLevelLabel(level: string, locale: Locale) {
+  return isOpportunityProbabilityLevelValue(level) ? PROBABILITY_LEVEL_LABELS[level][locale] : level
+}
+
+export function opportunityProbabilityLevelTone(level: string): Tone {
+  return isOpportunityProbabilityLevelValue(level) ? PROBABILITY_LEVEL_TONES[level] : 'neutral'
+}
+
+/** Reads a list filter from untrusted input such as the route query; anything unknown means All. */
+export function normalizeOpportunityProbabilityLevelFilter(value: unknown): OpportunityProbabilityLevelFilter {
+  if (value === PENDING_PROBABILITY_LEVEL_FILTER) return PENDING_PROBABILITY_LEVEL_FILTER
+  return isOpportunityProbabilityLevel(value) ? value : 'All'
+}
+
+export function matchesOpportunityProbabilityLevelFilter(level: OpportunityProbabilityLevelValue, filter?: OpportunityProbabilityLevelFilter) {
+  if (!filter || filter === 'All') return true
+  return filter === PENDING_PROBABILITY_LEVEL_FILTER ? level === '' : level === filter
 }

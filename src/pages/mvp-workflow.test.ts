@@ -40,7 +40,7 @@ describe('MVP workflow pages', () => {
 
     expect(wrapper.text()).toContain('Open Pipeline')
     expect(wrapper.text()).toContain('Confirmed Booking')
-    expect(wrapper.text()).toContain('商机口径不包含 Won / Lost')
+    expect(wrapper.text()).toContain('商机口径不包含收到 PO / 丢单')
   })
 
   it('keeps stage filters after removing the page search box', async () => {

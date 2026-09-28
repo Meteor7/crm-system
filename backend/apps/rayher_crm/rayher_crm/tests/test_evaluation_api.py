@@ -16,8 +16,10 @@ from rayher_crm.services.evaluations import (
     set_evaluation_test_run_deadline,
     update_evaluation_status,
 )
-from rayher_crm.services.opportunities import create_strategy_opportunity
+from rayher_crm.services.opportunities import create_strategy_opportunity, get_strategy_opportunity, mark_opportunity_lost
+from rayher_crm.services.opportunity_stages import CUSTOMER_BUDGET_APPROVED, DEMO_DONE, LOST, QUALIFIED_OPPORTUNITY
 from rayher_crm.services.sites import create_site
+from rayher_crm.tests._opportunity_fixtures import advance_opportunity_fixture
 
 
 class CleanScanner:
@@ -80,12 +82,11 @@ class TestEvaluationApi(FrappeTestCase):
         opportunity = create_strategy_opportunity({
             "accountId": account.name, "siteId": site["id"],
             "title": f"Evaluation {suffix} Opportunity", "owner": sales,
-            "stage": "需求发现", "forecast": "Pipeline", "amount": 200000,
+            "stage": QUALIFIED_OPPORTUNITY, "forecast": "Pipeline", "amount": 200000,
             "intentScore": 70, "poDate": "2026-12-31", "toolType": "Inspection",
             "saleType": "New Equipment", "subRegion": "East China", "currency": "CNY",
-            "originalAmount": 200000,
+            "originalAmount": 200000, "qualificationConfirmed": True,
         })
-        frappe.db.set_value("CRM Opportunity", opportunity["id"], "stage", "Wafer Demo确认")
         frappe.set_user("Administrator")
         request = frappe.get_doc({
             "doctype": "CRM Demo Request", "account": account.name, "primary_contact": contact.name,
@@ -103,6 +104,27 @@ class TestEvaluationApi(FrappeTestCase):
         frappe.set_user(self.manager)
         approved = transition_demo_request(request.name, {"type": "manager_approve", "comment": "Approved"})
         return account.name, approved["request"]
+
+    def _reach_customer_review(self, evaluation_id: str) -> dict:
+        current = get_evaluation(evaluation_id)
+        for status in ("Scope Confirmed", "Sample Received", "Scheduled", "Testing"):
+            current = update_evaluation_status(evaluation_id, {"status": status}, current["modified"])
+        add_evaluation_run(evaluation_id, {
+            "date": "2026-12-11", "lot": "LOT-REVIEW", "wafers": 1,
+            "capture": 96, "falsePositive": 1, "wph": 12, "summary": "Passed",
+            "expectedModified": current["modified"],
+        })
+        release_demo_test_report(
+            evaluation_id,
+            {"file_name": "results.csv", "mime_type": "text/csv", "content": b"metric,value\ncapture,96\n"},
+            {"file_name": "customer-results.csv", "mime_type": "text/csv", "content": b"metric,value\ncapture,96\n"},
+            scanner=CleanScanner(),
+            expected_round=current["testRound"],
+        )
+        current = get_evaluation(evaluation_id)
+        for status in ("Internal Review", "Customer Review"):
+            current = update_evaluation_status(evaluation_id, {"status": status}, current["modified"])
+        return current
 
     def test_scoped_list_get_strict_status_graph_cas_and_acceptance(self):
         evaluation_id = self.request["evaluationId"]
@@ -317,9 +339,22 @@ class TestEvaluationApi(FrappeTestCase):
             (sales_notice.category, sales_notice.route),
             ("Evaluation", f"/demo-workflow/{self.request['id']}?tab=information"),
         )
+        # Entering Customer Review is the demo milestone; archiving the Demo Test moves nothing further.
         self.assertEqual(
             frappe.db.get_value("CRM Opportunity", self.request["opportunityId"], "stage"),
-            "预算审批",
+            DEMO_DONE,
+        )
+        review_moves = frappe.get_all(
+            "CRM Opportunity Stage History",
+            filters={"opportunity": self.request["opportunityId"], "event": "demo_customer_review"},
+            fields=["from_stage", "to_stage", "reference_doctype", "reference_name"],
+        )
+        self.assertEqual(
+            [(row.from_stage, row.to_stage, row.reference_doctype, row.reference_name) for row in review_moves],
+            [(QUALIFIED_OPPORTUNITY, DEMO_DONE, "CRM Evaluation", evaluation_id)],
+        )
+        self.assertEqual(
+            frappe.db.count("CRM Opportunity Stage History", {"opportunity": self.request["opportunityId"]}), 2,
         )
 
         request_modified = frappe.db.get_value("CRM Demo Request", self.request["id"], "modified")
@@ -374,12 +409,12 @@ class TestEvaluationApi(FrappeTestCase):
         # turned the demo down, or moved back once the Demo Request was converted --
         # must not hold the Demo Test there, and must stay where Sales put it.
         for request, engineer, stage in (
-            (self.request, self.engineer, "Lost"),
-            (self.foreign_request, self.other_engineer, "需求发现"),
+            (self.request, self.engineer, LOST),
+            (self.foreign_request, self.other_engineer, QUALIFIED_OPPORTUNITY),
         ):
             current = self._in_customer_review(request, engineer)
             opportunity_id = request["opportunityId"]
-            values = {"stage": stage, "lost_reason": "Demo not accepted"} if stage == "Lost" else {"stage": stage}
+            values = {"stage": stage, "lost_reason": "Demo not accepted"} if stage == LOST else {"stage": stage}
             frappe.db.set_value("CRM Opportunity", opportunity_id, values)
 
             archived = update_evaluation_status(
@@ -417,6 +452,9 @@ class TestEvaluationApi(FrappeTestCase):
         current = get_evaluation(evaluation_id)
         for status in ("Internal Review", "Customer Review"):
             current = update_evaluation_status(evaluation_id, {"status": status}, current["modified"])
+        self.assertEqual(
+            frappe.db.get_value("CRM Opportunity", self.request["opportunityId"], "stage"), DEMO_DONE,
+        )
         current = set_evaluation_test_run_deadline(evaluation_id, {
             "testRunDeadline": "2099-01-15", "expectedModified": current["modified"],
         })
@@ -447,7 +485,7 @@ class TestEvaluationApi(FrappeTestCase):
         # A retest is not an outcome, so the Opportunity must stay where it was.
         self.assertEqual(
             frappe.db.get_value("CRM Opportunity", self.request["opportunityId"], "stage"),
-            "Wafer Demo确认",
+            DEMO_DONE,
         )
         self.assertEqual([run["round"] for run in retested["runs"]], [1])
 
@@ -553,3 +591,36 @@ class TestEvaluationApi(FrappeTestCase):
         self.assertEqual(timeline["test-execution"]["date"], "2026-12-18")
         self.assertEqual(timeline["internal-review"]["date"], "2026-12-18")
         self.assertEqual([run["round"] for run in workflow["evaluation"]["runs"]], [1, 2])
+        # The deal moved on during round 2; re-entering Customer Review must not move it again.
+        advance_opportunity_fixture(get_strategy_opportunity(self.request["opportunityId"]), CUSTOMER_BUDGET_APPROVED)
+        reviewed = update_evaluation_status(evaluation_id, {"status": "Customer Review"}, reviewed["modified"])
+        self.assertEqual((reviewed["status"], reviewed["testRound"]), ("Customer Review", 2))
+        self.assertEqual(
+            frappe.db.get_value("CRM Opportunity", self.request["opportunityId"], "stage"),
+            CUSTOMER_BUDGET_APPROVED,
+        )
+        self.assertEqual(
+            frappe.db.count(
+                "CRM Opportunity Stage History",
+                {"opportunity": self.request["opportunityId"], "event": "demo_customer_review"},
+            ),
+            1,
+        )
+
+    def test_customer_review_does_not_advance_a_lost_opportunity(self):
+        opportunity_id = self.foreign_request["opportunityId"]
+        frappe.set_user(self.other_sales)
+        lost = mark_opportunity_lost(
+            opportunity_id, {"lostReason": "Customer postponed the fab expansion."},
+            get_strategy_opportunity(opportunity_id)["modified"],
+        )
+        self.assertEqual((lost["stage"], lost["lostAtStage"]), (LOST, QUALIFIED_OPPORTUNITY))
+
+        frappe.set_user(self.other_engineer)
+        reviewed = self._reach_customer_review(self.foreign_request["evaluationId"])
+        # Customer feedback on a lost deal is still recorded, but it does not reopen the deal.
+        self.assertEqual(reviewed["status"], "Customer Review")
+        self.assertEqual(frappe.db.get_value("CRM Opportunity", opportunity_id, "stage"), LOST)
+        self.assertFalse(frappe.db.exists(
+            "CRM Opportunity Stage History", {"opportunity": opportunity_id, "event": "demo_customer_review"},
+        ))

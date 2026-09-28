@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { createMockApi } from './mock-adapter'
 import { createNotifyingApi } from './notifying-api'
+import { createMemorySalesRepository } from '@/demo/sales-repository'
 import type { NotificationInput } from '@/types/notifications'
 
 describe('createNotifyingApi', () => {
@@ -39,7 +40,7 @@ describe('createNotifyingApi', () => {
       (message) => messages.push(message),
     )
 
-    await expect(api.updateStrategyOpportunity('OPP-006', { stage: 'Won' })).rejects.toBeTruthy()
+    await expect(api.markOpportunityLost('OPP-006', { lostReason: 'Customer cancelled' })).rejects.toBeTruthy()
     expect(messages).toHaveLength(0)
   })
 
@@ -54,6 +55,36 @@ describe('createNotifyingApi', () => {
     expect(messages.at(-1)).toMatchObject({
       category: 'InstalledTool', recipientId: 'person077@crm.example.invalid', recipient: '\u6f14\u793a\u5458\u5de514',
       route: `/installed-tools?highlight=${converted.data.installedTool.id}`,
+    })
+  })
+
+  it('tells the requester when another Manager approves an internal validation', async () => {
+    const salesRepository = createMemorySalesRepository()
+    const sales = createMockApi({ latency: 0, role: 'Sales', userName: 'Demo Staff 01', salesRepository })
+    const contact = (await sales.listContacts({ accountId: 'ACC-002', pageSize: 100 })).data.items.find((item) => item.status === 'Active')!
+    const requested = await sales.requestInternalValidation('OPP-003', {
+      reason: 'Lock production capacity', expectedPoDate: '2026-09-30',
+      booking: { primaryContactId: contact.id, equipment: 'HBM AOI', quantity: 1, ddl: '2026-11-12', amount: '32500000.00', currency: 'CNY', owner: 'person002@crm.example.invalid', note: '' },
+    })
+    const messages: NotificationInput[] = []
+    const manager = createNotifyingApi(createMockApi({ latency: 0, role: 'Manager', salesRepository }), (message) => messages.push(message))
+
+    await manager.reviewInternalValidation('OPP-003', { validationId: requested.data.internalValidation!.id, decision: 'approved', comment: '' })
+
+    expect(messages.at(-1)).toMatchObject({
+      category: 'Opportunity', title: '内部生产审批已批准', recipientId: 'person002@crm.example.invalid', route: '/opportunities/OPP-003',
+    })
+  })
+
+  it('links the Booking owner to the confirmed Booking when the PO is received', async () => {
+    const messages: NotificationInput[] = []
+    const api = createNotifyingApi(createMockApi({ latency: 0, role: 'Manager' }), (message) => messages.push(message))
+    const opportunity = (await api.getStrategyOpportunity('OPP-008')).data
+
+    await api.confirmPo('OPP-008', { booking: { ...opportunity.internalValidation!.booking } })
+
+    expect(messages.at(-1)).toMatchObject({
+      category: 'Booking', title: 'Booking 已确认', recipientId: 'person002@crm.example.invalid', route: '/booking/BKG-003',
     })
   })
 

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { addIsoDateDays, formatDisplayDate, shanghaiDate, shanghaiTimestamp } from './time'
+import { addIsoDateDays, formatDisplayDate, formatDisplayDateTime, shanghaiDate, shanghaiTimestamp } from './time'
 
 describe('Shanghai business clock', () => {
   it('derives one consistent Shanghai date and timestamp from the same instant', () => {
@@ -28,5 +28,13 @@ describe('Shanghai business clock', () => {
     expect(formatDisplayDate('07-22', now)).toBe('2026-07-22')
     expect(formatDisplayDate('', now)).toBe('—')
     expect(formatDisplayDate('待排期', now)).toBe('待排期')
+  })
+
+  it('formats audit timestamps as a Shanghai date and minute', () => {
+    expect(formatDisplayDateTime('2026-07-16T09:20:00Z')).toBe('2026-07-16 17:20')
+    expect(formatDisplayDateTime('2026-07-16T16:05:30.000Z')).toBe('2026-07-17 00:05')
+    expect(formatDisplayDateTime('2026-07-16 09:20')).toBe('2026-07-16 09:20')
+    expect(formatDisplayDateTime('2026-07-16')).toBe('2026-07-16')
+    expect(formatDisplayDateTime('')).toBe('—')
   })
 })

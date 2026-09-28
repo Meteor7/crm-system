@@ -19,7 +19,8 @@ import { personnelDisplayName } from '@/demo/personnel'
 import { formatDisplayDate } from '@/domain/time'
 import { readAllPages } from '@/features/shared/read-all-pages'
 import { useI18n, useLocaleMessage, localeMessage } from '@/i18n'
-import { contactStatusLabel, salesEnumLabel, recordTypeLabel, opportunityStageLabel } from '@/features/shared/sales-i18n'
+import { contactStatusLabel, salesEnumLabel, recordTypeLabel } from '@/features/shared/sales-i18n'
+import { isOpportunityStage, opportunityStageLabel } from '@/domain/opportunity-stages'
 
 const props = withDefaults(defineProps<{ apiClient?: CrmApi }>(), { apiClient: () => defaultApi })
 const route = useRoute()
@@ -225,7 +226,7 @@ onMounted(async () => {
 
         <SectionCard :title="t('detail.activityTimeline')" eyebrow="ACTIVITY TIMELINE">
           <div v-if="detail.timeline.length" class="timeline">
-            <RouterLink v-for="item in detail.timeline" :key="item.id" :data-timeline-id="item.id" :to="item.href"><span>{{ recordTypeLabel(item.type, locale) }}</span><strong>{{ item.type === 'Booking' ? bookingTimelineTitle(item.title, locale) : item.title }}</strong><p>{{ item.type === 'Opportunity' ? opportunityStageLabel(item.summary, locale) : item.summary }}</p><time>{{ formatDisplayDate(item.at) }}</time></RouterLink>
+            <RouterLink v-for="item in detail.timeline" :key="item.id" :data-timeline-id="item.id" :to="item.href"><span>{{ recordTypeLabel(item.type, locale) }}</span><strong>{{ item.type === 'Booking' ? bookingTimelineTitle(item.title, locale) : item.title }}</strong><p>{{ item.type === 'Opportunity' ? (isOpportunityStage(item.summary) ? opportunityStageLabel(item.summary, locale) : salesEnumLabel(item.summary, locale)) : item.summary }}</p><time>{{ formatDisplayDate(item.at) }}</time></RouterLink>
           </div>
           <DataState v-else type="empty" :title="t('detail.noRelatedActivity')" :message="t('detail.relatedActivityHint')" />
         </SectionCard>

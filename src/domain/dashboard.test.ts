@@ -11,9 +11,15 @@ describe('management dashboard aggregation', () => {
 
   it('uses opportunity and booking records as the source of truth', () => {
     expect(dashboard.kpis.moneyByCurrency).toEqual([{
-      currency: 'CNY', openPipeline: '97100000.00', weightedPipeline: '69219000.00',
+      currency: 'CNY', openPipeline: '97100000.00',
       confirmedBooking: '22400000.00', cumulativeWon: '18800000.00',
     }])
+  })
+
+  it('keeps weighted values out of the funnel and owner performance', () => {
+    expect(dashboard.funnel.length).toBeGreaterThan(0)
+    expect(dashboard.funnel.every((row) => !('weightedAmount' in row))).toBe(true)
+    expect(dashboard.ownerPerformance.every((row) => !('weightedPipeline' in row))).toBe(true)
   })
 
   it('groups bookings by their real booking date', () => {

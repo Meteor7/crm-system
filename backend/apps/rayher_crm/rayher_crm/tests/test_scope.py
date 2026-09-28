@@ -3,7 +3,13 @@ from __future__ import annotations
 import frappe
 from frappe.tests.utils import FrappeTestCase
 
-from rayher_crm.permissions.scope import conditions_for_doctype, has_crm_permission, install_crm_doc_permissions
+from rayher_crm.permissions.scope import (
+    MUTATING_PERMISSIONS,
+    SCOPED_DOCTYPES,
+    conditions_for_doctype,
+    has_crm_permission,
+    install_crm_doc_permissions,
+)
 from rayher_crm.services.sites import create_site
 
 
@@ -150,7 +156,7 @@ class TestCrmScope(FrappeTestCase):
                 "po_date": "2026-12-31",
                 "opportunity_owner": owner,
                 "tool_type": "Inspection",
-                "stage": "需求发现",
+                "stage": "qualified_opportunity",
                 "forecast": "Pipeline",
                 "probability": 20,
                 "score": 20,
@@ -417,10 +423,87 @@ class TestCrmScope(FrappeTestCase):
             self.assertFalse(frappe.has_permission(doctype, "write", doc=owned_review, user=user))
             self.assertFalse(frappe.has_permission(doctype, "delete", doc=owned_review, user=user))
 
+    def test_probability_history_scope_follows_the_parent_opportunity(self):
+        doctype = "CRM Opportunity Probability History"
+        rows = {
+            key: frappe.get_doc({
+                "doctype": doctype, "opportunity": opportunity, "from_level": "", "to_level": "pipeline",
+                "actor": self.sales, "changed_at": frappe.utils.now_datetime(),
+            }).insert(ignore_permissions=True).name
+            for key, opportunity in (("owned", self.owned_opportunity), ("foreign", self.foreign_opportunity))
+        }
+
+        self.assertIn(f"`tab{doctype}`.`opportunity`", conditions_for_doctype(doctype, self.sales))
+        manager_names = self._visible_names(doctype, self.manager)
+        self.assertIn(rows["owned"], manager_names)
+        self.assertIn(rows["foreign"], manager_names)
+        for user in (self.sales, self.engineer):
+            names = self._visible_names(doctype, user)
+            self.assertIn(rows["owned"], names, user)
+            self.assertNotIn(rows["foreign"], names, user)
+            self.assertTrue(frappe.has_permission(doctype, "read", doc=rows["owned"], user=user))
+            self.assertFalse(frappe.has_permission(doctype, "read", doc=rows["foreign"], user=user))
+            # Audit rows are written only by the Opportunity service.
+            self.assertFalse(frappe.has_permission(doctype, "write", doc=rows["owned"], user=user))
+
+    def test_stage_history_scope_follows_the_parent_opportunity(self):
+        doctype = "CRM Opportunity Stage History"
+        now = frappe.utils.now_datetime()
+        rows = {
+            key: frappe.get_doc({
+                "doctype": doctype, "opportunity": opportunity, "from_stage": "",
+                "to_stage": "qualified_opportunity", "source": "creation", "event": "created",
+                "actor": self.sales, "recorded_at": now, "reached_at": now, "reached_at_basis": "recorded",
+            }).insert(ignore_permissions=True).name
+            for key, opportunity in (("owned", self.owned_opportunity), ("foreign", self.foreign_opportunity))
+        }
+
+        self.assertIn(f"`tab{doctype}`.`opportunity`", conditions_for_doctype(doctype, self.sales))
+        manager_names = self._visible_names(doctype, self.manager)
+        self.assertIn(rows["owned"], manager_names)
+        self.assertIn(rows["foreign"], manager_names)
+        for user in (self.sales, self.engineer):
+            names = self._visible_names(doctype, user)
+            self.assertIn(rows["owned"], names, user)
+            self.assertNotIn(rows["foreign"], names, user)
+            self.assertTrue(frappe.has_permission(doctype, "read", doc=rows["owned"], user=user))
+            self.assertFalse(frappe.has_permission(doctype, "read", doc=rows["foreign"], user=user))
+            # Stage changes are appended only by the Opportunity service.
+            self.assertFalse(frappe.has_permission(doctype, "write", doc=rows["owned"], user=user))
+            self.assertFalse(frappe.has_permission(doctype, "delete", doc=rows["owned"], user=user))
+
+    def test_internal_validation_scope_follows_the_parent_opportunity(self):
+        doctype = "CRM Opportunity Internal Validation"
+        # A pending request claims its Opportunity through a unique field, so each row needs its own.
+        rows = {
+            key: frappe.get_doc({
+                "doctype": doctype, "opportunity": opportunity, "attempt_no": 1, "status": "pending",
+                "reason": "Start production before the PO arrives", "expected_po_date": "2026-12-31",
+                "booking_draft": "{}", "requested_by": self.sales, "requested_at": frappe.utils.now_datetime(),
+            }).insert(ignore_permissions=True).name
+            for key, opportunity in (("owned", self.owned_opportunity), ("foreign", self.foreign_opportunity))
+        }
+
+        self.assertIn(f"`tab{doctype}`.`opportunity`", conditions_for_doctype(doctype, self.sales))
+        manager_names = self._visible_names(doctype, self.manager)
+        self.assertIn(rows["owned"], manager_names)
+        self.assertIn(rows["foreign"], manager_names)
+        for user in (self.sales, self.engineer):
+            names = self._visible_names(doctype, user)
+            self.assertIn(rows["owned"], names, user)
+            self.assertNotIn(rows["foreign"], names, user)
+            self.assertTrue(frappe.has_permission(doctype, "read", doc=rows["owned"], user=user))
+            self.assertFalse(frappe.has_permission(doctype, "read", doc=rows["foreign"], user=user))
+            # Requests change only through the Opportunity review workflow.
+            self.assertFalse(frappe.has_permission(doctype, "write", doc=rows["owned"], user=user))
+
     def test_all_sales_child_scopes_include_the_private_parent_guard(self):
         for doctype in (
             "Lead",
             "CRM Opportunity",
+            "CRM Opportunity Probability History",
+            "CRM Opportunity Stage History",
+            "CRM Opportunity Internal Validation",
             "CRM Booking",
             "CRM Installed Tool",
             "CRM Demo Request",
@@ -445,3 +528,45 @@ class TestCrmScope(FrappeTestCase):
         ):
             roles = {row.role for row in frappe.get_meta(doctype).permissions}
             self.assertTrue({"CRM Manager", "CRM Sales", "CRM Engineer"}.issubset(roles), doctype)
+
+    def test_no_crm_role_writes_through_the_standard_document_api(self):
+        """Business rules and history live in the api/v1 services, so the generic API only reads."""
+
+        for doctype in SCOPED_DOCTYPES:
+            for user in (self.manager, self.sales, self.engineer):
+                for permission in sorted(MUTATING_PERMISSIONS):
+                    self.assertFalse(
+                        frappe.has_permission(doctype, permission, user=user),
+                        f"{doctype} {permission} for {user}",
+                    )
+
+    def test_standard_document_api_cannot_change_an_opportunity(self):
+        """The review case: /api/resource and frappe.client skip the owner rule and the history."""
+
+        from frappe.client import set_value
+
+        before = frappe.db.get_value(
+            "CRM Opportunity", self.owned_opportunity, ["stage", "probability_level", "title"],
+        )
+        frappe.set_user(self.manager)
+        with self.assertRaises(frappe.PermissionError):
+            set_value("CRM Opportunity", self.owned_opportunity, "probability_level", "committed")
+
+        frappe.set_user(self.sales)
+        with self.assertRaises(frappe.PermissionError):
+            set_value("CRM Opportunity", self.owned_opportunity, "stage", "po_received")
+        with self.assertRaises(frappe.PermissionError):
+            document = frappe.get_doc("CRM Opportunity", self.owned_opportunity)
+            document.title = "Renamed outside the services"
+            document.save()
+
+        frappe.set_user("Administrator")
+        self.assertEqual(
+            frappe.db.get_value(
+                "CRM Opportunity", self.owned_opportunity, ["stage", "probability_level", "title"],
+            ),
+            before,
+        )
+        self.assertEqual(frappe.db.count("CRM Opportunity Probability History", {
+            "opportunity": self.owned_opportunity,
+        }), 0)

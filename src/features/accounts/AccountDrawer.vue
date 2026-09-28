@@ -12,6 +12,7 @@ import { mapRequestError, readRequestMeta, type RequestMetaState } from '@/api/r
 import { formatDisplayDate, shanghaiDate } from '@/domain/time'
 import { formatMoney, moneyByCurrency } from '@/domain/money'
 import { useI18n } from '@/i18n'
+import { isOpenOpportunityStage } from '@/domain/opportunity-stages'
 
 const props = defineProps<{ modelValue: boolean; accountId: string; apiClient: CrmApi }>()
 const { locale } = useI18n()
@@ -23,7 +24,7 @@ const denied = ref(false)
 const requestId = ref('')
 const meta = ref<RequestMetaState | null>(null)
 const visible = computed({ get: () => props.modelValue, set: (value) => emit('update:modelValue', value) })
-const opportunityTotals = computed(() => detail.value ? moneyByCurrency(detail.value.opportunities.filter((item) => !['Won', 'Lost'].includes(item.stage))) : [])
+const opportunityTotals = computed(() => detail.value ? moneyByCurrency(detail.value.opportunities.filter((item) => isOpenOpportunityStage(item.stage))) : [])
 const money = (value: number) => `¥${(value / 10000).toFixed(0)}万`
 const today = shanghaiDate()
 let loadSequence = 0

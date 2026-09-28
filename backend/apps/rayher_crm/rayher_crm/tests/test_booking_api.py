@@ -9,7 +9,8 @@ from rayher_crm.api.v1.errors import CrmApiException
 from rayher_crm.services.accounts import create_account
 from rayher_crm.services.bookings import complete_service_booking, create_booking, delete_booking, get_booking, list_bookings, update_booking
 from rayher_crm.services.contacts import create_contact
-from rayher_crm.services.opportunities import create_strategy_opportunity
+from rayher_crm.services.opportunities import confirm_po, create_strategy_opportunity, get_strategy_opportunity
+from rayher_crm.services.opportunity_stages import PO_RECEIVED, QUALIFIED_OPPORTUNITY
 from rayher_crm.services.sites import create_site
 from rayher_crm.tests._opportunity_fixtures import advance_opportunity_fixture
 
@@ -39,7 +40,7 @@ class TestBookingApi(FrappeTestCase):
             "enabled": 1, "send_welcome_email": 0, "roles": [{"role": role}],
         }).insert(ignore_permissions=True).name
 
-    def _records(self, owner: str, suffix: str, stage: str = "Won"):
+    def _records(self, owner: str, suffix: str, stage: str = PO_RECEIVED):
         frappe.set_user(owner)
         account = create_account({
             "name": f"Booking {suffix}", "shortName": suffix, "segment": "Frontend",
@@ -56,13 +57,24 @@ class TestBookingApi(FrappeTestCase):
         })
         opportunity = create_strategy_opportunity({
             "accountId": account["id"], "siteId": site["id"], "title": f"{suffix} Opportunity",
-            "owner": owner, "stage": "需求发现", "forecast": "Pipeline",
-            "amount": 200000, "probability": 100 if stage == "Won" else 20, "intentScore": 80,
+            "owner": owner, "stage": QUALIFIED_OPPORTUNITY, "forecast": "Pipeline",
+            "amount": 200000, "intentScore": 80, "qualificationConfirmed": True,
             "poDate": "2026-12-31", "toolType": "Inspection", "saleType": "New Equipment",
             "subRegion": "华东", "currency": "CNY", "originalAmount": 200000,
         })
-        opportunity = advance_opportunity_fixture(opportunity, stage)
+        # Opportunity Bookings are only created by the PO confirmation that reaches po_received.
+        booking = self._booking_draft(contact, owner) if stage == PO_RECEIVED else None
+        opportunity = advance_opportunity_fixture(opportunity, stage, booking=booking)
         return account, site, contact, opportunity
+
+    def _booking_draft(self, contact: dict, owner: str, **overrides):
+        draft = {
+            "primaryContactId": contact["id"], "equipment": "Inspection 3000", "quantity": 2,
+            "ddl": "2027-01-31", "amount": "200000.00", "currency": "CNY", "owner": owner,
+            "note": "Priority delivery",
+        }
+        draft.update(overrides)
+        return draft
 
     def _input(self, account: dict, contact: dict, opportunity: dict | None, owner: str, **overrides):
         payload = {
@@ -75,9 +87,13 @@ class TestBookingApi(FrappeTestCase):
         return payload
 
     def test_create_list_get_update_and_cas(self):
-        account, _, contact, opportunity = self._records(self.sales, "Core")
-        created = create_booking(self._input(account, contact, opportunity, self.sales))
+        account, _, _, opportunity = self._records(self.sales, "Core")
+        created = get_booking(opportunity["liveBooking"]["id"])
         self.assertRegex(created["id"], r"^CRM-BKG-\d{5}$")
+        self.assertEqual(
+            (created["status"], created["source"], created["sourceOpportunityId"], created["bookingType"]),
+            ("Confirmed", "Opportunity", opportunity["id"], "Equipment"),
+        )
         self.assertEqual(created["accountName"], account["name"])
         self.assertEqual(created["customerContact"], "Core Contact")
         self.assertEqual(created["title"], "Inspection 3000 · 2 台")
@@ -92,26 +108,31 @@ class TestBookingApi(FrappeTestCase):
         with self.assertRaises(CrmApiException) as stale:
             update_booking(created["id"], {"note": "stale"}, "2000-01-01T00:00:00Z")
         self.assertEqual(stale.exception.code, "VERSION_CONFLICT")
-        updated = update_booking(created["id"], {"status": "Pending", "note": "Await PO"}, created["modified"])
-        self.assertEqual((updated["status"], updated["note"]), ("Pending", "Await PO"))
+        updated = update_booking(created["id"], {"quantity": 3, "note": "Await delivery slot"}, created["modified"])
+        self.assertEqual(
+            (updated["status"], updated["quantity"], updated["note"]), ("Confirmed", 3, "Await delivery slot"),
+        )
 
     def test_source_contact_status_and_duplicate_rules(self):
         account, _, contact, won = self._records(self.sales, "Rules")
-        _, _, _, open_opportunity = self._records(self.sales, "Open", stage="Wafer Demo确认")
+        open_account, _, _, open_opportunity = self._records(self.sales, "Open", stage=QUALIFIED_OPPORTUNITY)
         cases = [
-            (self._input(account, contact, None, self.sales, source="Opportunity", sourceOpportunityId=""), "VALIDATION_ERROR"),
+            # Opportunity Bookings come only from the PO confirmation, whatever the Opportunity stage.
+            (self._input(account, contact, None, self.sales, source="Opportunity", sourceOpportunityId=""), "INVALID_TRANSITION"),
             (self._input(account, contact, open_opportunity, self.sales), "INVALID_TRANSITION"),
-            (self._input(account, contact, won, self.sales, status="Completed"), "INVALID_TRANSITION"),
-            (self._input(account, contact, won, self.sales, quantity=0), "VALIDATION_ERROR"),
-            (self._input(account, contact, won, self.sales, amount=-1), "VALIDATION_ERROR"),
-            (self._input(account, contact, won, self.sales, ddl="2026-02-30"), "VALIDATION_ERROR"),
+            (self._input(account, contact, won, self.sales), "INVALID_TRANSITION"),
+            (self._input(account, contact, None, self.sales, status="Completed"), "INVALID_TRANSITION"),
+            (self._input(account, contact, None, self.sales, quantity=0), "VALIDATION_ERROR"),
+            (self._input(account, contact, None, self.sales, amount=-1), "VALIDATION_ERROR"),
+            (self._input(account, contact, None, self.sales, ddl="2026-02-30"), "VALIDATION_ERROR"),
         ]
         for payload, code in cases:
             with self.subTest(code=code), self.assertRaises(CrmApiException) as error:
                 create_booking(payload)
             self.assertEqual(error.exception.code, code)
+        self.assertFalse(frappe.db.exists("CRM Booking", {"source_opportunity": open_opportunity["id"]}))
 
-        first = create_booking(self._input(account, contact, won, self.sales))
+        first = get_booking(won["liveBooking"]["id"])
         self.assertEqual(
             frappe.db.get_value("CRM Booking", first["id"], "live_source_opportunity"),
             won["id"],
@@ -122,27 +143,44 @@ class TestBookingApi(FrappeTestCase):
         )
         self.assertTrue(unique_indexes)
         with self.assertRaises(CrmApiException) as duplicate:
-            create_booking(self._input(account, contact, won, self.sales))
+            confirm_po(won["id"], {"booking": self._booking_draft(contact, self.sales)}, won["modified"])
         self.assertEqual(duplicate.exception.code, "CONFLICT")
+
+        # An Opportunity Booking follows its Opportunity: details may change, the status only to Cancelled.
+        for changes in (
+            {"accountId": open_account["id"]},
+            {"source": "Upsell", "sourceOpportunityId": ""},
+            {"sourceOpportunityId": open_opportunity["id"]},
+            {"bookingType": "Service"},
+            {"status": "Pending"},
+            {"status": "Completed"},
+        ):
+            with self.subTest(changes=changes), self.assertRaises(CrmApiException) as fixed:
+                update_booking(first["id"], changes, first["modified"])
+            self.assertEqual(fixed.exception.code, "INVALID_TRANSITION")
 
         cancelled = update_booking(first["id"], {"status": "Cancelled"}, first["modified"])
         self.assertEqual(cancelled["status"], "Cancelled")
         self.assertIsNone(frappe.db.get_value("CRM Booking", first["id"], "live_source_opportunity"))
-        replacement = create_booking(self._input(account, contact, won, self.sales))
-        self.assertNotEqual(replacement["id"], first["id"])
+        with self.assertRaises(CrmApiException) as restored:
+            update_booking(first["id"], {"status": "Confirmed"}, cancelled["modified"])
+        self.assertEqual(restored.exception.code, "INVALID_TRANSITION")
+        replacement = confirm_po(won["id"], {"booking": self._booking_draft(contact, self.sales)}, won["modified"])
+        self.assertEqual(replacement["stage"], PO_RECEIVED)
+        self.assertNotEqual(replacement["liveBooking"]["id"], first["id"])
 
     def test_owner_account_contact_scope_and_locked_booking(self):
         account, _, contact, won = self._records(self.sales, "Owned")
-        foreign_account, _, foreign_contact, _ = self._records(self.other_sales, "Foreign")
+        foreign_account, _, foreign_contact, _ = self._records(self.other_sales, "Foreign", stage=QUALIFIED_OPPORTUNITY)
         frappe.set_user(self.sales)
         with self.assertRaises(CrmApiException) as forged:
-            create_booking(self._input(account, contact, won, self.other_sales))
+            create_booking(self._input(account, contact, None, self.other_sales))
         self.assertEqual(forged.exception.code, "SCOPE_DENIED")
         with self.assertRaises(CrmApiException) as mismatch:
-            create_booking(self._input(account, foreign_contact, won, self.sales))
+            create_booking(self._input(account, foreign_contact, None, self.sales))
         self.assertEqual(mismatch.exception.code, "CONFLICT")
 
-        created = create_booking(self._input(account, contact, won, self.sales))
+        created = get_booking(won["liveBooking"]["id"])
         frappe.set_user(self.other_sales)
         self.assertNotIn(created["id"], {item["id"] for item in list_bookings()})
         with self.assertRaises(CrmApiException) as denied:
@@ -159,20 +197,31 @@ class TestBookingApi(FrappeTestCase):
 
     def test_only_manager_can_delete_booking(self):
         account, _, contact, opportunity = self._records(self.other_sales, "Delete")
-        booking = create_booking(self._input(account, contact, opportunity, self.other_sales))
+        po_booking = get_booking(opportunity["liveBooking"]["id"])
+        frappe.set_user(self.other_sales)
+        upsell = create_booking(self._input(account, contact, None, self.other_sales))
 
         frappe.set_user(self.sales)
-        with self.assertRaises(frappe.PermissionError):
-            delete_booking(booking["id"])
-        self.assertTrue(frappe.db.exists("CRM Booking", booking["id"]))
+        for booking_id in (upsell["id"], po_booking["id"]):
+            with self.assertRaises(frappe.PermissionError):
+                delete_booking(booking_id)
+            self.assertTrue(frappe.db.exists("CRM Booking", booking_id))
 
         frappe.set_user("Administrator")
-        self.assertEqual(delete_booking(booking["id"]), {"id": booking["id"], "status": "Deleted"})
-        self.assertFalse(frappe.db.exists("CRM Booking", booking["id"]))
+        # The PO record behind a po_received Opportunity can only be cancelled, never deleted.
+        with self.assertRaises(CrmApiException) as protected:
+            delete_booking(po_booking["id"])
+        # BOOKING_SOURCE_INVALID is published as the INVALID_TRANSITION contract code.
+        self.assertEqual(protected.exception.code, "INVALID_TRANSITION")
+        self.assertTrue(frappe.db.exists("CRM Booking", po_booking["id"]))
+        self.assertEqual(get_strategy_opportunity(opportunity["id"])["liveBooking"]["id"], po_booking["id"])
+
+        self.assertEqual(delete_booking(upsell["id"]), {"id": upsell["id"], "status": "Deleted"})
+        self.assertFalse(frappe.db.exists("CRM Booking", upsell["id"]))
 
     def test_assignment_notification_failure_rolls_back_create_and_reassignment(self):
-        account, _, contact, opportunity = self._records(self.sales, "NotifyRollback")
-        payload = self._input(account, contact, opportunity, self.other_sales)
+        account, _, contact, _ = self._records(self.sales, "NotifyRollback", stage=QUALIFIED_OPPORTUNITY)
+        payload = self._input(account, contact, None, self.other_sales)
         frappe.set_user("Administrator")
 
         before = frappe.db.count("CRM Booking")
@@ -183,7 +232,7 @@ class TestBookingApi(FrappeTestCase):
             create_booking(payload)
         self.assertEqual(frappe.db.count("CRM Booking"), before)
 
-        created = create_booking(self._input(account, contact, opportunity, self.sales))
+        created = create_booking(self._input(account, contact, None, self.sales))
         try:
             assigned = frappe.get_all(
                 "CRM Notification Event",
@@ -219,7 +268,7 @@ class TestBookingApi(FrappeTestCase):
         self.assertEqual(completed["status"], "Completed")
         self.assertNotIn("installedToolId", completed)
 
-        equipment = create_booking(self._input(account, contact, opportunity, self.sales))
+        equipment = get_booking(opportunity["liveBooking"]["id"])
         with self.assertRaises(CrmApiException) as invalid_type:
             complete_service_booking(equipment["id"], equipment["modified"])
         self.assertEqual(invalid_type.exception.code, "INVALID_TRANSITION")

@@ -1,9 +1,13 @@
+import type { OpenOpportunityStage, OpportunityStage } from '@/domain/opportunity-stages'
 import type {
+  OpportunityInternalValidationDto,
+  OpportunityLiveBookingDto,
+  OpportunityProbabilityHistoryDto,
+  OpportunityProbabilityLevelValue,
+  OpportunityStageHistoryDto,
   OpportunityStakeholderInfluence,
-  OpportunityForecast,
   OpportunityStakeholderRole,
   OpportunityStakeholderStance,
-  StrategyOpportunityStage,
 } from '@/types/workspaces'
 
 export type Tone = 'positive' | 'info' | 'warning' | 'danger' | 'neutral'
@@ -16,10 +20,21 @@ export interface StrategyOpportunity {
   account: string
   site: string
   owner: string
-  stage: StrategyOpportunityStage
-  forecast: OpportunityForecast
+  stage: OpportunityStage
+  stageChangedAt: string
+  budgetApprovedOn: string
+  lostAtStage: OpenOpportunityStage | ''
+  lostAt: string
+  lostBy: string
+  /** Newest first. */
+  stageHistory: OpportunityStageHistoryDto[]
+  /** Derived on read from the stored internal validations; seeds keep null. */
+  internalValidation: OpportunityInternalValidationDto | null
+  /** Derived on read from the Opportunity Bookings; seeds keep null. */
+  liveBooking: OpportunityLiveBookingDto | null
   amount: number
-  probability: number
+  probabilityLevel: OpportunityProbabilityLevelValue
+  probabilityHistory: OpportunityProbabilityHistoryDto[]
   poDate: string
   updated: string
   score: number
@@ -181,8 +196,13 @@ export interface ControlledDocument {
 
 export const opportunities: StrategyOpportunity[] = [
   {
-    id: 'OPP-003', accountId: 'ACC-002', siteId: 'SITE-004', title: 'HBM AOI 扩线项目', account: '示例企业044有限公司', site: '武汉二期', owner: 'Demo Staff 01', stage: '采购流程', forecast: 'Commit', amount: 32500000, probability: 79, poDate: '2026-09-18', updated: '2 天前', score: 86,
-    toolType: 'Inspection Tool', saleType: 'New Tool', subRegion: 'Central China', currency: 'CNY', originalAmount: 32500000, shipmentDate: '2026-11-12', fatDate: '2026-10-28', paymentMilestones: ['30% PO', '60% Shipment', '10% SAT'], competition: 'KLA · Final shortlist', winReason: '技术指标与本地服务领先', lostReason: '', history: [{ at: '2026-07-16 17:20', actor: 'Demo Staff 01', field: 'Probability', from: '72%', to: '79%' }, { at: '2026-07-14 09:30', actor: 'Demo Staff 06', field: 'Forecast', from: 'Best Case', to: 'Commit' }],
+    id: 'OPP-003', accountId: 'ACC-002', siteId: 'SITE-004', title: 'HBM AOI 扩线项目', account: '示例企业044有限公司', site: '武汉二期', owner: 'Demo Staff 01', stage: 'quotation_sent', probabilityLevel: 'committed', amount: 32500000, poDate: '2026-09-18', updated: '2 天前', score: 86,
+    stageChangedAt: '2026-07-14T01:30:00Z', budgetApprovedOn: '', lostAtStage: '', lostAt: '', lostBy: '', internalValidation: null, liveBooking: null,
+    stageHistory: [
+      { id: 'OSH-OPP-003-2', from: 'rfq_validated', to: 'quotation_sent', source: 'event', event: 'quotation_published', referenceDoctype: '', referenceName: '', reason: '', actor: 'person002@crm.example.invalid', recordedAt: '2026-07-14T01:30:00Z', reachedAt: '2026-07-14T01:30:00Z', reachedAtBasis: 'recorded' },
+      { id: 'OSH-OPP-003-1', from: '', to: 'rfq_validated', source: 'migration', event: 'migration', referenceDoctype: '', referenceName: '', reason: '旧阶段 报价', actor: 'Administrator', recordedAt: '2026-07-01T02:00:00Z', reachedAt: '', reachedAtBasis: 'unknown' },
+    ],
+    toolType: 'Inspection Tool', saleType: 'New Tool', subRegion: 'Central China', currency: 'CNY', originalAmount: 32500000, shipmentDate: '2026-11-12', fatDate: '2026-10-28', paymentMilestones: ['30% PO', '60% Shipment', '10% SAT'], competition: 'KLA · Final shortlist', winReason: '技术指标与本地服务领先', lostReason: '', history: [], probabilityHistory: [{ id: 'PLH-OPP-003-2', from: 'upside', to: 'committed', actor: 'Demo Staff 01', at: '2026-07-16T09:20:00Z' }, { id: 'PLH-OPP-003-1', from: '', to: 'upside', actor: 'Demo Staff 01', at: '2026-07-10T02:00:00Z' }],
     strengths: ['技术指标在客户基准测试中排名第一', '技术负责人愿意作为内部 Champion', '交付窗口与客户扩线计划匹配'],
     redFlags: ['集团采购要求追加 5% 价格让步', '最终预算批复尚未完成'],
     informationNeeded: ['CFO 最终预算签批日期', '竞争对手最新服务承诺'],
@@ -199,8 +219,12 @@ export const opportunities: StrategyOpportunity[] = [
     ],
   },
   {
-    id: 'OPP-001', accountId: 'ACC-001', siteId: 'SITE-001', title: '南京缺陷检测设备 2 台', account: '示例企业014有限公司', site: '南京 12-inch Fab', owner: 'Demo Staff 01', stage: 'Wafer Demo确认', forecast: 'Best Case', amount: 16800000, probability: 68, poDate: '2026-10-08', updated: '6 天前', score: 74,
-    toolType: 'Macro Inspection', saleType: 'Capacity Expansion', subRegion: 'East China', currency: 'CNY', originalAmount: 16800000, shipmentDate: '2026-12-05', fatDate: '2026-11-20', paymentMilestones: ['30% PO', '50% FAT', '20% SAT'], competition: 'Onto Innovation · Benchmarking', winReason: '', lostReason: '', history: [{ at: '2026-07-15 14:00', actor: 'Demo Staff 01', field: 'Stage', from: '需求发现', to: 'Wafer Demo确认' }],
+    id: 'OPP-001', accountId: 'ACC-001', siteId: 'SITE-001', title: '南京缺陷检测设备 2 台', account: '示例企业014有限公司', site: '南京 12-inch Fab', owner: 'Demo Staff 01', stage: 'qualified_opportunity', probabilityLevel: 'upside', amount: 16800000, poDate: '2026-10-08', updated: '6 天前', score: 74,
+    stageChangedAt: '2026-07-15T06:00:00Z', budgetApprovedOn: '', lostAtStage: '', lostAt: '', lostBy: '', internalValidation: null, liveBooking: null,
+    stageHistory: [
+      { id: 'OSH-OPP-001-1', from: '', to: 'qualified_opportunity', source: 'migration', event: 'migration', referenceDoctype: '', referenceName: '', reason: '旧阶段 Wafer Demo确认；旧历史记录 2026-07-15 推进', actor: 'Administrator', recordedAt: '2026-07-01T02:00:00Z', reachedAt: '2026-07-15T06:00:00Z', reachedAtBasis: 'evidence' },
+    ],
+    toolType: 'Macro Inspection', saleType: 'Capacity Expansion', subRegion: 'East China', currency: 'CNY', originalAmount: 16800000, shipmentDate: '2026-12-05', fatDate: '2026-11-20', paymentMilestones: ['30% PO', '50% FAT', '20% SAT'], competition: 'Onto Innovation · Benchmarking', winReason: '', lostReason: '', history: [], probabilityHistory: [{ id: 'PLH-OPP-001-1', from: '', to: 'upside', actor: 'Demo Staff 01', at: '2026-07-15T06:30:00Z' }],
     strengths: ['客户对低 false-positive 指标高度认可', '已有同类量产案例'], redFlags: ['样片到达延迟一周', '决策人覆盖不足'], informationNeeded: ['竞争工具复测数据', '客户量产节拍目标'],
     stakeholders: [
       { name: '周楠', title: '研发总监', role: 'Technical Buyer', influence: 'High', stance: 'Support', coverage: 'Demo steering meeting' },
@@ -209,8 +233,12 @@ export const opportunities: StrategyOpportunity[] = [
     actions: [{ title: '确认第二批样片物流', owner: 'Demo Staff 08', due: '07-21', status: 'Open' }, { title: '补齐 Economic Buyer 关系', owner: 'Demo Staff 06', due: '07-30', status: 'Open' }],
   },
   {
-    id: 'OPP-007', accountId: 'ACC-005', siteId: 'SITE-005', title: '先进封装外观检测', account: '示例企业040有限公司', site: '南通工厂', owner: 'Demo Staff 02', stage: '需求发现', forecast: 'Pipeline', amount: 7600000, probability: 31, poDate: '2026-12-15', updated: '11 天前', score: 63,
-    toolType: 'Package Inspection', saleType: 'New Tool', subRegion: 'East China', currency: 'CNY', originalAmount: 7600000, shipmentDate: '2027-02-18', fatDate: '2027-01-28', paymentMilestones: ['20% PO', '70% Shipment', '10% Acceptance'], competition: 'Local AOI vendor · Price pressure', winReason: '', lostReason: '价格与预算尚未确认', history: [{ at: '2026-07-10 11:10', actor: 'Demo Staff 02', field: 'Amount', from: '¥680万', to: '¥760万' }],
+    id: 'OPP-007', accountId: 'ACC-005', siteId: 'SITE-005', title: '先进封装外观检测', account: '示例企业040有限公司', site: '南通工厂', owner: 'Demo Staff 02', stage: 'qualified_opportunity', probabilityLevel: '', amount: 7600000, poDate: '2026-12-15', updated: '11 天前', score: 63,
+    stageChangedAt: '', budgetApprovedOn: '', lostAtStage: '', lostAt: '', lostBy: '', internalValidation: null, liveBooking: null,
+    stageHistory: [
+      { id: 'OSH-OPP-007-1', from: '', to: 'qualified_opportunity', source: 'migration', event: 'migration', referenceDoctype: '', referenceName: '', reason: '旧阶段 需求发现', actor: 'Administrator', recordedAt: '2026-07-01T02:00:00Z', reachedAt: '', reachedAtBasis: 'unknown' },
+    ],
+    toolType: 'Package Inspection', saleType: 'New Tool', subRegion: 'East China', currency: 'CNY', originalAmount: 7600000, shipmentDate: '2027-02-18', fatDate: '2027-01-28', paymentMilestones: ['20% PO', '70% Shipment', '10% Acceptance'], competition: 'Local AOI vendor · Price pressure', winReason: '', lostReason: '价格与预算尚未确认', history: [{ at: '2026-07-10 11:10', actor: 'Demo Staff 02', field: 'Amount', from: '¥680万', to: '¥760万' }], probabilityHistory: [],
     strengths: ['Wafer-level package 方案覆盖完整', '本地服务团队响应快'], redFlags: ['价格竞争进入最终轮', '机会连续 11 天未更新'], informationNeeded: ['采购评分权重', '竞争对手最终报价', '厂务接口确认结果'],
     stakeholders: [
       { name: '马会东', title: '封装事业部总经理', role: 'Economic Buyer', influence: 'High', stance: 'Neutral', coverage: 'No direct access' },
@@ -220,11 +248,51 @@ export const opportunities: StrategyOpportunity[] = [
     actions: [{ title: '更新竞争报价分析', owner: 'Demo Staff 07', due: '07-20', status: 'Open' }, { title: '发起总经理关系引荐', owner: 'Demo Staff 06', due: '07-24', status: 'Open' }],
   },
   {
-    id: 'OPP-006', accountId: 'ACC-006', siteId: 'SITE-006', title: '高速 AOI 产能升级', account: '示例企业027有限公司', site: '演示员工27', owner: 'Demo Staff 02', stage: 'Won', forecast: 'Commit', amount: 18800000, probability: 100, poDate: '2026-07-02', updated: '7月14日', score: 86,
-    toolType: 'FastScan 1200', saleType: 'Capacity Expansion', subRegion: 'East China', currency: 'CNY', originalAmount: 18800000, shipmentDate: '2026-08-28', fatDate: '2026-08-18', paymentMilestones: ['30% PO', '60% Shipment', '10% SAT'], competition: 'Won', winReason: '高速 AOI 产能与交付窗口满足客户要求', lostReason: '', history: [{ at: '2026-07-02 16:30', actor: 'Demo Staff 02', field: 'Stage', from: '采购流程', to: 'Won' }],
+    id: 'OPP-006', accountId: 'ACC-006', siteId: 'SITE-006', title: '高速 AOI 产能升级', account: '示例企业027有限公司', site: '演示员工27', owner: 'Demo Staff 02', stage: 'po_received', probabilityLevel: '', amount: 18800000, poDate: '2026-07-02', updated: '7月14日', score: 86,
+    stageChangedAt: '2026-07-02T08:30:00Z', budgetApprovedOn: '', lostAtStage: '', lostAt: '', lostBy: '', internalValidation: null, liveBooking: null,
+    // The PO was confirmed straight from quotation sent, so the optional internal validation was skipped.
+    stageHistory: [
+      { id: 'OSH-OPP-006-2', from: 'quotation_sent', to: 'po_received', source: 'manual', event: 'po_confirmed', referenceDoctype: 'CRM Booking', referenceName: 'BKG-001', reason: '', actor: 'person005@crm.example.invalid', recordedAt: '2026-07-02T08:30:00Z', reachedAt: '2026-07-02T08:30:00Z', reachedAtBasis: 'recorded' },
+      { id: 'OSH-OPP-006-1', from: '', to: 'quotation_sent', source: 'migration', event: 'migration', referenceDoctype: '', referenceName: '', reason: '旧阶段 采购流程', actor: 'Administrator', recordedAt: '2026-07-01T02:00:00Z', reachedAt: '', reachedAtBasis: 'unknown' },
+    ],
+    toolType: 'FastScan 1200', saleType: 'Capacity Expansion', subRegion: 'East China', currency: 'CNY', originalAmount: 18800000, shipmentDate: '2026-08-28', fatDate: '2026-08-18', paymentMilestones: ['30% PO', '60% Shipment', '10% SAT'], competition: 'Won', winReason: '高速 AOI 产能与交付窗口满足客户要求', lostReason: '', history: [], probabilityHistory: [],
     strengths: ['高速在线检测能力已通过客户确认', '交付资源与八月底窗口匹配'], redFlags: [], informationNeeded: [],
     stakeholders: [],
     actions: [{ title: '安排交付启动会', owner: 'Demo Staff 02', due: '07-21', status: 'Open' }],
+  },
+  {
+    id: 'OPP-008', accountId: 'ACC-002', siteId: 'SITE-003', title: '武汉一厂 CD 量测扩产', account: '示例企业044有限公司', site: '武汉一厂', owner: 'Demo Staff 01', stage: 'internal_validation', probabilityLevel: 'pipeline', amount: 21600000, poDate: '2026-08-15', updated: '昨天', score: 78,
+    stageChangedAt: '2026-07-20T01:00:00Z', budgetApprovedOn: '2026-07-06', lostAtStage: '', lostAt: '', lostBy: '', internalValidation: null, liveBooking: null,
+    // Production was approved before the PO, so the approval created the Pending Booking BKG-003.
+    stageHistory: [
+      { id: 'OSH-OPP-008-6', from: 'quotation_sent', to: 'internal_validation', source: 'approval', event: 'internal_validation_approved', referenceDoctype: 'CRM Opportunity Internal Validation', referenceName: 'CRM-VAL-00001', reason: '', actor: 'person029@crm.example.invalid', recordedAt: '2026-07-20T01:00:00Z', reachedAt: '2026-07-20T01:00:00Z', reachedAtBasis: 'recorded' },
+      { id: 'OSH-OPP-008-5', from: 'rfq_validated', to: 'quotation_sent', source: 'event', event: 'quotation_published', referenceDoctype: '', referenceName: '', reason: '', actor: 'person002@crm.example.invalid', recordedAt: '2026-07-16T03:00:00Z', reachedAt: '2026-07-16T03:00:00Z', reachedAtBasis: 'recorded' },
+      { id: 'OSH-OPP-008-4', from: 'customer_budget_approved', to: 'rfq_validated', source: 'event', event: 'rfq_approved', referenceDoctype: '', referenceName: '', reason: '', actor: 'person029@crm.example.invalid', recordedAt: '2026-07-12T06:00:00Z', reachedAt: '2026-07-12T06:00:00Z', reachedAtBasis: 'recorded' },
+      { id: 'OSH-OPP-008-3', from: 'demo_done', to: 'customer_budget_approved', source: 'manual', event: 'budget_confirmed', referenceDoctype: '', referenceName: '', reason: '', actor: 'person002@crm.example.invalid', recordedAt: '2026-07-08T02:00:00Z', reachedAt: '2026-07-05T16:00:00Z', reachedAtBasis: 'declared' },
+      { id: 'OSH-OPP-008-2', from: 'qualified_opportunity', to: 'demo_done', source: 'event', event: 'demo_customer_review', referenceDoctype: '', referenceName: '', reason: '', actor: 'person077@crm.example.invalid', recordedAt: '2026-07-03T08:00:00Z', reachedAt: '2026-07-03T08:00:00Z', reachedAtBasis: 'recorded' },
+      { id: 'OSH-OPP-008-1', from: '', to: 'qualified_opportunity', source: 'creation', event: 'created', referenceDoctype: '', referenceName: '', reason: '', actor: 'person002@crm.example.invalid', recordedAt: '2026-06-20T02:00:00Z', reachedAt: '2026-06-20T02:00:00Z', reachedAtBasis: 'recorded' },
+    ],
+    toolType: 'CD Metrology M5', saleType: 'Repeat Order', subRegion: 'Central China', currency: 'CNY', originalAmount: 21600000, shipmentDate: '2026-10-30', fatDate: '2026-10-15', paymentMilestones: ['30% PO', '60% Shipment', '10% SAT'], competition: 'Incumbent supplier · Repeat order', winReason: '', lostReason: '',
+    history: [
+      { at: '2026-07-20 09:00', actor: '演示员工24', field: 'internalValidationApproved', from: 'CRM-VAL-00001', to: 'BKG-003' },
+      { at: '2026-07-18 10:00', actor: 'Demo Staff 01', field: 'internalValidationRequested', from: '', to: 'CRM-VAL-00001' },
+    ],
+    probabilityHistory: [{ id: 'PLH-OPP-008-1', from: '', to: 'pipeline', actor: 'Demo Staff 01', at: '2026-07-08T02:10:00Z' }],
+    strengths: ['武汉一厂已在量产线使用同型号设备', '客户扩产排期已锁定'], redFlags: ['客户 PO 预计 8 月中旬才能下达'], informationNeeded: ['客户 PO 下达日期'],
+    stakeholders: [],
+    actions: [{ title: '跟进客户 PO 下达进度', owner: 'Demo Staff 01', due: '07-28', status: 'Open' }],
+  },
+]
+
+/** Internal validation requests, stored apart from their Opportunity like the server's own doctype. */
+export const opportunityInternalValidations: Array<OpportunityInternalValidationDto & { opportunityId: string }> = [
+  {
+    id: 'CRM-VAL-00001', opportunityId: 'OPP-008', attemptNo: 1, status: 'approved',
+    reason: '客户扩产窗口紧，需要在 PO 下达前锁定两台 CD Metrology M5 的产能。', expectedPoDate: '2026-08-15',
+    booking: { primaryContactId: 'CON-004', equipment: 'CD Metrology M5', quantity: 2, ddl: '2026-10-30', amount: '21600000.00', currency: 'CNY', owner: 'person002@crm.example.invalid', note: '内部生产审批已批准，等待客户 PO 后确认。' },
+    requestedBy: 'person002@crm.example.invalid', requestedAt: '2026-07-18T02:00:00Z',
+    decidedBy: 'person029@crm.example.invalid', decidedAt: '2026-07-20T01:00:00Z', decisionComment: '同意提前排产。',
+    bookingId: 'BKG-003', cancelledBy: '', cancelledAt: '', cancelReason: '',
   },
 ]
 

@@ -26,6 +26,7 @@ ALL_CAPABILITIES = (
     "deal:view",
     "deal:write",
     "deal:rollback",
+    "deal:internal_validation_approve",
     "contact:view",
     "contact:write",
     "contact:merge",

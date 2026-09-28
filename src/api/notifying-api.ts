@@ -85,11 +85,42 @@ function notificationFor(method: keyof CrmApi, args: unknown[], data: unknown): 
     case 'updateStrategyOpportunity':
       return {
         category: 'Opportunity',
-        title: input.stage ? `Opportunity 推进至 ${text(input.stage)}` : 'Opportunity 信息已更新',
+        title: 'Opportunity 信息已更新',
         message: `${text(result.title, id)} · ${text(result.owner)}`,
         route: id ? `/opportunities/${encodeURIComponent(id)}` : '/opportunities',
         ...recipientFor(text(result.owner, text(input.owner))),
       }
+    case 'requestInternalValidation':
+      // The other Managers review the request, so the notice has no single recipient.
+      return {
+        category: 'Opportunity',
+        title: '内部生产审批已申请',
+        message: `${text(result.title, id)} · ${text(input.reason)}`,
+        route: id ? `/opportunities/${encodeURIComponent(id)}` : '/opportunities',
+      }
+    case 'reviewInternalValidation': {
+      const validation = record(result.internalValidation)
+      const comment = text(input.comment)
+      return {
+        category: 'Opportunity',
+        title: input.decision === 'rejected' ? '内部生产审批已驳回' : '内部生产审批已批准',
+        message: comment ? `${text(result.title, id)} · ${comment}` : text(result.title, id),
+        route: id ? `/opportunities/${encodeURIComponent(id)}` : '/opportunities',
+        ...recipientFor(text(validation.requestedBy, text(result.owner))),
+      }
+    }
+    case 'confirmPo': {
+      const booking = record(result.liveBooking)
+      const bookingId = text(booking.id)
+      const owner = text(booking.owner, text(record(input.booking).owner))
+      return {
+        category: 'Booking',
+        title: 'Booking 已确认',
+        message: `${text(booking.equipment, text(result.title, id))} · ${owner}`,
+        route: bookingId ? `/booking/${encodeURIComponent(bookingId)}` : '/booking',
+        ...recipientFor(owner),
+      }
+    }
     case 'createOpportunityStakeholder':
     case 'updateOpportunityStakeholder':
       return {

@@ -7,6 +7,9 @@ import frappe
 
 ARTIFACT_INDEX = "unique_evaluation_artifact_version"
 QUOTATION_VERSION_INDEX = "uq_crm_quotation_version_number"
+PROBABILITY_HISTORY_INDEX = "idx_crm_opportunity_probability_history"
+STAGE_HISTORY_INDEX = "idx_crm_opportunity_stage_history"
+STAGE_REACHED_INDEX = "idx_crm_opportunity_stage_reached"
 
 
 def install_stage5f_indexes() -> None:
@@ -36,4 +39,16 @@ def install_stage5f_indexes() -> None:
     if frappe.db.table_exists("CRM Quotation Version"):
         frappe.db.add_unique(
             "CRM Quotation Version", ["quotation", "version_no"], QUOTATION_VERSION_INDEX,
+        )
+    if frappe.db.table_exists("CRM Opportunity Probability History"):
+        frappe.db.add_index(
+            "CRM Opportunity Probability History", ["opportunity", "changed_at"], PROBABILITY_HISTORY_INDEX,
+        )
+    if frappe.db.table_exists("CRM Opportunity Stage History"):
+        frappe.db.add_index(
+            "CRM Opportunity Stage History", ["opportunity", "recorded_at"], STAGE_HISTORY_INDEX,
+        )
+        # The cockpit counts arrivals at a stage within a period.
+        frappe.db.add_index(
+            "CRM Opportunity Stage History", ["to_stage", "reached_at"], STAGE_REACHED_INDEX,
         )

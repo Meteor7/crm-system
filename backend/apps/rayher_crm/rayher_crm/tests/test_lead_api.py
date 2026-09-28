@@ -8,6 +8,7 @@ from rayher_crm.api.v1.leads import create_lead as create_lead_endpoint
 from rayher_crm.services.accounts import create_account
 from rayher_crm.services.contacts import create_contact
 from rayher_crm.services.leads import convert_lead, create_lead, delete_lead, get_lead, list_leads, update_lead
+from rayher_crm.services.opportunity_stages import QUALIFIED_OPPORTUNITY
 from rayher_crm.services.sites import create_site
 
 
@@ -216,6 +217,7 @@ class TestLeadApi(FrappeTestCase):
             "opportunityCloseDate": "2026-12-31",
             "opportunityOwner": self.sales,
             "toolType": "Inspection",
+            "qualificationConfirmed": True,
         }
         payload.update(overrides)
         return payload
@@ -245,9 +247,17 @@ class TestLeadApi(FrappeTestCase):
         self.assertEqual(opportunity.site, site["id"])
         self.assertEqual(opportunity.source_lead, lead["id"])
         self.assertEqual(str(opportunity.po_date), "2026-12-31")
-        self.assertEqual(opportunity.stage, "需求发现")
-        self.assertEqual(opportunity.forecast, "Pipeline")
-        self.assertEqual((opportunity.probability, opportunity.score), (17, 20))
+        self.assertEqual(opportunity.stage, QUALIFIED_OPPORTUNITY)
+        stage_history = frappe.get_all(
+            "CRM Opportunity Stage History",
+            filters={"opportunity": opportunity.name},
+            fields=["to_stage", "source", "event", "reference_doctype", "reference_name"],
+        )
+        self.assertEqual(
+            [(row.to_stage, row.source, row.event, row.reference_doctype, row.reference_name) for row in stage_history],
+            [(QUALIFIED_OPPORTUNITY, "creation", "lead_converted", "Lead", lead["id"])],
+        )
+        self.assertEqual((opportunity.probability_level or "", opportunity.score), ("", 20))
         self.assertEqual(opportunity.sale_type, "New Equipment")
         self.assertEqual(opportunity.sub_region, "East China")
         self.assertEqual(opportunity.original_amount, opportunity.amount)
@@ -361,4 +371,14 @@ class TestLeadApi(FrappeTestCase):
                 ),
             )
         self.assertEqual(bad_date.exception.code, "VALIDATION_ERROR")
+        unqualified = self._conversion_input(
+            newAccount=self._account_input("Unqualified Conversion Account"),
+            newSite=self._site_input("Unqualified Conversion Site"),
+            newContact=self._contact_input("placeholder", "Unqualified Conversion Contact"),
+        )
+        unqualified.pop("qualificationConfirmed")
+        with self.assertRaises(CrmApiException) as not_confirmed:
+            convert_lead(lead["id"], unqualified)
+        self.assertEqual(not_confirmed.exception.code, "VALIDATION_ERROR")
+        self.assertEqual(not_confirmed.exception.field_errors, {"qualificationConfirmed": "Required"})
         self.assertEqual(frappe.db.count("CRM Opportunity"), before)

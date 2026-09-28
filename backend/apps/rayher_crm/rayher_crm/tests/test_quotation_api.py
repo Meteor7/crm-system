@@ -12,6 +12,12 @@ from rayher_crm.api.v1.errors import CrmApiException
 from rayher_crm.services.accounts import create_account, get_account_360
 from rayher_crm.services.contacts import create_contact
 from rayher_crm.services.opportunities import create_strategy_opportunity
+from rayher_crm.services.opportunity_stages import (
+    CUSTOMER_BUDGET_APPROVED,
+    QUALIFIED_OPPORTUNITY,
+    QUOTATION_SENT,
+    RFQ_VALIDATED,
+)
 from rayher_crm.services.quotations import (
     _pdf_context, _validated_values, create_quotation, create_version, discard_draft, get_pdf_file, get_preview_pdf, get_quotation, list_quotations,
     expire_quotations, link_quotation_opportunity, publish_version, record_decision, render_quotation_html, review_approval, save_draft, submit_for_approval,
@@ -66,13 +72,13 @@ class TestQuotationApi(FrappeTestCase):
         })
         opportunity = create_strategy_opportunity({
             "accountId": account["id"], "siteId": site["id"], "title": f"Quotation Project {suffix}",
-            "owner": self.sales, "stage": "\u9700\u6c42\u53d1\u73b0", "forecast": "Pipeline", "amount": "100000.00",
+            "owner": self.sales, "stage": QUALIFIED_OPPORTUNITY, "forecast": "Pipeline", "amount": "100000.00",
             "probability": 60, "intentScore": 70, "poDate": "2026-12-31", "toolType": "Inspection",
             "saleType": "New Equipment", "subRegion": "\u534e\u4e1c", "currency": "CNY",
             "originalAmount": "100000.00", "paymentMilestones": [],
-            "strengths": [], "redFlags": [], "informationNeeded": [],
+            "strengths": [], "redFlags": [], "informationNeeded": [], "qualificationConfirmed": True,
         })
-        opportunity = advance_opportunity_fixture(opportunity, "\u62a5\u4ef7")
+        opportunity = advance_opportunity_fixture(opportunity, RFQ_VALIDATED)
         return opportunity
 
     def _publish(self, name: str, expected_modified: str):
@@ -235,7 +241,7 @@ class TestQuotationApi(FrappeTestCase):
         self.assertTrue(approved["version"]["pdfAvailable"])
         self.assertEqual(
             frappe.db.get_value("CRM Opportunity", approved["quotation"]["opportunityId"], "stage"),
-            "采购流程",
+            QUOTATION_SENT,
         )
         approved_notice = frappe.get_all(
             "CRM Notification Event",
@@ -266,6 +272,27 @@ class TestQuotationApi(FrappeTestCase):
         self.assertEqual((current["version"]["status"], current["version"]["approvalStatus"]), ("Draft", "Pending"))
         self.assertEqual(current["approvals"][0]["status"], "Pending")
         self.assertFalse(current["version"]["pdfAvailable"])
+
+    def test_approval_and_publish_wait_for_the_validated_rfq(self):
+        saved, _ = self._ready_quotation()
+        quotation_id = saved["quotation"]["id"]
+        opportunity_id = saved["quotation"]["opportunityId"]
+        # Test data only: the Opportunity has not passed the RFQ approval yet.
+        frappe.db.set_value("CRM Opportunity", opportunity_id, "stage", CUSTOMER_BUDGET_APPROVED)
+        for attempt in (
+            lambda: submit_for_approval(quotation_id, saved["version"]["modified"]),
+            lambda: self._publish(quotation_id, saved["version"]["modified"]),
+        ):
+            with self.assertRaises(CrmApiException) as blocked:
+                attempt()
+            self.assertEqual(blocked.exception.code, "INVALID_TRANSITION")
+        self.assertEqual(get_quotation(quotation_id)["version"]["status"], "Draft")
+        self.assertEqual(frappe.db.get_value("CRM Opportunity", opportunity_id, "stage"), CUSTOMER_BUDGET_APPROVED)
+
+        frappe.db.set_value("CRM Opportunity", opportunity_id, "stage", RFQ_VALIDATED)
+        published = self._publish(quotation_id, saved["version"]["modified"])
+        self.assertEqual(published["version"]["status"], "Published")
+        self.assertEqual(frappe.db.get_value("CRM Opportunity", opportunity_id, "stage"), QUOTATION_SENT)
 
     def test_create_list_detail_and_save_draft_against_real_schema(self):
         opportunity = self._opportunity()

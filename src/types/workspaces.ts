@@ -1,10 +1,22 @@
 import type { DecimalAmount } from '@/domain/money'
-import type { DemoHealthDto, DemoLifecycleStage, DemoTrackingDto } from './crm'
+import type {
+  InternalValidationStatus,
+  OpenOpportunityStage,
+  OpportunityMilestoneStage,
+  OpportunityReachedAtBasis,
+  OpportunityStage,
+  OpportunityStageHistoryEvent,
+  OpportunityStageHistorySource,
+} from '@/domain/opportunity-stages'
+import type { BookingDto, DemoHealthDto, DemoLifecycleStage, DemoTrackingDto, ListQuery } from './crm'
 
-export const STRATEGY_OPPORTUNITY_STAGES = ['需求发现', 'Wafer Demo确认', '预算审批', '设备规格确认', '报价', '采购流程', 'Won', 'Lost'] as const
-export type StrategyOpportunityStage = typeof STRATEGY_OPPORTUNITY_STAGES[number]
-export const OPPORTUNITY_FORECASTS = ['Pipeline', 'Best Case', 'Commit', 'Closed'] as const
-export type OpportunityForecast = typeof OPPORTUNITY_FORECASTS[number]
+/** Success probability levels from lowest to highest. Only the Opportunity owner sets one; a level carries no percentage. */
+export const OPPORTUNITY_PROBABILITY_LEVELS = ['low_probability', 'pipeline', 'upside', 'committed'] as const
+export type OpportunityProbabilityLevel = typeof OPPORTUNITY_PROBABILITY_LEVELS[number]
+/** An empty value means the owner has not set a level yet (pending sales confirmation). */
+export type OpportunityProbabilityLevelValue = OpportunityProbabilityLevel | ''
+/** List filter: one level, `pending` for an empty level, or `All`. */
+export type OpportunityProbabilityLevelFilter = OpportunityProbabilityLevel | 'pending' | 'All'
 
 export const OPPORTUNITY_STAKEHOLDER_ROLES = [
   'Decision Maker', 'Economic Buyer', 'Technical Buyer', 'User Buyer', 'Coach',
@@ -46,16 +58,28 @@ export type UpdateOpportunityStakeholderInput = CreateOpportunityStakeholderInpu
 export type CreateOpportunityActionInput = Omit<OpportunityActionDto, 'id'>
 export type UpdateOpportunityActionInput = CreateOpportunityActionInput
 
+export interface OpportunityProbabilityHistoryDto {
+  id: string
+  from: OpportunityProbabilityLevelValue
+  to: OpportunityProbabilityLevelValue
+  actor: string
+  /** UTC ISO timestamp ending in Z. */
+  at: string
+}
+
+export interface StrategyOpportunityListQuery extends ListQuery {
+  probabilityLevel?: OpportunityProbabilityLevelFilter
+}
+
 export interface CreateStrategyOpportunityInput {
   accountId: string
   siteId: string
   title: string
   owner: string
-  stage: StrategyOpportunityStage
-  forecast: OpportunityForecast
   amount: DecimalAmount
   intentScore?: number
-  probability?: number
+  /** Only the owner may set a level; creating for another owner sends ''. */
+  probabilityLevel?: OpportunityProbabilityLevelValue
   poDate: string
   toolType: string
   saleType: string
@@ -71,13 +95,113 @@ export interface CreateStrategyOpportunityInput {
   strengths?: string[]
   redFlags?: string[]
   informationNeeded?: string[]
+  /**
+   * Sales confirms the customer need and the budget owner. Creating an Opportunity requires `true`;
+   * every new Opportunity starts at qualified_opportunity.
+   */
+  qualificationConfirmed?: boolean
 }
 
-export type UpdateStrategyOpportunityInput = Partial<CreateStrategyOpportunityInput>
+/** Stages change only through their workflow actions, so an update never carries a stage. */
+export type UpdateStrategyOpportunityInput = Partial<Omit<CreateStrategyOpportunityInput, 'qualificationConfirmed'>>
 
 export interface RollbackOpportunityStageInput {
-  targetStage: StrategyOpportunityStage
+  targetStage: OpportunityMilestoneStage
   reason: string
+}
+
+/** Booking fields Sales enters for an Opportunity; account, source, Opportunity and type always follow the Opportunity. */
+export interface BookingDraft {
+  primaryContactId: string
+  equipment: string
+  quantity: number
+  ddl: string
+  amount: DecimalAmount
+  currency: string
+  owner: string
+  note: string
+}
+
+export interface ConfirmBudgetApprovedInput {
+  /** YYYY-MM-DD, not later than today. */
+  approvedOn: string
+}
+
+export interface RequestInternalValidationInput {
+  reason: string
+  expectedPoDate: string
+  booking: BookingDraft
+}
+
+export interface ReviewInternalValidationInput {
+  validationId: string
+  decision: 'approved' | 'rejected'
+  /** Optional to approve, required to reject. */
+  comment: string
+}
+
+export interface ConfirmPoInput {
+  booking: BookingDraft
+  /** `liveBooking.modified` the form was prefilled from; the server requires it while a Pending Booking exists. */
+  expectedBookingModified?: string
+}
+
+export interface MarkOpportunityLostInput {
+  lostReason: string
+}
+
+export interface OpportunityStageHistoryDto {
+  id: string
+  /** Empty for creation and migration rows. */
+  from: OpportunityStage | ''
+  to: OpportunityStage
+  source: OpportunityStageHistorySource
+  event: OpportunityStageHistoryEvent
+  referenceDoctype: string
+  referenceName: string
+  reason: string
+  actor: string
+  /** UTC ISO timestamp of when the row was written. */
+  recordedAt: string
+  /** UTC ISO timestamp of the business arrival, such as a declared budget date; only migration rows may leave it empty. */
+  reachedAt: string
+  reachedAtBasis: OpportunityReachedAtBasis
+}
+
+/** The latest internal validation request of an Opportunity. */
+export interface OpportunityInternalValidationDto {
+  id: string
+  attemptNo: number
+  status: InternalValidationStatus
+  reason: string
+  expectedPoDate: string
+  booking: BookingDraft
+  requestedBy: string
+  requestedAt: string
+  decidedBy: string
+  decidedAt: string
+  decisionComment: string
+  /** The Pending Booking created when the request was approved. */
+  bookingId: string
+  cancelledBy: string
+  cancelledAt: string
+  cancelReason: string
+}
+
+/** The Opportunity's Booking that is not Cancelled. Details are omitted when the viewer cannot read that Booking. */
+export interface OpportunityLiveBookingDto {
+  id: string
+  status: Exclude<BookingDto['status'], 'Cancelled'>
+  primaryContactId?: string
+  equipment?: string
+  quantity?: number
+  ddl?: string
+  amount?: DecimalAmount
+  currency?: string
+  owner?: string
+  note?: string
+  /** Version to send back as `expectedBookingModified` when the PO confirms this Pending Booking. */
+  modified?: string
 }
 
 export interface StrategyOpportunityDto {
@@ -90,10 +214,26 @@ export interface StrategyOpportunityDto {
   account: string
   site: string
   owner: string
-  stage: StrategyOpportunityStage
-  forecast: OpportunityForecast
+  stage: OpportunityStage
+  /** UTC ISO timestamp of the latest arrival at the current stage, or ''. */
+  stageChangedAt: string
+  /** YYYY-MM-DD on which Sales declared the customer approved the budget, or ''. */
+  budgetApprovedOn: string
+  /** The open stage the Opportunity was lost at. Empty unless lost, and possibly empty for a migrated loss. */
+  lostAtStage: OpenOpportunityStage | ''
+  /** UTC ISO timestamp, or ''. */
+  lostAt: string
+  lostBy: string
   amount: DecimalAmount
-  probability: number
+  probabilityLevel: OpportunityProbabilityLevelValue
+  /** Level changes, newest first. */
+  probabilityHistory: OpportunityProbabilityHistoryDto[]
+  /** Stage changes, newest first. Stage moves are no longer written to the generic history. */
+  stageHistory: OpportunityStageHistoryDto[]
+  /** The latest internal validation request, or null. */
+  internalValidation: OpportunityInternalValidationDto | null
+  /** The non-cancelled Booking (Pending, Confirmed or Completed), or null. */
+  liveBooking: OpportunityLiveBookingDto | null
   poDate: string
   updated: string
   modified?: string

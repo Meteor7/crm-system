@@ -37,8 +37,9 @@ describe('Booking page', () => {
 
     expect(wrapper.get('h1').text()).toBe('Booking')
     expect(wrapper.find('[data-testid="booking-search"]').exists()).toBe(false)
-    expect(wrapper.findAll('[data-booking-id]')).toHaveLength(2)
+    expect(wrapper.findAll('[data-booking-id]')).toHaveLength(3)
     expect(wrapper.get('[data-booking-source="OPP-006"]').attributes('href')).toBe('/opportunities/OPP-006')
+    expect(wrapper.get('[data-booking-source="OPP-008"]').attributes('href')).toBe('/opportunities/OPP-008')
     expect(wrapper.text()).toContain('FastScan 1200')
     expect(wrapper.text()).toContain('Service Expansion Kit')
     expect(wrapper.get('select[aria-label="来源"]').text()).toContain('Opportunity')
@@ -56,7 +57,7 @@ describe('Booking page', () => {
     const wrapper = mount(BookingPage, { props: { apiClient: degraded }, global: { plugins: [pinia, router] } })
     await flushPromises()
 
-    expect(wrapper.findAll('[data-booking-id]')).toHaveLength(2)
+    expect(wrapper.findAll('[data-booking-id]')).toHaveLength(3)
     expect(wrapper.text()).toContain('参考数据暂时不可用')
     expect(wrapper.find('[data-testid="booking-crash"]').exists()).toBe(false)
   })
@@ -109,14 +110,16 @@ describe('Booking page', () => {
       .toEqual(latestResult.data.items.map((item) => item.id))
   })
 
-  it('creates Bookings only from Opportunity or Upsell', async () => {
+  it('creates new Bookings only as Upsell because Opportunity Bookings come from the Opportunity workflow', async () => {
     const { api, pinia, router } = await context()
     const wrapper = mount(BookingPage, { props: { apiClient: api }, global: { plugins: [pinia, router] } })
     await flushPromises()
 
     await wrapper.get('[data-testid="new-booking"]').trigger('click')
     const source = wrapper.get('select[aria-label="Booking 来源"]')
-    expect(source.findAll('option').map((option) => option.text())).toEqual(['Opportunity', '客户增购'])
+    expect(source.findAll('option').map((option) => option.text())).toEqual(['客户增购'])
+    expect(source.attributes('disabled')).toBeDefined()
+    expect(wrapper.text()).toContain('新增 Booking 仅支持客户增购')
     expect(wrapper.find('input[aria-label="Booking 直接来源"]').exists()).toBe(false)
     expect(wrapper.find('input[aria-label="Booking 直接创建原因"]').exists()).toBe(false)
   })

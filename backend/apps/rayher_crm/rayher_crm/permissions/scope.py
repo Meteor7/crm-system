@@ -9,43 +9,55 @@ from rayher_crm.permissions.roles import capabilities_for_role, resolve_crm_role
 
 
 SCOPED_DOCTYPES = (
-    "Customer", "Contact", "Lead", "CRM Opportunity", "CRM Booking", "CRM Installed Tool",
+    "Customer", "Contact", "Lead", "CRM Opportunity", "CRM Opportunity Probability History",
+    "CRM Opportunity Stage History", "CRM Opportunity Internal Validation",
+    "CRM Booking", "CRM Installed Tool",
     "CRM Demo Request", "CRM Evaluation", "CRM Evaluation Customer Review", "CRM Visit",
     "CRM Visit Meeting Record", "CRM Contact File", "CRM Demo Artifact", "CRM Notification Event",
     "CRM Quotation", "CRM Quotation Version", "CRM Quotation Approval",
     "CRM RFQ", "CRM RFQ Version",
 )
+# Every CRM DocType belongs to the whitelisted services in api/v1: they check the business
+# rules, drive the state machines and append the history rows the cockpit reads. The standard
+# Frappe document API (/api/resource, frappe.client, the Desk form) writes straight to the
+# table and skips all of that, so no CRM role gets write, create or delete on any of them.
+MUTATING_PERMISSIONS = frozenset({"write", "create", "delete"})
+# Frappe ships these with an "All" row that lets every signed-in user change them.
+SHARED_STANDARD_DOCTYPES = ("Customer", "Contact", "Lead")
+UNIVERSAL_ROLE = "All"
 ROLE_DOCPERMS = {
-    "CRM Manager": {"read", "write", "create", "delete", "report", "export", "print", "email", "share"},
-    "CRM Sales": {"read", "write", "create", "report", "export", "print", "email"},
+    "CRM Manager": {"read", "report", "export", "print", "email", "share"},
+    "CRM Sales": {"read", "report", "export", "print", "email"},
     "CRM Engineer": {"read", "report", "export", "print"},
 }
+# Engineers work Installed Tools and Demo Requests, and never see Visits.
 INSTALLED_TOOL_DOCPERMS = {
     "CRM Manager": ROLE_DOCPERMS["CRM Manager"],
     "CRM Sales": {"read", "report", "export", "print"},
-    "CRM Engineer": {"read", "write", "report", "export", "print"},
+    "CRM Engineer": {"read", "report", "export", "print"},
 }
 DEMO_REQUEST_DOCPERMS = {
     "CRM Manager": ROLE_DOCPERMS["CRM Manager"],
-    "CRM Sales": {"read", "write", "create", "report", "export", "print", "email"},
+    "CRM Sales": ROLE_DOCPERMS["CRM Sales"],
     "CRM Engineer": {"read", "report", "export", "print"},
 }
-# Evaluation state (status, round, report pointers) is owned by the evaluation
-# service, which writes with ignore_permissions; a direct write permission would
-# let a user bypass the state machine and the retest gate.
 EVALUATION_DOCPERMS = {
     "CRM Manager": {"read", "report", "export", "print"},
     "CRM Sales": {"read", "report", "export", "print"},
     "CRM Engineer": {"read", "report", "export", "print"},
 }
-# Customer Review rows are immutable record-keeping written by the evaluation
-# service (ignore_permissions); every role only ever reads them, scoped to the
-# parent Evaluation.
-CUSTOMER_REVIEW_DOCPERMS = {
+# History, artifacts, customer review rows and contact files are record keeping: the
+# services append them and nobody edits them afterwards.
+AUDIT_DOCPERMS = {
     "CRM Manager": {"read", "report", "export"},
     "CRM Sales": {"read", "report", "export"},
     "CRM Engineer": {"read", "report", "export"},
 }
+OPPORTUNITY_CHILD_DOCTYPES = (
+    "CRM Opportunity Probability History",
+    "CRM Opportunity Stage History",
+    "CRM Opportunity Internal Validation",
+)
 # Visits are changed only through the visit service, which writes with
 # ignore_permissions. A Sales user also reads a colleague's visit as its action
 # owner, so a write DocPerm would let them change it through the standard document
@@ -53,7 +65,7 @@ CUSTOMER_REVIEW_DOCPERMS = {
 # service's owner and workflow checks.
 VISIT_DOCPERMS = {
     "CRM Manager": ROLE_DOCPERMS["CRM Manager"],
-    "CRM Sales": {"read", "report", "export", "print", "email"},
+    "CRM Sales": ROLE_DOCPERMS["CRM Sales"],
     "CRM Engineer": set(),
 }
 # A visit's meeting record is written only by the visit record service (its
@@ -64,20 +76,6 @@ MEETING_RECORD_DOCPERMS = {
     "CRM Sales": {"read", "report", "export"},
     "CRM Engineer": set(),
 }
-CONTACT_FILE_DOCPERMS = {
-    "CRM Manager": {"read", "write", "create", "report", "export"},
-    "CRM Sales": {"read", "write", "create", "report", "export"},
-    "CRM Engineer": {"read", "report", "export"},
-}
-# Demo artifacts (Demo Request forms, Test Reports, Customer Reports) are created
-# only by the upload services, which scan the file and check the workflow stage
-# before inserting with ignore_permissions. A direct create permission would let
-# a user post forged report rows through the standard resource API.
-ARTIFACT_DOCPERMS = {
-    "CRM Manager": {"read", "report", "export"},
-    "CRM Sales": {"read", "report", "export"},
-    "CRM Engineer": {"read", "report", "export"},
-}
 NOTIFICATION_DOCPERMS = {
     "CRM Manager": {"read"},
     "CRM Sales": {"read"},
@@ -85,13 +83,39 @@ NOTIFICATION_DOCPERMS = {
 }
 QUOTATION_DOCPERMS = {
     "CRM Manager": ROLE_DOCPERMS["CRM Manager"],
-    "CRM Sales": {"read", "write", "create", "report", "export", "print", "email"},
+    "CRM Sales": ROLE_DOCPERMS["CRM Sales"],
+}
+QUOTATION_APPROVAL_DOCPERMS = {
+    "CRM Manager": {"read"},
+    "CRM Sales": {"read"},
+    "CRM Engineer": set(),
+}
+DOCPERMS_BY_DOCTYPE = {
+    "CRM Installed Tool": INSTALLED_TOOL_DOCPERMS,
+    "CRM Demo Request": DEMO_REQUEST_DOCPERMS,
+    "CRM Evaluation": EVALUATION_DOCPERMS,
+    "CRM Evaluation Customer Review": AUDIT_DOCPERMS,
+    "CRM Opportunity Probability History": AUDIT_DOCPERMS,
+    "CRM Opportunity Stage History": AUDIT_DOCPERMS,
+    "CRM Opportunity Internal Validation": AUDIT_DOCPERMS,
+    "CRM Visit": VISIT_DOCPERMS,
+    "CRM Visit Meeting Record": MEETING_RECORD_DOCPERMS,
+    "CRM Contact File": AUDIT_DOCPERMS,
+    "CRM Demo Artifact": AUDIT_DOCPERMS,
+    "CRM Notification Event": NOTIFICATION_DOCPERMS,
+    "CRM Quotation": QUOTATION_DOCPERMS,
+    "CRM Quotation Version": QUOTATION_DOCPERMS,
+    "CRM Quotation Approval": QUOTATION_APPROVAL_DOCPERMS,
+    "CRM RFQ": AUDIT_DOCPERMS,
+    "CRM RFQ Version": AUDIT_DOCPERMS,
 }
 PERMISSION_FIELDS = ("read", "write", "create", "delete", "report", "export", "print", "email", "share")
 ROLE_TO_SERVER_ROLE = {"Manager": "CRM Manager", "Sales": "CRM Sales", "Engineer": "CRM Engineer"}
 DOCTYPES_TO_VIEW_CAPABILITY = {
     "Customer": "account:view", "Contact": "contact:view", "Lead": "requirement:view",
-    "CRM Opportunity": "deal:view", "CRM Booking": "deal:view", "CRM Installed Tool": "service:view",
+    "CRM Opportunity": "deal:view", "CRM Opportunity Probability History": "deal:view",
+    "CRM Opportunity Stage History": "deal:view", "CRM Opportunity Internal Validation": "deal:view",
+    "CRM Booking": "deal:view", "CRM Installed Tool": "service:view",
     "CRM Demo Request": "demo_request:view", "CRM Evaluation": "evaluation:view",
     "CRM Evaluation Customer Review": "evaluation:view", "CRM Visit": "visit:view",
     "CRM Visit Meeting Record": "visit:view",
@@ -103,32 +127,7 @@ DOCTYPES_TO_VIEW_CAPABILITY = {
 
 
 def _permissions_for_doctype(doctype: str, role: str) -> set[str]:
-    permissions = {
-        "CRM Installed Tool": INSTALLED_TOOL_DOCPERMS,
-        "CRM Demo Request": DEMO_REQUEST_DOCPERMS,
-        "CRM Evaluation": EVALUATION_DOCPERMS,
-        "CRM Evaluation Customer Review": CUSTOMER_REVIEW_DOCPERMS,
-        "CRM Visit": VISIT_DOCPERMS,
-        "CRM Visit Meeting Record": MEETING_RECORD_DOCPERMS,
-        "CRM Contact File": CONTACT_FILE_DOCPERMS,
-        "CRM Demo Artifact": ARTIFACT_DOCPERMS,
-        "CRM Notification Event": NOTIFICATION_DOCPERMS,
-        "CRM Quotation": QUOTATION_DOCPERMS,
-        "CRM Quotation Version": QUOTATION_DOCPERMS,
-        "CRM Quotation Approval": {
-            "CRM Manager": {"read"}, "CRM Sales": {"read"}, "CRM Engineer": set(),
-        },
-        "CRM RFQ": {
-            "CRM Manager": {"read", "report", "export"},
-            "CRM Sales": {"read", "create", "report", "export"},
-            "CRM Engineer": {"read", "report", "export"},
-        },
-        "CRM RFQ Version": {
-            "CRM Manager": {"read", "report", "export"},
-            "CRM Sales": {"read", "report", "export"},
-            "CRM Engineer": {"read", "report", "export"},
-        },
-    }.get(doctype, ROLE_DOCPERMS)
+    permissions = DOCPERMS_BY_DOCTYPE.get(doctype, ROLE_DOCPERMS)
     return set(permissions.get(ROLE_TO_SERVER_ROLE[role], set()))
 
 
@@ -136,35 +135,13 @@ def install_crm_doc_permissions() -> None:
     """Install explicit DocPerm rows so standard ERPNext roles do not mask CRM scope."""
 
     for doctype in SCOPED_DOCTYPES:
-        permissions = {
-            "CRM Installed Tool": INSTALLED_TOOL_DOCPERMS,
-            "CRM Demo Request": DEMO_REQUEST_DOCPERMS,
-            "CRM Evaluation": EVALUATION_DOCPERMS,
-            "CRM Evaluation Customer Review": CUSTOMER_REVIEW_DOCPERMS,
-            "CRM Visit": VISIT_DOCPERMS,
-            "CRM Visit Meeting Record": MEETING_RECORD_DOCPERMS,
-            "CRM Contact File": CONTACT_FILE_DOCPERMS,
-            "CRM Demo Artifact": ARTIFACT_DOCPERMS,
-            "CRM Notification Event": NOTIFICATION_DOCPERMS,
-            "CRM Quotation": QUOTATION_DOCPERMS,
-            "CRM Quotation Version": QUOTATION_DOCPERMS,
-            "CRM Quotation Approval": {
-                "CRM Manager": {"read"},
-                "CRM Sales": {"read"},
-                "CRM Engineer": set(),
-            },
-            "CRM RFQ": {
-                "CRM Manager": {"read", "report", "export"},
-                "CRM Sales": {"read", "create", "report", "export"},
-                "CRM Engineer": {"read", "report", "export"},
-            },
-            "CRM RFQ Version": {
-                "CRM Manager": {"read", "report", "export"},
-                "CRM Sales": {"read", "report", "export"},
-                "CRM Engineer": {"read", "report", "export"},
-            },
-        }.get(doctype, ROLE_DOCPERMS)
+        permissions = DOCPERMS_BY_DOCTYPE.get(doctype, ROLE_DOCPERMS)
         for role, allowed in permissions.items():
+            if allowed & MUTATING_PERMISSIONS:
+                raise ValueError(
+                    f"{doctype} would let {role} change rows through the standard document API; "
+                    "writes belong to the api/v1 services.",
+                )
             if not frappe.db.exists(
                 "Custom DocPerm",
                 {"parent": doctype, "role": role, "permlevel": 0, "if_owner": 0},
@@ -178,6 +155,22 @@ def install_crm_doc_permissions() -> None:
                     permission_type,
                     1 if permission_type in allowed else 0,
                     validate=False,
+                )
+        frappe.clear_cache(doctype=doctype)
+
+    # Every CRM user also holds the "All" role, so leaving its write access in place would put
+    # the standard document API back in business for Customers, Contacts and Leads. Frappe ships
+    # that access as an owner-only row, which still covers every record the user created.
+    for doctype in SHARED_STANDARD_DOCTYPES:
+        for if_owner in (0, 1):
+            if not frappe.db.exists(
+                "Custom DocPerm",
+                {"parent": doctype, "role": UNIVERSAL_ROLE, "permlevel": 0, "if_owner": if_owner},
+            ):
+                continue
+            for permission_type in sorted(MUTATING_PERMISSIONS):
+                update_permission_property(
+                    doctype, UNIVERSAL_ROLE, 0, permission_type, 0, validate=False, if_owner=if_owner,
                 )
         frappe.clear_cache(doctype=doctype)
 
@@ -308,6 +301,16 @@ def conditions_for_doctype(doctype: str, user: str | None = None) -> str:
         return "1=0"
     if doctype == "CRM Notification Event":
         return f"`tabCRM Notification Event`.`recipient_user` = {frappe.db.escape(resolved_user)}"
+    if doctype in OPPORTUNITY_CHILD_DOCTYPES:
+        # History and validation rows are visible exactly when their Opportunity is. The
+        # parent condition references `tabCRM Opportunity` unaliased, so nesting it inside
+        # a correlated EXISTS on the same table keeps it bound to the parent row.
+        opportunity_scope = conditions_for_doctype("CRM Opportunity", resolved_user)
+        return (
+            "EXISTS (SELECT 1 FROM `tabCRM Opportunity` "
+            f"WHERE `tabCRM Opportunity`.`name` = `tab{doctype}`.`opportunity` "
+            f"AND ({opportunity_scope}))"
+        )
     if doctype == "CRM Evaluation Customer Review":
         # A review row is visible exactly when its parent Evaluation is. The parent
         # condition references `tabCRM Evaluation` unaliased, so nesting it inside a
@@ -550,6 +553,18 @@ def demo_request_query(user: str | None = None) -> str:
 
 def evaluation_query(user: str | None = None) -> str:
     return conditions_for_doctype("CRM Evaluation", user)
+
+
+def opportunity_probability_history_query(user: str | None = None) -> str:
+    return conditions_for_doctype("CRM Opportunity Probability History", user)
+
+
+def opportunity_stage_history_query(user: str | None = None) -> str:
+    return conditions_for_doctype("CRM Opportunity Stage History", user)
+
+
+def opportunity_internal_validation_query(user: str | None = None) -> str:
+    return conditions_for_doctype("CRM Opportunity Internal Validation", user)
 
 
 def evaluation_customer_review_query(user: str | None = None) -> str:

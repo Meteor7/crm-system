@@ -4,9 +4,9 @@ import frappe
 from frappe.tests.utils import FrappeTestCase
 
 from rayher_crm.services.accounts import create_account, get_account_360
-from rayher_crm.services.bookings import create_booking
 from rayher_crm.services.contacts import create_contact
 from rayher_crm.services.opportunities import create_opportunity_action, create_strategy_opportunity
+from rayher_crm.services.opportunity_stages import PO_RECEIVED, QUALIFIED_OPPORTUNITY
 from rayher_crm.tests._opportunity_fixtures import advance_opportunity_fixture
 from rayher_crm.services.pipeline import PIPELINE_READ_LIMIT, _read_all_pages, list_pipeline
 from rayher_crm.services.sites import create_site
@@ -67,16 +67,23 @@ class TestStage5GProjections(FrappeTestCase):
         })
         return account, site, contact
 
-    def _opportunity(self, account: dict, site: dict, owner: str, title: str, stage: str, amount: int, probability: int):
+    def _opportunity(
+        self, account: dict, site: dict, owner: str, title: str, stage: str, amount: int,
+        booking: dict | None = None,
+    ):
         opportunity = create_strategy_opportunity({
             "accountId": account["id"], "siteId": site["id"], "title": title,
-            "owner": owner, "stage": "需求发现", "forecast": "Pipeline",
-            "amount": amount, "probability": probability, "intentScore": 70,
+            "owner": owner, "stage": QUALIFIED_OPPORTUNITY, "amount": amount, "intentScore": 70,
             "poDate": "2026-12-31", "toolType": "Inspection", "saleType": "New Equipment",
-            "subRegion": "East", "currency": "CNY", "originalAmount": amount,
+            "subRegion": "East", "currency": "CNY", "originalAmount": amount, "qualificationConfirmed": True,
         })
-        changes = {"forecast": "Closed"} if stage == "Won" else None
-        return advance_opportunity_fixture(opportunity, stage, changes)
+        return advance_opportunity_fixture(opportunity, stage, booking=booking)
+
+    def _po_booking(self, contact: dict, amount: str) -> dict:
+        return {
+            "primaryContactId": contact["id"], "equipment": "Inspection", "quantity": 1, "ddl": "2026-12-31",
+            "amount": amount, "currency": "CNY", "owner": self.sales, "note": "",
+        }
 
     def _demo_and_evaluation(self, account: dict, contact: dict, opportunity: dict):
         request = frappe.get_doc({
@@ -96,18 +103,16 @@ class TestStage5GProjections(FrappeTestCase):
 
     def test_pipeline_projects_canonical_rows_totals_and_scope(self):
         account, site, contact = self._base(self.sales, "Core")
-        open_opportunity = self._opportunity(account, site, self.sales, "Open Projection", "Wafer Demo确认", 1000, 25)
-        won = self._opportunity(account, site, self.sales, "Won Projection", "Won", 500, 100)
+        open_opportunity = self._opportunity(account, site, self.sales, "Open Projection", QUALIFIED_OPPORTUNITY, 1000)
+        won = self._opportunity(
+            account, site, self.sales, "Won Projection", PO_RECEIVED, 500, booking=self._po_booking(contact, "500.00"),
+        )
         action = create_opportunity_action(open_opportunity["id"], {
             "title": "Call customer", "owner": self.sales, "due": "2026-08-30", "status": "Open",
         })
-        booking = create_booking({
-            "accountId": account["id"], "primaryContactId": contact["id"], "equipment": "Inspection",
-            "quantity": 1, "ddl": "2026-12-31", "amount": "500.00", "currency": "CNY", "status": "Confirmed",
-            "owner": self.sales, "source": "Opportunity", "sourceOpportunityId": won["id"], "note": "",
-        })
+        booking = won["liveBooking"]
         foreign_account, foreign_site, _ = self._base(self.other_sales, "Foreign")
-        self._opportunity(foreign_account, foreign_site, self.other_sales, "Hidden Projection", "Wafer Demo确认", 9999, 50)
+        self._opportunity(foreign_account, foreign_site, self.other_sales, "Hidden Projection", QUALIFIED_OPPORTUNITY, 9999)
 
         frappe.set_user(self.sales)
         result = list_pipeline({"accountId": account["id"]})
@@ -118,20 +123,18 @@ class TestStage5GProjections(FrappeTestCase):
         self.assertEqual(projected["budgetStatus"], "Unknown")
         self.assertEqual((projected["nextAction"], projected["due"]), (action["title"], "2026-08-30"))
         self.assertEqual([item["id"] for item in result["bookings"]], [booking["id"]])
-        self.assertEqual(result["totals"], [{"currency": "CNY", "openPipeline": "1000.00", "weightedPipeline": "610.00", "confirmedBooking": "500.00"}])
+        self.assertEqual(result["totals"], [{"currency": "CNY", "openPipeline": "1000.00", "confirmedBooking": "500.00"}])
         self.assertNotIn("Hidden Projection", {item["title"] for item in list_pipeline({})["opportunities"]})
 
     def test_account_360_expands_scoped_canonical_rows_without_get_writes(self):
         account, site, contact = self._base(self.sales, "Detail")
-        opportunity = self._opportunity(account, site, self.sales, "Detail Projection", "Won", 500, 100)
+        opportunity = self._opportunity(
+            account, site, self.sales, "Detail Projection", PO_RECEIVED, 500, booking=self._po_booking(contact, "500.00"),
+        )
         action = create_opportunity_action(opportunity["id"], {
             "title": "Prepare delivery", "owner": self.sales, "due": "2026-08-31", "status": "Open",
         })
-        booking = create_booking({
-            "accountId": account["id"], "primaryContactId": contact["id"], "equipment": "Inspection",
-            "quantity": 1, "ddl": "2026-12-31", "amount": "500.00", "currency": "CNY", "status": "Confirmed",
-            "owner": self.sales, "source": "Opportunity", "sourceOpportunityId": opportunity["id"], "note": "",
-        })
+        booking = opportunity["liveBooking"]
         visit = create_visit({
             "accountId": account["id"], "primaryContactId": contact["id"], "subject": "Detail Visit",
             "date": "2026-08-22", "type": "Video", "owner": self.sales, "objective": "Review",

@@ -1,23 +1,10 @@
-from __future__ import annotations
+"""Retired: the stage-weighted probability percentage no longer exists.
 
-import frappe
-
-from rayher_crm.services.opportunities import (
-    STAGE_PROBABILITIES,
-    _calculate_opportunity_probability,
-)
+Opportunity probability is now a four-level value that only the owner sets, so there
+is nothing to recalculate. The module stays because patches.txt still lists it and a
+site that never ran it must be able to import it.
+"""
 
 
 def execute():
-    rows = frappe.get_all(
-        "CRM Opportunity",
-        fields=["name", "stage", "score", "probability"],
-    )
-    for row in rows:
-        if row.stage not in STAGE_PROBABILITIES:
-            continue
-        probability = _calculate_opportunity_probability(row.stage, int(row.score or 0))
-        if int(row.probability or 0) != probability:
-            frappe.db.set_value(
-                "CRM Opportunity", row.name, "probability", probability, update_modified=False,
-            )
+    return None

@@ -55,3 +55,14 @@ export function formatDisplayDate(value?: string | null, now = new Date()) {
   if (!Number.isNaN(parsed.getTime())) return shanghaiDate(parsed)
   return text
 }
+
+/** Shows an audit timestamp, such as a UTC ISO value ending in Z, as a Shanghai date and minute. */
+export function formatDisplayDateTime(value?: string | null) {
+  const text = String(value ?? '').trim()
+  const local = text.match(/^(\d{4}-\d{2}-\d{2})[ T](\d{1,2}):(\d{2})(?::\d{2})?(?:\.\d+)?$/)
+  if (local) return `${local[1]} ${local[2].padStart(2, '0')}:${local[3]}`
+  const parsed = /\d:\d{2}/.test(text) ? new Date(text) : new Date(Number.NaN)
+  if (Number.isNaN(parsed.getTime())) return formatDisplayDate(text)
+  const parts = dateTimeParts(parsed)
+  return `${parts.year}-${parts.month}-${parts.day} ${parts.hour}:${parts.minute}`
+}

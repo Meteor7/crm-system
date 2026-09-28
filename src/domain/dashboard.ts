@@ -7,7 +7,8 @@ import type {
   EvaluationDto,
   RequirementDto,
 } from '@/types/crm'
-import { addMoney, weightedMoney, type DecimalAmount } from '@/domain/money'
+import { addMoney, type DecimalAmount } from '@/domain/money'
+import { OPEN_OPPORTUNITY_STAGES, isOpenOpportunityStage } from '@/domain/opportunity-stages'
 
 interface VisitStatusLike { status: string; owner: string }
 interface DashboardOpportunityLike {
@@ -16,7 +17,6 @@ interface DashboardOpportunityLike {
   stage: string
   amount: DecimalAmount
   currency: string
-  probability: number
   owner: string
 }
 
@@ -33,7 +33,6 @@ export interface ManagementDashboardInput {
 }
 
 const sumMoney = <T>(rows: T[], read: (row: T) => DecimalAmount) => addMoney(rows.map(read))
-const weighted = (rows: DashboardOpportunityLike[]) => addMoney(rows.map((item) => weightedMoney(item.amount, item.probability)))
 
 function countBy<T>(rows: T[], read: (row: T) => string) {
   const counts = new Map<string, number>()
@@ -52,9 +51,9 @@ function amountBy<T>(rows: T[], readLabel: (row: T) => string, readAmount: (row:
 }
 
 export function buildManagementDashboard(input: ManagementDashboardInput): DashboardDto {
-  const isWon = (stage: string) => stage === 'Won'
-  const isLost = (stage: string) => stage === 'Lost'
-  const open = input.opportunities.filter((item) => !isWon(item.stage) && !isLost(item.stage))
+  // PO received is the won outcome; the open pipeline and the funnel count only the six open milestones.
+  const isWon = (stage: string) => stage === 'po_received'
+  const open = input.opportunities.filter((item) => isOpenOpportunityStage(item.stage))
   const confirmed = input.bookings.filter((item) => item.status === 'Confirmed')
   const accountById = new Map(input.accounts.map((account) => [account.id, account]))
   const currencies = [...new Set([...input.opportunities, ...input.bookings].map((item) => item.currency))].sort()
@@ -63,18 +62,16 @@ export function buildManagementDashboard(input: ManagementDashboardInput): Dashb
     return {
       currency,
       openPipeline: sumMoney(currencyOpen, (item) => item.amount),
-      weightedPipeline: weighted(currencyOpen),
       confirmedBooking: sumMoney(confirmed.filter((item) => item.currency === currency), (item) => item.amount),
       cumulativeWon: sumMoney(input.opportunities.filter((item) => item.currency === currency && isWon(item.stage)), (item) => item.amount),
     }
   })
 
-  const stages = ['需求发现', 'Wafer Demo确认', '预算审批', '设备规格确认', '报价', '采购流程']
-  const funnel = stages.flatMap((stage) => {
+  const funnel = OPEN_OPPORTUNITY_STAGES.flatMap((stage) => {
     const rows = open.filter((item) => item.stage === stage)
     return [...new Set(rows.map((item) => item.currency))].sort().map((currency) => {
       const currencyRows = rows.filter((item) => item.currency === currency)
-      return { stage, currency, amount: sumMoney(currencyRows, (item) => item.amount), weightedAmount: weighted(currencyRows), count: currencyRows.length }
+      return { stage, currency, amount: sumMoney(currencyRows, (item) => item.amount), count: currencyRows.length }
     })
   })
 
@@ -83,7 +80,7 @@ export function buildManagementDashboard(input: ManagementDashboardInput): Dashb
     const rows = [...open, ...confirmed].filter((item) => item.owner === owner)
     return [...new Set(rows.map((item) => item.currency))].sort().map((currency) => {
       const ownerOpen = open.filter((item) => item.owner === owner && item.currency === currency)
-      return { owner, currency, pipeline: sumMoney(ownerOpen, (item) => item.amount), weightedPipeline: weighted(ownerOpen), booking: sumMoney(confirmed.filter((item) => item.owner === owner && item.currency === currency), (item) => item.amount) }
+      return { owner, currency, pipeline: sumMoney(ownerOpen, (item) => item.amount), booking: sumMoney(confirmed.filter((item) => item.owner === owner && item.currency === currency), (item) => item.amount) }
     })
   })
 

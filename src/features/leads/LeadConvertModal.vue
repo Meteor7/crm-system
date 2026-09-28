@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { useLocalizedInput } from '@/i18n/localized-input'
 import { systemValueLabel } from '@/features/shared/system-labels'
-import { computed, reactive, watch } from 'vue'
+import { computed, reactive, ref, watch } from 'vue'
 import type { AccountSummaryDto, ContactSummaryDto, LeadConversionInput, LeadDto, SiteDto } from '@/types/crm'
 import ModalShell from '@/design-system/ModalShell.vue'
 import RequiredMark from '@/design-system/RequiredMark.vue'
@@ -9,7 +9,7 @@ import PersonnelSelect from '@/design-system/PersonnelSelect.vue'
 import AccountSegmentSelect from '@/features/accounts/AccountSegmentSelect.vue'
 import { OPPORTUNITY_TOOL_TYPE_OPTIONS } from '@/features/opportunities/opportunity-options'
 import { useAppStore } from '@/stores/app'
-import { useI18n } from '@/i18n'
+import { useI18n, useLocaleMessage } from '@/i18n'
 
 const props = defineProps<{
   lead: LeadDto
@@ -22,7 +22,7 @@ const props = defineProps<{
 }>()
 const emit = defineEmits<{ close: []; submit: [payload: LeadConversionInput] }>()
 const app = useAppStore()
-const { t, locale } = useI18n()
+const { t, locale, message } = useI18n()
 const form = reactive({
   accountId: '',
   contactId: '',
@@ -51,6 +51,9 @@ const form = reactive({
   contactEmail: '',
   contactOwner: '',
 })
+// The Opportunity created by the conversion starts at qualified_opportunity, so Sales confirms the qualification first.
+const qualificationConfirmed = ref(false)
+const qualificationError = useLocaleMessage()
 const accountContacts = computed(() => props.contacts.filter((contact) => contact.accountId === form.accountId && contact.status === 'Active'))
 const accountSites = computed(() => props.sites.filter((site) => site.accountId === form.accountId))
 
@@ -82,8 +85,15 @@ watch(() => form.accountId, () => {
   if (!accountContacts.value.some((item) => item.id === form.contactId)) form.contactId = ''
   if (!accountSites.value.some((item) => item.id === form.siteId)) form.siteId = accountSites.value[0]?.id ?? ''
 })
+watch(qualificationConfirmed, (confirmed) => {
+  if (confirmed) qualificationError.value = ''
+})
 
 function submit() {
+  if (!qualificationConfirmed.value) {
+    qualificationError.value = message('oppEditor.qualificationRequired')
+    return
+  }
   emit('submit', {
     ...(form.accountId ? { accountId: form.accountId } : {}),
     ...(form.contactId ? { contactId: form.contactId } : {}),
@@ -123,6 +133,7 @@ function submit() {
     opportunityCloseDate: form.opportunityCloseDate,
     opportunityOwner: form.opportunityOwner,
     toolType: form.toolType,
+    qualificationConfirmed: true,
   })
 }
 
@@ -165,10 +176,15 @@ const opportunityTitleInput = useLocalizedInput(() => form.opportunityTitle, (va
       <label><span>{{ t('oppEditor.poDate') }}<RequiredMark /></span><input v-model="form.opportunityCloseDate" :aria-label="t('oppEditor.poDate')" type="date" required /></label>
       <label><span>{{ t('detail.owner') }}<RequiredMark /></span><PersonnelSelect v-model="form.opportunityOwner" :roles="app.bootstrap?.user.role === 'Manager' ? ['Sales', 'Manager'] : ['Sales']" :ariaLabel="t('detail.owner')" required /></label>
       <label><span>{{ t('oppEditor.toolType') }}<RequiredMark /></span><AccountSegmentSelect v-model="form.toolType" :segments="OPPORTUNITY_TOOL_TYPE_OPTIONS" :label="t('oppEditor.toolType')" :custom-option-label="locale === 'en-US' ? '+ Custom equipment type' : '＋自定义设备类型'" :custom-input-label="t('oppEditor.toolType')" :custom-placeholder="locale === 'en-US' ? 'Enter a custom equipment type' : '请输入自定义设备类型'" :empty-placeholder="locale === 'en-US' ? 'Select equipment type' : '请选择设备类型'" :custom-on-empty="false" required /></label>
+      <div class="qualification-field" data-testid="qualification-confirmed-field">
+        <label class="qualification-check"><input v-model="qualificationConfirmed" type="checkbox" :aria-label="t('oppEditor.qualificationConfirmed')" data-testid="qualification-confirmed" required /><span>{{ t('oppEditor.qualificationConfirmed') }}<RequiredMark /></span></label>
+        <small v-if="qualificationError" data-field-error="qualificationConfirmed">{{ qualificationError }}</small>
+      </div>
     </div>
   </ModalShell>
 </template>
 
 <style scoped>
 .conversion-note{margin:0 0 12px;padding:10px 12px;color:var(--crm-text-muted);background:var(--crm-teal-soft);border-radius:9px;font-size:10px;line-height:1.6}.form-error{margin:0 0 12px;padding:10px;color:var(--crm-danger);background:var(--crm-danger-soft);border-radius:8px;font-size:10px}.convert-form{display:grid;grid-template-columns:1fr 1fr;gap:13px}.convert-form label{display:grid;gap:6px;color:var(--crm-text-muted);font-size:10px;font-weight:700}.convert-form input,.convert-form select{width:100%;min-height:38px;padding:8px 10px;color:var(--crm-text);background:#fff;border:1px solid var(--crm-line);border-radius:8px;outline:0}.convert-form select:disabled{background:var(--crm-surface)}@media(max-width:560px){.convert-form{grid-template-columns:1fr}}
+.qualification-field{display:grid;grid-column:1/-1;gap:5px;padding:10px 12px;background:var(--crm-teal-soft);border-radius:9px}.convert-form .qualification-check{display:flex;align-items:center;gap:8px;color:var(--crm-text);cursor:pointer}.convert-form .qualification-check input{width:16px;min-height:16px;height:16px;flex:0 0 auto;margin:0;padding:0;accent-color:var(--crm-teal)}.qualification-field small{color:var(--crm-danger);font-size:9px}
 </style>

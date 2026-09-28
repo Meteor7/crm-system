@@ -62,6 +62,13 @@ describe('role permissions', () => {
     expect(ROLE_PROFILES.Sales.capabilities).not.toContain('contact:delete')
   })
 
+  it('reserves internal validation approval and stage rollback for Manager', () => {
+    expect(ROLE_PROFILES.Manager.capabilities).toEqual(expect.arrayContaining(['deal:rollback', 'deal:internal_validation_approve']))
+    expect(ROLE_PROFILES.Sales.capabilities).not.toContain('deal:internal_validation_approve')
+    expect(ROLE_PROFILES.Engineer.capabilities).not.toContain('deal:internal_validation_approve')
+    expect(ROLE_PROFILES.Sales.capabilities).not.toContain('deal:rollback')
+  })
+
   it('reports denied capabilities through the shared API error model', () => {
     expect(() => assertCapability(ROLE_PROFILES.Sales.capabilities, 'evaluation:write'))
       .toThrowError(CrmApiError)

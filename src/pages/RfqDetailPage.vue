@@ -14,6 +14,7 @@ import { useAppStore } from '@/stores/app'
 import type { Tone } from '@/types/crm'
 import type { RfqDetailDto, RfqStatus, RfqVersionDto } from '@/features/rfqs/types'
 import { useI18n, useLocaleMessage, localeMessage } from '@/i18n'
+import { opportunityStageLabel as stageLabel } from '@/domain/opportunity-stages'
 
 const props = withDefaults(defineProps<{ apiClient?: CrmApi }>(), { apiClient: () => defaultApi })
 const route = useRoute()
@@ -61,11 +62,7 @@ function decisionLabel(value: 'Approved' | 'Returned') {
   return value === 'Approved' ? ui('Approved', '已批准') : ui('Returned', '已退回')
 }
 function opportunityStageLabel(value: string) {
-  const keys: Record<string, string> = {
-    '需求发现': 'opportunities.stage.discovery', 'Wafer Demo确认': 'opportunities.stage.waferDemo', '预算审批': 'opportunities.stage.budget',
-    '设备规格确认': 'opportunities.stage.specification', '报价': 'opportunities.stage.quotation', '采购流程': 'opportunities.stage.procurement', Won: 'opportunities.stage.won', Lost: 'opportunities.stage.lost',
-  }
-  return keys[value] ? t(keys[value]) : value
+  return stageLabel(value, locale.value)
 }
 
 function statusTone(value: RfqStatus): Tone {

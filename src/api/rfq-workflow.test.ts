@@ -12,7 +12,7 @@ describe('RFQ workflow', () => {
   it('enforces role scope, revision approval, and the Opportunity quotation gate', async () => {
     const repository = createMemorySalesRepository()
     const opportunity = repository.snapshot.opportunities.find((item) => item.owner === 'person002@crm.example.invalid')!
-    opportunity.stage = '预算审批'
+    opportunity.stage = 'demo_done'
     repository.save()
 
     const sales = createMockApi({ latency: 0, role: 'Sales', userId: 'person002@crm.example.invalid', salesRepository: repository })
@@ -21,9 +21,11 @@ describe('RFQ workflow', () => {
     const otherEngineer = createMockApi({ latency: 0, role: 'Engineer', userId: 'person053@crm.example.invalid', salesRepository: repository })
     const manager = createMockApi({ latency: 0, role: 'Manager', userId: 'person029@crm.example.invalid', salesRepository: repository })
 
-    const specified = await sales.updateStrategyOpportunity(opportunity.id, { stage: '设备规格确认' })
-    expect(specified.data.stage).toBe('设备规格确认')
-    await expect(sales.updateStrategyOpportunity(opportunity.id, { stage: '报价' })).rejects.toMatchObject({ code: 'INVALID_TRANSITION' })
+    await expect(sales.createRfq({ opportunityId: opportunity.id, engineerId: 'person077@crm.example.invalid' }, pdf('too-early.pdf')))
+      .rejects.toMatchObject({ code: 'INVALID_TRANSITION', message: 'RFQ can only be created when the Opportunity is at customer_budget_approved.' })
+    const budgeted = await sales.confirmBudgetApproved(opportunity.id, { approvedOn: '2026-07-06' })
+    expect(budgeted.data).toMatchObject({ stage: 'customer_budget_approved', budgetApprovedOn: '2026-07-06' })
+    await expect(sales.updateStrategyOpportunity(opportunity.id, { stage: 'rfq_validated' } as never)).rejects.toMatchObject({ code: 'INVALID_TRANSITION' })
     const created = await sales.createRfq({ opportunityId: opportunity.id, engineerId: 'person077@crm.example.invalid', note: 'Customer specification' }, pdf())
     expect(created.data.status).toBe('Engineer Review')
     await expect(sales.createRfq({ opportunityId: opportunity.id, engineerId: 'person077@crm.example.invalid' }, pdf('duplicate.pdf'))).rejects.toMatchObject({ code: 'CONFLICT' })
@@ -32,7 +34,7 @@ describe('RFQ workflow', () => {
     expect((await otherSales.listRfqs()).data.items).toHaveLength(0)
     expect((await otherEngineer.listRfqs()).data.items).toHaveLength(0)
 
-    await expect(sales.updateStrategyOpportunity(opportunity.id, { stage: '报价' })).rejects.toMatchObject({ code: 'INVALID_TRANSITION' })
+    expect((await sales.getStrategyOpportunity(opportunity.id)).data.stage).toBe('customer_budget_approved')
     const commented = await engineer.submitRfqEngineerComment(created.data.id, 'Specification is feasible.', created.data.modified)
     expect(commented.data.status).toBe('Manager Approval')
     await expect(engineer.downloadRfqFile(created.data.id)).rejects.toMatchObject({ code: 'PERMISSION_DENIED' })
@@ -49,6 +51,11 @@ describe('RFQ workflow', () => {
     expect(approved.data.status).toBe('Approved')
     await expect(sales.reviseRfq(created.data.id, pdf('late-change.pdf'), approved.data.modified)).rejects.toMatchObject({ code: 'INVALID_TRANSITION' })
 
-    expect((await sales.getStrategyOpportunity(opportunity.id)).data.stage).toBe('报价')
+    const validated = (await sales.getStrategyOpportunity(opportunity.id)).data
+    expect(validated.stage).toBe('rfq_validated')
+    expect(validated.stageHistory[0]).toMatchObject({
+      from: 'customer_budget_approved', to: 'rfq_validated', source: 'event', event: 'rfq_approved',
+      referenceDoctype: 'CRM RFQ', referenceName: created.data.id, actor: 'person029@crm.example.invalid',
+    })
   })
 })

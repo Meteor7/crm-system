@@ -26,7 +26,7 @@
   "name": "CRM Contact File",
   "naming_rule": "Expression",
   "owner": "Administrator",
-  "permissions": [{"create": 1, "read": 1, "role": "CRM Manager", "write": 1}, {"create": 1, "read": 1, "role": "CRM Sales", "write": 1}, {"read": 1, "role": "CRM Engineer"}],
+  "permissions": [{"read": 1, "role": "CRM Manager"}, {"read": 1, "role": "CRM Sales"}, {"read": 1, "role": "CRM Engineer"}],
   "sort_field": "uploaded_at",
   "sort_order": "DESC",
   "states": []

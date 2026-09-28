@@ -1,6 +1,6 @@
 import type { NotificationInput } from '@/types/notifications'
 import type { Locale } from './index'
-import { opportunityStageLabel, salesEnumLabel } from '@/features/shared/sales-i18n'
+import { salesEnumLabel } from '@/features/shared/sales-i18n'
 
 const localTitles: Partial<Record<NotificationInput['category'], Record<string, string>>> = {
   "Account": {
@@ -20,7 +20,10 @@ const localTitles: Partial<Record<NotificationInput['category'], Record<string, 
     "新增 Opportunity": "New opportunity",
     "Opportunity 信息已更新": "Opportunity updated",
     "商机关键人已更新": "Opportunity stakeholder updated",
-    "商机新增关键人": "New opportunity stakeholder"
+    "商机新增关键人": "New opportunity stakeholder",
+    "内部生产审批已申请": "Internal validation requested",
+    "内部生产审批已批准": "Internal validation approved",
+    "内部生产审批已驳回": "Internal validation rejected"
   },
   "Action": {
     "推进 Action 已更新": "Opportunity action updated",
@@ -32,7 +35,8 @@ const localTitles: Partial<Record<NotificationInput['category'], Record<string, 
   },
   "Booking": {
     "新增 Confirmed Booking": "New confirmed booking",
-    "Booking 已更新": "Booking updated"
+    "Booking 已更新": "Booking updated",
+    "Booking 已确认": "Booking confirmed"
   },
   "Demo": {
     "新增 Demo 需求": "New Demo Request",
@@ -81,8 +85,9 @@ export function notificationCopy(notification: NotificationInput, locale: Locale
     const mention = /^(.+) @你确认 Demo$/.exec(title)
     if (mention) title = `${mention[1] === '项目成员' ? 'A project member' : mention[1]} mentioned you on a Demo`
   }
-  const moved = /^(Opportunity|Demo Request|Demo Test) 推进至 (.+)$/.exec(title)
-  const categories: Record<string, string> = { Opportunity: 'Opportunity', 'Demo Request': 'Demo', 'Demo Test': 'Evaluation' }
-  if (moved && notification.category === categories[moved[1]]) title = `${moved[1]} moved to ${moved[1] === 'Opportunity' ? opportunityStageLabel(moved[2], locale) : salesEnumLabel(moved[2], locale)}`
+  // Opportunity stages move only through workflow actions, which carry their own titles above.
+  const moved = /^(Demo Request|Demo Test) 推进至 (.+)$/.exec(title)
+  const categories: Record<string, string> = { 'Demo Request': 'Demo', 'Demo Test': 'Evaluation' }
+  if (moved && notification.category === categories[moved[1]]) title = `${moved[1]} moved to ${salesEnumLabel(moved[2], locale)}`
   return { title, message }
 }

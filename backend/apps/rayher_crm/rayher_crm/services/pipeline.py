@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from decimal import Decimal, ROUND_HALF_UP
+from decimal import Decimal
 from collections.abc import Callable
 from typing import Any
 
@@ -11,6 +11,7 @@ import frappe
 from rayher_crm.permissions.roles import assert_capability
 from rayher_crm.services.bookings import list_bookings
 from rayher_crm.services.opportunities import list_strategy_opportunities
+from rayher_crm.services.opportunity_stages import OPEN_STAGES
 from rayher_crm.services.money import as_decimal, decimal_string
 
 
@@ -43,7 +44,7 @@ def project_opportunity(item: dict[str, Any]) -> dict[str, Any]:
         "title": item["title"],
         "segment": frappe.db.get_value("Customer", item["accountId"], "custom_crm_segment") or "",
         "amount": decimal_string(item.get("amount") or 0), "currency": item["currency"], "stage": item["stage"],
-        "probability": int(item.get("probability") or 0),
+        "probabilityLevel": item.get("probabilityLevel") or "",
         "intentScore": int(item.get("score") or 0), "budgetStatus": "Unknown",
         "owner": item["owner"], "nextAction": next_action["title"] if next_action else "",
         "due": next_action["due"] if next_action else item.get("poDate", ""),
@@ -83,7 +84,7 @@ def list_pipeline(query: dict[str, Any]) -> dict[str, Any]:
         and (not date_from or (item.get("ddl") or "") >= date_from)
         and (not date_to or (item.get("ddl") or "") <= date_to)
     )]
-    open_opportunities = [item for item in opportunities if item["stage"] not in {"Won", "Lost"}]
+    open_opportunities = [item for item in opportunities if item["stage"] in OPEN_STAGES]
     currencies = sorted({item["currency"] for item in [*opportunities, *bookings]})
     totals = []
     for currency in currencies:
@@ -91,13 +92,6 @@ def list_pipeline(query: dict[str, Any]) -> dict[str, Any]:
             (as_decimal(item["amount"]) for item in open_opportunities if item["currency"] == currency),
             Decimal("0.00"),
         )
-        weighted_amount = sum(
-            (
-                as_decimal(item["amount"]) * Decimal(item["probability"]) / Decimal(100)
-                for item in open_opportunities if item["currency"] == currency
-            ),
-            Decimal("0.00"),
-        ).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
         confirmed_amount = sum(
             (
                 as_decimal(item["amount"])
@@ -108,7 +102,6 @@ def list_pipeline(query: dict[str, Any]) -> dict[str, Any]:
         totals.append({
             "currency": currency,
             "openPipeline": decimal_string(open_amount),
-            "weightedPipeline": decimal_string(weighted_amount),
             "confirmedBooking": decimal_string(confirmed_amount),
         })
     return {

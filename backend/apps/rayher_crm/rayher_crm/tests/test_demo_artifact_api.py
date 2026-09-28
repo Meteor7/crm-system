@@ -16,6 +16,7 @@ from rayher_crm.services.demo_artifacts import (
     save_demo_artifact,
 )
 from rayher_crm.services.opportunities import create_strategy_opportunity
+from rayher_crm.services.opportunity_stages import QUALIFIED_OPPORTUNITY
 from rayher_crm.services.sites import create_site
 
 
@@ -116,10 +117,10 @@ class TestDemoArtifactApi(FrappeTestCase):
         })
         opportunity = create_strategy_opportunity({
             "accountId": account, "siteId": site["id"], "title": f"Artifact Opportunity {suffix}",
-            "owner": sales, "stage": "需求发现", "forecast": "Pipeline", "amount": 100000,
+            "owner": sales, "stage": QUALIFIED_OPPORTUNITY, "forecast": "Pipeline", "amount": 100000,
             "intentScore": 70, "poDate": "2026-12-31", "toolType": "Inspection",
             "saleType": "New Equipment", "subRegion": "East China", "currency": "CNY",
-            "originalAmount": 100000,
+            "originalAmount": 100000, "qualificationConfirmed": True,
         })
         frappe.set_user(previous_user)
         request = frappe.get_doc({

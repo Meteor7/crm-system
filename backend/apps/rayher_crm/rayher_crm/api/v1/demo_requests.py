@@ -8,6 +8,7 @@ import frappe
 
 from rayher_crm.api.v1.errors import CrmApiException, api_endpoint
 from rayher_crm.api.v1.responses import success_response
+from rayher_crm.permissions.roles import assert_capability
 from rayher_crm.services import demo_request_imports, demo_requests
 from rayher_crm.services.common import as_payload
 
@@ -28,11 +29,9 @@ def get_demo_request(id: str) -> dict:
 @frappe.whitelist(methods=["POST"])
 @api_endpoint
 def import_form() -> dict:
-    if not (
-        frappe.has_permission("CRM Demo Request", ptype="create")
-        or frappe.has_permission("CRM Demo Request", ptype="write")
-    ):
-        raise frappe.PermissionError
+    # CRM roles no longer hold table-level create/write (they write through the services),
+    # so the gate is the same capability that creating a Demo Request requires.
+    assert_capability("demo_request:create")
     uploads = frappe.request.files.getlist("file")
     if len(uploads) != 1:
         raise CrmApiException("VALIDATION_ERROR", "Exactly one PDF or DOCX file is required.")

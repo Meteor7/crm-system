@@ -86,9 +86,16 @@ class TestStage5BSchema(FrappeTestCase):
             "po_date": ("Date", None, 1),
             "opportunity_owner": ("Link", "User", 1),
             "tool_type": ("Data", None, 1),
-            "stage": ("Select", "需求发现\nWafer Demo确认\n预算审批\n设备规格确认\n报价\n采购流程\nWon\nLost", 1),
+            "stage": (
+                "Select",
+                "qualified_opportunity\ndemo_done\ncustomer_budget_approved\nrfq_validated\nquotation_sent\ninternal_validation\npo_received\nlost",
+                1,
+            ),
+            "stage_changed_at": ("Datetime", None, 0),
+            "budget_approved_on": ("Date", None, 0),
+            "probability_level": ("Select", "\nlow_probability\npipeline\nupside\ncommitted", 0),
             "forecast": ("Select", "Pipeline\nBest Case\nCommit\nClosed", 1),
-            "probability": ("Int", None, 1),
+            "probability": ("Int", None, 0),
             "score": ("Int", None, 1),
             "sale_type": ("Select", "New Equipment\nRepeat Order\nService", 1),
             "sub_region": ("Data", None, 1),
@@ -99,15 +106,25 @@ class TestStage5BSchema(FrappeTestCase):
             "competition": ("Small Text", None, 0),
             "win_reason": ("Small Text", None, 0),
             "lost_reason": ("Small Text", None, 0),
+            "lost_at_stage": (
+                "Select",
+                "\nqualified_opportunity\ndemo_done\ncustomer_budget_approved\nrfq_validated\nquotation_sent\ninternal_validation",
+                0,
+            ),
+            "lost_at": ("Datetime", None, 0),
+            "lost_by": ("Link", "User", 0),
             "strengths": ("JSON", None, 0),
             "red_flags": ("JSON", None, 0),
             "information_needed": ("JSON", None, 0),
+            "legacy_stage": ("Data", None, 0),
         }
         actual = {
             fieldname: (meta.get_field(fieldname).fieldtype, meta.get_field(fieldname).options or None, meta.get_field(fieldname).reqd)
             for fieldname in expected
         }
         self.assertEqual(actual, expected)
+        self.assertEqual(meta.get_field("stage").default, "qualified_opportunity")
+        self.assertTrue(meta.get_field("legacy_stage").hidden)
         self.assertIsNone(meta.get_field("company"))
         self.assertIsNone(meta.get_field("status"))
         self.assertEqual(meta.autoname, "format:CRM-OPP-{#####}")
@@ -135,6 +152,35 @@ class TestStage5BSchema(FrappeTestCase):
         self.assertEqual(history.get_field("actor").options, "User")
         permissions = {(row.role, row.read, row.write, row.create, row.delete) for row in history.permissions}
         self.assertIn(("CRM Manager", 1, 0, 0, 0), permissions)
+
+        probability_history = frappe.get_meta("CRM Opportunity Probability History")
+        self.assertEqual(probability_history.autoname, "hash")
+        opportunity_link = probability_history.get_field("opportunity")
+        self.assertEqual((opportunity_link.fieldtype, opportunity_link.options), ("Link", "CRM Opportunity"))
+        for fieldname in ("from_level", "to_level"):
+            field = probability_history.get_field(fieldname)
+            self.assertEqual((field.fieldtype, field.options), ("Select", "\nlow_probability\npipeline\nupside\ncommitted"))
+        self.assertEqual(probability_history.get_field("changed_at").fieldtype, "Datetime")
+        permissions = {(row.role, row.read, row.write, row.create, row.delete) for row in probability_history.permissions}
+        self.assertIn(("CRM Sales", 1, 0, 0, 0), permissions)
+
+        stage_history = frappe.get_meta("CRM Opportunity Stage History")
+        internal_validation = frappe.get_meta("CRM Opportunity Internal Validation")
+        self.assertEqual(stage_history.autoname, "hash")
+        self.assertEqual(internal_validation.autoname, "format:CRM-VAL-{#####}")
+        self.assertEqual(
+            stage_history.get_field("to_stage").options,
+            "qualified_opportunity\ndemo_done\ncustomer_budget_approved\nrfq_validated\nquotation_sent\ninternal_validation\npo_received\nlost",
+        )
+        self.assertEqual(internal_validation.get_field("status").options, "pending\napproved\nrejected\ncancelled")
+        # At most one pending request per Opportunity, whichever code path writes the row.
+        self.assertTrue(internal_validation.get_field("live_opportunity").unique)
+        for meta in (stage_history, internal_validation):
+            opportunity_link = meta.get_field("opportunity")
+            self.assertEqual((opportunity_link.fieldtype, opportunity_link.options), ("Link", "CRM Opportunity"))
+            permissions = {(row.role, row.read, row.write, row.create, row.delete) for row in meta.permissions}
+            for role in ("CRM Manager", "CRM Sales", "CRM Engineer"):
+                self.assertIn((role, 1, 0, 0, 0), permissions, meta.name)
 
     def test_booking_and_installed_tool_are_lightweight_crm_doctypes(self):
         booking = frappe.get_meta("CRM Booking")
@@ -188,10 +234,11 @@ class TestStage5BSchema(FrappeTestCase):
         self.assertTrue(installed_tool.get_field("source_booking").unique)
         booking_permissions = {(row.role, row.read, row.write, row.create) for row in booking.permissions}
         tool_permissions = {(row.role, row.read, row.write, row.create) for row in installed_tool.permissions}
-        self.assertIn(("CRM Sales", 1, 1, 1), booking_permissions)
-        self.assertIn(("CRM Engineer", 1, 0, 0), booking_permissions)
-        self.assertIn(("CRM Sales", 1, 0, 0), tool_permissions)
-        self.assertIn(("CRM Engineer", 1, 1, 0), tool_permissions)
+        # Bookings and Installed Tools change through the api/v1 services, so the standard
+        # document API only reads them.
+        read_only = {("CRM Manager", 1, 0, 0), ("CRM Sales", 1, 0, 0), ("CRM Engineer", 1, 0, 0)}
+        self.assertEqual(booking_permissions, read_only)
+        self.assertEqual(tool_permissions, read_only)
 
     def test_installed_tool_audit_doctypes_are_server_named_and_append_only(self):
         expected_fields = {

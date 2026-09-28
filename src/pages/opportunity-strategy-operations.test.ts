@@ -204,6 +204,7 @@ describe('Mock customer and opportunity operations', () => {
     await flushPromises()
     await wrapper.get('[aria-label="Opportunity 名称"]').setValue('Demo 新机会')
     await wrapper.get('[aria-label="金额"]').setValue('100000.00')
+    await wrapper.get('[data-testid="qualification-confirmed"]').setValue(true)
     await wrapper.findAll('[data-modal-submit]').at(-1)!.trigger('submit')
     await flushPromises()
     expect(wrapper.text()).toContain('Demo 新机会')

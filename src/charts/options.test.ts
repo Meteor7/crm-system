@@ -5,8 +5,8 @@ import { buildAccountContributionOption, buildBookingOption, buildCountBreakdown
 describe('chart option builders', () => {
   it('keeps dashboard chart labels at the unified caption size or larger', () => {
     const options = [
-      buildFunnelOption([{ stage: 'Wafer Demo确认', currency: 'CNY', amount: '100.00', weightedAmount: '70.00', count: 1 }]),
-      buildOwnerPerformanceOption([{ owner: 'person002@crm.example.invalid', currency: 'CNY', pipeline: '100.00', weightedPipeline: '70.00', booking: '20.00' }]),
+      buildFunnelOption([{ stage: 'demo_done', currency: 'CNY', amount: '100.00', count: 1 }]),
+      buildOwnerPerformanceOption([{ owner: 'person002@crm.example.invalid', currency: 'CNY', pipeline: '100.00', booking: '20.00' }]),
       buildBookingOption([{ label: '2026-07', amount: 20, count: 1 }]),
       buildValueDistributionOption([{ label: '华东', pipeline: 100, booking: 20 }]),
       buildAccountContributionOption([{ label: '客户 A', pipeline: 100, booking: 20 }]),
@@ -28,43 +28,49 @@ describe('chart option builders', () => {
     expect(Math.min(...fontSizes)).toBeGreaterThanOrEqual(10)
   })
 
-  it('keeps amount, weighted amount and count in the funnel dataset', () => {
+  it('keeps amount and count in the funnel dataset without a weighted amount', () => {
     const option = buildFunnelOption([
-      { stage: 'Wafer Demo确认', currency: 'CNY', amount: '8000000.00', weightedAmount: '2400000.00', count: 3 },
+      { stage: 'demo_done', currency: 'CNY', amount: '8000000.00', count: 3 },
     ])
     const dataset = Array.isArray(option.dataset) ? option.dataset[0] : option.dataset
     const source = dataset?.source as Array<Record<string, unknown>> | undefined
     const series = Array.isArray(option.series) ? option.series : [option.series]
 
-    expect(source?.[0]).toMatchObject({
-      stage: 'Wafer Demo确认', currency: 'CNY', amount: '8000000.00', weightedAmount: '2400000.00', count: 3,
+    expect(source?.[0]).toEqual({
+      stage: 'demo_done', currency: 'CNY', amount: '8000000.00', count: 3,
     })
     expect(series[0]).toMatchObject({ type: 'bar' })
+    const stageAxisLabel = (locale: 'zh-CN' | 'en-US') => {
+      const yAxis = buildFunnelOption([{ stage: 'demo_done', currency: 'CNY', amount: '1.00', count: 1 }], locale).yAxis as { axisLabel: { formatter: (value: string) => string } }
+      return yAxis.axisLabel.formatter('demo_done')
+    }
+    expect(stageAxisLabel('zh-CN')).toBe('Demo 完成')
+    expect(stageAxisLabel('en-US')).toBe('Demo done')
   })
 
-  it('shows owner pipeline, weighted pipeline and booking as separate series', () => {
+  it('shows owner pipeline and booking as separate series without a weighted pipeline', () => {
     const option = buildOwnerPerformanceOption([
-      { owner: 'person002@crm.example.invalid', currency: 'CNY', pipeline: '100.00', weightedPipeline: '70.00', booking: '20.00' },
+      { owner: 'person002@crm.example.invalid', currency: 'CNY', pipeline: '100.00', booking: '20.00' },
     ])
     const series = Array.isArray(option.series) ? option.series : [option.series]
 
-    expect(series.map((item) => item?.name)).toEqual(['销售管道', '加权销售管道', '已确认订单'])
+    expect(series.map((item) => item?.name)).toEqual(['销售管道', '已确认订单'])
   })
 
   it('uses the approved semantic colors for dashboard data series', () => {
     const owner = buildOwnerPerformanceOption([
-      { owner: 'person002@crm.example.invalid', currency: 'CNY', pipeline: '100.00', weightedPipeline: '70.00', booking: '20.00' },
+      { owner: 'person002@crm.example.invalid', currency: 'CNY', pipeline: '100.00', booking: '20.00' },
     ])
     const booking = buildBookingOption([{ label: '2026-07', amount: 20, count: 1 }])
     const distribution = buildValueDistributionOption([{ label: '华东', pipeline: 100, booking: 20 }])
     const contribution = buildAccountContributionOption([{ label: '客户 A', pipeline: 100, booking: 20 }])
-    const funnel = buildFunnelOption([{ stage: 'Wafer Demo确认', currency: 'CNY', amount: '100.00', weightedAmount: '70.00', count: 1 }])
+    const funnel = buildFunnelOption([{ stage: 'demo_done', currency: 'CNY', amount: '100.00', count: 1 }])
     const mix = buildPipelineMixOption([{ label: 'Frontend', currency: 'CNY', pipeline: '100.00', booking: '20.00' }])
     const count = buildCountBreakdownOption([{ label: 'Planned', count: 1 }])
     const colors = (series: typeof owner.series) => (Array.isArray(series) ? series : [series])
       .map((item) => (item as { itemStyle?: { color?: string } } | undefined)?.itemStyle?.color)
 
-    expect(colors(owner.series)).toEqual(['#FE9900', '#0D9488', '#6366F1'])
+    expect(colors(owner.series)).toEqual(['#FE9900', '#6366F1'])
     expect(colors(booking.series)).toEqual(['#6366F1'])
     expect(colors(distribution.series)).toEqual(['#FE9900', '#6366F1'])
     expect(colors(contribution.series)).toEqual(['#FE9900', '#6366F1'])
@@ -114,10 +120,10 @@ describe('chart option builders', () => {
   })
 
   it('localizes generated labels while retaining raw dimensions and tooltip escaping', () => {
-    const row = { stage: "<Acme & Co's>", currency: 'CNY', amount: '8000000.00', weightedAmount: '2400000.00', count: 3 }
+    const row = { stage: "<Acme & Co's>", currency: 'CNY', amount: '8000000.00', count: 3 }
     const zh = buildFunnelOption([row], 'zh-CN')
     const en = buildFunnelOption([row], 'en-US')
-    const ownerEn = buildOwnerPerformanceOption([{ owner: 'Customer owner', currency: 'CNY', pipeline: '100.00', weightedPipeline: '70.00', booking: '20.00' }], 'en-US')
+    const ownerEn = buildOwnerPerformanceOption([{ owner: 'Customer owner', currency: 'CNY', pipeline: '100.00', booking: '20.00' }], 'en-US')
     const bookingEn = buildBookingOption([{ label: '2026-07', amount: 20, count: 1 }], 'en-US')
     const distributionEn = buildValueDistributionOption([{ label: 'Raw region', pipeline: 100, booking: 20 }], 'en-US')
     const contributionEn = buildAccountContributionOption([{ label: 'Raw account', pipeline: 100, booking: 20 }], 'en-US')
@@ -128,7 +134,7 @@ describe('chart option builders', () => {
     const tooltipFormatter = (option: EChartsOption) => (option.tooltip as { formatter?: (params: never) => string }).formatter
     const valueFormatter = (option: EChartsOption) => (option.tooltip as { valueFormatter?: (value: unknown) => string }).valueFormatter
 
-    expect(series(ownerEn).map((item) => item.name)).toEqual(['Pipeline', 'Weighted pipeline', 'Booking'])
+    expect(series(ownerEn).map((item) => item.name)).toEqual(['Pipeline', 'Booking'])
     expect(series(bookingEn).map((item) => item.name)).toEqual(['Amount'])
     expect(series(distributionEn).map((item) => item.name)).toEqual(['Pipeline', 'Booking'])
     expect(series(contributionEn).map((item) => item.name)).toEqual(['Pipeline', 'Booking'])
@@ -142,6 +148,7 @@ describe('chart option builders', () => {
     const tooltip = tooltipFormatter(en)?.([{ data: row }] as never)
     expect(tooltip).toContain('&lt;Acme &amp; Co&#39;s&gt;')
     expect(tooltip).toContain('Stage amount ¥8.0M')
+    expect(tooltip).not.toContain('Weighted')
     expect(tooltip).toContain('Opportunities 3 opportunities')
 
     const dataset = (en.dataset as { source?: unknown }).source

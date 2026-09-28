@@ -49,6 +49,36 @@ def rollback_opportunity_stage(id: str, input: Any, expectedModified: str | None
     ))
 
 
+@frappe.whitelist(methods=["POST"])
+@api_endpoint
+def confirm_budget_approved(id: str, input: Any, expectedModified: str | None = None) -> dict:
+    return success_response(opportunities.confirm_budget_approved(id, as_payload(input), expectedModified))
+
+
+@frappe.whitelist(methods=["POST"])
+@api_endpoint
+def request_internal_validation(id: str, input: Any, expectedModified: str | None = None) -> dict:
+    return success_response(opportunities.request_internal_validation(id, as_payload(input), expectedModified))
+
+
+@frappe.whitelist(methods=["POST"])
+@api_endpoint
+def review_internal_validation(id: str, input: Any, expectedModified: str | None = None) -> dict:
+    return success_response(opportunities.review_internal_validation(id, as_payload(input), expectedModified))
+
+
+@frappe.whitelist(methods=["POST"])
+@api_endpoint
+def confirm_po(id: str, input: Any, expectedModified: str | None = None) -> dict:
+    return success_response(opportunities.confirm_po(id, as_payload(input), expectedModified))
+
+
+@frappe.whitelist(methods=["POST"])
+@api_endpoint
+def mark_opportunity_lost(id: str, input: Any, expectedModified: str | None = None) -> dict:
+    return success_response(opportunities.mark_opportunity_lost(id, as_payload(input), expectedModified))
+
+
 @frappe.whitelist(methods=["POST", "DELETE"])
 @api_endpoint
 def delete_strategy_opportunity(id: str) -> dict:

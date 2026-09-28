@@ -16,7 +16,8 @@ import PaginationControls from '@/features/shared/PaginationControls.vue'
 import { formatMoney, moneyByCurrency } from '@/domain/money'
 import { formatDisplayDate } from '@/domain/time'
 import { useI18n, useLocaleMessage } from '@/i18n'
-import { salesEnumLabel, opportunityStageLabel, recordTypeLabel } from '@/features/shared/sales-i18n'
+import { salesEnumLabel, recordTypeLabel } from '@/features/shared/sales-i18n'
+import { isOpportunityStage, opportunityStageLabel, opportunityStageTone } from '@/domain/opportunity-stages'
 
 const props = defineProps<{ accountId: string; apiClient: CrmApi }>()
 const emit = defineEmits<{ loaded: [detail: Account360Dto]; 'manage-sites': [] }>()
@@ -123,10 +124,14 @@ const filteredEvaluations = computed(() => {
     Boolean(item.demoRequestId && requestIds.has(item.demoRequestId))
     || Boolean(item.requirementId && requirementIds.has(item.requirementId)))
 })
+// Deal rows mix Opportunity stages with Booking statuses.
+function dealStatusLabel(value: string) {
+  return isOpportunityStage(value) ? opportunityStageLabel(value, locale.value) : salesEnumLabel(value, locale.value)
+}
 const dealRows = computed<ProjectRow[]>(() => [
   ...filteredOpportunities.value.map((item) => ({
     id: item.id, title: item.title, meta: `${item.id} · ${formatMoney(item.amount, item.currency)} · ${item.owner}`,
-    status: item.stage, tone: item.stage === 'Won' ? 'positive' as const : item.stage === 'Lost' ? 'danger' as const : 'info' as const,
+    status: item.stage, tone: opportunityStageTone(item.stage),
   })),
   ...filteredBookings.value.map((item) => ({
     id: item.id, title: bookingTitle(item, locale.value), meta: `${item.id} · ${formatMoney(item.amount, item.currency)} · ${formatDisplayDate(item.bookingDate)}`,
@@ -242,7 +247,7 @@ watch(selectedProject, resetSectionPages)
             <div class="project-section-grid">
               <section class="project-section">
                 <header><Target :size="16" /><strong>{{ locale === 'en-US' ? 'Opportunities & Bookings' : '商机与 Booking' }}</strong><span>{{ dealRows.length }}</span></header>
-                <article v-for="item in pagedRows(dealRows, 'deals')" :key="item.id"><div><strong>{{ item.title }}</strong><small>{{ item.meta }}</small></div><StatusBadge :label="opportunityStageLabel(item.status, locale)" :tone="item.tone" /></article>
+                <article v-for="item in pagedRows(dealRows, 'deals')" :key="item.id"><div><strong>{{ item.title }}</strong><small>{{ item.meta }}</small></div><StatusBadge :label="dealStatusLabel(item.status)" :tone="item.tone" /></article>
                 <div v-if="!dealRows.length" class="mini-empty">{{ locale === 'en-US' ? 'No opportunities or bookings for this project' : '该项目暂无商机或 Booking' }}</div>
                 <PaginationControls v-if="dealRows.length > PROJECT_PAGE_SIZE" :page="sectionPages.deals" :page-size="PROJECT_PAGE_SIZE" :total="dealRows.length" @change="sectionPages.deals = $event" />
               </section>

@@ -14,7 +14,7 @@ from rayher_crm.rayher_crm.doctype.crm_evaluation.crm_evaluation import OPEN_RET
 from rayher_crm.permissions.scope import conditions_for_doctype
 from rayher_crm.services.common import normalize_pagination, optional_date, required_text, to_iso_timestamp
 from rayher_crm.services.concurrency import lock_document
-from rayher_crm.services.opportunities import DEMO_EVENT_TRANSITIONS, advance_opportunity_for_demo_event
+from rayher_crm.services.opportunities import advance_opportunity_for_event
 from rayher_crm.services.notifications import active_crm_users, create_notification
 
 
@@ -365,15 +365,11 @@ def update_evaluation_status(name: str, command: dict[str, Any], expected_modifi
             history_summary = f"Demo Test moved to {next_status}"
         append_evaluation_history(doc, "Status", history_summary, previous_status, next_status)
         request = frappe.get_doc("CRM Demo Request", doc.demo_request)
-        # Archiving is the only way out of Customer Review, so the Opportunity's stage
-        # must never block it. Only an Opportunity still at the Demo gate is advanced;
-        # one Sales has closed as Lost, or moved back after the Demo Request was
-        # converted, stays where it is instead of holding the Demo Test in Customer
-        # Review for good. The row lock keeps this read consistent with the advance.
-        if next_status == "Accepted" and request.opportunity and frappe.db.get_value(
-            "CRM Opportunity", request.opportunity, "stage", for_update=True,
-        ) == DEMO_EVENT_TRANSITIONS["evaluation_accepted"][0]:
-            advance_opportunity_for_demo_event(request.opportunity, "evaluation_accepted")
+        if next_status == "Customer Review" and request.opportunity:
+            advance_opportunity_for_event(
+                request.opportunity, "demo_customer_review",
+                reference_doctype="CRM Evaluation", reference_name=doc.name,
+            )
         _update_request_tracking(doc, history_summary)
         _notify_status_change(doc, request, previous_status)
     except Exception:

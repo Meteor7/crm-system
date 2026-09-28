@@ -111,7 +111,7 @@ describe('delivery workflow pages', () => {
       ...structuredClone(templateOpportunity),
       id: 'OPP-004', accountId: 'ACC-003', siteId: salesRepository.snapshot.sites['ACC-003']![0]!.id,
       account: '示例企业003有限公司', site: salesRepository.snapshot.sites['ACC-003']![0]!.name,
-      title: '关键尺寸量测替换', stage: 'Wafer Demo确认', probability: 47,
+      title: '关键尺寸量测替换', stage: 'qualified_opportunity', probabilityLevel: '', probabilityHistory: [],
       stakeholders: [], actions: [], history: [],
     })
     await repository.transact((snapshot) => {

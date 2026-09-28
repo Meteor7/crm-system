@@ -6,11 +6,11 @@ import frappe
 
 from rayher_crm.services.opportunities import (
     ACTION_STATUSES,
-    OPPORTUNITY_STAGES,
     STAKEHOLDER_INFLUENCES,
     STAKEHOLDER_ROLES,
     STAKEHOLDER_STANCES,
 )
+from rayher_crm.services.opportunity_stages import OPPORTUNITY_STAGES
 
 
 def _replace(doctype: str, fieldname: str, mapping: dict[str, str]) -> None:
@@ -31,10 +31,8 @@ def _assert_known(doctype: str, fieldname: str, allowed: tuple[str, ...]) -> Non
 
 
 def normalize_crm_enums() -> None:
-    _replace("CRM Opportunity", "stage", {
-        "技术确认": "Wafer Demo确认", "Demo验证": "Wafer Demo确认", "Demo 验证": "Wafer Demo确认",
-        "商务谈判": "报价", "Closed Won": "Won", "Closed Lost": "Lost",
-    })
+    # Legacy Opportunity stages and their old aliases are rewritten by the
+    # migrate_opportunity_seven_stages patch, which runs before this hook.
     _replace("CRM Opportunity Stakeholder", "stance", {
         "Supportive": "Support", "Supporter": "Support", "Champion": "Support", "Detractor": "Against",
     })

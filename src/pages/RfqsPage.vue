@@ -17,6 +17,7 @@ import type { Tone } from '@/types/crm'
 import type { StrategyOpportunityDto } from '@/types/workspaces'
 import type { RfqStatus, RfqSummaryDto } from '@/features/rfqs/types'
 import { localeMessage, useI18n, useLocaleMessage } from '@/i18n'
+import { canCreateRfqAt, opportunityStageLabel as stageLabel } from '@/domain/opportunity-stages'
 
 const props = withDefaults(defineProps<{ apiClient?: CrmApi }>(), { apiClient: () => defaultApi })
 const app = useAppStore()
@@ -54,7 +55,7 @@ const owners = computed(() => [...new Set([
   ...rows.value.flatMap((item) => [item.salesOwner, item.engineerOwner]),
 ])].sort())
 const usedOpportunityIds = computed(() => new Set(rows.value.map((item) => item.opportunity.id)))
-const availableOpportunities = computed(() => opportunities.value.filter((item) => item.stage === '设备规格确认' && !usedOpportunityIds.value.has(item.id)))
+const availableOpportunities = computed(() => opportunities.value.filter((item) => canCreateRfqAt(item.stage) && !usedOpportunityIds.value.has(item.id)))
 const visibleRows = computed(() => rows.value)
 
 function statusLabel(value: RfqStatus) {
@@ -64,11 +65,7 @@ function statusLabel(value: RfqStatus) {
   } satisfies Record<RfqStatus, string>)[value]
 }
 function opportunityStageLabel(value: string) {
-  const keys: Record<string, string> = {
-    '需求发现': 'opportunities.stage.discovery', 'Wafer Demo确认': 'opportunities.stage.waferDemo', '预算审批': 'opportunities.stage.budget',
-    '设备规格确认': 'opportunities.stage.specification', '报价': 'opportunities.stage.quotation', '采购流程': 'opportunities.stage.procurement', Won: 'opportunities.stage.won', Lost: 'opportunities.stage.lost',
-  }
-  return keys[value] ? t(keys[value]) : value
+  return stageLabel(value, locale.value)
 }
 
 function statusTone(value: RfqStatus): Tone {

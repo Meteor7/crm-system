@@ -24,7 +24,7 @@ describe('first demo completion contract', () => {
 
   it('provides the required commercial, demo, installed-base and audit fields', () => {
     expect(opportunities[0]).toMatchObject({ toolType: expect.any(String), saleType: expect.any(String), currency: expect.any(String), shipmentDate: expect.any(String), fatDate: expect.any(String), competition: expect.any(String) })
-    expect(opportunities[0].history.length).toBeGreaterThan(0)
+    expect(opportunities[0].stageHistory.length).toBeGreaterThan(0)
     expect(demoProjects[0]).toMatchObject({ contact: expect.any(String), industry: expect.any(String), specificRequest: expect.any(String), conclusion: expect.any(Object) })
     expect(installedTools[0]).toMatchObject({ sourceOpportunityId: expect.any(String), serviceContract: expect.any(String), pmCycle: expect.any(String), ownershipType: expect.any(String) })
     expect(serviceAppointments[0]).toMatchObject({ issue: expect.any(String), priority: expect.any(String), rootCause: expect.any(String), actionsPerformed: expect.any(String), customerSignoff: expect.any(String) })

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { opportunityStageLabel } from '@/features/shared/sales-i18n'
+import { DEMO_REQUEST_STAGES, canCreateDemoRequestAt, opportunityStageLabel } from '@/domain/opportunity-stages'
 import { computed, reactive, ref, watch } from 'vue'
 import { api as defaultApi, type CrmApi } from '@/api'
 import type { AccountSummaryDto, ContactSummaryDto, CreateDemoRequestInput, DemoRequestCommand, DemoRequestDto, DemoRequestFormData } from '@/types/crm'
@@ -50,7 +50,7 @@ const opportunityOptions = computed(() => {
   const source = props.opportunities ?? loadedOpportunities.value
   const search = opportunitySearch.value.trim().toLocaleLowerCase()
   return source.filter((item) => item.accountId === accountId.value
-    && (item.id === props.request?.opportunityId || item.stage === '需求发现' || item.stage === 'Wafer Demo确认')
+    && (item.id === props.request?.opportunityId || canCreateDemoRequestAt(item.stage))
     && (!search || `${item.id} ${item.title}`.toLocaleLowerCase().includes(search)))
 })
 const opportunityGuidance = computed(() => locale.value === 'en-US'
@@ -65,10 +65,9 @@ async function loadOpportunities() {
   opportunityLoadError.value = ''
   try {
     const query = { accountId: accountId.value, search: opportunitySearch.value.trim(), page: 1, pageSize: 20 }
-    const results = await Promise.all([
-      (props.apiClient || defaultApi).listStrategyOpportunities({ ...query, status: '需求发现' }),
-      (props.apiClient || defaultApi).listStrategyOpportunities({ ...query, status: 'Wafer Demo确认' }),
-    ])
+    const results = await Promise.all(DEMO_REQUEST_STAGES.map((status) =>
+      (props.apiClient || defaultApi).listStrategyOpportunities({ ...query, status }),
+    ))
     if (request !== opportunityRequest) return
     const eligible = results.flatMap((result) => result.data.items)
     if (props.request?.opportunityId && !eligible.some((item) => item.id === props.request?.opportunityId)) {

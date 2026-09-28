@@ -30,7 +30,7 @@ describe('RfqsPage', () => {
 
   it('lets Sales create one RFQ from the project list', async () => {
     const repository = createMemorySalesRepository()
-    repository.snapshot.opportunities[0].stage = '设备规格确认'
+    repository.snapshot.opportunities[0].stage = 'customer_budget_approved'
     const api = createMockApi({ latency: 0, role: 'Sales', userId: 'person002@crm.example.invalid', salesRepository: repository })
     const router = createRouter({
       history: createMemoryHistory(),
@@ -66,7 +66,7 @@ describe('RfqsPage', () => {
 
   it('asks for confirmation before uploading a TipRay-protected file', async () => {
     const repository = createMemorySalesRepository()
-    repository.snapshot.opportunities[0].stage = '设备规格确认'
+    repository.snapshot.opportunities[0].stage = 'customer_budget_approved'
     const api = createMockApi({ latency: 0, role: 'Sales', userId: 'person002@crm.example.invalid', salesRepository: repository })
     const createSpy = vi.spyOn(api, 'createRfq')
     const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValueOnce(false).mockReturnValueOnce(true)

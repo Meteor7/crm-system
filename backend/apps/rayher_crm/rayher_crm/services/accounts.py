@@ -23,6 +23,7 @@ from rayher_crm.services.common import (
 )
 from rayher_crm.services.concurrency import lock_document
 from rayher_crm.services.notifications import create_notification
+from rayher_crm.services.opportunity_stages import OPEN_STAGES
 
 
 DEFAULT_ACCOUNT_SEGMENTS = ("Frontend", "Advanced Packaging")
@@ -109,7 +110,7 @@ def _account_activity_metrics(account_id: str) -> dict[str, Any]:
         (account_id,),
         as_dict=True,
     )
-    open_opportunities = [item for item in opportunities if item.stage not in {"Won", "Lost"}]
+    open_opportunities = [item for item in opportunities if item.stage in OPEN_STAGES]
     currencies = {str(item.currency or "") for item in open_opportunities}
     pipeline_amount = (
         sum((Decimal(str(item.amount or 0)) for item in open_opportunities), Decimal("0"))

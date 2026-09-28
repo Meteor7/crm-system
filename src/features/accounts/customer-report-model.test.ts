@@ -25,6 +25,7 @@ describe('customer report model', () => {
 
   it('stores percentages as numeric decimals and current detail counts as numbers', async () => {
     const detail = (await createMockApi({ latency: 0 }).getAccount360('ACC-001')).data
+    detail.evaluations[0]!.runs = [{ id: 'RUN-1', date: '2026-07-16', lot: 'LOT-1', round: 1, wafers: 2, status: 'Completed', capture: 96.8, falsePositive: 1.2, wph: 40, summary: 'Completed run' }]
     const spec = buildCustomerReportModel(detail, '2026-07-17')
     const percentageCells = spec.sheets
       .flatMap((sheet) => sheet.rows.flat())
@@ -34,6 +35,18 @@ describe('customer report model', () => {
     expect(percentageCells.some((cell) => typeof cell?.v === 'number' && cell.v > 0 && cell.v < 1)).toBe(true)
     expect(dateCells.some((cell) => typeof cell?.v === 'number' && cell.v > 45_000)).toBe(true)
     expect(values(spec, '客户全貌 Overview')).toContain(detail.contacts.length)
+  })
+
+  it('exports the owner-set success probability level instead of a percentage', async () => {
+    const detail = (await createMockApi({ latency: 0 }).getAccount360('ACC-001')).data
+    const rows = buildCustomerReportModel(detail, '2026-07-17').sheets.find((sheet) => sheet.name === '商机 Opportunities')!.rows
+    const header = rows.find((row) => row.some((cell) => cell.v === '成功概率 / Success Probability'))!
+    const levelColumn = header.findIndex((cell) => cell.v === '成功概率 / Success Probability')
+
+    expect(detail.opportunities.map((item) => [item.id, item.probabilityLevel])).toEqual([['OPP-001', 'upside']])
+    expect(rows.find((row) => row[0]?.v === 'OPP-001')?.[levelColumn]?.v).toBe('有望')
+    expect(rows.flat().some((cell) => cell.s === 7)).toBe(false)
+    expect(values(buildCustomerReportModel(detail, '2026-07-17', 'en-US'), 'Opportunities')).toContain('Upside')
   })
 
   it('deduplicates equivalent actions and includes opportunity next actions', async () => {

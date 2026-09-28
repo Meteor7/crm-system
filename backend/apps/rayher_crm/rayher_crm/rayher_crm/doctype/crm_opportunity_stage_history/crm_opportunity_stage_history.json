@@ -1,0 +1,24 @@
+{
+  "actions": [], "autoname": "hash", "creation": "2026-09-15 00:00:00.000000", "doctype": "DocType", "engine": "InnoDB",
+  "field_order": ["opportunity", "from_stage", "to_stage", "source", "event", "reference_doctype", "reference_name", "reason", "actor", "recorded_at", "reached_at", "reached_at_basis"],
+  "fields": [
+    {"fieldname": "opportunity", "fieldtype": "Link", "label": "Opportunity", "options": "CRM Opportunity", "reqd": 1},
+    {"fieldname": "from_stage", "fieldtype": "Select", "label": "From Stage", "options": "\nqualified_opportunity\ndemo_done\ncustomer_budget_approved\nrfq_validated\nquotation_sent\ninternal_validation\npo_received\nlost"},
+    {"fieldname": "to_stage", "fieldtype": "Select", "label": "To Stage", "options": "qualified_opportunity\ndemo_done\ncustomer_budget_approved\nrfq_validated\nquotation_sent\ninternal_validation\npo_received\nlost", "reqd": 1},
+    {"fieldname": "source", "fieldtype": "Select", "label": "Source", "options": "creation\nevent\nmanual\napproval\nrollback\nlost\nmigration", "reqd": 1},
+    {"fieldname": "event", "fieldtype": "Select", "label": "Event", "options": "created\nlead_converted\ndemo_customer_review\nbudget_confirmed\nrfq_approved\nquotation_published\ninternal_validation_approved\npo_confirmed\nmarked_lost\nrollback\nreopened\nmigration", "reqd": 1},
+    {"fieldname": "reference_doctype", "fieldtype": "Data", "label": "Reference DocType"},
+    {"fieldname": "reference_name", "fieldtype": "Data", "label": "Reference Name"},
+    {"fieldname": "reason", "fieldtype": "Small Text", "label": "Reason"},
+    {"fieldname": "actor", "fieldtype": "Link", "label": "Actor", "options": "User", "reqd": 1},
+    {"fieldname": "recorded_at", "fieldtype": "Datetime", "label": "Recorded At", "reqd": 1},
+    {"fieldname": "reached_at", "fieldtype": "Datetime", "label": "Reached At"},
+    {"fieldname": "reached_at_basis", "fieldtype": "Select", "label": "Reached At Basis", "options": "recorded\ndeclared\nevidence\nupper_bound\nunknown", "reqd": 1}
+  ],
+  "index_web_pages_for_search": 0, "modified": "2026-09-15 00:00:00.000000", "modified_by": "Administrator", "module": "Rayher CRM", "name": "CRM Opportunity Stage History", "naming_rule": "Random", "owner": "Administrator",
+  "permissions": [
+    {"read": 1, "role": "CRM Manager"},
+    {"read": 1, "role": "CRM Sales"},
+    {"read": 1, "role": "CRM Engineer"}
+  ], "sort_field": "recorded_at", "sort_order": "DESC", "states": []
+}

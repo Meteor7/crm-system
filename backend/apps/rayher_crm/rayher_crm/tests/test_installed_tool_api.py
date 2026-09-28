@@ -14,7 +14,7 @@ from rayher_crm.api.v1.installed_tools import (
     transition_installed_tool as transition_installed_tool_endpoint,
 )
 from rayher_crm.services.accounts import create_account
-from rayher_crm.services.bookings import create_booking
+from rayher_crm.services.bookings import get_booking
 from rayher_crm.services.contacts import create_contact
 from rayher_crm.patches.v1_0.migrate_installed_tool_lifecycle import execute as migrate_installed_tool_lifecycle
 from rayher_crm.services.installed_tools import (
@@ -27,6 +27,7 @@ from rayher_crm.services.installed_tools import (
     update_installed_tool,
 )
 from rayher_crm.services.opportunities import create_strategy_opportunity
+from rayher_crm.services.opportunity_stages import PO_RECEIVED, QUALIFIED_OPPORTUNITY
 from rayher_crm.services.sites import create_site
 from rayher_crm.tests._opportunity_fixtures import advance_opportunity_fixture
 
@@ -75,17 +76,22 @@ class TestInstalledToolApi(FrappeTestCase):
         })
         opportunity = create_strategy_opportunity({
             "accountId": account["id"], "siteId": site["id"], "title": f"{suffix} Opportunity",
-            "owner": owner, "stage": "需求发现", "forecast": "Pipeline", "amount": 300000,
+            "owner": owner, "stage": QUALIFIED_OPPORTUNITY, "forecast": "Pipeline", "amount": 300000,
             "probability": 100, "intentScore": 90, "poDate": "2026-12-31", "toolType": "Inspection",
             "saleType": "New Equipment", "subRegion": "华东", "currency": "CNY", "originalAmount": 300000,
+            "qualificationConfirmed": True,
         })
-        opportunity = advance_opportunity_fixture(opportunity, "Won")
-        booking = create_booking({
-            "accountId": account["id"], "primaryContactId": contact["id"], "equipment": "Inspection 5000",
-            "quantity": 1, "ddl": "2027-01-31", "amount": "300000.00", "currency": "CNY", "status": status,
-            "owner": owner, "source": "Opportunity", "sourceOpportunityId": opportunity["id"], "note": "",
+        opportunity = advance_opportunity_fixture(opportunity, PO_RECEIVED, booking={
+            "primaryContactId": contact["id"], "equipment": "Inspection 5000",
+            "quantity": 1, "ddl": "2027-01-31", "amount": "300000.00", "currency": "CNY",
+            "owner": owner, "note": "",
         })
-        return account, site, opportunity, booking
+        booking_id = opportunity["liveBooking"]["id"]
+        if status != "Confirmed":
+            # Test data only: the PO confirmation always creates a Confirmed Booking, and the
+            # conversion gate reads nothing but the Booking status.
+            frappe.db.set_value("CRM Booking", booking_id, "status", status)
+        return account, site, opportunity, get_booking(booking_id)
 
     def _input(self, site: dict, serial: str, engineer: str | None = None, **overrides):
         payload = {

@@ -132,19 +132,6 @@ export function salesUnits(currentLocale: Locale) {
   return currentLocale === 'en-US' ? 'units / items' : '台 / 项'
 }
 
-const opportunityStageLabels: Record<string, LocalizedPair> = {
-  '需求发现': { 'zh-CN': '需求发现', 'en-US': 'Discovery' },
-  'Wafer Demo确认': { 'zh-CN': 'Wafer Demo确认', 'en-US': 'Wafer demo confirmed' },
-  '预算审批': { 'zh-CN': '预算审批', 'en-US': 'Budget approval' },
-  '设备规格确认': { 'zh-CN': '设备规格确认', 'en-US': 'Equipment specification' },
-  '报价': { 'zh-CN': '报价', 'en-US': 'Quotation' },
-  '采购流程': { 'zh-CN': '采购流程', 'en-US': 'Procurement' },
-}
-
-export function opportunityStageLabel(value: string, currentLocale: Locale) {
-  return opportunityStageLabels[value]?.[currentLocale] ?? salesEnumLabel(value, currentLocale)
-}
-
 export function recordTypeLabel(value: string, currentLocale: Locale) {
   const chinese: Record<string, string> = { Account: '客户', Contact: '联系人', Opportunity: '商机', Deal: '商机', Booking: '订单', 'Demo Request': 'Demo 申请', Requirement: '需求', Visit: '拜访', Evaluation: '评估', Contract: '合同' }
   return currentLocale === 'zh-CN' ? chinese[value] ?? value : value

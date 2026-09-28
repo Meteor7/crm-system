@@ -8,8 +8,8 @@ import { createMemoryContactFileRepository } from '@/demo/contact-file-repositor
 import type { ContactDto } from '@/types/crm'
 import { addMoney } from '@/domain/money'
 
-type TestDashboardMoney = { currency: string; openPipeline: string; weightedPipeline: string; confirmedBooking: string; cumulativeWon: string }
-type TestPipelineMoney = { currency: string; openPipeline: string; weightedPipeline: string; confirmedBooking: string }
+type TestDashboardMoney = { currency: string; openPipeline: string; confirmedBooking: string; cumulativeWon: string }
+type TestPipelineMoney = { currency: string; openPipeline: string; confirmedBooking: string }
 const cnyKpis = (dashboard: { kpis: { moneyByCurrency: TestDashboardMoney[] } }) =>
   dashboard.kpis.moneyByCurrency.find((item) => item.currency === 'CNY')!
 const cnyTotals = (pipeline: { totals: TestPipelineMoney[] }) =>
@@ -60,7 +60,7 @@ function completeDemoRequestForm() {
 async function createEligibleDemoOpportunity(api: ReturnType<typeof createMockApi>, suffix = '') {
   return (await api.createStrategyOpportunity({
     accountId: 'ACC-001', siteId: 'SITE-001', title: `Demo Request Opportunity ${suffix || Date.now()}`,
-    owner: 'person002@crm.example.invalid', stage: '需求发现', forecast: 'Pipeline', amount: '4860000.00',
+    owner: 'person002@crm.example.invalid', qualificationConfirmed: true, amount: '4860000.00',
     intentScore: 60, poDate: '2026-12-31', toolType: 'Defect Inspection', saleType: 'New Equipment',
     subRegion: 'East China', currency: 'CNY',
   })).data
@@ -177,7 +177,7 @@ describe('mock CRM API', () => {
 
     await expect(manager.createStrategyOpportunity({
       accountId: 'ACC-001', siteId: 'SITE-001', title: 'Invalid owner opportunity', owner: 'person077@crm.example.invalid',
-      stage: '需求发现', forecast: 'Pipeline', amount: '1000000.00', intentScore: 30, poDate: '2026-12-31',
+      qualificationConfirmed: true, amount: '1000000.00', intentScore: 30, poDate: '2026-12-31',
       toolType: 'Inspection', saleType: 'New Tool', subRegion: '华东', currency: 'CNY',
     })).rejects.toMatchObject({ code: 'VALIDATION_ERROR' })
     await expect(manager.createBooking({
@@ -192,7 +192,7 @@ describe('mock CRM API', () => {
 
     await expect(manager.convertLead('LEAD-002', {
       opportunityTitle: 'Invalid conversion owner', opportunityAmount: '1000000.00',
-      opportunityCloseDate: '2026-12-31', opportunityOwner: 'person077@crm.example.invalid', toolType: 'Inspection',
+      opportunityCloseDate: '2026-12-31', opportunityOwner: 'person077@crm.example.invalid', toolType: 'Inspection', qualificationConfirmed: true,
     })).rejects.toMatchObject({ code: 'VALIDATION_ERROR' })
     await expect(manager.createOpportunityAction('OPP-001', {
       title: 'Invalid action owner', owner: '演示经理01', due: '2026-08-10', status: 'Open',
@@ -206,7 +206,7 @@ describe('mock CRM API', () => {
     expect(BigInt(kpis.openPipeline.replace('.', ''))).toBeGreaterThan(0n)
     expect(BigInt(kpis.confirmedBooking.replace('.', ''))).toBeGreaterThan(0n)
     expect(kpis.openPipeline).not.toBe(kpis.confirmedBooking)
-    expect(BigInt(kpis.weightedPipeline.replace('.', ''))).toBeLessThan(BigInt(kpis.openPipeline.replace('.', '')))
+    expect(kpis).not.toHaveProperty('weightedPipeline')
   })
 
   it('uses the injected business date for metadata, writes and DDL validation', async () => {
@@ -248,8 +248,7 @@ describe('mock CRM API', () => {
       siteId: 'SITE-001',
       title: 'Dashboard 数据联通验证',
       owner: 'person002@crm.example.invalid',
-      stage: '需求发现',
-      forecast: 'Pipeline',
+      qualificationConfirmed: true,
       amount: '9800000.00',
       intentScore: 35,
       poDate: '2026-11-30',
@@ -264,9 +263,9 @@ describe('mock CRM API', () => {
     expect(afterCreate.data.topAccounts.find((item) => item.accountId === 'ACC-001' && item.currency === 'CNY')?.pipeline)
       .toBe(addMoney([beforeAccount?.pipeline ?? '0.00', '9800000.00']))
 
-    await expect(api.updateStrategyOpportunity(created.data.id, { stage: 'Lost' }))
+    await expect(api.markOpportunityLost(created.data.id, { lostReason: ' ' }))
       .rejects.toMatchObject({ code: 'VALIDATION_ERROR' })
-    await api.updateStrategyOpportunity(created.data.id, { stage: 'Lost', lostReason: '预算冻结' })
+    await api.markOpportunityLost(created.data.id, { lostReason: '预算冻结' })
     const afterClosed = await api.getDashboard({ range: 'quarter' })
     expect(cnyKpis(afterClosed.data).openPipeline).toBe(cnyKpis(before.data).openPipeline)
     expect(cnyKpis(afterClosed.data).cumulativeWon).toBe(cnyKpis(before.data).cumulativeWon)
@@ -690,12 +689,11 @@ describe('mock CRM API', () => {
 
   it('stores Booking primary Contact by ID and derives the display name', async () => {
     const bookingApi = createMockApi({ latency: 0 })
-    await bookingApi.updateStrategyOpportunity('OPP-003', { stage: 'Won' })
     const contact = (await bookingApi.listContacts({ accountId: 'ACC-002' })).data.items[0]
     const created = await bookingApi.createBooking({
       accountId: 'ACC-002', primaryContactId: contact.id, equipment: 'FastScan 1200',
       quantity: 1, ddl: '2026-09-30', amount: '1000000.00', currency: 'CNY', status: 'Pending',
-      owner: 'person002@crm.example.invalid', source: 'Opportunity', sourceOpportunityId: 'OPP-003', note: '',
+      owner: 'person002@crm.example.invalid', source: 'Upsell', sourceOpportunityId: '', note: '',
     })
     expect(created.data).toMatchObject({ primaryContactId: contact.id, customerContact: contact.name })
   })
@@ -742,7 +740,7 @@ describe('mock CRM API', () => {
     const booking = (primaryContactId: string) => api.createBooking({
       accountId: 'ACC-001', primaryContactId, equipment: 'FastScan 1200', quantity: 1,
       ddl: '2026-09-30', amount: '1000000.00', currency: 'CNY', status: 'Pending', owner: 'person002@crm.example.invalid',
-      source: 'Opportunity', sourceOpportunityId: 'OPP-001', note: '',
+      source: 'Upsell', sourceOpportunityId: '', note: '',
     })
     await expect(booking('missing-contact')).rejects.toMatchObject({ code: 'NOT_FOUND' })
     await expect(booking(crossAccount.id)).rejects.toMatchObject({ code: 'CONFLICT' })
@@ -786,13 +784,14 @@ describe('mock CRM API', () => {
     expect(created.data.engineerOwner).toBe('person077@crm.example.invalid')
   })
 
-  it('automatically advances the linked Opportunity through the complete Demo gate chain', async () => {
+  it('moves the linked Opportunity to Demo done only when its Demo reaches Customer Review', async () => {
     const opportunity = await createEligibleDemoOpportunity(api, 'complete-auto-chain')
+    expect(opportunity.stageHistory).toEqual([expect.objectContaining({ from: '', to: 'qualified_opportunity', source: 'creation', event: 'created' })])
     const created = await api.createDemoRequest({
       accountId: 'ACC-001', primaryContactId: 'CON-001', opportunityId: opportunity.id,
       requestMode: 'Opportunity', formData: completeDemoRequestForm(), customerExpectedDate: '2026-09-01', submit: true,
     })
-    expect((await api.getStrategyOpportunity(opportunity.id)).data.stage).toBe('Wafer Demo确认')
+    expect((await api.getStrategyOpportunity(opportunity.id)).data.stage).toBe('qualified_opportunity')
 
     await api.transitionDemoRequest(created.data.id, {
       type: 'engineer_approve', engineerOwner: 'person077@crm.example.invalid', testPlan: 'CIS defect recipe',
@@ -800,7 +799,7 @@ describe('mock CRM API', () => {
       estimatedCompletionDate: '2026-08-21', technicalRisk: 'Low', comment: 'Technical scope confirmed',
     })
     const approved = await api.transitionDemoRequest(created.data.id, { type: 'manager_approve', comment: 'Approved' })
-    expect((await api.getStrategyOpportunity(opportunity.id)).data.stage).toBe('Wafer Demo确认')
+    expect((await api.getStrategyOpportunity(opportunity.id)).data.stage).toBe('qualified_opportunity')
 
     const evaluationId = approved.data.evaluation!.id
     await api.completeEvaluationPreparation(evaluationId, 'wafer', '')
@@ -812,10 +811,16 @@ describe('mock CRM API', () => {
     })
     await api.releaseDemoTestReport(evaluationId, reportFiles('cis-demo-report.pdf', 'report'))
     await api.updateEvaluationStatus(evaluationId, { status: 'Internal Review' })
+    expect((await api.getStrategyOpportunity(opportunity.id)).data.stage).toBe('qualified_opportunity')
     await api.updateEvaluationStatus(evaluationId, { status: 'Customer Review' })
+    const reviewed = (await api.getStrategyOpportunity(opportunity.id)).data
+    expect(reviewed.stage).toBe('demo_done')
+    expect(reviewed.stageHistory[0]).toMatchObject({
+      from: 'qualified_opportunity', to: 'demo_done', source: 'event', event: 'demo_customer_review',
+      referenceDoctype: 'CRM Evaluation', referenceName: evaluationId,
+    })
     await api.updateEvaluationStatus(evaluationId, { status: 'Accepted', customerComment: '客户确认留痕' })
-
-    expect((await api.getStrategyOpportunity(opportunity.id)).data.stage).toBe('预算审批')
+    expect((await api.getStrategyOpportunity(opportunity.id)).data.stage).toBe('demo_done')
   })
 
   it('archives a Demo Test whose Opportunity has left the Demo gate', async () => {
@@ -847,11 +852,11 @@ describe('mock CRM API', () => {
     // With Reject gone, archiving is the only way out of Customer Review. An Opportunity
     // closed as Lost, or moved back once the Demo Request was converted, must not hold it.
     const lost = await inCustomerReview('archive-lost')
-    await api.updateStrategyOpportunity(lost.opportunityId, { stage: 'Lost', lostReason: '客户不认可 Demo' })
+    await api.markOpportunityLost(lost.opportunityId, { lostReason: '客户不认可 Demo' })
     const rolledBack = await inCustomerReview('archive-rolled-back')
-    await api.rollbackOpportunityStage(rolledBack.opportunityId, { targetStage: '需求发现', reason: '客户预算冻结，重新评估需求' })
+    await api.rollbackOpportunityStage(rolledBack.opportunityId, { targetStage: 'qualified_opportunity', reason: '客户预算冻结，重新评估需求' })
 
-    for (const [scenario, stage] of [[lost, 'Lost'], [rolledBack, '需求发现']] as const) {
+    for (const [scenario, stage] of [[lost, 'lost'], [rolledBack, 'qualified_opportunity']] as const) {
       const archived = await api.updateEvaluationStatus(scenario.evaluationId, { status: 'Accepted', customerComment: '客户不认可检出率，项目关闭' })
       expect(archived.data.status).toBe('Accepted')
       expect((await api.getStrategyOpportunity(scenario.opportunityId)).data.stage).toBe(stage)
@@ -900,20 +905,28 @@ describe('mock CRM API', () => {
     await expect(api.createDemoRequest(input)).resolves.toBeDefined()
   })
 
-  it('blocks rollback to discovery while the linked Demo Request is active', async () => {
-    const repository = createDemoRepository(createMemoryDemoStorage(), seedDemoSnapshot)
-    const manager = createMockApi({ repository, latency: 0, role: 'Manager' })
-    const opportunity = await createEligibleDemoOpportunity(manager, 'active-request-rollback')
-    await manager.createDemoRequest({
-      accountId: 'ACC-001', primaryContactId: 'CON-001', opportunityId: opportunity.id,
-      requestMode: 'Opportunity', formData: completeDemoRequestForm(), customerExpectedDate: '2026-09-01', submit: true,
-    })
-    const current = (await manager.getStrategyOpportunity(opportunity.id)).data
+  it('rolls back only to earlier milestones and records why in the stage history', async () => {
+    const manager = createMockApi({ latency: 0, role: 'Manager' })
+    await expect(manager.rollbackOpportunityStage('OPP-003', { targetStage: 'quotation_sent', reason: 'Same stage' }))
+      .rejects.toMatchObject({ code: 'INVALID_TRANSITION', message: 'Rollback target must be an earlier stage.' })
+    await expect(manager.rollbackOpportunityStage('OPP-003', { targetStage: 'lost' as never, reason: 'Not a milestone' }))
+      .rejects.toMatchObject({ code: 'VALIDATION_ERROR', message: 'targetStage is invalid.' })
+    await expect(manager.rollbackOpportunityStage('OPP-003', { targetStage: 'demo_done', reason: ' ' }))
+      .rejects.toMatchObject({ code: 'VALIDATION_ERROR', message: 'reason is required.' })
 
-    await expect(manager.rollbackOpportunityStage(opportunity.id, {
-      targetStage: '需求发现', reason: 'Requirements changed',
-    }, current.modified)).rejects.toMatchObject({ code: 'CONFLICT' })
-    expect((await manager.getStrategyOpportunity(opportunity.id)).data.stage).toBe('Wafer Demo确认')
+    const rolledBack = (await manager.rollbackOpportunityStage('OPP-003', { targetStage: 'demo_done', reason: 'Customer re-runs the demo' })).data
+    expect(rolledBack).toMatchObject({ stage: 'demo_done', budgetApprovedOn: '', stageChangedAt: rolledBack.stageHistory[0]!.recordedAt })
+    expect(rolledBack.stageHistory[0]).toMatchObject({
+      from: 'quotation_sent', to: 'demo_done', source: 'rollback', event: 'rollback', reason: 'Customer re-runs the demo', actor: 'person029@crm.example.invalid',
+    })
+    await expect(manager.rollbackOpportunityStage('OPP-003', { targetStage: 'qualified_opportunity', reason: 'Stale page' }, 'stale-version'))
+      .rejects.toMatchObject({ code: 'VERSION_CONFLICT' })
+    await expect(manager.rollbackOpportunityStage('OPP-003', { targetStage: 'qualified_opportunity', reason: 'Fresh page' }, rolledBack.modified))
+      .resolves.toMatchObject({ data: { stage: 'qualified_opportunity' } })
+
+    const sales = createMockApi({ latency: 0, role: 'Sales', userName: 'Demo Staff 01' })
+    await expect(sales.rollbackOpportunityStage('OPP-003', { targetStage: 'qualified_opportunity', reason: 'Not a Manager' }))
+      .rejects.toMatchObject({ code: 'PERMISSION_DENIED' })
   })
 
   it('enforces role capabilities in the Mock API', async () => {
@@ -973,9 +986,9 @@ describe('mock CRM API', () => {
   it('persists customer and opportunity changes inside one Mock session', async () => {
     const existing = await api.listStrategyOpportunities()
     expect(existing.data.items.find((item) => item.id === 'OPP-003')).toMatchObject({
-      stage: '采购流程',
+      stage: 'quotation_sent',
       score: 86,
-      probability: 88,
+      probabilityLevel: 'committed',
     })
 
     const customer = await api.createAccount({
@@ -995,15 +1008,18 @@ describe('mock CRM API', () => {
 
     const created = await api.createStrategyOpportunity({
       accountId: 'ACC-001', siteId: 'SITE-001', title: '新增缺陷检测机会', owner: 'person002@crm.example.invalid',
-      stage: '需求发现', forecast: 'Pipeline', amount: '9800000.00', intentScore: 35,
+      qualificationConfirmed: true, amount: '9800000.00', intentScore: 35,
       poDate: '2026-11-30', toolType: 'Defect Inspection', saleType: 'New Tool', subRegion: '华东', currency: 'CNY',
     })
     expect(created.data).toMatchObject({
       account: '示例企业014有限公司',
       site: '南京 12-inch Fab',
       score: 35,
-      probability: 23,
+      probabilityLevel: '',
+      probabilityHistory: [],
     })
+    expect(created.data).not.toHaveProperty('probability')
+    expect(created.data).not.toHaveProperty('forecast')
 
     const updated = await api.updateStrategyOpportunity(created.data.id, {
       title: '新增缺陷检测机会（更新）', intentScore: 55,
@@ -1011,13 +1027,95 @@ describe('mock CRM API', () => {
     expect(updated.data).toMatchObject({
       title: '新增缺陷检测机会（更新）',
       score: 55,
-      probability: 31,
-      stage: '需求发现',
+      probabilityLevel: '',
+      stage: 'qualified_opportunity',
     })
     expect(updated.data.history[0]).toMatchObject({ actor: 'person029@crm.example.invalid' })
 
     const listed = await api.listStrategyOpportunities()
     expect(listed.data.items.find((item) => item.id === created.data.id)?.title).toBe('新增缺陷检测机会（更新）')
+  })
+
+  it('lets only the Opportunity owner set the success probability and audits each level change', async () => {
+    const salesRepository = createMemorySalesRepository()
+    const owner = createMockApi({ latency: 0, role: 'Sales', userName: 'Demo Staff 01', salesRepository, today: '2026-07-17' })
+    const manager = createMockApi({ latency: 0, role: 'Manager', salesRepository, today: '2026-07-17' })
+    const input = {
+      accountId: 'ACC-001', siteId: 'SITE-001', owner: 'person002@crm.example.invalid', qualificationConfirmed: true,
+      amount: '1200000.00', intentScore: 40, poDate: '2026-12-31', toolType: 'Inspection', saleType: 'New Equipment',
+      subRegion: 'East China', currency: 'CNY',
+    }
+
+    const created = (await owner.createStrategyOpportunity({ ...input, title: 'Owner sets a level', probabilityLevel: 'pipeline' })).data
+    expect(created).toMatchObject({
+      probabilityLevel: 'pipeline',
+      probabilityHistory: [{ from: '', to: 'pipeline', actor: 'person002@crm.example.invalid', at: '2026-07-17T02:30:00.000Z' }],
+    })
+    expect(created).not.toHaveProperty('probability')
+    expect(created).not.toHaveProperty('forecast')
+
+    const raised = (await owner.updateStrategyOpportunity(created.id, { probabilityLevel: 'upside' })).data
+    expect(raised.probabilityHistory.map((entry) => [entry.from, entry.to])).toEqual([['pipeline', 'upside'], ['', 'pipeline']])
+    expect(raised.history.map((entry) => entry.field)).not.toContain('probabilityLevel')
+
+    const intentOnly = (await owner.updateStrategyOpportunity(created.id, { intentScore: 95 })).data
+    expect(intentOnly).toMatchObject({ score: 95, probabilityLevel: 'upside' })
+    expect(intentOnly.probabilityHistory).toHaveLength(2)
+
+    await expect(owner.updateStrategyOpportunity(created.id, { probabilityLevel: 'certain' as never }))
+      .rejects.toMatchObject({ code: 'VALIDATION_ERROR' })
+    await expect(manager.updateStrategyOpportunity(created.id, { probabilityLevel: 'low_probability' }))
+      .rejects.toMatchObject({ code: 'PERMISSION_DENIED', message: 'Only the Opportunity owner can set the probability level.' })
+    expect((await manager.updateStrategyOpportunity(created.id, { title: 'Manager edit keeps the level' })).data)
+      .toMatchObject({ title: 'Manager edit keeps the level', probabilityLevel: 'upside' })
+    await expect(manager.createStrategyOpportunity({ ...input, title: 'Manager picks a level', probabilityLevel: 'committed' }))
+      .rejects.toMatchObject({ code: 'PERMISSION_DENIED' })
+    expect((await manager.createStrategyOpportunity({ ...input, title: 'Pending for the owner', probabilityLevel: '' })).data)
+      .toMatchObject({ probabilityLevel: '', probabilityHistory: [] })
+    expect((await owner.getStrategyOpportunity(created.id)).data.probabilityHistory).toHaveLength(2)
+  })
+
+  it('keeps the success probability when the stage advances or rolls back', async () => {
+    const before = (await api.getStrategyOpportunity('OPP-003')).data
+    const levelHistory = structuredClone(before.probabilityHistory)
+    expect(before.probabilityLevel).toBe('committed')
+    expect(levelHistory).toHaveLength(2)
+    const contact = (await api.listContacts({ accountId: 'ACC-002', pageSize: 100 })).data.items.find((item) => item.status === 'Active')!
+
+    const received = (await api.confirmPo('OPP-003', {
+      booking: { primaryContactId: contact.id, equipment: 'HBM AOI', quantity: 1, ddl: '2026-11-12', amount: '32500000.00', currency: 'CNY', owner: 'person002@crm.example.invalid', note: '' },
+    })).data
+    expect(received).toMatchObject({ stage: 'po_received', probabilityLevel: 'committed', liveBooking: { status: 'Confirmed' } })
+    expect(received.probabilityHistory).toEqual(levelHistory)
+
+    await expect(api.rollbackOpportunityStage('OPP-003', { targetStage: 'quotation_sent', reason: '客户撤回 PO' }))
+      .rejects.toMatchObject({ code: 'CONFLICT', message: 'Cancel the Booking before rolling the Opportunity back.' })
+    const booking = (await api.listBookings({ pageSize: 100 })).data.items.find((item) => item.id === received.liveBooking!.id)!
+    await api.updateBooking(booking.id, { ...booking, status: 'Cancelled' } as never)
+    const rolledBack = (await api.rollbackOpportunityStage('OPP-003', { targetStage: 'quotation_sent', reason: '客户撤回 PO' })).data
+    expect(rolledBack).toMatchObject({ stage: 'quotation_sent', probabilityLevel: 'committed', liveBooking: null })
+    expect(rolledBack.probabilityHistory).toEqual(levelHistory)
+    expect(rolledBack.history.map((entry) => entry.field)).not.toContain('probability')
+  })
+
+  it('filters by success probability and keeps weighted values out of pipeline and dashboard reads', async () => {
+    const ids = async (probabilityLevel: 'All' | 'pending' | 'upside' | 'committed') =>
+      (await api.listStrategyOpportunities({ probabilityLevel, pageSize: 100 })).data.items.map((item) => item.id).sort()
+
+    expect(await ids('committed')).toEqual(['OPP-003'])
+    expect(await ids('upside')).toEqual(['OPP-001'])
+    expect(await ids('pending')).toEqual(['OPP-006', 'OPP-007'])
+    expect(await ids('All')).toEqual((await api.listStrategyOpportunities({ pageSize: 100 })).data.items.map((item) => item.id).sort())
+
+    const pipeline = (await api.listPipeline({})).data
+    expect(pipeline.opportunities.find((item) => item.id === 'OPP-001')).toMatchObject({ probabilityLevel: 'upside' })
+    expect(pipeline.opportunities.every((item) => !('probability' in item))).toBe(true)
+    expect(cnyTotals(pipeline)).not.toHaveProperty('weightedPipeline')
+
+    const dashboard = (await api.getDashboard({ range: 'quarter' })).data
+    expect(cnyKpis(dashboard)).not.toHaveProperty('weightedPipeline')
+    expect(dashboard.funnel.every((row) => !('weightedAmount' in row))).toBe(true)
+    expect(dashboard.ownerPerformance.every((row) => !('weightedPipeline' in row))).toBe(true)
   })
 
   it('registers trimmed custom account segments globally without duplicates', async () => {
@@ -1165,8 +1263,8 @@ describe('mock CRM API', () => {
   it('blocks CRM writes for equipment engineers', async () => {
     const engineer = createMockApi({ latency: 0, role: 'Engineer', assignedAccountIds: ['ACC-001'] })
     await expect(engineer.createStrategyOpportunity({
-      accountId: 'ACC-001', siteId: 'SITE-001', title: '越权商机', owner: 'person053@crm.example.invalid', stage: '需求发现', forecast: 'Pipeline',
-      amount: '1.00', probability: 10, poDate: '2026-12-01', toolType: 'AOI', saleType: 'New Tool', subRegion: '华东', currency: 'CNY',
+      accountId: 'ACC-001', siteId: 'SITE-001', title: '越权商机', owner: 'person053@crm.example.invalid', qualificationConfirmed: true,
+      amount: '1.00', intentScore: 10, poDate: '2026-12-01', toolType: 'AOI', saleType: 'New Tool', subRegion: '华东', currency: 'CNY',
     })).rejects.toMatchObject({ code: 'PERMISSION_DENIED' })
   })
 
@@ -1994,12 +2092,18 @@ describe('mock CRM API', () => {
     const beforeOpportunities = salesRepository.snapshot.opportunities.length
     const lead = (await conversionApi.getLead('LEAD-002')).data
 
+    await expect(conversionApi.convertLead('LEAD-002', {
+      opportunityTitle: '未确认需求的商机', opportunityAmount: '9800000.00', opportunityCloseDate: '2026-12-31',
+      opportunityOwner: 'person002@crm.example.invalid', toolType: 'Inspect X',
+    })).rejects.toMatchObject({ code: 'VALIDATION_ERROR', fieldErrors: { qualificationConfirmed: 'Required' } })
+    expect(salesRepository.snapshot.opportunities).toHaveLength(beforeOpportunities)
     const first = await conversionApi.convertLead('LEAD-002', {
       opportunityTitle: '新线索直接创建商机',
       opportunityAmount: '9800000.00',
       opportunityCloseDate: '2026-12-31',
       opportunityOwner: 'person002@crm.example.invalid',
       toolType: 'Inspect X',
+      qualificationConfirmed: true,
     })
     const second = await conversionApi.convertLead('LEAD-002', {
       opportunityTitle: '重复提交不会再创建',
@@ -2007,6 +2111,7 @@ describe('mock CRM API', () => {
       opportunityCloseDate: '2027-01-01',
       opportunityOwner: 'person005@crm.example.invalid',
       toolType: 'Other',
+      qualificationConfirmed: true,
     })
 
     expect(first.data).toEqual(second.data)
@@ -2021,6 +2126,10 @@ describe('mock CRM API', () => {
     expect(salesRepository.snapshot.opportunities).toHaveLength(beforeOpportunities + 1)
     const opportunity = salesRepository.snapshot.opportunities.find((item) => item.id === first.data.opportunityId)!
     expect(opportunity.stakeholders).toContainEqual(expect.objectContaining({ contactId: first.data.contactId }))
+    expect(opportunity).toMatchObject({ stage: 'qualified_opportunity', sourceLeadId: 'LEAD-002' })
+    expect(opportunity.stageHistory).toEqual([expect.objectContaining({
+      from: '', to: 'qualified_opportunity', source: 'creation', event: 'lead_converted', referenceDoctype: 'Lead', referenceName: 'LEAD-002',
+    })])
     expect((await conversionApi.getContact(first.data.contactId)).data.opportunities)
       .toContainEqual(expect.objectContaining({ id: first.data.opportunityId }))
   })
@@ -2031,7 +2140,7 @@ describe('mock CRM API', () => {
     const before = (await accountApi.listAccounts({ page: 1, pageSize: 100 })).data.items.find((item) => item.id === 'ACC-001')!
     const created = await accountApi.createStrategyOpportunity({
       accountId: 'ACC-001', siteId: 'SITE-001', title: 'Account summary sync', owner: 'person002@crm.example.invalid',
-      stage: '需求发现', forecast: 'Pipeline', amount: '9800000.00', intentScore: 99, poDate: '2026-12-31',
+      qualificationConfirmed: true, amount: '9800000.00', intentScore: 99, poDate: '2026-12-31',
       toolType: 'Inspect X', saleType: 'New Equipment', subRegion: 'East China', currency: 'CNY',
     })
 
@@ -2039,7 +2148,7 @@ describe('mock CRM API', () => {
     expect(afterCreate.pipelineAmount).toBe(before.pipelineAmount + 9800000)
     expect(afterCreate.intentScore).toBe(99)
 
-    await accountApi.updateStrategyOpportunity(created.data.id, { stage: 'Lost', lostReason: '客户延期' })
+    await accountApi.markOpportunityLost(created.data.id, { lostReason: '客户延期' })
     const afterClosed = (await accountApi.getAccount360('ACC-001')).data.account
     expect(afterClosed.pipelineAmount).toBe(before.pipelineAmount)
   })
@@ -2050,6 +2159,7 @@ describe('mock CRM API', () => {
     const lead = (await conversionApi.getLead('LEAD-002')).data
 
     const converted = await conversionApi.convertLead(lead.id, {
+      qualificationConfirmed: true,
       opportunityTitle: '跨角色客户联通验证',
       opportunityAmount: '9800000.00',
       opportunityCloseDate: '2026-12-31',
@@ -2085,6 +2195,7 @@ describe('mock CRM API', () => {
     const conversionApi = createMockApi({ latency: 0, salesRepository })
 
     const converted = await conversionApi.convertLead('LEAD-002', {
+      qualificationConfirmed: true,
       opportunityTitle: '武汉新厂 AOI 项目',
       opportunityAmount: '9800000.00',
       opportunityCloseDate: '2026-12-31',
@@ -2146,19 +2257,14 @@ describe('mock CRM API', () => {
     })
 
     expect(contact.data.accountId).toBe(account.data.id)
-    await expect(boss.updateStrategyOpportunity('OPP-003', { stage: 'Won' }))
-      .resolves.toMatchObject({ data: { stage: 'Won' } })
+    await expect(boss.updateStrategyOpportunity('OPP-003', { title: '老板更新的商机' }))
+      .resolves.toMatchObject({ data: { title: '老板更新的商机', stage: 'quotation_sent' } })
   })
 
-  it('enforces Won Opportunity sourcing while Upsell Booking can be created directly', async () => {
-    const bookingApi = createMockApi({ latency: 0 })
-    await bookingApi.updateStrategyOpportunity('OPP-003', { stage: 'Won' })
-    const contact = (await bookingApi.listContacts({ accountId: 'ACC-002' })).data.items[0]
-    const openOpportunity = await bookingApi.createStrategyOpportunity({
-      accountId: 'ACC-002', siteId: 'SITE-004', title: 'Open source validation', owner: 'person002@crm.example.invalid',
-      stage: '需求发现', forecast: 'Pipeline', amount: '9000000.00', intentScore: 50, poDate: '2026-12-31',
-      toolType: 'FastScan 1200', saleType: 'New Equipment', subRegion: 'East China', currency: 'CNY',
-    })
+  it('creates Opportunity Bookings only through the Opportunity workflow while Upsell Booking can be created directly', async () => {
+    const salesRepository = createMemorySalesRepository()
+    const bookingApi = createMockApi({ latency: 0, salesRepository })
+    const contact = (await bookingApi.listContacts({ accountId: 'ACC-002' })).data.items.find((item) => item.status === 'Active')!
     const base = {
       accountId: 'ACC-002',
       primaryContactId: contact.id,
@@ -2172,20 +2278,29 @@ describe('mock CRM API', () => {
       note: '',
     }
 
-    await expect(bookingApi.createBooking({ ...base, source: 'Opportunity', sourceOpportunityId: '' }))
-      .rejects.toMatchObject({ code: 'VALIDATION_ERROR' })
-    await expect(bookingApi.createBooking({ ...base, source: 'Opportunity', sourceOpportunityId: openOpportunity.data.id }))
-      .rejects.toMatchObject({ code: 'INVALID_TRANSITION' })
     await expect(bookingApi.createBooking({ ...base, source: 'Opportunity', sourceOpportunityId: 'OPP-003' }))
-      .resolves.toMatchObject({ data: { source: 'Opportunity', sourceOpportunityId: 'OPP-003' } })
-    await expect(bookingApi.createBooking({ ...base, source: 'Opportunity', sourceOpportunityId: 'OPP-003' }))
-      .rejects.toMatchObject({ code: 'CONFLICT' })
+      .rejects.toMatchObject({ code: 'INVALID_TRANSITION', message: 'Opportunity Bookings are created by confirming the PO or approving an internal validation.' })
+    await expect(bookingApi.createBooking({ ...base, source: 'Upsell', sourceOpportunityId: 'OPP-003' }))
+      .rejects.toMatchObject({ code: 'INVALID_TRANSITION', message: 'Upsell Booking must not reference an Opportunity.' })
+    await expect(bookingApi.createBooking({ ...base, source: 'Upsell', sourceOpportunityId: '' }))
+      .resolves.toMatchObject({ data: { source: 'Upsell', sourceOpportunityId: '' } })
 
-    await expect(bookingApi.createBooking({
-      ...base,
-      source: 'Upsell',
-      sourceOpportunityId: '',
-    })).resolves.toMatchObject({ data: { source: 'Upsell', sourceOpportunityId: '' } })
+    // BKG-003 was created by the approved internal validation of OPP-008.
+    const pending = (await bookingApi.listBookings({ pageSize: 100 })).data.items.find((item) => item.id === 'BKG-003')!
+    expect(pending).toMatchObject({ source: 'Opportunity', sourceOpportunityId: 'OPP-008', status: 'Pending' })
+    await expect(bookingApi.updateBooking('BKG-003', { ...pending, accountId: 'ACC-001' } as never))
+      .rejects.toMatchObject({ code: 'INVALID_TRANSITION', message: 'Account, source, Opportunity and type of an Opportunity Booking cannot change.' })
+    await expect(bookingApi.updateBooking('BKG-003', { ...pending, source: 'Upsell', sourceOpportunityId: '' } as never))
+      .rejects.toMatchObject({ code: 'INVALID_TRANSITION' })
+    await expect(bookingApi.updateBooking('BKG-003', { ...pending, status: 'Confirmed' } as never))
+      .rejects.toMatchObject({ code: 'INVALID_TRANSITION', message: 'An Opportunity Booking can only be changed to Cancelled.' })
+    await expect(bookingApi.updateBooking('BKG-003', { ...pending, quantity: 3, note: 'Customer asked for a third tool' } as never))
+      .resolves.toMatchObject({ data: { quantity: 3, status: 'Pending', sourceOpportunityId: 'OPP-008' } })
+    const cancelled = await bookingApi.updateBooking('BKG-003', { ...pending, quantity: 3, status: 'Cancelled' } as never)
+    expect(cancelled.data.status).toBe('Cancelled')
+    await expect(bookingApi.updateBooking('BKG-003', { ...pending, quantity: 3, status: 'Pending' } as never))
+      .rejects.toMatchObject({ code: 'INVALID_TRANSITION', message: 'An Opportunity Booking can only be changed to Cancelled.' })
+    expect((await bookingApi.getStrategyOpportunity('OPP-008')).data).toMatchObject({ stage: 'internal_validation', liveBooking: null })
   })
 
   it('converts confirmed Opportunity and Upsell Bookings once and keeps completed archive records', async () => {

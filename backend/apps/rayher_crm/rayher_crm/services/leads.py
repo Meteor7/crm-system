@@ -261,6 +261,9 @@ def _lock_lead_for_conversion(name: str):
 
 
 def _validate_conversion(payload: dict[str, Any]) -> dict[str, Any]:
+    from rayher_crm.services.opportunities import assert_qualification_confirmed
+
+    assert_qualification_confirmed(payload)
     po_date = optional_date(payload.get("opportunityCloseDate"), "opportunityCloseDate")
     if not po_date:
         raise CrmApiException(
@@ -303,6 +306,7 @@ def convert_lead(
     try:
         from rayher_crm.services.accounts import _require_account, create_account
         from rayher_crm.services.contacts import _contact_account, _require_contact, create_contact
+        from rayher_crm.services.opportunities import insert_qualified_opportunity
         from rayher_crm.services.sites import _require_site, create_site, sites_for_account
 
         account_id = str(payload.get("accountId") or "").strip()
@@ -354,10 +358,8 @@ def convert_lead(
             failure_injector("contact")
 
         sub_region = frappe.db.get_value("Customer", account_id, "custom_crm_region") or ""
-        from rayher_crm.services.opportunities import _calculate_opportunity_probability
-        opportunity = frappe.get_doc(
+        opportunity = insert_qualified_opportunity(
             {
-                "doctype": "CRM Opportunity",
                 "account": account_id,
                 "site": site_id,
                 "source_lead": lead.name,
@@ -368,14 +370,14 @@ def convert_lead(
                 "po_date": values["po_date"],
                 "opportunity_owner": values["owner"],
                 "tool_type": values["tool_type"],
-                "stage": "需求发现",
-                "forecast": "Pipeline",
-                "probability": _calculate_opportunity_probability("需求发现", 20),
                 "score": 20,
                 "sale_type": "New Equipment",
                 "sub_region": sub_region,
-            }
-        ).insert(ignore_permissions=True)
+            },
+            event="lead_converted",
+            reference_doctype="Lead",
+            reference_name=lead.name,
+        )
         frappe.get_doc(
             {
                 "doctype": "CRM Opportunity History",

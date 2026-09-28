@@ -11,7 +11,7 @@ export type Capability =
   | 'stakeholder:view' | 'stakeholder:write'
   | 'contact:view' | 'contact:write' | 'contact:merge' | 'contact:delete'
   | 'requirement:view'
-  | 'deal:view' | 'deal:write' | 'deal:rollback'
+  | 'deal:view' | 'deal:write' | 'deal:rollback' | 'deal:internal_validation_approve'
   | 'visit:view' | 'visit:create' | 'visit:write' | 'visit:review'
   | 'demo_request:view' | 'demo_request:create' | 'demo_request:engineering_review' | 'demo_request:manager_approve'
   | 'evaluation:view' | 'evaluation:write'
@@ -70,7 +70,6 @@ export interface ListQuery {
   status?: string
   accountId?: string
   owner?: string
-  forecast?: string
   type?: string
   dateFrom?: string
   dateTo?: string
@@ -254,6 +253,8 @@ export interface LeadConversionInput {
   opportunityCloseDate: string
   opportunityOwner: string
   toolType: string
+  /** Sales confirms the customer need and the budget owner; conversion requires `true`. */
+  qualificationConfirmed?: boolean
 }
 
 export interface LeadConversionResult {
@@ -311,8 +312,8 @@ export interface OpportunityDto {
   segment: AccountSummaryDto['segment']
   amount: DecimalAmount
   currency: string
-  stage: '需求发现' | 'Wafer Demo确认' | '预算审批' | '设备规格确认' | '报价' | '采购流程' | 'Won' | 'Lost'
-  probability: number
+  stage: OpportunityStage
+  probabilityLevel: OpportunityProbabilityLevelValue
   intentScore: number
   budgetStatus: RequirementDto['budgetStatus']
   owner: string
@@ -749,7 +750,6 @@ export interface DashboardDto {
     moneyByCurrency: Array<{
       currency: string
       openPipeline: DecimalAmount
-      weightedPipeline: DecimalAmount
       confirmedBooking: DecimalAmount
       cumulativeWon: DecimalAmount
     }>
@@ -761,11 +761,10 @@ export interface DashboardDto {
     stage: string
     currency: string
     amount: DecimalAmount
-    weightedAmount: DecimalAmount
     count: number
   }>
   bookingByMonth: Array<{ label: string; currency: string; amount: DecimalAmount; count: number }>
-  ownerPerformance: Array<{ owner: string; currency: string; pipeline: DecimalAmount; weightedPipeline: DecimalAmount; booking: DecimalAmount }>
+  ownerPerformance: Array<{ owner: string; currency: string; pipeline: DecimalAmount; booking: DecimalAmount }>
   topAccounts: Array<{ accountId: string; accountName: string; currency: string; pipeline: DecimalAmount; booking: DecimalAmount }>
   segmentDistribution: Array<{ label: string; currency: string; pipeline: DecimalAmount; booking: DecimalAmount }>
   regionDistribution: Array<{ label: string; currency: string; pipeline: DecimalAmount; booking: DecimalAmount }>
@@ -832,9 +831,10 @@ export interface PipelineDto {
   totals: Array<{
     currency: string
     openPipeline: DecimalAmount
-    weightedPipeline: DecimalAmount
     confirmedBooking: DecimalAmount
   }>
 }
 import type { DecimalAmount } from '@/domain/money'
 import type { MultipartFilePart } from '@/api/binary-transport'
+import type { OpportunityProbabilityLevelValue } from './workspaces'
+import type { OpportunityStage } from '@/domain/opportunity-stages'

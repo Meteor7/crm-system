@@ -48,7 +48,7 @@ it('translates contact timeline opportunity stages while keeping business summar
   const response = await api.getContact('CON-001')
   response.data.timeline = [
     { id: 'B-1', type: 'Booking', at: '2026-09-07', title: 'Tool X · 2 台', summary: 'Confirmed', href: '/booking/B-1' },
-    { id: 'OP-1', type: 'Opportunity', at: '2026-09-07', title: '客户项目', summary: '需求发现', href: '/opportunities/OP-1' },
+    { id: 'OP-1', type: 'Opportunity', at: '2026-09-07', title: '客户项目', summary: 'demo_done', href: '/opportunities/OP-1' },
     { id: 'V-1', type: 'Visit', at: '2026-09-07', title: '客户拜访', summary: '需求发现', href: '/visits/V-1' },
   ]
   vi.spyOn(api, 'getContact').mockResolvedValue(response)
@@ -56,12 +56,13 @@ it('translates contact timeline opportunity stages while keeping business summar
   await flushPromises()
   setLocale('en-US')
   await flushPromises()
-  expect(wrapper.text()).toContain('Discovery')
+  expect(wrapper.get('[data-timeline-id="OP-1"]').text()).toContain('Demo done')
   expect(wrapper.get('[data-timeline-id="B-1"]').text()).toContain('Tool X · 2 units')
   expect(wrapper.get('[data-timeline-id="B-1"]').text()).not.toContain('2 台')
   expect(wrapper.text()).toContain('需求发现')
   expect(wrapper.text()).toContain('客户项目')
-  expect(response.data.timeline.find(item => item.id === 'OP-1')?.summary).toBe('需求发现')
+  expect(wrapper.get('[data-timeline-id="V-1"]').text()).toContain('需求发现')
+  expect(response.data.timeline.find(item => item.id === 'OP-1')?.summary).toBe('demo_done')
   wrapper.unmount()
 })
 

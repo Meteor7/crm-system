@@ -16,3 +16,4 @@ rayher_crm.patches.v1_0.seed_quotation_catalog
 rayher_crm.patches.v1_0.backfill_demo_test_round
 rayher_crm.patches.v1_0.submit_planned_visits_with_complete_records
 rayher_crm.patches.v1_0.protect_demo_artifact_files
+rayher_crm.patches.v1_0.migrate_opportunity_seven_stages

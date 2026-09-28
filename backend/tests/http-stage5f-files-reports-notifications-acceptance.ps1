@@ -168,11 +168,10 @@ try {
     }}
     $created.Contact = $contact.data.id
 
-    $discoveryStage = -join ([char[]]@(0x9700, 0x6C42, 0x53D1, 0x73B0))
-    $waferDemoStage = 'Wafer Demo' + (-join ([char[]]@(0x786E, 0x8BA4)))
-    $opportunity = Invoke-CrmPost $sessions.Sales 'rayher_crm.api.v1.opportunities.create_strategy_opportunity' @{input=@{
+    $qualifiedStage = 'qualified_opportunity'
+    $opportunity = Invoke-CrmPost $sessions.Sales 'rayher_crm.api.v1.opportunities.create_strategy_opportunity' @{input=@{probabilityLevel='pipeline';
         accountId=$created.Account;siteId=$created.Site;title="Stage 5F Opportunity $stamp";owner=$created.Sales
-        stage=$discoveryStage;forecast='Pipeline';amount='300000.00';probability=20;intentScore=85;poDate='2026-12-31'
+        stage=$qualifiedStage;qualificationConfirmed=$true;forecast='Pipeline';amount='300000.00';probability=20;intentScore=85;poDate='2026-12-31'
         toolType='Inspection';saleType='New Equipment';subRegion='East China';currency='CNY';originalAmount='300000.00'
     }}
     $created.Opportunity = $opportunity.data.id
@@ -200,7 +199,7 @@ try {
     }}
     $created.Request = $request.data.id
     $opportunityAfterRequest = (Invoke-RestMethod -Uri "$BaseUrl/api/method/rayher_crm.api.v1.opportunities.get_strategy_opportunity?id=$([Uri]::EscapeDataString($created.Opportunity))" -WebSession $sessions.Sales).message.data
-    if ($opportunityAfterRequest.stage -ne $waferDemoStage) { throw "Demo Request creation did not advance Opportunity to $waferDemoStage." }
+    if ($opportunityAfterRequest.stage -ne $qualifiedStage) { throw "Demo Request creation moved the Opportunity to $($opportunityAfterRequest.stage)." }
     $artifactUpload = Invoke-MultipartFile $sessions.Sales 'rayher_crm.api.v1.demo_artifacts.save_artifact' @{
         demoRequestId=$created.Request;type='Demo Request DOCX';visibility='Internal'
     } 'file' $sourceDocx 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
@@ -331,7 +330,9 @@ try {
     Remove-TestChildren 'CRM Demo Comment' 'demo_request' $created.Request
     Remove-TestChildren 'CRM Demo Request History' 'demo_request' $created.Request
     Remove-TestDoc 'CRM Demo Request' $created.Request
-    Remove-TestChildren 'CRM Opportunity History' 'opportunity' $created.Opportunity
+    foreach ($docType in @('CRM Opportunity History', 'CRM Opportunity Stage History', 'CRM Opportunity Probability History', 'CRM Opportunity Internal Validation')) {
+        Remove-TestChildren $docType 'opportunity' $created.Opportunity
+    }
     Remove-TestDoc 'CRM Opportunity' $created.Opportunity
     Remove-TestDoc 'Contact' $created.Contact
     Remove-TestDoc 'Address' $created.Site
