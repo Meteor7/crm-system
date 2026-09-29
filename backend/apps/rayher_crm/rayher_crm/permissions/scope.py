@@ -3,23 +3,30 @@
 from __future__ import annotations
 
 import frappe
-from frappe.permissions import add_permission, update_permission_property
+from frappe.permissions import AUTOMATIC_ROLES, add_permission, get_valid_perms, update_permission_property
 
-from rayher_crm.permissions.roles import capabilities_for_role, resolve_crm_role
+from rayher_crm.permissions.roles import CRM_ROLE_TO_PROFILE, capabilities_for_role, resolve_crm_role
 
 
 SCOPED_DOCTYPES = (
     "Customer", "Contact", "Lead", "CRM Opportunity", "CRM Opportunity Probability History",
-    "CRM Probability Recovery", "CRM Probability Recovery Revision",
-    "CRM Opportunity Loss Review", "CRM Opportunity Loss Review Revision",
-    "CRM Opportunity Stage History", "CRM Opportunity Internal Validation",
-    "CRM Opportunity Action", "CRM Opportunity History",
-    "CRM Booking", "CRM Installed Tool",
-    "CRM Demo Request", "CRM Evaluation", "CRM Evaluation Customer Review", "CRM Visit",
-    "CRM Visit Meeting Record", "CRM Contact File", "CRM Status Attachment", "CRM Demo Artifact", "CRM Notification Event",
+    "CRM Probability Recovery", "CRM Probability Recovery Revision", "CRM Opportunity Loss Review",
+    "CRM Opportunity Loss Review Revision", "CRM Opportunity Stage History", "CRM Opportunity Internal Validation",
+    "CRM Opportunity Action", "CRM Opportunity History", "CRM Booking",
+    "CRM Installed Tool", "CRM Demo Request", "CRM Evaluation",
+    "CRM Evaluation Customer Review", "CRM Visit", "CRM Visit Meeting Record",
+    "CRM Contact File", "CRM Status Attachment", "CRM Demo Artifact",
+    "CRM Notification Event", "CRM Opportunity Stakeholder", "CRM Installed Tool Lifecycle History",
+    "CRM Installed Tool Service History", "CRM Installed Tool Version History", "CRM Demo Comment",
+    "CRM Demo Request History", "CRM Evaluation History", "CRM Test Run",
+    "CRM Document Access Request",
     "CRM Quotation", "CRM Quotation Version", "CRM Quotation Approval",
     "CRM RFQ", "CRM RFQ Version",
 )
+# Address keeps ERPNext's own role permissions and adds CRM read-only roles. Its hooks
+# add CRM-only row and write checks without changing the global All role. Engineer assignments remain Manager-
+# managed configuration, but their native reads are scoped to the assigned Engineer.
+CONDITION_DOCTYPES = SCOPED_DOCTYPES + ("Address", "CRM Account Engineer Assignment")
 # Every CRM DocType belongs to the whitelisted services in api/v1: they check the business
 # rules, drive the state machines and append the history rows the cockpit reads. The standard
 # Frappe document API (/api/resource, frappe.client, the Desk form) writes straight to the
@@ -57,6 +64,14 @@ AUDIT_DOCPERMS = {
     "CRM Sales": {"read", "report", "export"},
     "CRM Engineer": {"read", "report", "export"},
 }
+# Opportunity serialization deliberately omits stakeholder/contact data for
+# Engineers, even when they can work the Opportunity through an Account assignment.
+STAKEHOLDER_DOCPERMS = {
+    "CRM Manager": AUDIT_DOCPERMS["CRM Manager"],
+    "CRM Sales": AUDIT_DOCPERMS["CRM Sales"],
+    "CRM Engineer": set(),
+}
+
 # Removed together with their Opportunity by delete_strategy_opportunity.
 OPPORTUNITY_CHILD_DOCTYPES = (
     "CRM Probability Recovery Revision", "CRM Probability Recovery",
@@ -65,12 +80,45 @@ OPPORTUNITY_CHILD_DOCTYPES = (
     "CRM Opportunity Stage History",
     "CRM Opportunity Internal Validation",
 )
-# Visible exactly when their Opportunity is. Keep read scope independent of the
-# generic deletion tuple; the Opportunity service explicitly handles its Action
-# and History rows in delete_strategy_opportunity.
+# Read scope is independent of the generic deletion tuple; business services own deletion.
 OPPORTUNITY_SCOPED_CHILD_DOCTYPES = OPPORTUNITY_CHILD_DOCTYPES + (
     "CRM Opportunity Action",
     "CRM Opportunity History",
+    "CRM Opportunity Stakeholder",
+)
+DEMO_REQUEST_SCOPED_CHILD_DOCTYPES = (
+    "CRM Demo Comment",
+    "CRM Demo Request History",
+)
+EVALUATION_SCOPED_CHILD_DOCTYPES = (
+    "CRM Evaluation Customer Review",
+    "CRM Evaluation History",
+    "CRM Test Run",
+)
+INSTALLED_TOOL_SCOPED_CHILD_DOCTYPES = (
+    "CRM Installed Tool Lifecycle History",
+    "CRM Installed Tool Service History",
+    "CRM Installed Tool Version History",
+)
+# These records carry parent-scoped notes, test results, service details or
+# requester data. Frappe treats DocShare as an override for document reads, so
+# sharing them would make a stale child ID survive loss of parent access.
+NATIVE_SHARE_BLOCKED_DOCTYPES = (
+    *OPPORTUNITY_SCOPED_CHILD_DOCTYPES,
+    *INSTALLED_TOOL_SCOPED_CHILD_DOCTYPES,
+    *DEMO_REQUEST_SCOPED_CHILD_DOCTYPES,
+    *EVALUATION_SCOPED_CHILD_DOCTYPES,
+    "CRM Visit Meeting Record",
+    "CRM Demo Artifact",
+    "CRM Status Attachment",
+    "CRM Quotation Version",
+    "CRM Quotation Approval",
+    "CRM RFQ Version",
+    "CRM Document Access Request",
+    "CRM Account Engineer Assignment",
+)
+ADDRESS_NATIVE_PERMISSION_TYPES = (
+    "select", "read", "write", "create", "delete", "print", "email", "share",
 )
 # Visits are changed only through the visit service, which writes with
 # ignore_permissions. A Sales user also reads a colleague's visit as its action
@@ -111,6 +159,11 @@ NOTIFICATION_DOCPERMS = {
     "CRM Sales": {"read"},
     "CRM Engineer": {"read"},
 }
+ACCOUNT_ENGINEER_ASSIGNMENT_DOCPERMS = {
+    "CRM Manager": {"read", "write", "create", "delete", "report", "export", "print", "email"},
+    "CRM Sales": set(),
+    "CRM Engineer": {"read"},
+}
 QUOTATION_DOCPERMS = {
     "CRM Manager": ROLE_DOCPERMS["CRM Manager"],
     "CRM Sales": ROLE_DOCPERMS["CRM Sales"],
@@ -121,6 +174,10 @@ QUOTATION_APPROVAL_DOCPERMS = {
     "CRM Engineer": set(),
 }
 DOCPERMS_BY_DOCTYPE = {
+    "Address": {role: {"read"} for role in CRM_ROLE_TO_PROFILE},
+    # This Manager-maintained configuration is intentionally outside SCOPED_DOCTYPES,
+    # whose members are service-owned and read-only through the standard API.
+    "CRM Account Engineer Assignment": ACCOUNT_ENGINEER_ASSIGNMENT_DOCPERMS,
     "CRM Installed Tool": INSTALLED_TOOL_DOCPERMS,
     "CRM Demo Request": DEMO_REQUEST_DOCPERMS,
     "CRM Evaluation": EVALUATION_DOCPERMS,
@@ -134,34 +191,62 @@ DOCPERMS_BY_DOCTYPE = {
     "CRM Opportunity Internal Validation": AUDIT_DOCPERMS,
     "CRM Opportunity Action": AUDIT_DOCPERMS,
     "CRM Opportunity History": AUDIT_DOCPERMS,
+    "CRM Opportunity Stakeholder": STAKEHOLDER_DOCPERMS,
+    "CRM Installed Tool Lifecycle History": AUDIT_DOCPERMS,
+    "CRM Installed Tool Service History": AUDIT_DOCPERMS,
+    "CRM Installed Tool Version History": AUDIT_DOCPERMS,
+    "CRM Demo Comment": AUDIT_DOCPERMS,
+    "CRM Demo Request History": AUDIT_DOCPERMS,
+    "CRM Evaluation History": AUDIT_DOCPERMS,
+    "CRM Test Run": AUDIT_DOCPERMS,
     "CRM Visit": VISIT_DOCPERMS,
     "CRM Contact File": AUDIT_DOCPERMS,
     "CRM Demo Artifact": AUDIT_DOCPERMS,
     "CRM Status Attachment": STATUS_ATTACHMENT_DOCPERMS,
     "CRM Visit Meeting Record": MEETING_RECORD_DOCPERMS,
     "CRM Notification Event": NOTIFICATION_DOCPERMS,
+    "CRM Document Access Request": AUDIT_DOCPERMS,
     "CRM Quotation": QUOTATION_DOCPERMS,
     "CRM Quotation Version": QUOTATION_DOCPERMS,
     "CRM Quotation Approval": QUOTATION_APPROVAL_DOCPERMS,
     "CRM RFQ": AUDIT_DOCPERMS,
     "CRM RFQ Version": AUDIT_DOCPERMS,
 }
+CRM_SHARE_GUARDED_DOCTYPES = tuple(
+    doctype for doctype in SCOPED_DOCTYPES if doctype.startswith("CRM ")
+) + ("CRM Account Engineer Assignment",)
 PERMISSION_FIELDS = ("read", "write", "create", "delete", "report", "export", "print", "email", "share")
 ROLE_TO_SERVER_ROLE = {"Manager": "CRM Manager", "Sales": "CRM Sales", "Engineer": "CRM Engineer"}
 DOCTYPES_TO_VIEW_CAPABILITY = {
-    "Customer": "account:view", "Contact": "contact:view", "Lead": "requirement:view",
+    "Customer": "account:view", "Address": "account:view", "Contact": "contact:view", "Lead": "requirement:view",
+    "CRM Account Engineer Assignment": "account:view",
     "CRM Opportunity": "deal:view", "CRM Opportunity Probability History": "deal:view",
     "CRM Probability Recovery": "deal:view", "CRM Probability Recovery Revision": "deal:view",
     "CRM Opportunity Loss Review": "deal:view", "CRM Opportunity Loss Review Revision": "deal:view",
     "CRM Opportunity Stage History": "deal:view", "CRM Opportunity Internal Validation": "deal:view",
-    "CRM Opportunity Action": "deal:view", "CRM Opportunity History": "deal:view",
-    "CRM Booking": "deal:view", "CRM Installed Tool": "service:view",
-    "CRM Demo Request": "demo_request:view", "CRM Evaluation": "evaluation:view",
-    "CRM Evaluation Customer Review": "evaluation:view", "CRM Visit": "visit:view",
-    "CRM Contact File": "stakeholder:view", "CRM Status Attachment": "deal:view",
+    "CRM Opportunity Action": "deal:view",
+    "CRM Opportunity History": "deal:view",
+    "CRM Booking": "deal:view",
+    "CRM Installed Tool": "service:view",
+    "CRM Demo Request": "demo_request:view",
+    "CRM Evaluation": "evaluation:view",
+    "CRM Evaluation Customer Review": "evaluation:view",
+    "CRM Visit": "visit:view",
+    "CRM Contact File": "stakeholder:view",
+    "CRM Status Attachment": "deal:view",
     "CRM Demo Artifact": "demo_request:view",
     "CRM Visit Meeting Record": "visit:view",
-    "CRM Notification Event": "dashboard:view", "CRM Quotation": "quotation:view",
+    "CRM Notification Event": "dashboard:view",
+    "CRM Quotation": "quotation:view",
+    "CRM Opportunity Stakeholder": "deal:view",
+    "CRM Installed Tool Lifecycle History": "service:view",
+    "CRM Installed Tool Service History": "service:view",
+    "CRM Installed Tool Version History": "service:view",
+    "CRM Demo Comment": "demo_request:view",
+    "CRM Demo Request History": "demo_request:view",
+    "CRM Evaluation History": "evaluation:view",
+    "CRM Test Run": "evaluation:view",
+    "CRM Document Access Request": "account:view",
     "CRM Quotation Version": "quotation:view", "CRM Quotation Approval": "quotation:view",
     "CRM RFQ": "rfq:view", "CRM RFQ Version": "rfq:view",
 }
@@ -175,7 +260,9 @@ def _permissions_for_doctype(doctype: str, role: str) -> set[str]:
 def install_crm_doc_permissions() -> None:
     """Install explicit DocPerm rows so standard ERPNext roles do not mask CRM scope."""
 
-    for doctype in SCOPED_DOCTYPES:
+    # Address needs a non-owner read grant before DBQuery reaches its CRM row hook.
+    # Reconcile only the CRM rows; existing ERP and All permissions stay intact.
+    for doctype in (*SCOPED_DOCTYPES, "Address"):
         permissions = DOCPERMS_BY_DOCTYPE.get(doctype, ROLE_DOCPERMS)
         for role, allowed in permissions.items():
             if allowed & MUTATING_PERMISSIONS:
@@ -199,6 +286,51 @@ def install_crm_doc_permissions() -> None:
                 )
         frappe.clear_cache(doctype=doctype)
 
+    # A read share overrides a failed controller detail check, and DBQuery may OR a
+    # share with owner/User Permission scope. Remove every legacy share for the new
+    # sensitive records so loss of parent access also revokes old child IDs.
+    blocked_placeholders = ", ".join(["%s"] * len(NATIVE_SHARE_BLOCKED_DOCTYPES))
+    frappe.db.sql(
+        f"DELETE FROM `tabDocShare` WHERE `share_doctype` IN ({blocked_placeholders})",
+        NATIVE_SHARE_BLOCKED_DOCTYPES,
+    )
+    # Address is a shared ERPNext DocType. Delete shares only for sites linked to
+    # CRM Customers; ordinary ERP Address shares keep their existing semantics.
+    frappe.db.sql(
+        "DELETE FROM `tabDocShare` WHERE `share_doctype` = 'Address' "
+        "AND `share_name` IN ("
+        "SELECT `crm_address_link`.`parent` FROM `tabDynamic Link` AS `crm_address_link` "
+        "INNER JOIN `tabCustomer` AS `crm_address_customer` "
+        "ON `crm_address_customer`.`name` = `crm_address_link`.`link_name` "
+        "WHERE `crm_address_link`.`parenttype` = 'Address' "
+        "AND `crm_address_link`.`parentfield` = 'links' "
+        "AND `crm_address_link`.`link_doctype` = 'Customer' "
+        "AND `crm_address_customer`.`customer_group` = 'CRM Customers')",
+    )
+
+    # The same holds for an Address whose Customer link points at a Customer that is gone.
+    frappe.db.sql(
+        "DELETE FROM `tabDocShare` WHERE `share_doctype` = 'Address' "
+        "AND `share_name` IN ("
+        "SELECT `crm_orphan_link`.`parent` FROM `tabDynamic Link` AS `crm_orphan_link` "
+        "LEFT JOIN `tabCustomer` AS `crm_orphan_customer` "
+        "ON `crm_orphan_customer`.`name` = `crm_orphan_link`.`link_name` "
+        "WHERE `crm_orphan_link`.`parenttype` = 'Address' "
+        "AND `crm_orphan_link`.`parentfield` = 'links' "
+        "AND `crm_orphan_link`.`link_doctype` = 'Customer' "
+        "AND `crm_orphan_customer`.`name` IS NULL)",
+    )
+
+    # Historical write/submit shares on the wider custom CRM surface could bypass
+    # service workflows and Manager-only configuration rules. Production had no CRM
+    # shares when this guard was added; keep this cleanup away from Customer/Contact/Lead.
+    placeholders = ", ".join(["%s"] * len(CRM_SHARE_GUARDED_DOCTYPES))
+    frappe.db.sql(
+        f"UPDATE `tabDocShare` SET `write` = 0, `submit` = 0 "
+        f"WHERE `share_doctype` IN ({placeholders}) AND (`write` = 1 OR `submit` = 1)",
+        CRM_SHARE_GUARDED_DOCTYPES,
+    )
+
     # Every CRM user also holds the "All" role, so leaving its write access in place would put
     # the standard document API back in business for Customers, Contacts and Leads. Frappe ships
     # that access as an owner-only row, which still covers every record the user created.
@@ -214,6 +346,240 @@ def install_crm_doc_permissions() -> None:
                     doctype, UNIVERSAL_ROLE, 0, permission_type, 0, validate=False, if_owner=if_owner,
                 )
         frappe.clear_cache(doctype=doctype)
+
+
+def _crm_address_exists_condition(address_expression: str) -> str:
+    return (
+        "EXISTS (SELECT 1 FROM `tabDynamic Link` AS `crm_boundary_link` "
+        "INNER JOIN `tabCustomer` AS `crm_boundary_customer` "
+        "ON `crm_boundary_customer`.`name` = `crm_boundary_link`.`link_name` "
+        f"WHERE `crm_boundary_link`.`parent` = {address_expression} "
+        "AND `crm_boundary_link`.`parenttype` = 'Address' "
+        "AND `crm_boundary_link`.`parentfield` = 'links' "
+        "AND `crm_boundary_link`.`link_doctype` = 'Customer' "
+        "AND `crm_boundary_customer`.`customer_group` = 'CRM Customers')"
+    )
+
+
+def _orphan_customer_link_exists_condition(address_expression: str) -> str:
+    """A Customer link whose Customer no longer exists.
+
+    Frappe removes a Customer's links when it deletes the record; a failed migration or
+    direct SQL is what leaves one behind. Such an Address cannot be shown to be ordinary
+    ERP data, so it is handled as protected instead of falling through to the ERP path.
+    """
+
+    return (
+        "EXISTS (SELECT 1 FROM `tabDynamic Link` AS `crm_orphan_link` "
+        "LEFT JOIN `tabCustomer` AS `crm_orphan_customer` "
+        "ON `crm_orphan_customer`.`name` = `crm_orphan_link`.`link_name` "
+        f"WHERE `crm_orphan_link`.`parent` = {address_expression} "
+        "AND `crm_orphan_link`.`parenttype` = 'Address' "
+        "AND `crm_orphan_link`.`parentfield` = 'links' "
+        "AND `crm_orphan_link`.`link_doctype` = 'Customer' "
+        "AND `crm_orphan_customer`.`name` IS NULL)"
+    )
+
+
+def _protected_address_exists_condition(address_expression: str) -> str:
+    """CRM sites and Addresses that cannot be told apart from one stay off the ERP path."""
+
+    return (
+        f"({_crm_address_exists_condition(address_expression)} "
+        f"OR {_orphan_customer_link_exists_condition(address_expression)})"
+    )
+
+
+def _address_crm_identity(user: str | None) -> tuple[str | None, bool]:
+    """Return the single CRM role and whether the identity is ambiguous."""
+
+    if not user or user == "Guest":
+        return None, False
+    if user == "Administrator":
+        return "Manager", False
+    assigned = set(frappe.get_roles(user)).intersection(CRM_ROLE_TO_PROFILE)
+    if not assigned:
+        return None, False
+    if len(assigned) != 1:
+        return None, True
+    return CRM_ROLE_TO_PROFILE[next(iter(assigned))], False
+
+
+def _has_explicit_erp_address_role(user: str | None) -> bool:
+    """Detect an Address DocPerm role other than automatic and CRM roles.
+
+    The native permission engine remains responsible for the requested permission,
+    owner-only rows and User Permissions. This only decides whether a mixed CRM/ERP
+    identity may hand a non-CRM Address back to that engine.
+    """
+
+    if not user or user in {"Guest", "Administrator"}:
+        return False
+    candidate_roles = (
+        set(frappe.get_roles(user))
+        .difference(AUTOMATIC_ROLES)
+        .difference(CRM_ROLE_TO_PROFILE)
+    )
+    return any(
+        permission.role in candidate_roles
+        and any(permission.get(permission_type) for permission_type in ADDRESS_NATIVE_PERMISSION_TYPES)
+        for permission in get_valid_perms("Address", user)
+    )
+
+
+def _document_has_crm_customer_link(doc) -> bool:
+    for link in doc.get("links") or ():
+        if link.get("link_doctype") != "Customer" or not link.get("link_name"):
+            continue
+        if frappe.db.get_value("Customer", link.get("link_name"), "customer_group") == "CRM Customers":
+            return True
+    return False
+
+
+def _address_customer_names(address_name: str | None, doc=None) -> tuple[str, ...]:
+    customer_names = {
+        link.get("link_name")
+        for link in ((doc.get("links") or ()) if doc is not None else ())
+        if link.get("link_doctype") == "Customer" and link.get("link_name")
+    }
+    if address_name:
+        customer_names.update(frappe.db.sql_list(
+            "SELECT `link_name` FROM `tabDynamic Link` "
+            "WHERE `parent` = %s AND `parenttype` = 'Address' "
+            "AND `parentfield` = 'links' AND `link_doctype` = 'Customer'",
+            (address_name,),
+        ))
+    return tuple(sorted(customer_names))
+
+
+def _lock_customer_groups(customer_names: tuple[str, ...]) -> dict[str, str | None]:
+    if not customer_names:
+        return {}
+    placeholders = ", ".join(["%s"] * len(customer_names))
+    rows = frappe.db.sql(
+        f"SELECT `name`, `customer_group` FROM `tabCustomer` "
+        f"WHERE `name` IN ({placeholders}) ORDER BY `name` FOR UPDATE",
+        customer_names,
+        as_dict=True,
+    )
+    return {row.name: row.customer_group for row in rows}
+
+
+def _is_crm_customer_address(address_name: str | None, doc=None) -> bool:
+    # During a re-parenting save the old database links and the proposed in-memory
+    # links both matter: neither direction may turn a CRM mutation into an ERP one.
+    if doc is not None and _document_has_crm_customer_link(doc):
+        return True
+    if not address_name:
+        return False
+    return bool(frappe.db.sql(
+        "SELECT 1 FROM `tabDynamic Link` AS `crm_address_link` "
+        "INNER JOIN `tabCustomer` AS `crm_address_customer` "
+        "ON `crm_address_customer`.`name` = `crm_address_link`.`link_name` "
+        "WHERE `crm_address_link`.`parent` = %s "
+        "AND `crm_address_link`.`parenttype` = 'Address' "
+        "AND `crm_address_link`.`parentfield` = 'links' "
+        "AND `crm_address_link`.`link_doctype` = 'Customer' "
+        "AND `crm_address_customer`.`customer_group` = 'CRM Customers' LIMIT 1",
+        (address_name,),
+    ))
+
+
+def _has_orphan_customer_link(address_name: str | None) -> bool:
+    if not address_name:
+        return False
+    return bool(frappe.db.sql(
+        "SELECT 1 FROM `tabDynamic Link` AS `crm_orphan_link` "
+        "LEFT JOIN `tabCustomer` AS `crm_orphan_customer` "
+        "ON `crm_orphan_customer`.`name` = `crm_orphan_link`.`link_name` "
+        "WHERE `crm_orphan_link`.`parent` = %s "
+        "AND `crm_orphan_link`.`parenttype` = 'Address' "
+        "AND `crm_orphan_link`.`parentfield` = 'links' "
+        "AND `crm_orphan_link`.`link_doctype` = 'Customer' "
+        "AND `crm_orphan_customer`.`name` IS NULL LIMIT 1",
+        (address_name,),
+    ))
+
+
+def _lock_address(address_name: str | None):
+    if address_name:
+        rows = frappe.db.sql(
+            "SELECT `modified` FROM `tabAddress` WHERE `name` = %s FOR UPDATE",
+            (address_name,),
+        )
+        return rows[0][0] if rows else None
+    return None
+
+
+def _delete_address_shares(address_names: list[str] | tuple[str, ...]) -> None:
+    if address_names:
+        placeholders = ", ".join(["%s"] * len(address_names))
+        frappe.db.sql(
+            f"DELETE FROM `tabDocShare` WHERE `share_doctype` = 'Address' "
+            f"AND `share_name` IN ({placeholders})",
+            tuple(address_names),
+        )
+
+
+def revoke_address_shares_entering_crm(doc, method: str | None = None) -> None:
+    """Atomically remove ERP shares when an Address gains a CRM Customer link."""
+
+    del method
+    customer_groups = _lock_customer_groups(
+        _address_customer_names(getattr(doc, "name", None), doc=doc),
+    )
+    if not doc.is_new():
+        _lock_address(doc.name)
+    if "CRM Customers" in customer_groups.values():
+        _delete_address_shares((doc.name,))
+
+
+def revoke_customer_address_shares_entering_crm(doc, method: str | None = None) -> None:
+    """Remove shares from linked Addresses before a Customer enters CRM scope."""
+
+    del method
+    if doc.get("customer_group") != "CRM Customers" or doc.is_new():
+        return
+    frappe.db.sql("SELECT `name` FROM `tabCustomer` WHERE `name` = %s FOR UPDATE", (doc.name,))
+    address_names = sorted(set(frappe.db.sql_list(
+        "SELECT `parent` FROM `tabDynamic Link` "
+        "WHERE `parenttype` = 'Address' AND `parentfield` = 'links' "
+        "AND `link_doctype` = 'Customer' AND `link_name` = %s "
+        "ORDER BY `parent` FOR UPDATE",
+        (doc.name,),
+    )))
+    for address_name in address_names:
+        _lock_address(address_name)
+    _delete_address_shares(tuple(address_names))
+
+
+def prevent_scoped_docshare(doc, method: str | None = None) -> None:
+    """Keep explicit shares from overriding CRM parent and site scope."""
+
+    del method
+    blocked = doc.share_doctype in NATIVE_SHARE_BLOCKED_DOCTYPES
+    if doc.share_doctype == "Address":
+        # Use the Address already loaded by DocShare's controller as the optimistic
+        # boundary. Customer locks are current reads and always precede the Address
+        # lock, matching both transition hooks. A concurrent re-parent changes
+        # Address.modified; fail closed instead of classifying from an RR snapshot.
+        address_doc = doc.get_doc()
+        loaded_modified = address_doc.modified
+        customer_names = _address_customer_names(doc.share_name, doc=address_doc)
+        customer_groups = _lock_customer_groups(customer_names)
+        locked_modified = _lock_address(doc.share_name)
+        if frappe.utils.get_datetime(locked_modified) != frappe.utils.get_datetime(loaded_modified):
+            frappe.throw(
+                "Address changed while its sharing boundary was checked. Please retry.",
+                frappe.PermissionError,
+            )
+        # A link to a Customer that is gone cannot show the Address is ordinary ERP data.
+        blocked = "CRM Customers" in customer_groups.values() or len(customer_groups) < len(customer_names)
+    if blocked:
+        frappe.throw(
+            f"{doc.share_doctype} records in CRM scope cannot be shared directly.",
+            frappe.PermissionError,
+        )
 
 
 def _role_for_query(user: str | None) -> str | None:
@@ -332,8 +698,24 @@ def _sales_child_condition(
     return f"({owner_condition}) AND ({parent_scope})"
 
 
+def _parent_scope_condition(
+    child_doctype: str,
+    parent_doctype: str,
+    parent_field: str,
+    user: str,
+) -> str:
+    """Correlate a native child-record query with the parent's current row scope."""
+
+    parent_scope = conditions_for_doctype(parent_doctype, user)
+    return (
+        f"EXISTS (SELECT 1 FROM `tab{parent_doctype}` "
+        f"WHERE `tab{parent_doctype}`.`name` = `tab{child_doctype}`.`{parent_field}` "
+        f"AND ({parent_scope}))"
+    )
+
+
 def conditions_for_doctype(doctype: str, user: str | None = None) -> str:
-    if doctype not in SCOPED_DOCTYPES:
+    if doctype not in CONDITION_DOCTYPES:
         raise ValueError(f"Unsupported scoped DocType: {doctype}")
 
     resolved_user = user or getattr(frappe.session, "user", None)
@@ -342,25 +724,31 @@ def conditions_for_doctype(doctype: str, user: str | None = None) -> str:
         return "1=0"
     if doctype == "CRM Notification Event":
         return f"`tabCRM Notification Event`.`recipient_user` = {frappe.db.escape(resolved_user)}"
+    if doctype == "CRM Opportunity Stakeholder" and role == "Engineer":
+        return "1=0"
     if doctype in OPPORTUNITY_SCOPED_CHILD_DOCTYPES:
-        # Action, history and validation rows are visible exactly when their Opportunity is. The
-        # parent condition references `tabCRM Opportunity` unaliased, so nesting it inside
-        # a correlated EXISTS on the same table keeps it bound to the parent row.
-        opportunity_scope = conditions_for_doctype("CRM Opportunity", resolved_user)
+        return _parent_scope_condition(doctype, "CRM Opportunity", "opportunity", resolved_user)
+    if doctype in DEMO_REQUEST_SCOPED_CHILD_DOCTYPES:
+        return _parent_scope_condition(doctype, "CRM Demo Request", "demo_request", resolved_user)
+    if doctype in EVALUATION_SCOPED_CHILD_DOCTYPES:
+        return _parent_scope_condition(doctype, "CRM Evaluation", "evaluation", resolved_user)
+    if doctype in INSTALLED_TOOL_SCOPED_CHILD_DOCTYPES:
+        return _parent_scope_condition(doctype, "CRM Installed Tool", "installed_tool", resolved_user)
+    if doctype == "Address":
+        escaped_user = frappe.db.escape(resolved_user)
+        customer_scope = _customer_condition("`crm_customer`", role, escaped_user)
+        if role == "Sales":
+            # Public Accounts may be returned through redacted CRM DTOs, while the
+            # native Address document exposes the complete site address.
+            customer_scope = f"`crm_customer`.`custom_crm_owner` = {escaped_user}"
         return (
-            "EXISTS (SELECT 1 FROM `tabCRM Opportunity` "
-            f"WHERE `tabCRM Opportunity`.`name` = `tab{doctype}`.`opportunity` "
-            f"AND ({opportunity_scope}))"
-        )
-    if doctype == "CRM Evaluation Customer Review":
-        # A review row is visible exactly when its parent Evaluation is. The parent
-        # condition references `tabCRM Evaluation` unaliased, so nesting it inside a
-        # correlated EXISTS on the same table keeps it bound to the parent row.
-        evaluation_scope = conditions_for_doctype("CRM Evaluation", resolved_user)
-        return (
-            "EXISTS (SELECT 1 FROM `tabCRM Evaluation` "
-            "WHERE `tabCRM Evaluation`.`name` = `tabCRM Evaluation Customer Review`.`evaluation` "
-            f"AND ({evaluation_scope}))"
+            "EXISTS (SELECT 1 FROM `tabDynamic Link` AS `crm_link` "
+            "INNER JOIN `tabCustomer` AS `crm_customer` ON `crm_customer`.`name` = `crm_link`.`link_name` "
+            "WHERE `crm_link`.`parent` = `tabAddress`.`name` "
+            "AND `crm_link`.`parenttype` = 'Address' AND `crm_link`.`parentfield` = 'links' "
+            "AND `crm_link`.`link_doctype` = 'Customer' "
+            "AND `crm_customer`.`customer_group` = 'CRM Customers' "
+            f"AND ({customer_scope}))"
         )
     if doctype == "CRM Visit Meeting Record":
         # The minutes are read exactly where their visit is. The visit condition
@@ -454,6 +842,15 @@ def conditions_for_doctype(doctype: str, user: str | None = None) -> str:
         return "1=1"
 
     escaped_user = frappe.db.escape(resolved_user)
+    if doctype == "CRM Account Engineer Assignment":
+        if role != "Engineer":
+            return "1=0"
+        return (
+            f"`tabCRM Account Engineer Assignment`.`engineer` = {escaped_user} "
+            "AND `tabCRM Account Engineer Assignment`.`enabled` = 1"
+        )
+    if doctype == "CRM Document Access Request":
+        return f"`tabCRM Document Access Request`.`requester` = {escaped_user}"
     if doctype == "Customer":
         return _customer_condition("`tabCustomer`", role, escaped_user)
     if doctype == "Contact":
@@ -579,6 +976,27 @@ def customer_query(user: str | None = None) -> str:
     return conditions_for_doctype("Customer", user)
 
 
+def address_query(user: str | None = None) -> str:
+    resolved_user = user or getattr(frappe.session, "user", None)
+    if resolved_user == "Administrator":
+        # Frappe's superuser shortcut covers single documents only; lists, counts, exports and
+        # link search still run this hook, and Administrator keeps every Address, CRM site or not.
+        return ""
+    role, ambiguous = _address_crm_identity(resolved_user)
+    has_erp_role = _has_explicit_erp_address_role(resolved_user)
+    if not role and not ambiguous:
+        return ""
+    if ambiguous:
+        if has_erp_role:
+            return f"NOT ({_protected_address_exists_condition('`tabAddress`.`name`')})"
+        return "1=0"
+    crm_scope = conditions_for_doctype("Address", resolved_user)
+    if has_erp_role:
+        boundary = _protected_address_exists_condition("`tabAddress`.`name`")
+        return f"(NOT ({boundary}) OR ({crm_scope}))"
+    return crm_scope
+
+
 def contact_query(user: str | None = None) -> str:
     return _raw_site_data_query("Contact", user)
 
@@ -643,8 +1061,44 @@ def opportunity_history_query(user: str | None = None) -> str:
     return conditions_for_doctype("CRM Opportunity History", user)
 
 
+def opportunity_stakeholder_query(user: str | None = None) -> str:
+    return conditions_for_doctype("CRM Opportunity Stakeholder", user)
+
+
+def account_engineer_assignment_query(user: str | None = None) -> str:
+    return conditions_for_doctype("CRM Account Engineer Assignment", user)
+
+
+def installed_tool_lifecycle_history_query(user: str | None = None) -> str:
+    return conditions_for_doctype("CRM Installed Tool Lifecycle History", user)
+
+
+def installed_tool_service_history_query(user: str | None = None) -> str:
+    return conditions_for_doctype("CRM Installed Tool Service History", user)
+
+
+def installed_tool_version_history_query(user: str | None = None) -> str:
+    return conditions_for_doctype("CRM Installed Tool Version History", user)
+
+
+def demo_comment_query(user: str | None = None) -> str:
+    return conditions_for_doctype("CRM Demo Comment", user)
+
+
+def demo_request_history_query(user: str | None = None) -> str:
+    return conditions_for_doctype("CRM Demo Request History", user)
+
+
 def evaluation_customer_review_query(user: str | None = None) -> str:
     return conditions_for_doctype("CRM Evaluation Customer Review", user)
+
+
+def evaluation_history_query(user: str | None = None) -> str:
+    return conditions_for_doctype("CRM Evaluation History", user)
+
+
+def test_run_query(user: str | None = None) -> str:
+    return conditions_for_doctype("CRM Test Run", user)
 
 
 def contact_file_query(user: str | None = None) -> str:
@@ -682,6 +1136,10 @@ def notification_query(user: str | None = None) -> str:
     return conditions_for_doctype("CRM Notification Event", user)
 
 
+def document_access_request_query(user: str | None = None) -> str:
+    return conditions_for_doctype("CRM Document Access Request", user)
+
+
 def visit_query(user: str | None = None) -> str:
     return conditions_for_doctype("CRM Visit", user)
 
@@ -710,8 +1168,18 @@ def rfq_version_query(user: str | None = None) -> str:
     return conditions_for_doctype("CRM RFQ Version", user)
 
 
-def has_crm_permission(doc, user: str | None = None, permission_type: str | None = None) -> bool:
+def has_crm_permission(
+    doc,
+    user: str | None = None,
+    permission_type: str | None = None,
+    ptype: str | None = None,
+    debug: bool = False,
+) -> bool:
+    # Frappe v15 calls controller hooks with ``ptype`` and ``debug``. Keep
+    # ``permission_type`` for the direct service/test callers already using it.
+    del debug
     resolved_user = user or getattr(frappe.session, "user", None)
+    normalized_permission = permission_type or ptype
     if not resolved_user or resolved_user == "Guest":
         return False
     role = _role_for_query(resolved_user)
@@ -720,7 +1188,7 @@ def has_crm_permission(doc, user: str | None = None, permission_type: str | None
     view_capability = DOCTYPES_TO_VIEW_CAPABILITY.get(doc.doctype)
     if view_capability and view_capability not in capabilities_for_role(role):
         return False
-    if permission_type and permission_type not in _permissions_for_doctype(doc.doctype, role):
+    if normalized_permission and normalized_permission not in _permissions_for_doctype(doc.doctype, role):
         return False
     if getattr(doc, "is_new", lambda: False)():
         return role == "Manager"
@@ -758,23 +1226,56 @@ def has_site_bearing_permission(
         return False
     if _role_for_query(resolved_user) != "Sales":
         return True
-    if doc.doctype == "Contact":
+    if doc.doctype in {"Address", "Contact"}:
         rows = frappe.db.sql(
             "SELECT 1 FROM `tabDynamic Link` AS `crm_owned_link` "
             "INNER JOIN `tabCustomer` AS `crm_owned_customer` "
             "ON `crm_owned_customer`.`name` = `crm_owned_link`.`link_name` "
             "WHERE `crm_owned_link`.`parent` = %s "
-            "AND `crm_owned_link`.`parenttype` = 'Contact' "
+            "AND `crm_owned_link`.`parenttype` = %s "
             "AND `crm_owned_link`.`parentfield` = 'links' "
             "AND `crm_owned_link`.`link_doctype` = 'Customer' "
+            "AND `crm_owned_customer`.`customer_group` = 'CRM Customers' "
             "AND `crm_owned_customer`.`custom_crm_owner` = %s LIMIT 1",
-            (doc.name, resolved_user),
+            (doc.name, doc.doctype, resolved_user),
         )
         return bool(rows)
     account_id = frappe.db.get_value(doc.doctype, doc.name, "account")
     return bool(
         account_id
         and frappe.db.get_value("Customer", account_id, "custom_crm_owner") == resolved_user
+    )
+
+
+def has_address_permission(
+    doc,
+    user: str | None = None,
+    permission_type: str | None = None,
+    ptype: str | None = None,
+    debug: bool = False,
+) -> bool | None:
+    """Apply CRM site rules without changing Address access for non-CRM ERP users."""
+
+    resolved_user = user or getattr(frappe.session, "user", None)
+    role, ambiguous = _address_crm_identity(resolved_user)
+    has_erp_role = _has_explicit_erp_address_role(resolved_user)
+    is_crm_address = _is_crm_customer_address(getattr(doc, "name", None), doc=doc)
+    if not role and not ambiguous:
+        return None
+    # An Address linked to a Customer that is gone cannot be shown to be ordinary ERP data.
+    protected = is_crm_address or _has_orphan_customer_link(getattr(doc, "name", None))
+    if ambiguous:
+        return None if has_erp_role and not protected else False
+    if not protected:
+        return None if has_erp_role else False
+    if not is_crm_address:
+        return False
+    return has_site_bearing_permission(
+        doc,
+        user=resolved_user,
+        permission_type=permission_type,
+        ptype=ptype,
+        debug=debug,
     )
 
 

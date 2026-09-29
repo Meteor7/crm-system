@@ -19,6 +19,7 @@ after_request = [
 
 permission_query_conditions = {
     "Customer": "rayher_crm.permissions.scope.customer_query",
+    "Address": "rayher_crm.permissions.scope.address_query",
     "Contact": "rayher_crm.permissions.scope.contact_query",
     "Lead": "rayher_crm.permissions.scope.lead_query",
     "CRM Opportunity": "rayher_crm.permissions.scope.opportunity_query",
@@ -31,15 +32,25 @@ permission_query_conditions = {
     "CRM Opportunity Internal Validation": "rayher_crm.permissions.scope.opportunity_internal_validation_query",
     "CRM Opportunity Action": "rayher_crm.permissions.scope.opportunity_action_query",
     "CRM Opportunity History": "rayher_crm.permissions.scope.opportunity_history_query",
+    "CRM Opportunity Stakeholder": "rayher_crm.permissions.scope.opportunity_stakeholder_query",
     "CRM Booking": "rayher_crm.permissions.scope.booking_query",
     "CRM Installed Tool": "rayher_crm.permissions.scope.installed_tool_query",
+    "CRM Installed Tool Lifecycle History": "rayher_crm.permissions.scope.installed_tool_lifecycle_history_query",
+    "CRM Installed Tool Service History": "rayher_crm.permissions.scope.installed_tool_service_history_query",
+    "CRM Installed Tool Version History": "rayher_crm.permissions.scope.installed_tool_version_history_query",
+    "CRM Account Engineer Assignment": "rayher_crm.permissions.scope.account_engineer_assignment_query",
     "CRM Demo Request": "rayher_crm.permissions.scope.demo_request_query",
+    "CRM Demo Comment": "rayher_crm.permissions.scope.demo_comment_query",
+    "CRM Demo Request History": "rayher_crm.permissions.scope.demo_request_history_query",
     "CRM Evaluation": "rayher_crm.permissions.scope.evaluation_query",
     "CRM Evaluation Customer Review": "rayher_crm.permissions.scope.evaluation_customer_review_query",
+    "CRM Evaluation History": "rayher_crm.permissions.scope.evaluation_history_query",
+    "CRM Test Run": "rayher_crm.permissions.scope.test_run_query",
     "CRM Contact File": "rayher_crm.permissions.scope.contact_file_query",
     "CRM Status Attachment": "rayher_crm.permissions.scope.status_attachment_query",
     "CRM Demo Artifact": "rayher_crm.permissions.scope.demo_artifact_query",
     "CRM Notification Event": "rayher_crm.permissions.scope.notification_query",
+    "CRM Document Access Request": "rayher_crm.permissions.scope.document_access_request_query",
     "CRM Visit": "rayher_crm.permissions.scope.visit_query",
     "CRM Visit Meeting Record": "rayher_crm.permissions.scope.visit_meeting_record_query",
     "CRM Quotation": "rayher_crm.permissions.scope.quotation_query",
@@ -51,6 +62,7 @@ permission_query_conditions = {
 
 has_permission = {
     "Customer": "rayher_crm.permissions.scope.has_crm_permission",
+    "Address": "rayher_crm.permissions.scope.has_address_permission",
     "Contact": "rayher_crm.permissions.scope.has_site_bearing_permission",
     "Lead": "rayher_crm.permissions.scope.has_crm_permission",
     "CRM Opportunity": "rayher_crm.permissions.scope.has_site_bearing_permission",
@@ -63,15 +75,25 @@ has_permission = {
     "CRM Opportunity Internal Validation": "rayher_crm.permissions.scope.has_crm_permission",
     "CRM Opportunity Action": "rayher_crm.permissions.scope.has_crm_permission",
     "CRM Opportunity History": "rayher_crm.permissions.scope.has_crm_permission",
+    "CRM Opportunity Stakeholder": "rayher_crm.permissions.scope.has_crm_permission",
     "CRM Booking": "rayher_crm.permissions.scope.has_crm_permission",
     "CRM Installed Tool": "rayher_crm.permissions.scope.has_site_bearing_permission",
+    "CRM Installed Tool Lifecycle History": "rayher_crm.permissions.scope.has_crm_permission",
+    "CRM Installed Tool Service History": "rayher_crm.permissions.scope.has_crm_permission",
+    "CRM Installed Tool Version History": "rayher_crm.permissions.scope.has_crm_permission",
+    "CRM Account Engineer Assignment": "rayher_crm.permissions.scope.has_crm_permission",
     "CRM Demo Request": "rayher_crm.permissions.scope.has_crm_permission",
+    "CRM Demo Comment": "rayher_crm.permissions.scope.has_crm_permission",
+    "CRM Demo Request History": "rayher_crm.permissions.scope.has_crm_permission",
     "CRM Evaluation": "rayher_crm.permissions.scope.has_crm_permission",
     "CRM Evaluation Customer Review": "rayher_crm.permissions.scope.has_crm_permission",
+    "CRM Evaluation History": "rayher_crm.permissions.scope.has_crm_permission",
+    "CRM Test Run": "rayher_crm.permissions.scope.has_crm_permission",
     "CRM Contact File": "rayher_crm.permissions.scope.has_crm_permission",
     "CRM Status Attachment": "rayher_crm.permissions.scope.has_status_attachment_permission",
     "CRM Demo Artifact": "rayher_crm.permissions.scope.has_crm_permission",
     "CRM Notification Event": "rayher_crm.permissions.scope.has_crm_permission",
+    "CRM Document Access Request": "rayher_crm.permissions.scope.has_crm_permission",
     "CRM Visit": "rayher_crm.permissions.scope.has_crm_permission",
     "CRM Visit Meeting Record": "rayher_crm.permissions.scope.has_crm_permission",
     "CRM Quotation": "rayher_crm.permissions.scope.has_crm_permission",
@@ -83,9 +105,26 @@ has_permission = {
 
 
 
+# Desk link search turns ignore_user_permissions=1 into get_list(ignore_permissions=True), which
+# skips every permission_query_conditions hook above. These wrappers drop the flag for the
+# DocTypes that have one.
+override_whitelisted_methods = {
+    "frappe.desk.search.search_link": "rayher_crm.permissions.search.search_link",
+    "frappe.desk.search.search_widget": "rayher_crm.permissions.search.search_widget",
+}
+
 delete_file_data_content = "rayher_crm.services.private_file_lifecycle.delete_file_content"
 
 doc_events = {
+    "DocShare": {
+        "validate": "rayher_crm.permissions.scope.prevent_scoped_docshare",
+    },
+    "Address": {
+        "before_save": "rayher_crm.permissions.scope.revoke_address_shares_entering_crm",
+    },
+    "Customer": {
+        "before_save": "rayher_crm.permissions.scope.revoke_customer_address_shares_entering_crm",
+    },
     "File": {
         "before_insert": "rayher_crm.services.private_file_lifecycle.protect_private_upload",
     },
