@@ -205,6 +205,9 @@ services:
       - |
         set -euo pipefail
         bench --site "$${SITE_NAME}" set-config max_file_size 104857600 --parse
+        # A new Frappe site starts with the scheduler off; the daily CRM jobs (DDL reminders,
+        # quotation expiry) need it on. Runs on every start, so older sites are fixed too.
+        bench --site "$${SITE_NAME}" enable-scheduler
         if bench --site "$${SITE_NAME}" list-apps | awk '{print $$1}' | grep -qx rayher_crm; then
           echo "rayher_crm is already installed; keeping the existing site installation."
         else

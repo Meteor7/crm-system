@@ -73,12 +73,13 @@ class TestDemoReportApi(FrappeTestCase):
             "process": "Frontend", "status": "量产",
         })
         opportunity = create_strategy_opportunity({
+            "probabilityLevel": "pipeline",
             "accountId": account.name, "siteId": site["id"],
             "title": f"Report Opportunity {unique}", "owner": self.sales,
             "stage": QUALIFIED_OPPORTUNITY, "forecast": "Pipeline", "amount": 100000,
             "intentScore": 70, "poDate": "2026-12-31", "toolType": "Inspection",
             "saleType": "New Equipment", "subRegion": "East China", "currency": "CNY",
-            "originalAmount": 100000, "qualificationConfirmed": True,
+            "originalAmount": 100000, "amountCny": 100000, "qualificationConfirmed": True,
         })
         frappe.set_user("Administrator")
         request = frappe.get_doc({

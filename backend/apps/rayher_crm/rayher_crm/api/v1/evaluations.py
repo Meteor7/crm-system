@@ -50,6 +50,18 @@ def add_evaluation_run(id: str, input: Any) -> dict:
 
 @frappe.whitelist(methods=["POST", "PUT"])
 @api_endpoint
+def update_evaluation_run(id: str, runId: str, input: Any) -> dict:
+    return success_response(evaluations.update_evaluation_run(id, runId, as_payload(input)))
+
+
+@frappe.whitelist(methods=["POST"])
+@api_endpoint
+def cancel_evaluation_run(id: str, runId: str, input: Any) -> dict:
+    return success_response(evaluations.cancel_evaluation_run(id, runId, as_payload(input)))
+
+
+@frappe.whitelist(methods=["POST", "PUT"])
+@api_endpoint
 def set_evaluation_test_run_deadline(id: str, input: Any) -> dict:
     return success_response(evaluations.set_evaluation_test_run_deadline(id, as_payload(input)))
 

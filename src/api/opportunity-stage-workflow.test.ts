@@ -17,8 +17,9 @@ describe('mock Opportunity stage workflow', () => {
   it('creates an Opportunity only after the qualification is confirmed, always at Qualified opportunity', async () => {
     const manager = createMockApi({ latency: 0, role: 'Manager', today: '2026-07-20' })
     const input = {
-      accountId: 'ACC-001', siteId: 'SITE-001', title: 'Qualified only', owner: 'person002@crm.example.invalid', amount: '1000000.00',
+      accountId: 'ACC-001', siteId: 'SITE-001', title: 'Qualified only', owner: 'person002@crm.example.invalid', amount: '1000000.00', amountCny: '1000000.00',
       intentScore: 50, poDate: '2026-12-31', toolType: 'AOI', saleType: 'New Equipment', subRegion: 'East China', currency: 'CNY',
+      probabilityLevel: 'pipeline' as const,
     }
 
     await expect(manager.createStrategyOpportunity(input))
@@ -26,10 +27,13 @@ describe('mock Opportunity stage workflow', () => {
     await expect(manager.createStrategyOpportunity({ ...input, qualificationConfirmed: true, stage: 'demo_done' } as never))
       .rejects.toMatchObject({ code: 'INVALID_TRANSITION', message: 'New Opportunity must start at qualified_opportunity.' })
 
+    await expect(manager.createStrategyOpportunity({ ...input, qualificationConfirmed: true, probabilityLevel: '' }))
+      .rejects.toMatchObject({ code: 'VALIDATION_ERROR', fieldErrors: { probabilityLevel: 'Required' } })
+
     const created = (await manager.createStrategyOpportunity({ ...input, qualificationConfirmed: true })).data
     expect(created).toMatchObject({
       stage: 'qualified_opportunity', stageChangedAt: '2026-07-20T02:30:00.000Z', budgetApprovedOn: '', lostAtStage: '',
-      internalValidation: null, liveBooking: null,
+      internalValidation: null, liveBooking: null, probabilityLevel: 'pipeline',
     })
     expect(created.stageHistory).toEqual([expect.objectContaining({
       from: '', to: 'qualified_opportunity', source: 'creation', event: 'created', actor: 'person029@crm.example.invalid',
@@ -131,18 +135,18 @@ describe('mock Opportunity stage workflow', () => {
       internalValidation: { id: 'CRM-VAL-00001', status: 'approved', bookingId: 'BKG-003' },
     })
 
-    const confirmed = (await sales.confirmPo('OPP-008', { booking: { ...seeded.internalValidation!.booking, quantity: 3 } }, seeded.modified)).data
+    const confirmed = (await sales.confirmPo('OPP-008', { booking: { ...seeded.internalValidation!.booking, quantity: 3 }, actualPoDate: '2026-07-15' }, seeded.modified)).data
     expect(confirmed).toMatchObject({ stage: 'po_received', liveBooking: { id: 'BKG-003', status: 'Confirmed', quantity: 3 } })
     expect(confirmed.stageHistory[0]).toMatchObject({
       from: 'internal_validation', to: 'po_received', source: 'manual', event: 'po_confirmed', referenceDoctype: 'CRM Booking', referenceName: 'BKG-003',
     })
     expect(confirmed.history[0]).toMatchObject({ field: 'poConfirmed', from: '', to: 'BKG-003' })
-    await expect(sales.confirmPo('OPP-008', { booking: seeded.internalValidation!.booking }))
+    await expect(sales.confirmPo('OPP-008', { booking: seeded.internalValidation!.booking, actualPoDate: '2026-07-15' }))
       .rejects.toMatchObject({ code: 'CONFLICT', message: 'The Opportunity already has a live Booking.' })
 
     const booking = await activeDraft(sales, 'ACC-002')
     await sales.requestInternalValidation('OPP-003', { reason: 'Capacity', expectedPoDate: '2026-09-30', booking })
-    const direct = (await sales.confirmPo('OPP-003', { booking })).data
+    const direct = (await sales.confirmPo('OPP-003', { booking, actualPoDate: '2026-07-15' })).data
     expect(direct).toMatchObject({ stage: 'po_received', liveBooking: { status: 'Confirmed' } })
     expect(direct.liveBooking!.id).not.toBe('BKG-003')
     expect(direct.internalValidation).toMatchObject({
@@ -160,11 +164,11 @@ describe('mock Opportunity stage workflow', () => {
       amount: '18800000.00', currency: 'CNY', owner: 'person005@crm.example.invalid', note: '',
     }
 
-    await expect(manager.confirmPo('OPP-006', { booking: draft }))
+    await expect(manager.confirmPo('OPP-006', { booking: draft, actualPoDate: '2026-07-15' }))
       .rejects.toMatchObject({ code: 'CONFLICT', message: 'The Opportunity already has a live Booking.' })
     await manager.updateBooking('BKG-001', { ...current, status: 'Cancelled' } as never)
 
-    const replaced = (await manager.confirmPo('OPP-006', { booking: draft })).data
+    const replaced = (await manager.confirmPo('OPP-006', { booking: draft, actualPoDate: '2026-07-15' })).data
     expect(replaced).toMatchObject({ stage: 'po_received', stageChangedAt: '2026-07-02T08:30:00Z', liveBooking: { status: 'Confirmed' } })
     expect(replaced.stageHistory).toHaveLength(2)
     expect(replaced.history[0]).toMatchObject({ field: 'bookingReplaced', from: '', to: replaced.liveBooking!.id })
@@ -201,7 +205,7 @@ describe('mock Opportunity stage workflow', () => {
     const sales = createMockApi({ latency: 0, role: 'Sales', userName: 'Demo Staff 01', salesRepository, today: '2026-07-20' })
     const manager = createMockApi({ latency: 0, role: 'Manager', salesRepository, today: '2026-07-20' })
     const seeded = (await sales.getStrategyOpportunity('OPP-008')).data
-    await sales.confirmPo('OPP-008', { booking: seeded.internalValidation!.booking })
+    await sales.confirmPo('OPP-008', { booking: seeded.internalValidation!.booking, actualPoDate: '2026-07-15' })
 
     await expect(manager.rollbackOpportunityStage('OPP-008', { targetStage: 'quotation_sent', reason: 'PO withdrawn' }))
       .rejects.toMatchObject({ code: 'CONFLICT', message: 'Cancel the Booking before rolling the Opportunity back.' })
@@ -226,15 +230,76 @@ describe('mock Opportunity stage workflow', () => {
     await expect(sales.updateStrategyOpportunity('OPP-001', { stage: 'demo_done', title: 'Same stage is fine' } as never))
       .resolves.toMatchObject({ data: { title: 'Same stage is fine', stage: 'demo_done' } })
     await expect(sales.updateStrategyOpportunity('OPP-001', { probabilityLevel: '' }))
-      .rejects.toMatchObject({ code: 'VALIDATION_ERROR', message: 'probabilityLevel cannot be cleared once the demo is done.' })
+      .rejects.toMatchObject({ code: 'VALIDATION_ERROR', message: 'probabilityLevel cannot be cleared once it is set.' })
     await expect(sales.updateStrategyOpportunity('OPP-001', { probabilityLevel: 'committed' }))
       .resolves.toMatchObject({ data: { probabilityLevel: 'committed' } })
+    await expect(sales.updateStrategyOpportunity('OPP-001', { probabilityLevel: 'pipeline' }))
+      .rejects.toMatchObject({ code: 'VALIDATION_ERROR', fieldErrors: { probabilityReason: 'Required' } })
+    await expect(sales.updateStrategyOpportunity('OPP-001', { probabilityLevel: 'pipeline', probabilityReason: '客户预算推迟', probabilityActionPlan: 'Meet procurement' }, (await sales.getStrategyOpportunity('OPP-001')).data.modified))
+      .resolves.toMatchObject({ data: { probabilityLevel: 'pipeline', probabilityHistory: [{ from: 'committed', to: 'pipeline', reason: '客户预算推迟' }, {}, {}] } })
     await expect(manager.updateStrategyOpportunity('OPP-008', { saleType: 'Service' }))
       .rejects.toMatchObject({ code: 'CONFLICT', message: 'Account and sale type cannot change while the Opportunity has a live Booking.' })
 
     const seeded = (await sales.getStrategyOpportunity('OPP-008')).data
-    await sales.confirmPo('OPP-008', { booking: seeded.internalValidation!.booking })
+    await sales.confirmPo('OPP-008', { booking: seeded.internalValidation!.booking, actualPoDate: '2026-07-15' })
     await expect(sales.updateStrategyOpportunity('OPP-008', { probabilityLevel: 'committed' }))
       .rejects.toMatchObject({ code: 'INVALID_TRANSITION', message: 'The probability level is frozen once the PO is received or the Opportunity is lost.' })
+  })
+})
+
+describe('mock actual PO date', () => {
+  it('confirms a PO only with the date on it and clears the date when the PO is rolled back', async () => {
+    const salesRepository = createMemorySalesRepository()
+    const sales = createMockApi({ latency: 0, role: 'Sales', userName: 'Demo Staff 01', salesRepository, today: '2026-07-20' })
+    const manager = createMockApi({ latency: 0, role: 'Manager', salesRepository, today: '2026-07-20' })
+    const booking = (await sales.getStrategyOpportunity('OPP-008')).data.internalValidation!.booking
+
+    await expect(sales.confirmPo('OPP-008', { booking } as never))
+      .rejects.toMatchObject({ code: 'VALIDATION_ERROR', fieldErrors: { actualPoDate: 'Required' } })
+    await expect(sales.confirmPo('OPP-008', { booking, actualPoDate: '2026-07-21' }))
+      .rejects.toMatchObject({ code: 'VALIDATION_ERROR', fieldErrors: { actualPoDate: 'Cannot be in the future' } })
+    const confirmed = (await sales.confirmPo('OPP-008', { booking, actualPoDate: '2026-07-15' })).data
+    expect(confirmed.liveBooking).toMatchObject({ id: 'BKG-003', status: 'Confirmed', actualPoDate: '2026-07-15' })
+    expect((await sales.listBookings({ pageSize: 100 })).data.items.find((item) => item.id === 'BKG-003'))
+      .toMatchObject({ actualPoDate: '2026-07-15', actualPoDateSource: 'po_confirmation' })
+
+    const rolledBack = (await manager.rollbackOpportunityStage('OPP-008', { targetStage: 'internal_validation', reason: 'Customer withdrew the PO' })).data
+    expect((await manager.listBookings({ pageSize: 100 })).data.items.find((item) => item.id === 'BKG-003'))
+      .toMatchObject({ status: 'Pending', actualPoDate: '', actualPoDateSource: '' })
+    expect(rolledBack.history.find((entry) => entry.field === 'bookingPoDate')).toMatchObject({ from: '2026-07-15', to: '' })
+  })
+
+  it('lets only a Manager fill in or correct the date, and an Upsell Booking take its first date on entry', async () => {
+    const salesRepository = createMemorySalesRepository()
+    const sales = createMockApi({ latency: 0, role: 'Sales', userName: 'Demo Staff 02', salesRepository, today: '2026-07-20' })
+    const manager = createMockApi({ latency: 0, role: 'Manager', salesRepository, today: '2026-07-20' })
+    const missing = (await manager.listBookings({ actualPoDateMissing: '1', pageSize: 100 })).data.items
+    expect(missing.map((item) => item.id)).toEqual(['BKG-002'])
+
+    await expect(sales.setBookingActualPoDate('BKG-002', { actualPoDate: '2026-06-24' }))
+      .rejects.toMatchObject({ code: 'PERMISSION_DENIED' })
+    await expect(manager.setBookingActualPoDate('BKG-003', { actualPoDate: '2026-06-24' }))
+      .rejects.toMatchObject({ code: 'INVALID_TRANSITION' })
+    const filled = (await manager.setBookingActualPoDate('BKG-002', { actualPoDate: '2026-06-24' }, missing[0]!.modified)).data
+    expect(filled).toMatchObject({ actualPoDate: '2026-06-24', actualPoDateSource: 'backfill', actualPoDateNote: '' })
+    await expect(manager.setBookingActualPoDate('BKG-002', { actualPoDate: '2026-06-25' }, filled.modified))
+      .rejects.toMatchObject({ code: 'VALIDATION_ERROR', fieldErrors: { reason: 'Required' } })
+    const corrected = (await manager.setBookingActualPoDate('BKG-002', { actualPoDate: '2026-06-25', reason: 'The PO is dated 25 June' }, filled.modified)).data
+    expect(corrected).toMatchObject({ actualPoDate: '2026-06-25', actualPoDateNote: 'The PO is dated 25 June' })
+    await expect(sales.updateBooking('BKG-002', { ...corrected, actualPoDate: '2026-06-26' } as never, corrected.modified))
+      .rejects.toMatchObject({ code: 'VALIDATION_ERROR', fieldErrors: { actualPoDate: 'Manager correction only' } })
+
+    const contact = (await manager.listContacts({ accountId: 'ACC-003', pageSize: 100 })).data.items.find((item) => item.status === 'Active')!
+    const upsell = {
+      accountId: 'ACC-003', primaryContactId: contact.id, equipment: 'Spare parts', quantity: 1, ddl: '2026-09-30',
+      amount: '1000.00', currency: 'CNY', status: 'Confirmed' as const, owner: 'person005@crm.example.invalid',
+      source: 'Upsell' as const, bookingType: 'Service' as const, sourceOpportunityId: '', note: '',
+    }
+    await expect(manager.createBooking({ ...upsell, actualPoDate: '2026-07-21' }))
+      .rejects.toMatchObject({ fieldErrors: { actualPoDate: 'Cannot be in the future' } })
+    const undated = (await manager.createBooking(upsell)).data
+    expect(undated).toMatchObject({ actualPoDate: '', actualPoDateSource: '' })
+    const dated = (await manager.updateBooking(undated.id, { ...upsell, actualPoDate: '2026-07-10' }, undated.modified)).data
+    expect(dated).toMatchObject({ actualPoDate: '2026-07-10', actualPoDateSource: 'booking_entry' })
   })
 })

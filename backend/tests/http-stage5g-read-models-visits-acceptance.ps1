@@ -161,7 +161,7 @@ try {
         accountId = $created.Account; siteId = $created.Site; title = "Stage 5G Opportunity $stamp"
         owner = $salesEmail; stage = 'qualified_opportunity'; qualificationConfirmed = $true; forecast = 'Pipeline'; amount = '1000'
         probability = 25; intentScore = 70; poDate = '2026-12-31'; toolType = 'Inspection'
-        saleType = 'New Equipment'; subRegion = 'East China'; currency = 'CNY'; originalAmount = '1000'
+        saleType = 'New Equipment'; subRegion = 'East China'; currency = 'CNY'; originalAmount = '1000'; amountCny = '1000'
     } }
     $created.Opportunity = $opportunity.data.id
     Invoke-CrmPost $salesSession 'rayher_crm.api.v1.opportunities.create_opportunity_action' @{

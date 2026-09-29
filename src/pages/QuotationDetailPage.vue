@@ -31,6 +31,7 @@ const approvalOpen = ref(false); const approvalDecision = ref<QuotationApprovalD
 const linkOpen = ref(false); const linkBusy = ref(false); const linkError = useLocaleMessage(); const linkOpportunityId = ref(''); const linkOpportunities = ref<StrategyOpportunityDto[]>([])
 let ready = false; let previewSequence = 0; let saveTimer: ReturnType<typeof setTimeout>|undefined; let revision = 0; let savedRevision = 0; let savePromise: Promise<boolean>|undefined
 const quotationId = computed(() => String(route.params.quotationId || ''))
+const linkedVersion = computed(() => typeof route.query.version === 'string' ? route.query.version : undefined)
 const selectedIsLatest = computed(() => detail.value?.version.id === detail.value?.quotation.currentVersionId)
 const canMutateQuotation = computed(() => Boolean(app.can('quotation:write') && !detail.value?.version.addressRestricted))
 const editable = computed(() => Boolean(canMutateQuotation.value && selectedIsLatest.value && detail.value?.version.status === 'Draft' && detail.value?.version.approvalStatus !== 'Pending'))
@@ -194,7 +195,7 @@ async function refreshCurrentIfClean(){
   catch(reason){ saveError.value=mappedMessage(mapRequestError(reason)) }
 }
 function handleVisibility(){ if(document.visibilityState==='visible')void refreshCurrentIfClean() }
-onMounted(async()=>{window.addEventListener('focus',refreshCurrentIfClean);document.addEventListener('visibilitychange',handleVisibility);await app.loadBootstrap(props.apiClient);await load()})
+onMounted(async()=>{window.addEventListener('focus',refreshCurrentIfClean);document.addEventListener('visibilitychange',handleVisibility);await app.loadBootstrap(props.apiClient);await load(linkedVersion.value)})
 onBeforeRouteLeave(async()=>{if(!ready||!editable.value)return true;return await flushPendingSave()})
 onBeforeUnmount(()=>{ready=false;previewSequence+=1;window.removeEventListener('focus',refreshCurrentIfClean);document.removeEventListener('visibilitychange',handleVisibility);clearSaveTimer();if(previewUrl.value)URL.revokeObjectURL(previewUrl.value)})
 </script>
@@ -216,7 +217,7 @@ onBeforeUnmount(()=>{ready=false;previewSequence+=1;window.removeEventListener('
     </PageHeader>
     <DataState v-if="loading" type="loading" />
     <DataState v-else-if="denied" type="denied" :message="error" :request-id="requestId" />
-    <DataState v-else-if="error||!detail||!draft" type="error" :message="error||(locale === 'en-US' ? 'Quotation failed to load' : '报价单加载失败')" :request-id="requestId" @retry="load()" />
+    <DataState v-else-if="error||!detail||!draft" type="error" :message="error||(locale === 'en-US' ? 'Quotation failed to load' : '报价单加载失败')" :request-id="requestId" @retry="load(linkedVersion)" />
     <template v-else>
       <section class="summary-strip">
         <div><small>{{ ui('Name', '名称') }}</small><strong>{{ detail.quotation.refNo }}</strong><span>{{ detail.quotation.accountName }}</span></div>

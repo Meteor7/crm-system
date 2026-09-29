@@ -12,26 +12,9 @@ import OpportunityDetailPage from './OpportunityDetailPage.vue'
 type MockOptions = NonNullable<Parameters<typeof createMockApi>[0]>
 
 function requireOpportunityVersion(api: ReturnType<typeof createMockApi>) {
-  const modified = '2026-08-05T10:00:00.000000Z'
-  const listStrategyOpportunities = api.listStrategyOpportunities.bind(api)
-  const getStrategyOpportunity = api.getStrategyOpportunity.bind(api)
   const updateStrategyOpportunity = api.updateStrategyOpportunity.bind(api)
-  api.listStrategyOpportunities = async (query) => {
-    const result = await listStrategyOpportunities(query)
-    return {
-      ...result,
-      data: {
-        ...result.data,
-        items: result.data.items.map((item) => ({ ...item, modified })),
-      },
-    }
-  }
-  api.getStrategyOpportunity = async (id) => {
-    const result = await getStrategyOpportunity(id)
-    return { ...result, data: { ...result.data, modified } }
-  }
   api.updateStrategyOpportunity = async (id, input, expectedModified) => {
-    if (expectedModified !== modified) {
+    if (!expectedModified) {
       throw new CrmApiError('VALIDATION_ERROR', 'expectedModified is required.', 'req_opportunity_version')
     }
     return updateStrategyOpportunity(id, input, expectedModified)
@@ -256,6 +239,7 @@ describe('Opportunity detail', () => {
     salesRepository.snapshot.opportunities.find((item) => item.id === 'OPP-001')!.stage = 'demo_done'
     const setup = await context('OPP-001', false, 'Sales', { salesRepository })
     const confirmBudgetApproved = vi.spyOn(setup.api, 'confirmBudgetApproved')
+    const version = (await setup.api.getStrategyOpportunity('OPP-001')).data.modified
     const wrapper = mountPage(setup)
     await flushPromises()
 
@@ -265,7 +249,7 @@ describe('Opportunity detail', () => {
     await wrapper.get('[role="dialog"] [data-modal-submit]').trigger('submit')
     await flushPromises()
 
-    expect(confirmBudgetApproved).toHaveBeenCalledWith('OPP-001', { approvedOn: '2026-07-06' }, undefined)
+    expect(confirmBudgetApproved).toHaveBeenCalledWith('OPP-001', { approvedOn: '2026-07-06' }, version)
     expect(wrapper.find('[role="dialog"]').exists()).toBe(false)
     expect(wrapper.get('[data-testid="opportunity-stage"]').text()).toBe('客户预算批准')
     expect(wrapper.get('[data-testid="opportunity-budget-approved-on"]').text()).toBe('2026-07-06')
@@ -277,6 +261,7 @@ describe('Opportunity detail', () => {
     const salesRepository = createMemorySalesRepository()
     const sales = await context('OPP-003', false, 'Sales', { salesRepository })
     const requestInternalValidation = vi.spyOn(sales.api, 'requestInternalValidation')
+    const version = (await sales.api.getStrategyOpportunity('OPP-003')).data.modified
     const salesPage = mountPage(sales)
     await flushPromises()
 
@@ -296,7 +281,7 @@ describe('Opportunity detail', () => {
       reason: '客户扩产窗口紧，需要提前锁定产能',
       expectedPoDate: '2026-09-18',
       booking: expect.objectContaining({ owner: 'person002@crm.example.invalid', amount: '32500000.00', currency: 'CNY' }),
-    }), undefined)
+    }), version)
     expect(salesPage.get('[data-testid="internal-validation-panel"]').attributes('data-validation-status')).toBe('pending')
     expect(salesPage.find('[data-testid="approve-internal-validation"]').exists()).toBe(false)
     expect(salesPage.find('[data-testid="request-internal-validation"]').exists()).toBe(false)
@@ -318,16 +303,23 @@ describe('Opportunity detail', () => {
     expect(managerPage.get('[data-stage-path="internal_validation"]').classes()).toContain('is-current')
     expect(booking.modified).toBeTruthy()
 
-    // The PO form is prefilled from the Pending Booking and sends back the version it was prefilled from.
+    // The PO form keeps the current Pending Booking details and sends its own optimistic-lock token.
     const confirmPo = vi.spyOn(manager.api, 'confirmPo')
     await managerPage.get('[data-testid="confirm-po"]').trigger('click')
     await flushPromises()
+    await managerPage.get('[aria-label="实际 PO 日期"]').setValue('2026-07-15')
     await managerPage.get('[role="dialog"] [data-modal-submit]').trigger('submit')
     await flushPromises()
     expect(confirmPo).toHaveBeenCalledTimes(1)
     expect(confirmPo.mock.calls[0].slice(0, 2)).toEqual(['OPP-003', {
-      booking: expect.objectContaining({ primaryContactId: booking.primaryContactId, amount: booking.amount, owner: 'person002@crm.example.invalid' }),
+      booking: expect.objectContaining({
+        primaryContactId: booking.primaryContactId,
+        amount: booking.amount,
+        owner: 'person002@crm.example.invalid',
+        note: booking.note,
+      }),
       expectedBookingModified: booking.modified,
+      actualPoDate: '2026-07-15',
     }])
     expect(managerPage.get('[data-testid="opportunity-stage"]').text()).toBe('收到 PO')
   })
@@ -351,13 +343,24 @@ describe('Opportunity detail', () => {
     const createdContact = (await setup.api.listContacts({ search: 'Opportunity Booking 联系人', page: 1, pageSize: 10 })).data.items[0]!
     expect((wrapper.get('[aria-label="选择联系人"]').element as HTMLSelectElement).value).toBe(createdContact.id)
 
+    // The actual PO date starts blank: neither today nor the expected PO date is the date on the PO.
+    expect((wrapper.get('[aria-label="实际 PO 日期"]').element as HTMLInputElement).value).toBe('')
+    await wrapper.get('[role="dialog"] [data-modal-submit]').trigger('submit')
+    await flushPromises()
+    expect(wrapper.get('[data-field-error="actualPoDate"]').text()).toBe('请填写实际 PO 日期')
+    expect((await setup.api.getStrategyOpportunity('OPP-003')).data.stage).toBe('quotation_sent')
+
+    await wrapper.get('[aria-label="实际 PO 日期"]').setValue('2026-07-15')
     await wrapper.get('[role="dialog"] [data-modal-submit]').trigger('submit')
     await flushPromises()
 
     const opportunity = (await setup.api.getStrategyOpportunity('OPP-003')).data
     expect(opportunity).toMatchObject({ stage: 'po_received', liveBooking: { status: 'Confirmed', amount: '32500000.00' } })
     const booking = (await setup.api.listBookings({ pageSize: 100 })).data.items.find((item) => item.id === opportunity.liveBooking!.id)!
-    expect(booking).toMatchObject({ accountId: 'ACC-002', primaryContactId: createdContact.id, source: 'Opportunity', sourceOpportunityId: 'OPP-003' })
+    expect(booking).toMatchObject({
+      accountId: 'ACC-002', primaryContactId: createdContact.id, source: 'Opportunity', sourceOpportunityId: 'OPP-003',
+      actualPoDate: '2026-07-15', actualPoDateSource: 'po_confirmation',
+    })
     expect(wrapper.get('[data-testid="opportunity-booking-link"]').text()).toContain(booking.id)
     expect(wrapper.get('[data-stage-path="internal_validation"]').classes()).toContain('is-skipped')
     expect(wrapper.find('[data-testid="confirm-po"]').exists()).toBe(false)
@@ -369,16 +372,20 @@ describe('Opportunity detail', () => {
     const current = (await setup.api.listBookings({ pageSize: 100 })).data.items.find((item) => item.id === 'BKG-001')!
     await setup.api.updateBooking('BKG-001', { ...current, status: 'Cancelled' } as never)
     const confirmPo = vi.spyOn(setup.api, 'confirmPo')
+    const version = (await setup.api.getStrategyOpportunity('OPP-006')).data.modified
     const wrapper = mountPage(setup)
     await flushPromises()
 
     expect(wrapper.find('[data-testid="opportunity-booking-link"]').exists()).toBe(false)
     await wrapper.get('[data-testid="replace-booking"]').trigger('click')
     expect(wrapper.get('[data-testid="po-confirmation-hint"]').text()).toBe('原 Booking 已取消。补录的 Booking 为 Confirmed，商机阶段保持不变。')
+    await wrapper.get('[aria-label="实际 PO 日期"]').setValue('2026-07-15')
     await wrapper.get('[role="dialog"] [data-modal-submit]').trigger('submit')
     await flushPromises()
 
-    expect(confirmPo).toHaveBeenCalledWith('OPP-006', { booking: expect.objectContaining({ owner: 'person005@crm.example.invalid' }) }, undefined)
+    expect(confirmPo).toHaveBeenCalledWith(
+      'OPP-006', { booking: expect.objectContaining({ owner: 'person005@crm.example.invalid' }), actualPoDate: '2026-07-15' }, version,
+    )
     expect(wrapper.get('[data-testid="opportunity-stage"]').text()).toBe('收到 PO')
     expect(wrapper.get('[data-testid="opportunity-booking-link"]').text()).toContain('BKG-')
     expect(wrapper.find('[data-testid="replace-booking"]').exists()).toBe(false)
@@ -387,6 +394,7 @@ describe('Opportunity detail', () => {
   it('marks an open Opportunity lost with a reason and shows where it was lost', async () => {
     const setup = await context('OPP-001')
     const markOpportunityLost = vi.spyOn(setup.api, 'markOpportunityLost')
+    const version = (await setup.api.getStrategyOpportunity('OPP-001')).data.modified
     const wrapper = mountPage(setup)
     await flushPromises()
 
@@ -399,7 +407,7 @@ describe('Opportunity detail', () => {
     await wrapper.get('[role="dialog"] [data-modal-submit]').trigger('submit')
     await flushPromises()
 
-    expect(markOpportunityLost).toHaveBeenCalledWith('OPP-001', { lostReason: '客户预算冻结' }, undefined)
+    expect(markOpportunityLost).toHaveBeenCalledWith('OPP-001', { lostReason: '客户预算冻结' }, version)
     expect(wrapper.get('[data-testid="opportunity-stage"]').text()).toBe('丢单')
     expect(wrapper.get('[data-testid="opportunity-lost-outcome"]').text()).toBe('丢单')
     expect(wrapper.get('[data-testid="lost-at-stage"]').text()).toBe('合格商机')
@@ -467,6 +475,7 @@ describe('Opportunity detail', () => {
     const setup = await context('OPP-003', false, 'Manager')
     const rollbackOpportunityStage = vi.fn().mockResolvedValue(await setup.api.getStrategyOpportunity('OPP-003'))
     setup.api.rollbackOpportunityStage = rollbackOpportunityStage
+    const version = (await setup.api.getStrategyOpportunity('OPP-003')).data.modified
     const wrapper = mountPage(setup)
     await flushPromises()
 
@@ -487,7 +496,7 @@ describe('Opportunity detail', () => {
     expect(rollbackOpportunityStage).toHaveBeenCalledWith(
       'OPP-003',
       { targetStage: 'demo_done', reason: '客户要求重新做 Demo' },
-      undefined,
+      version,
     )
   })
 
@@ -512,5 +521,32 @@ describe('Opportunity detail', () => {
 
     expect(wrapper.get('h1').text()).toBe('已更新的 Opportunity')
     expect(wrapper.find('[role="dialog"]').exists()).toBe(false)
+  })
+
+  it('shows the amount in CNY, and asks for it before an edit when it is missing', async () => {
+    const filled = mountPage(await context('OPP-001'))
+    await flushPromises()
+    expect(filled.get('[data-testid="opportunity-amount-cny"]').text()).toBe('CNY 16,800,000.00')
+
+    const cached = structuredClone(createMemorySalesRepository().snapshot)
+    const foreign = cached.opportunities.find((item) => item.id === 'OPP-001')!
+    foreign.currency = 'USD'
+    delete (foreign as { amountCny?: string }).amountCny
+    const wrapper = mountPage(await context('OPP-001', false, 'Manager', { salesRepository: createMemorySalesRepository(cached) }))
+    await flushPromises()
+    expect(wrapper.get('[data-testid="opportunity-amount-cny"]').text()).toBe('待补填')
+
+    await wrapper.get('[data-testid="edit-opportunity"]').trigger('click')
+    expect(wrapper.find('[data-testid="opportunity-amount-cny-missing"]').exists()).toBe(true)
+    await wrapper.get('[aria-label="Opportunity 名称"]').setValue('改名但没填人民币金额')
+    await wrapper.get('[data-modal-submit]').trigger('submit')
+    await flushPromises()
+    expect(wrapper.get('[role="dialog"]').text()).toContain('请填写人民币金额。')
+
+    await wrapper.get('[aria-label="人民币金额"]').setValue('118000')
+    await wrapper.get('[data-modal-submit]').trigger('submit')
+    await flushPromises()
+    expect(wrapper.find('[role="dialog"]').exists()).toBe(false)
+    expect(wrapper.get('[data-testid="opportunity-amount-cny"]').text()).toBe('CNY 118,000.00')
   })
 })

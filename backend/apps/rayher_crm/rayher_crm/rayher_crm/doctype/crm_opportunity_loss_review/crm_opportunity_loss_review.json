@@ -1,0 +1,48 @@
+{
+  "doctype": "DocType",
+  "name": "CRM Opportunity Loss Review",
+  "module": "Rayher CRM",
+  "engine": "InnoDB",
+  "autoname": "hash",
+  "naming_rule": "Random",
+  "owner": "Administrator",
+  "modified_by": "Administrator",
+  "creation": "2026-09-23 00:00:00.000000",
+  "modified": "2026-09-23 00:00:00.000000",
+  "field_order": [
+    "opportunity",
+    "stage_event",
+    "lost_at",
+    "lost_at_stage",
+    "lost_by",
+    "lost_reason",
+    "review_status",
+    "review_note",
+    "reviewed_by",
+    "reviewed_at",
+    "reopened_at"
+  ],
+  "fields": [
+    {"fieldname": "opportunity", "fieldtype": "Link", "options": "CRM Opportunity", "label": "Opportunity", "reqd": 1},
+    {"fieldname": "stage_event", "fieldtype": "Link", "options": "CRM Opportunity Stage History", "label": "Marked Lost Event", "reqd": 1, "unique": 1},
+    {"fieldname": "lost_at", "fieldtype": "Datetime", "label": "Lost At", "reqd": 1},
+    {"fieldname": "lost_at_stage", "fieldtype": "Data", "label": "Lost At Stage"},
+    {"fieldname": "lost_by", "fieldtype": "Link", "options": "User", "label": "Lost By"},
+    {"fieldname": "lost_reason", "fieldtype": "Small Text", "label": "Lost Reason"},
+    {"fieldname": "review_status", "fieldtype": "Select", "options": "Pending\nReviewed", "label": "Post-mortem Status", "reqd": 1, "default": "Pending"},
+    {"fieldname": "review_note", "fieldtype": "Small Text", "label": "Post-mortem Conclusion"},
+    {"fieldname": "reviewed_by", "fieldtype": "Link", "options": "User", "label": "Reviewed By"},
+    {"fieldname": "reviewed_at", "fieldtype": "Datetime", "label": "Reviewed At"},
+    {"fieldname": "reopened_at", "fieldtype": "Datetime", "label": "Opportunity Reopened At"}
+  ],
+  "permissions": [
+    {"role": "CRM Manager", "read": 1},
+    {"role": "CRM Sales", "read": 1},
+    {"role": "CRM Engineer", "read": 1}
+  ],
+  "sort_field": "modified",
+  "sort_order": "DESC",
+  "actions": [],
+  "states": [],
+  "index_web_pages_for_search": 0
+}

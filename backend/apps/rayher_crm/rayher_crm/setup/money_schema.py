@@ -9,8 +9,10 @@ import frappe
 
 MONEY_COLUMNS = (
     ("tabCRM Booking", "amount"),
+    ("tabCRM Booking", "amount_cny"),
     ("tabCRM Opportunity", "amount"),
     ("tabCRM Opportunity", "original_amount"),
+    ("tabCRM Opportunity", "amount_cny"),
 )
 MAX_MONEY = Decimal("999999999999999999.99")
 

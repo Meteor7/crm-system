@@ -24,6 +24,7 @@ from rayher_crm.services.common import (
 from rayher_crm.services.concurrency import lock_document
 from rayher_crm.services.notifications import create_notification
 from rayher_crm.services.opportunity_stages import OPEN_STAGES
+from rayher_crm.services.regions import collapse_region, list_regions, matching_region, register_region
 
 
 DEFAULT_ACCOUNT_SEGMENTS = ("Frontend", "Advanced Packaging")
@@ -56,6 +57,11 @@ def _segment_field(*, for_update: bool = False) -> dict[str, Any]:
 def list_account_segments() -> list[str]:
     assert_capability("account:view")
     return _segment_options(_segment_field().get("options"))
+
+
+def list_account_regions() -> list[str]:
+    assert_capability("account:view")
+    return list_regions()
 
 
 def list_account_cities() -> list[str]:
@@ -229,6 +235,10 @@ def list_accounts(query: dict[str, Any]) -> tuple[list[dict[str, Any]], int, int
     if segment and segment != "All":
         where.append("`custom_crm_segment` = %s")
         values.append(segment)
+    region = collapse_region(query.get("region"))
+    if region and region != "All":
+        where.append("`custom_crm_region` = %s")
+        values.append(matching_region(region, list_regions()) or region)
     city = query.get("city")
     if city and city != "All":
         where.append("`custom_crm_city` = %s")
@@ -255,6 +265,7 @@ def create_account(payload: dict[str, Any]) -> dict[str, Any]:
     frappe.db.savepoint(savepoint)
     try:
         _register_account_segment(values["segment"])
+        values["region"] = register_region(values["region"])
         doc = frappe.get_doc(
             {
                 "doctype": "Customer",
@@ -304,6 +315,11 @@ def update_account(
     frappe.db.savepoint(savepoint)
     try:
         _register_account_segment(values["segment"])
+        values["region"] = register_region(values["region"])
+        # Registering a new Select option clears the shared cache, but the
+        # locked document still holds its old Meta instance. Keep the lock and
+        # version check above; reload with current metadata before validation.
+        doc = frappe.get_doc("Customer", name, for_update=True)
         doc.update(
             {
                 "customer_name": values["name"],

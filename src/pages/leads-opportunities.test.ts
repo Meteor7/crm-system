@@ -83,7 +83,7 @@ describe('Leads&Opportunities workspace', () => {
     expect(wrapper.find('[data-testid="opportunity-list"]').exists()).toBe(true)
   })
 
-  it('keeps purchase intent editable on its own while only the owner can set the success probability', async () => {
+  it('keeps purchase intent editable on its own next to the required success probability', async () => {
     const { api, pinia, router } = await context('/leads-opportunities?view=opportunities')
     const wrapper = mount(LeadsOpportunitiesPage, { props: { apiClient: api }, global: { plugins: [pinia, router] } })
     await flushPromises()
@@ -100,18 +100,16 @@ describe('Leads&Opportunities workspace', () => {
     expect(intent.attributes('step')).toBe('1')
     expect(wrapper.get('[data-testid="opportunity-intent-value"]').text()).toBe('50')
 
-    // The Manager creates for the default Sales owner, so the level stays pending sales confirmation.
-    const level = wrapper.get('[aria-label="成功概率"]').element as HTMLSelectElement
-    expect(level.disabled).toBe(true)
+    // The Manager opening this for the default Sales owner still picks its first level.
+    const level = wrapper.get('[data-testid="opportunity-probability-level"]').element as HTMLSelectElement
+    expect(level.disabled).toBe(false)
     expect(level.value).toBe('')
 
     await intent.setValue(80)
     expect(wrapper.get('[data-testid="opportunity-intent-value"]').text()).toBe('80')
     expect(level.value).toBe('')
 
-    await wrapper.get('[aria-label="负责人"]').setValue('person029@crm.example.invalid')
-    expect(level.disabled).toBe(false)
-    await wrapper.get('[aria-label="成功概率"]').setValue('upside')
+    await wrapper.get('[data-testid="opportunity-probability-level"]').setValue('upside')
     expect(level.value).toBe('upside')
     expect(wrapper.get('[data-testid="opportunity-intent-value"]').text()).toBe('80')
 

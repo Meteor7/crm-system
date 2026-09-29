@@ -5,6 +5,7 @@ import type { ContactSummaryDto } from '@/types/crm'
 import type { BookingDraft, StrategyOpportunityDto } from '@/types/workspaces'
 
 type DraftSource = Pick<StrategyOpportunityDto, 'accountId' | 'title' | 'toolType' | 'amount' | 'currency' | 'poDate' | 'internalValidation' | 'liveBooking'>
+  & Partial<Pick<StrategyOpportunityDto, 'amountCny'>>
 
 /**
  * Booking fields for an Opportunity action. The latest internal validation request supplies its draft, the live
@@ -31,6 +32,8 @@ export function opportunityBookingDraft(
     ddl: booking?.ddl ?? requested.ddl ?? opportunity.poDate,
     amount: booking?.amount ?? requested.amount ?? opportunity.amount,
     currency: booking?.currency ?? requested.currency ?? opportunity.currency,
+    // Only shown for another currency; the Opportunity's CNY estimate is the starting point.
+    amountCny: booking?.amountCny || requested.amountCny || opportunity.amountCny || '',
     owner: lockedOwner || preferredPersonnelId('Sales', booking?.owner ?? requested.owner ?? defaultOwner),
     note: booking?.note ?? requested.note ?? '',
   }
@@ -47,15 +50,22 @@ export function validateBookingDraft(draft: BookingDraft): BookingDraftErrors {
   if (!isIsoDate(draft.ddl)) errors.ddl = localeMessage('Enter a valid customer DDL', '请填写有效的客户 DDL')
   if (!/^\d+(?:\.\d{1,2})?$/.test(String(draft.amount).trim())) errors.amount = localeMessage('Enter an amount with at most two decimal places', '请填写最多两位小数的金额')
   if (!draft.currency) errors.currency = localeMessage('Select a currency', '请选择币种')
+  const amountCny = String(draft.amountCny ?? '').trim()
+  if (draft.currency && draft.currency !== 'CNY' && (!/^\d+(?:\.\d{1,2})?$/.test(amountCny) || Number(amountCny) <= 0)) {
+    errors.amountCny = localeMessage('Enter the amount in CNY, above 0 with at most two decimal places', '请填写人民币金额，大于 0，最多两位小数')
+  }
   if (!draft.owner) errors.owner = localeMessage('Select a Booking owner', '请选择 Booking 负责人')
   return errors
 }
 
 export function trimmedBookingDraft(draft: BookingDraft): BookingDraft {
+  const { amountCny, ...fields } = draft
   return {
-    ...draft,
+    ...fields,
     equipment: draft.equipment.trim(),
     amount: String(draft.amount).trim(),
+    // A CNY order sends no separate CNY amount.
+    ...(draft.currency !== 'CNY' ? { amountCny: String(amountCny ?? '').trim() } : {}),
     owner: draft.owner.trim(),
     note: draft.note.trim(),
   }

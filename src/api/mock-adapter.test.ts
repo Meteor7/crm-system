@@ -60,7 +60,7 @@ function completeDemoRequestForm() {
 async function createEligibleDemoOpportunity(api: ReturnType<typeof createMockApi>, suffix = '') {
   return (await api.createStrategyOpportunity({
     accountId: 'ACC-001', siteId: 'SITE-001', title: `Demo Request Opportunity ${suffix || Date.now()}`,
-    owner: 'person002@crm.example.invalid', qualificationConfirmed: true, amount: '4860000.00',
+    owner: 'person002@crm.example.invalid', qualificationConfirmed: true, probabilityLevel: 'pipeline', amount: '4860000.00', amountCny: '4860000.00',
     intentScore: 60, poDate: '2026-12-31', toolType: 'Defect Inspection', saleType: 'New Equipment',
     subRegion: 'East China', currency: 'CNY',
   })).data
@@ -177,7 +177,7 @@ describe('mock CRM API', () => {
 
     await expect(manager.createStrategyOpportunity({
       accountId: 'ACC-001', siteId: 'SITE-001', title: 'Invalid owner opportunity', owner: 'person077@crm.example.invalid',
-      qualificationConfirmed: true, amount: '1000000.00', intentScore: 30, poDate: '2026-12-31',
+      qualificationConfirmed: true, probabilityLevel: 'pipeline', amount: '1000000.00', amountCny: '1000000.00', intentScore: 30, poDate: '2026-12-31',
       toolType: 'Inspection', saleType: 'New Tool', subRegion: '华东', currency: 'CNY',
     })).rejects.toMatchObject({ code: 'VALIDATION_ERROR' })
     await expect(manager.createBooking({
@@ -191,8 +191,8 @@ describe('mock CRM API', () => {
     const manager = createMockApi({ latency: 0, role: 'Manager', userName: '演示员工24' })
 
     await expect(manager.convertLead('LEAD-002', {
-      opportunityTitle: 'Invalid conversion owner', opportunityAmount: '1000000.00',
-      opportunityCloseDate: '2026-12-31', opportunityOwner: 'person077@crm.example.invalid', toolType: 'Inspection', qualificationConfirmed: true,
+      opportunityTitle: 'Invalid conversion owner', opportunityAmount: '1000000.00', opportunityAmountCny: '1000000.00',
+      opportunityCloseDate: '2026-12-31', opportunityOwner: 'person077@crm.example.invalid', opportunityProbabilityLevel: 'pipeline', toolType: 'Inspection', qualificationConfirmed: true,
     })).rejects.toMatchObject({ code: 'VALIDATION_ERROR' })
     await expect(manager.createOpportunityAction('OPP-001', {
       title: 'Invalid action owner', owner: '演示经理01', due: '2026-08-10', status: 'Open',
@@ -248,8 +248,8 @@ describe('mock CRM API', () => {
       siteId: 'SITE-001',
       title: 'Dashboard 数据联通验证',
       owner: 'person002@crm.example.invalid',
-      qualificationConfirmed: true,
-      amount: '9800000.00',
+      qualificationConfirmed: true, probabilityLevel: 'pipeline',
+      amount: '9800000.00', amountCny: '9800000.00',
       intentScore: 35,
       poDate: '2026-11-30',
       toolType: 'Defect Inspection',
@@ -1008,15 +1008,15 @@ describe('mock CRM API', () => {
 
     const created = await api.createStrategyOpportunity({
       accountId: 'ACC-001', siteId: 'SITE-001', title: '新增缺陷检测机会', owner: 'person002@crm.example.invalid',
-      qualificationConfirmed: true, amount: '9800000.00', intentScore: 35,
+      qualificationConfirmed: true, probabilityLevel: 'pipeline', amount: '9800000.00', amountCny: '9800000.00', intentScore: 35,
       poDate: '2026-11-30', toolType: 'Defect Inspection', saleType: 'New Tool', subRegion: '华东', currency: 'CNY',
     })
     expect(created.data).toMatchObject({
       account: '示例企业014有限公司',
       site: '南京 12-inch Fab',
       score: 35,
-      probabilityLevel: '',
-      probabilityHistory: [],
+      probabilityLevel: 'pipeline',
+      probabilityHistory: [expect.objectContaining({ from: '', to: 'pipeline' })],
     })
     expect(created.data).not.toHaveProperty('probability')
     expect(created.data).not.toHaveProperty('forecast')
@@ -1027,7 +1027,7 @@ describe('mock CRM API', () => {
     expect(updated.data).toMatchObject({
       title: '新增缺陷检测机会（更新）',
       score: 55,
-      probabilityLevel: '',
+      probabilityLevel: 'pipeline',
       stage: 'qualified_opportunity',
     })
     expect(updated.data.history[0]).toMatchObject({ actor: 'person029@crm.example.invalid' })
@@ -1036,13 +1036,13 @@ describe('mock CRM API', () => {
     expect(listed.data.items.find((item) => item.id === created.data.id)?.title).toBe('新增缺陷检测机会（更新）')
   })
 
-  it('lets only the Opportunity owner set the success probability and audits each level change', async () => {
+  it('lets the opener set the first success probability, then only the owner, and audits each level change', async () => {
     const salesRepository = createMemorySalesRepository()
     const owner = createMockApi({ latency: 0, role: 'Sales', userName: 'Demo Staff 01', salesRepository, today: '2026-07-17' })
     const manager = createMockApi({ latency: 0, role: 'Manager', salesRepository, today: '2026-07-17' })
     const input = {
       accountId: 'ACC-001', siteId: 'SITE-001', owner: 'person002@crm.example.invalid', qualificationConfirmed: true,
-      amount: '1200000.00', intentScore: 40, poDate: '2026-12-31', toolType: 'Inspection', saleType: 'New Equipment',
+      amount: '1200000.00', amountCny: '1200000.00', intentScore: 40, poDate: '2026-12-31', toolType: 'Inspection', saleType: 'New Equipment',
       subRegion: 'East China', currency: 'CNY',
     }
 
@@ -1068,11 +1068,25 @@ describe('mock CRM API', () => {
       .rejects.toMatchObject({ code: 'PERMISSION_DENIED', message: 'Only the Opportunity owner can set the probability level.' })
     expect((await manager.updateStrategyOpportunity(created.id, { title: 'Manager edit keeps the level' })).data)
       .toMatchObject({ title: 'Manager edit keeps the level', probabilityLevel: 'upside' })
-    await expect(manager.createStrategyOpportunity({ ...input, title: 'Manager picks a level', probabilityLevel: 'committed' }))
-      .rejects.toMatchObject({ code: 'PERMISSION_DENIED' })
-    expect((await manager.createStrategyOpportunity({ ...input, title: 'Pending for the owner', probabilityLevel: '' })).data)
-      .toMatchObject({ probabilityLevel: '', probabilityHistory: [] })
+    // A Manager opening an Opportunity for Sales sets its first level; a new one is never left pending.
+    expect((await manager.createStrategyOpportunity({ ...input, title: 'Manager picks a level', probabilityLevel: 'committed' })).data)
+      .toMatchObject({ owner: 'person002@crm.example.invalid', probabilityLevel: 'committed', probabilityHistory: [{ from: '', to: 'committed', actor: 'person029@crm.example.invalid' }] })
+    await expect(manager.createStrategyOpportunity({ ...input, title: 'No level', probabilityLevel: '' }))
+      .rejects.toMatchObject({ code: 'VALIDATION_ERROR', fieldErrors: { probabilityLevel: 'Required' } })
     expect((await owner.getStrategyOpportunity(created.id)).data.probabilityHistory).toHaveLength(2)
+
+    // A set level never returns to pending, even at the first milestone.
+    expect((await owner.getStrategyOpportunity(created.id)).data.stage).toBe('qualified_opportunity')
+    await expect(owner.updateStrategyOpportunity(created.id, { probabilityLevel: '' }))
+      .rejects.toMatchObject({ code: 'VALIDATION_ERROR', fieldErrors: { probabilityLevel: 'Required' } })
+    // Lowering it needs a reason, which is kept on the level history row and nowhere else.
+    await expect(owner.updateStrategyOpportunity(created.id, { probabilityLevel: 'pipeline', probabilityReason: '   ' }))
+      .rejects.toMatchObject({ code: 'VALIDATION_ERROR', fieldErrors: { probabilityReason: 'Required' } })
+    const lowered = (await owner.updateStrategyOpportunity(created.id, { probabilityLevel: 'pipeline', probabilityReason: ' 客户预算推迟 ', probabilityActionPlan: 'Meet procurement' }, (await owner.getStrategyOpportunity(created.id)).data.modified)).data
+    expect(lowered.probabilityHistory).toHaveLength(3)
+    expect(lowered.probabilityHistory[0]).toMatchObject({ from: 'upside', to: 'pipeline', reason: '客户预算推迟' })
+    expect(lowered).not.toHaveProperty('probabilityReason')
+    expect(lowered.history.map((entry) => entry.field)).not.toContain('probabilityReason')
   })
 
   it('keeps the success probability when the stage advances or rolls back', async () => {
@@ -1083,7 +1097,7 @@ describe('mock CRM API', () => {
     const contact = (await api.listContacts({ accountId: 'ACC-002', pageSize: 100 })).data.items.find((item) => item.status === 'Active')!
 
     const received = (await api.confirmPo('OPP-003', {
-      booking: { primaryContactId: contact.id, equipment: 'HBM AOI', quantity: 1, ddl: '2026-11-12', amount: '32500000.00', currency: 'CNY', owner: 'person002@crm.example.invalid', note: '' },
+      booking: { primaryContactId: contact.id, equipment: 'HBM AOI', quantity: 1, ddl: '2026-11-12', amount: '32500000.00', currency: 'CNY', owner: 'person002@crm.example.invalid', note: '' }, actualPoDate: '2026-07-15',
     })).data
     expect(received).toMatchObject({ stage: 'po_received', probabilityLevel: 'committed', liveBooking: { status: 'Confirmed' } })
     expect(received.probabilityHistory).toEqual(levelHistory)
@@ -1141,6 +1155,43 @@ describe('mock CRM API', () => {
       name: '空领域客户', shortName: 'Blank Segment', segment: '   ', tier: 'A',
       city: '上海', region: '华东', owner: 'person002@crm.example.invalid',
     })).rejects.toMatchObject({ code: 'VALIDATION_ERROR' })
+  })
+
+  it('stores regions in English, shares custom regions and filters by any spelling', async () => {
+    const east = await api.createAccount({
+      name: '区域客户华东', shortName: 'Region East', segment: 'Frontend', tier: 'A',
+      city: '上海', region: '华东区', owner: 'person002@crm.example.invalid',
+    })
+    expect(east.data.region).toBe('East China')
+
+    const custom = await api.createAccount({
+      name: '区域客户东南亚', shortName: 'Region SEA', segment: 'Frontend', tier: 'B',
+      city: 'Singapore', region: '  Southeast   Asia ', owner: 'person005@crm.example.invalid',
+    })
+    const updated = await api.updateAccount(custom.data.id, {
+      name: custom.data.name, shortName: custom.data.shortName, segment: custom.data.segment, tier: custom.data.tier,
+      city: custom.data.city, region: 'south-east asia', owner: custom.data.owner,
+    }, custom.data.modified)
+    expect(updated.data.region).toBe('Southeast Asia')
+    const regions = (await api.listAccountRegions()).data
+    expect(regions.slice(0, 5)).toEqual(['East China', 'South China', 'West China', 'North China', 'Central China'])
+    expect(regions.filter((item) => item === 'Southeast Asia')).toHaveLength(1)
+
+    await expect(api.createAccount({
+      name: '区域客户东北', shortName: 'Region NE', segment: 'Frontend', tier: 'A',
+      city: '沈阳', region: '东北', owner: 'person002@crm.example.invalid',
+    })).rejects.toMatchObject({ code: 'VALIDATION_ERROR', fieldErrors: { region: 'Use an English region name' } })
+    const filtered = (await api.listAccounts({ search: 'Region', region: 'southeast asia', pageSize: 100 })).data.items
+    expect(filtered.map((item) => item.id)).toEqual([custom.data.id])
+
+    const opportunity = await api.createStrategyOpportunity({
+      accountId: 'ACC-001', siteId: 'SITE-001', title: '区域归一商机', owner: 'person002@crm.example.invalid',
+      qualificationConfirmed: true, probabilityLevel: 'pipeline', amount: '1000000.00', amountCny: '1000000.00', intentScore: 30,
+      poDate: '2026-12-31', toolType: 'Inspection', saleType: 'New Tool', subRegion: '华北区', currency: 'CNY',
+    })
+    expect(opportunity.data.subRegion).toBe('North China')
+    await expect(api.updateStrategyOpportunity(opportunity.data.id, { subRegion: 'Mars' }, opportunity.data.modified))
+      .rejects.toMatchObject({ code: 'VALIDATION_ERROR', fieldErrors: { subRegion: 'Unknown region' } })
   })
 
   it('completes opportunity stakeholder and action CRUD with stable ids', async () => {
@@ -1264,7 +1315,7 @@ describe('mock CRM API', () => {
     const engineer = createMockApi({ latency: 0, role: 'Engineer', assignedAccountIds: ['ACC-001'] })
     await expect(engineer.createStrategyOpportunity({
       accountId: 'ACC-001', siteId: 'SITE-001', title: '越权商机', owner: 'person053@crm.example.invalid', qualificationConfirmed: true,
-      amount: '1.00', intentScore: 10, poDate: '2026-12-01', toolType: 'AOI', saleType: 'New Tool', subRegion: '华东', currency: 'CNY',
+      amount: '1.00', amountCny: '1.00', intentScore: 10, poDate: '2026-12-01', toolType: 'AOI', saleType: 'New Tool', subRegion: '华东', currency: 'CNY',
     })).rejects.toMatchObject({ code: 'PERMISSION_DENIED' })
   })
 
@@ -2093,24 +2144,24 @@ describe('mock CRM API', () => {
     const lead = (await conversionApi.getLead('LEAD-002')).data
 
     await expect(conversionApi.convertLead('LEAD-002', {
-      opportunityTitle: '未确认需求的商机', opportunityAmount: '9800000.00', opportunityCloseDate: '2026-12-31',
-      opportunityOwner: 'person002@crm.example.invalid', toolType: 'Inspect X',
+      opportunityTitle: '未确认需求的商机', opportunityAmount: '9800000.00', opportunityAmountCny: '9800000.00', opportunityCloseDate: '2026-12-31',
+      opportunityOwner: 'person002@crm.example.invalid', opportunityProbabilityLevel: 'pipeline', toolType: 'Inspect X',
     })).rejects.toMatchObject({ code: 'VALIDATION_ERROR', fieldErrors: { qualificationConfirmed: 'Required' } })
     expect(salesRepository.snapshot.opportunities).toHaveLength(beforeOpportunities)
     const first = await conversionApi.convertLead('LEAD-002', {
       opportunityTitle: '新线索直接创建商机',
-      opportunityAmount: '9800000.00',
+      opportunityAmount: '9800000.00', opportunityAmountCny: '9800000.00',
       opportunityCloseDate: '2026-12-31',
       opportunityOwner: 'person002@crm.example.invalid',
-      toolType: 'Inspect X',
+      opportunityProbabilityLevel: 'pipeline', toolType: 'Inspect X',
       qualificationConfirmed: true,
     })
     const second = await conversionApi.convertLead('LEAD-002', {
       opportunityTitle: '重复提交不会再创建',
-      opportunityAmount: '1.00',
+      opportunityAmount: '1.00', opportunityAmountCny: '1.00',
       opportunityCloseDate: '2027-01-01',
       opportunityOwner: 'person005@crm.example.invalid',
-      toolType: 'Other',
+      opportunityProbabilityLevel: 'pipeline', toolType: 'Other',
       qualificationConfirmed: true,
     })
 
@@ -2140,7 +2191,7 @@ describe('mock CRM API', () => {
     const before = (await accountApi.listAccounts({ page: 1, pageSize: 100 })).data.items.find((item) => item.id === 'ACC-001')!
     const created = await accountApi.createStrategyOpportunity({
       accountId: 'ACC-001', siteId: 'SITE-001', title: 'Account summary sync', owner: 'person002@crm.example.invalid',
-      qualificationConfirmed: true, amount: '9800000.00', intentScore: 99, poDate: '2026-12-31',
+      qualificationConfirmed: true, probabilityLevel: 'pipeline', amount: '9800000.00', amountCny: '9800000.00', intentScore: 99, poDate: '2026-12-31',
       toolType: 'Inspect X', saleType: 'New Equipment', subRegion: 'East China', currency: 'CNY',
     })
 
@@ -2161,10 +2212,10 @@ describe('mock CRM API', () => {
     const converted = await conversionApi.convertLead(lead.id, {
       qualificationConfirmed: true,
       opportunityTitle: '跨角色客户联通验证',
-      opportunityAmount: '9800000.00',
+      opportunityAmount: '9800000.00', opportunityAmountCny: '9800000.00',
       opportunityCloseDate: '2026-12-31',
       opportunityOwner: 'person002@crm.example.invalid',
-      toolType: 'Inspect X',
+      opportunityProbabilityLevel: 'pipeline', toolType: 'Inspect X',
     })
 
     const recreatedApi = createMockApi({
@@ -2197,10 +2248,10 @@ describe('mock CRM API', () => {
     const converted = await conversionApi.convertLead('LEAD-002', {
       qualificationConfirmed: true,
       opportunityTitle: '武汉新厂 AOI 项目',
-      opportunityAmount: '9800000.00',
+      opportunityAmount: '9800000.00', opportunityAmountCny: '9800000.00',
       opportunityCloseDate: '2026-12-31',
       opportunityOwner: 'person002@crm.example.invalid',
-      toolType: 'Inspect X',
+      opportunityProbabilityLevel: 'pipeline', toolType: 'Inspect X',
       newAccount: {
         name: '示例企业026有限公司',
         shortName: '武汉新芯',
@@ -2230,7 +2281,7 @@ describe('mock CRM API', () => {
     })
 
     const detail = await conversionApi.getAccount360(converted.data.accountId)
-    expect(detail.data.account).toMatchObject({ shortName: '武汉新芯', tier: 'A', city: '武汉', region: '华中' })
+    expect(detail.data.account).toMatchObject({ shortName: '武汉新芯', tier: 'A', city: '武汉', region: 'Central China' })
     expect(detail.data.sites).toContainEqual(expect.objectContaining({ name: '武汉二厂', process: '28nm', status: '建设中' }))
     expect(detail.data.contacts).toContainEqual(expect.objectContaining({
       id: converted.data.contactId,
@@ -2570,5 +2621,122 @@ describe('Installed Tool audit mock parity', () => {
     await expect(manager.updateInstalledTool('TOOL-001', {
       ...master, ownershipType: '',
     }, tool.modified!)).rejects.toMatchObject({ code: 'VALIDATION_ERROR' })
+  })
+})
+
+describe('mock lost-deal post-mortems (services.loss_review parity)', () => {
+  const deal = {
+    accountId: 'ACC-001', siteId: 'SITE-001', title: '丢单复盘 mock', owner: 'person002@crm.example.invalid',
+    qualificationConfirmed: true, probabilityLevel: 'pipeline' as const, amount: '1000.00', amountCny: '1000.00',
+    intentScore: 35, poDate: '2026-11-30', toolType: 'Defect Inspection', saleType: 'New Tool' as const, subRegion: '华东', currency: 'CNY',
+  }
+
+  it('creates one pending review per loss, keeps it on reopen and lists the newest first', async () => {
+    const api = createMockApi({ latency: 0, role: 'Manager', today: '2026-07-17' })
+    const created = await api.createStrategyOpportunity(deal)
+    const lost = await api.markOpportunityLost(created.data.id, { lostReason: '预算冻结' })
+    const event = lost.data.stageHistory.find((row) => row.event === 'marked_lost')!
+    expect(lost.data.lossReviews).toHaveLength(1)
+    expect(lost.data.lossReviews![0]).toMatchObject({
+      opportunityId: created.data.id, stageEventId: event.id, lostAtStage: created.data.stage, lostReason: '预算冻结',
+      status: 'pending', reviewNote: '', reviewedBy: null, reopenedAt: null,
+    })
+    expect(lost.data.lossReviews![0].history.map((row) => row.kind)).toEqual(['Created'])
+
+    const reopened = await api.rollbackOpportunityStage(created.data.id, { targetStage: created.data.stage as never, reason: '客户重启预算' }, lost.data.modified)
+    expect(reopened.data.lostReason).toBe('')
+    expect(reopened.data.lossReviews![0].reopenedAt).toBeTruthy()
+    expect(reopened.data.lossReviews![0].history.map((row) => row.kind)).toEqual(['Reopened', 'Created'])
+
+    const again = await api.markOpportunityLost(created.data.id, { lostReason: '竞品低价' }, reopened.data.modified)
+    expect(again.data.lossReviews!.map((row) => [row.lostReason, row.reopenedAt === null])).toEqual([['竞品低价', true], ['预算冻结', false]])
+    expect((await api.getStrategyOpportunity(created.data.id)).data.lossReviews).toHaveLength(2)
+  })
+
+  it('lets only a Manager record, edit and revert the conclusion, with an audit row each time', async () => {
+    const salesRepository = createMemorySalesRepository()
+    const manager = createMockApi({ latency: 0, role: 'Manager', today: '2026-07-17', salesRepository })
+    const sales = createMockApi({ latency: 0, role: 'Sales', userName: 'Demo Staff 01', today: '2026-07-17', salesRepository })
+    const created = await manager.createStrategyOpportunity(deal)
+    const lost = await manager.markOpportunityLost(created.data.id, { lostReason: '预算冻结' })
+    const pending = lost.data.lossReviews![0]
+    const review = (input: Parameters<typeof manager.reviewOpportunityLoss>[2], version: string, api = manager, id = created.data.id, reviewId = pending.id) =>
+      api.reviewOpportunityLoss(id, reviewId, input, version)
+
+    await expect(review({ status: 'Reviewed', reviewNote: '价格' }, pending.modified, sales)).rejects.toMatchObject({ code: 'PERMISSION_DENIED' })
+    await expect(review({ status: 'Done' as never, reviewNote: '价格' }, pending.modified)).rejects.toMatchObject({ code: 'VALIDATION_ERROR', fieldErrors: { status: 'Invalid value' } })
+    await expect(review({ status: 'Reviewed', reviewNote: '  ' }, pending.modified)).rejects.toMatchObject({ code: 'VALIDATION_ERROR', fieldErrors: { reviewNote: 'Enter 1-4000 characters' } })
+    await expect(review({ status: 'Reviewed', reviewNote: 'x'.repeat(4001) }, pending.modified)).rejects.toMatchObject({ code: 'VALIDATION_ERROR' })
+    await expect(review({ status: 'Reviewed', reviewNote: '价格' }, '')).rejects.toMatchObject({ code: 'VALIDATION_ERROR' })
+    await expect(review({ status: 'Reviewed', reviewNote: '价格' }, '2026-07-17T10:30:00')).rejects.toMatchObject({ code: 'VALIDATION_ERROR' })
+    await expect(review({ status: 'Reviewed', reviewNote: '价格' }, '2020-01-01T00:00:00Z')).rejects.toMatchObject({ code: 'VERSION_CONFLICT' })
+    await expect(review({ status: 'Reviewed', reviewNote: '价格' }, pending.modified, manager, created.data.id, 'LR-missing')).rejects.toMatchObject({ code: 'NOT_FOUND' })
+    await expect(review({ status: 'Pending', reviewNote: '', revertReason: '还要再看' }, pending.modified)).rejects.toMatchObject({ code: 'INVALID_TRANSITION' })
+
+    const done = await review({ status: 'Reviewed', reviewNote: ' 价格高于竞品 15% ' }, pending.modified)
+    expect(done.data).toMatchObject({ status: 'reviewed', reviewNote: '价格高于竞品 15%', reviewedBy: expect.any(String), reviewedAt: done.data.modified })
+    expect(done.data.modified).not.toBe(pending.modified)
+    expect(done.data.history.map((row) => row.kind)).toEqual(['Reviewed', 'Created'])
+    // Saving the same conclusion again is a no-op: no new version, no audit row.
+    const same = await review({ status: 'Reviewed', reviewNote: '价格高于竞品 15%' }, done.data.modified)
+    expect(same.data.modified).toBe(done.data.modified)
+    expect(same.data.history).toHaveLength(2)
+    await expect(review({ status: 'Reviewed', reviewNote: '改结论' }, pending.modified)).rejects.toMatchObject({ code: 'VERSION_CONFLICT' })
+    const edited = await review({ status: 'Reviewed', reviewNote: '价格 + 交期' }, done.data.modified)
+    expect(edited.data.history.map((row) => row.kind)).toEqual(['ReviewUpdated', 'Reviewed', 'Created'])
+
+    await expect(review({ status: 'Pending', reviewNote: '' }, edited.data.modified)).rejects.toMatchObject({ code: 'VALIDATION_ERROR', fieldErrors: { revertReason: 'Enter 1-4000 characters' } })
+    const reverted = await review({ status: 'Pending', reviewNote: '', revertReason: '销售补充了新信息' }, edited.data.modified)
+    expect(reverted.data).toMatchObject({ status: 'pending', reviewNote: '价格 + 交期', reviewedBy: null, reviewedAt: null })
+    expect(reverted.data.history[0]).toMatchObject({ kind: 'ReviewReverted', status: 'pending', note: '价格 + 交期', reason: '销售补充了新信息' })
+    // Sales sees the same record on the deal, and the review never moved the Opportunity's own version.
+    const seen = await sales.getStrategyOpportunity(created.data.id)
+    expect(seen.data.lossReviews![0]).toMatchObject({ id: pending.id, status: 'pending', history: expect.any(Array) })
+    expect(seen.data.modified).toBe(lost.data.modified)
+  })
+
+  it('backfills stored deals lost before reviews existed, once per loss, like the server patch', async () => {
+    const salesRepository = createMemorySalesRepository()
+    const first = createMockApi({ latency: 0, role: 'Manager', today: '2026-07-17', salesRepository })
+    const created = await first.createStrategyOpportunity(deal)
+    const lost = await first.markOpportunityLost(created.data.id, { lostReason: '预算冻结' })
+    const reopened = await first.rollbackOpportunityStage(created.data.id, { targetStage: created.data.stage as never, reason: '重启' }, lost.data.modified)
+    await first.markOpportunityLost(created.data.id, { lostReason: '竞品低价' }, reopened.data.modified)
+    // Data saved by an older build: the losses are in the stage history, the reviews are not.
+    const stored = salesRepository.snapshot.opportunities.find((item) => item.id === created.data.id)!
+    const events = stored.stageHistory.filter((row) => row.event === 'marked_lost').map((row) => row.id)
+    delete stored.lossReviews
+    salesRepository.save()
+
+    const later = createMockApi({ latency: 0, role: 'Manager', today: '2026-07-18', salesRepository })
+    const backfilled = (await later.getStrategyOpportunity(created.data.id)).data.lossReviews!
+    expect(backfilled).toHaveLength(2)
+    expect(new Set(backfilled.map((row) => row.stageEventId))).toEqual(new Set(events))
+    const [newest, oldest] = backfilled
+    expect(newest).toMatchObject({ lostReason: '竞品低价', status: 'pending', reopenedAt: null })
+    expect(newest.history.map((row) => row.kind)).toEqual(['Created'])
+    expect(oldest).toMatchObject({ lostReason: '预算冻结', status: 'pending', reopenedAt: expect.any(String) })
+    expect(oldest.history.map((row) => row.kind)).toEqual(['Reopened', 'Created'])
+    // Nothing is invented: no conclusion, no reviewer, and a second load adds nothing.
+    expect(backfilled.every((row) => row.reviewNote === '' && row.reviewedBy === null)).toBe(true)
+    const again = createMockApi({ latency: 0, role: 'Manager', today: '2026-07-19', salesRepository })
+    expect((await again.getStrategyOpportunity(created.data.id)).data.lossReviews!.map((row) => row.id)).toEqual(backfilled.map((row) => row.id))
+    // Only the older loss missing (saved by an older build before the newer one was recorded): it goes after the newer one.
+    stored.lossReviews = stored.lossReviews!.filter((row) => row.lostReason === '竞品低价')
+    salesRepository.save()
+    const partial = createMockApi({ latency: 0, role: 'Manager', today: '2026-07-20', salesRepository })
+    expect((await partial.getStrategyOpportunity(created.data.id)).data.lossReviews!.map((row) => row.lostReason)).toEqual(['竞品低价', '预算冻结'])
+  })
+
+  it('refuses reviews from roles other than Manager and keeps the Warnings read model server-only', async () => {
+    const salesRepository = createMemorySalesRepository()
+    const manager = createMockApi({ latency: 0, role: 'Manager', today: '2026-07-17', salesRepository })
+    const engineer = createMockApi({ latency: 0, role: 'Engineer', userName: '演示员工14', assignedAccountIds: ['ACC-001'], today: '2026-07-17', salesRepository })
+    const created = await manager.createStrategyOpportunity(deal)
+    const review = (await manager.markOpportunityLost(created.data.id, { lostReason: '预算冻结' })).data.lossReviews![0]
+    await expect(engineer.reviewOpportunityLoss(created.data.id, review.id, { status: 'Reviewed', reviewNote: '价格' }, review.modified))
+      .rejects.toMatchObject({ code: 'PERMISSION_DENIED' })
+    // Like Review and Plan, the Warnings page needs the business API; the mock says so instead of inventing counts.
+    await expect(manager.getWarnings({ period: 'week' } as never)).rejects.toMatchObject({ code: 'BACKEND_NOT_CONNECTED' })
   })
 })

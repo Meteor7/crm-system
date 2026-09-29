@@ -8,6 +8,7 @@ from rayher_crm.api.v1.leads import create_lead as create_lead_endpoint
 from rayher_crm.services.accounts import create_account
 from rayher_crm.services.contacts import create_contact
 from rayher_crm.services.leads import convert_lead, create_lead, delete_lead, get_lead, list_leads, update_lead
+from rayher_crm.services.opportunities import get_strategy_opportunity
 from rayher_crm.services.opportunity_stages import QUALIFIED_OPPORTUNITY
 from rayher_crm.services.sites import create_site
 
@@ -214,10 +215,12 @@ class TestLeadApi(FrappeTestCase):
         payload = {
             "opportunityTitle": "Advanced Packaging Inspection",
             "opportunityAmount": "250000.50",
+            "opportunityAmountCny": "250000.50",
             "opportunityCloseDate": "2026-12-31",
             "opportunityOwner": self.sales,
             "toolType": "Inspection",
             "qualificationConfirmed": True,
+            "opportunityProbabilityLevel": "pipeline",
         }
         payload.update(overrides)
         return payload
@@ -257,7 +260,7 @@ class TestLeadApi(FrappeTestCase):
             [(row.to_stage, row.source, row.event, row.reference_doctype, row.reference_name) for row in stage_history],
             [(QUALIFIED_OPPORTUNITY, "creation", "lead_converted", "Lead", lead["id"])],
         )
-        self.assertEqual((opportunity.probability_level or "", opportunity.score), ("", 20))
+        self.assertEqual((opportunity.probability_level, opportunity.score), ("pipeline", 20))
         self.assertEqual(opportunity.sale_type, "New Equipment")
         self.assertEqual(opportunity.sub_region, "East China")
         self.assertEqual(opportunity.original_amount, opportunity.amount)
@@ -300,6 +303,42 @@ class TestLeadApi(FrappeTestCase):
             frappe.db.get_value("CRM Opportunity", converted["opportunityId"], "opportunity_owner"),
             self.other_sales,
         )
+        # The Manager who converts sets the first level; the new owner takes it from there.
+        self.assertEqual(
+            [
+                (row["from"], row["to"], row["actor"])
+                for row in get_strategy_opportunity(converted["opportunityId"])["probabilityHistory"]
+            ],
+            [("", "pipeline", self.manager)],
+        )
+
+    def test_conversion_needs_a_probability_level_before_it_writes_anything(self):
+        frappe.set_user(self.sales)
+        account = create_account(self._account_input("Lead Level Account"))
+        site = create_site(account["id"], self._site_input("Lead Level Site"))
+        contact_input = self._contact_input(account["id"], "Lead Level Contact")
+        contact_input["siteId"] = site["id"]
+        contact = create_contact(contact_input)
+        lead = create_lead(self._input("Level Required Lead"))
+        existing = {"accountId": account["id"], "contactId": contact["id"], "siteId": site["id"]}
+
+        with self.assertRaises(CrmApiException) as missing:
+            convert_lead(lead["id"], self._conversion_input(**existing, opportunityProbabilityLevel=""))
+        self.assertEqual(
+            (missing.exception.code, missing.exception.field_errors),
+            ("VALIDATION_ERROR", {"opportunityProbabilityLevel": "Required"}),
+        )
+        self.assertEqual(frappe.db.count("CRM Opportunity", {"source_lead": lead["id"]}), 0)
+        self.assertEqual(get_lead(lead["id"])["status"], "New")
+
+        converted = convert_lead(lead["id"], self._conversion_input(**existing, opportunityProbabilityLevel="upside"))
+        opportunity = get_strategy_opportunity(converted["opportunityId"])
+        self.assertEqual(opportunity["probabilityLevel"], "upside")
+        self.assertEqual(
+            [(row["from"], row["to"], row["actor"]) for row in opportunity["probabilityHistory"]],
+            [("", "upside", self.sales)],
+        )
+
     def test_conversion_can_create_account_and_contact_and_rolls_back_each_subwrite(self):
         frappe.set_user(self.sales)
         lead = create_lead(self._input("New Records Conversion Lead"))

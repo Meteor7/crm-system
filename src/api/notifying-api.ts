@@ -219,6 +219,8 @@ function notificationFor(method: keyof CrmApi, args: unknown[], data: unknown): 
         ...recipientFor(text(result.engineerOwner, text(input.engineerOwner))),
       }
     case 'addEvaluationRun':
+    case 'updateEvaluationRun':
+    case 'cancelEvaluationRun':
       return {
         category: 'Evaluation',
         title: 'Test Run 已更新',

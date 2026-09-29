@@ -190,8 +190,10 @@ try {
         }
         opportunityTitle = "HTTP Opportunity $stamp"
         opportunityAmount = '100000.50'
+        opportunityAmountCny = '100000.50'
         opportunityCloseDate = '2026-12-31'
         opportunityOwner = 'Administrator'
+        opportunityProbabilityLevel = 'pipeline'
         toolType = 'Inspection'
         qualificationConfirmed = $true
     }

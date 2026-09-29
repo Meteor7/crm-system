@@ -33,6 +33,7 @@ import {
 } from '@/charts/options'
 import { formatMoney } from '@/domain/money'
 import { formatDisplayDate } from '@/domain/time'
+import { regionLabel } from '@/domain/regions'
 import { readAllPages } from '@/features/shared/read-all-pages'
 import { useI18n, useLocaleMessage } from '@/i18n'
 
@@ -101,7 +102,7 @@ const PROCESS_DIMENSION_LABELS: Record<ProcessDimension, Record<string, [string,
     Scheduled: ['已排期', 'Scheduled'], Testing: ['测试中', 'Testing'], Analysis: ['分析中', 'Analysis'], 'Internal Review': ['内部审核', 'Internal review'],
     'Customer Review': ['客户审核', 'Customer review'], Accepted: ['已接受', 'Accepted'], Rejected: ['已拒绝', 'Rejected'],
   },
-  'run-results': { Planned: ['计划中', 'Planned'], Completed: ['已完成', 'Completed'] },
+  'run-results': { Planned: ['计划中', 'Planned'], Completed: ['已完成', 'Completed'], Cancelled: ['已取消', 'Cancelled'] },
   visits: {
     Planned: ['待拜访', 'To visit'], Visited: ['已拜访', 'Visited'], 'Minutes Submitted': ['待经理审核', 'Awaiting manager review'],
     'Manager Reviewed': ['拜访完成', 'Visit completed'],
@@ -128,7 +129,7 @@ const activeMoney = computed(() => store.data?.kpis.moneyByCurrency.find((item) 
 const bookingOption = computed(() => buildBookingOption((store.data?.bookingByMonth ?? []).filter((item) => item.currency === activeCurrency.value).map((item) => ({ ...item, amount: Number(item.amount) })), locale.value))
 const evaluationOption = computed(() => buildCountBreakdownOption(processRows(store.data?.process.evaluationByStatus ?? [], 'evaluation'), locale.value))
 const accountOption = computed(() => buildAccountContributionOption((store.data?.topAccounts ?? []).filter((item) => item.currency === activeCurrency.value).slice(0, 6).map((item) => ({ label: item.accountName, pipeline: Number(item.pipeline), booking: Number(item.booking) })), locale.value))
-const regionOption = computed(() => buildValueDistributionOption((store.data?.regionDistribution ?? []).filter((item) => item.currency === activeCurrency.value).map((item) => ({ ...item, pipeline: Number(item.pipeline), booking: Number(item.booking) })), locale.value))
+const regionOption = computed(() => buildValueDistributionOption((store.data?.regionDistribution ?? []).filter((item) => item.currency === activeCurrency.value).map((item) => ({ ...item, label: regionLabel(item.label, locale.value), pipeline: Number(item.pipeline), booking: Number(item.booking) })), locale.value))
 const tierOption = computed(() => buildCountBreakdownOption(store.data?.tierDistribution ?? [], locale.value))
 const riskOption = computed(() => buildCountBreakdownOption(processRows(store.data?.riskDistribution ?? [], 'risk'), locale.value))
 

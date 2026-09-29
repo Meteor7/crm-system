@@ -1,0 +1,8 @@
+/* Keep column labels and values on the same edge in both cockpit views. */
+.cockpit-sales-table :is(th, td) {
+  text-align: right;
+}
+
+.cockpit-sales-table :is(th, td):first-child {
+  text-align: left;
+}

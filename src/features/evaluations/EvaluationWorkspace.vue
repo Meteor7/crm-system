@@ -2,7 +2,9 @@
 import { personnelDisplayName } from '@/demo/personnel'
 import { computed, ref, watch } from 'vue'
 import { CalendarClock, ExternalLink, FileText, FlaskConical, History, Plus, UserRoundCog } from '@lucide/vue'
-import type { EvaluationDto, EvaluationPreparationBranch, EvaluationStatus, Tone } from '@/types/crm'
+import type { EvaluationDto, EvaluationPreparationBranch, EvaluationStatus, TestRunDto, Tone } from '@/types/crm'
+import TestRunList from './TestRunList.vue'
+import type { TestRunAction } from './test-run-actions'
 import { canRetestEvaluation, evaluationGroup, evaluationPreparationStatus, evaluationStatusOptions, hasCompletedTestRun, isEvaluationPreparationComplete } from '@/domain/evaluations'
 import { formatDisplayDate } from '@/domain/time'
 import StatusBadge from '@/design-system/StatusBadge.vue'
@@ -38,6 +40,7 @@ const emit = defineEmits<{
   prepare: [evaluation: EvaluationDto, branch: EvaluationPreparationBranch]
   deadline: [evaluation: EvaluationDto]
   run: [evaluation: EvaluationDto]
+  'manage-run': [evaluation: EvaluationDto, run: TestRunDto, action: TestRunAction]
   report: [evaluation: EvaluationDto]
   'customer-report': [evaluation: EvaluationDto]
   retest: [evaluation: EvaluationDto]
@@ -180,6 +183,7 @@ watch(accountId, () => emit('customer-change'))
         </table>
         <p v-if="!scopedRows.length" class="empty-copy">{{ locale === 'en-US' ? 'No Demo Tests in this view' : '当前分类暂无 Demo Test' }}</p>
       </div>
+      <TestRunList v-if="selected" :evaluation="selected" :can-write="canWrite" :busy="Boolean(processing)" @action="(run, action) => emit('manage-run', selected!, run, action)" />
     </div>
 
     <aside class="action-panel" data-evaluation-actions>

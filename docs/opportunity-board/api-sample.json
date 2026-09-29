@@ -1,0 +1,1398 @@
+{
+  "source": "Real HTTP calls on the local test stack (site rayher-crm.test, staging_dataset seed, region migration flag on), 2026-09-22.",
+  "note": "POST bodies are form-encoded; object values (input) are sent as JSON strings. 'response' is the Frappe 'message' envelope.",
+  "samples": [
+    {
+      "title": "Filter options (Sales)",
+      "user": "person063@staff.example.invalid",
+      "request": {
+        "method": "GET",
+        "path": "/api/method/rayher_crm.api.v1.cockpit.get_opportunity_filters",
+        "params": {}
+      },
+      "httpStatus": 200,
+      "response": {
+        "data": {
+          "sales": [
+            {
+              "value": "person063@staff.example.invalid",
+              "label": "演示员工155"
+            }
+          ],
+          "regions": [
+            {
+              "value": "East China",
+              "label": "East China"
+            },
+            {
+              "value": "South China",
+              "label": "South China"
+            },
+            {
+              "value": "West China",
+              "label": "West China"
+            },
+            {
+              "value": "North China",
+              "label": "North China"
+            },
+            {
+              "value": "Central China",
+              "label": "Central China"
+            }
+          ],
+          "markets": [
+            {
+              "value": "Frontend",
+              "label": "Frontend"
+            },
+            {
+              "value": "Advanced Packaging",
+              "label": "Advanced Packaging"
+            },
+            {
+              "value": "Memory",
+              "label": "Memory"
+            },
+            {
+              "value": "Power",
+              "label": "Power"
+            }
+          ],
+          "equipment": [
+            {
+              "value": "Aconca",
+              "label": "Aconca"
+            },
+            {
+              "value": "Drakens",
+              "label": "Drakens"
+            },
+            {
+              "value": "Kibo 4895C",
+              "label": "Kibo 4895C"
+            },
+            {
+              "value": "Nansi",
+              "label": "Nansi"
+            },
+            {
+              "value": "Veymont",
+              "label": "Veymont"
+            }
+          ],
+          "stages": [
+            {
+              "value": "qualified_opportunity",
+              "label": "Qualified opportunity"
+            },
+            {
+              "value": "demo_done",
+              "label": "Demo done"
+            },
+            {
+              "value": "customer_budget_approved",
+              "label": "Customer budget approved"
+            },
+            {
+              "value": "rfq_validated",
+              "label": "RFQ validated"
+            },
+            {
+              "value": "quotation_sent",
+              "label": "Quotation sent"
+            },
+            {
+              "value": "internal_validation",
+              "label": "Internal validation"
+            },
+            {
+              "value": "po_received",
+              "label": "PO received"
+            },
+            {
+              "value": "lost",
+              "label": "Lost"
+            }
+          ],
+          "probabilityLevels": [
+            {
+              "value": "low_probability",
+              "label": "Low probability"
+            },
+            {
+              "value": "pipeline",
+              "label": "Pipeline"
+            },
+            {
+              "value": "upside",
+              "label": "Upside"
+            },
+            {
+              "value": "committed",
+              "label": "Committed"
+            },
+            {
+              "value": "pending",
+              "label": "Pending sales confirmation"
+            }
+          ],
+          "regionReady": true
+        },
+        "meta": {
+          "requestId": "req_d61b45edd00641a69e32dc0c",
+          "generatedAt": "2026-09-22T04:09:42.350588Z"
+        },
+        "warnings": []
+      }
+    },
+    {
+      "title": "Filter options (Manager)",
+      "user": "person060@staff.example.invalid",
+      "request": {
+        "method": "GET",
+        "path": "/api/method/rayher_crm.api.v1.cockpit.get_opportunity_filters",
+        "params": {}
+      },
+      "httpStatus": 200,
+      "response": {
+        "data": {
+          "sales": [
+            {
+              "value": "test@erpnext.com",
+              "label": "Test User"
+            },
+            {
+              "value": "person064@staff.example.invalid",
+              "label": "演示员工201"
+            },
+            {
+              "value": "person063@staff.example.invalid",
+              "label": "演示员工155"
+            }
+          ],
+          "regions": [
+            {
+              "value": "East China",
+              "label": "East China"
+            },
+            {
+              "value": "South China",
+              "label": "South China"
+            },
+            {
+              "value": "West China",
+              "label": "West China"
+            },
+            {
+              "value": "North China",
+              "label": "North China"
+            },
+            {
+              "value": "Central China",
+              "label": "Central China"
+            }
+          ],
+          "markets": [
+            {
+              "value": "Frontend",
+              "label": "Frontend"
+            },
+            {
+              "value": "Advanced Packaging",
+              "label": "Advanced Packaging"
+            },
+            {
+              "value": "Memory",
+              "label": "Memory"
+            },
+            {
+              "value": "Power",
+              "label": "Power"
+            }
+          ],
+          "equipment": [
+            {
+              "value": "Aconca",
+              "label": "Aconca"
+            },
+            {
+              "value": "Drakens",
+              "label": "Drakens"
+            },
+            {
+              "value": "Kibo 4895C",
+              "label": "Kibo 4895C"
+            },
+            {
+              "value": "Nansi",
+              "label": "Nansi"
+            },
+            {
+              "value": "Veymont",
+              "label": "Veymont"
+            }
+          ],
+          "stages": [
+            {
+              "value": "qualified_opportunity",
+              "label": "Qualified opportunity"
+            },
+            {
+              "value": "demo_done",
+              "label": "Demo done"
+            },
+            {
+              "value": "customer_budget_approved",
+              "label": "Customer budget approved"
+            },
+            {
+              "value": "rfq_validated",
+              "label": "RFQ validated"
+            },
+            {
+              "value": "quotation_sent",
+              "label": "Quotation sent"
+            },
+            {
+              "value": "internal_validation",
+              "label": "Internal validation"
+            },
+            {
+              "value": "po_received",
+              "label": "PO received"
+            },
+            {
+              "value": "lost",
+              "label": "Lost"
+            }
+          ],
+          "probabilityLevels": [
+            {
+              "value": "low_probability",
+              "label": "Low probability"
+            },
+            {
+              "value": "pipeline",
+              "label": "Pipeline"
+            },
+            {
+              "value": "upside",
+              "label": "Upside"
+            },
+            {
+              "value": "committed",
+              "label": "Committed"
+            },
+            {
+              "value": "pending",
+              "label": "Pending sales confirmation"
+            }
+          ],
+          "regionReady": true
+        },
+        "meta": {
+          "requestId": "req_eb965f5cd2da43588b5fac53",
+          "generatedAt": "2026-09-22T04:09:42.428959Z"
+        },
+        "warnings": []
+      }
+    },
+    {
+      "title": "Default query, first page (Sales)",
+      "user": "person063@staff.example.invalid",
+      "request": {
+        "method": "POST",
+        "path": "/api/method/rayher_crm.api.v1.cockpit.query_opportunities",
+        "params": {
+          "input": {
+            "page": 1,
+            "pageSize": 3
+          }
+        }
+      },
+      "httpStatus": 200,
+      "response": {
+        "data": {
+          "items": [
+            {
+              "id": "CRM-OPP-00077",
+              "title": "晶元封装 2.5D Nansi 检测项目",
+              "accountId": "示例企业023有限公司",
+              "customerName": "示例企业023有限公司",
+              "region": "East China",
+              "salesId": "person063@staff.example.invalid",
+              "salesName": "演示员工155",
+              "stage": "po_received",
+              "stageChangedAt": "2025-07-03T03:55:00.651167Z",
+              "stageAgeDays": 446,
+              "stageUnchangedOver21Days": false,
+              "probabilityLevel": "pipeline",
+              "equipment": "Nansi",
+              "market": "Advanced Packaging",
+              "amount": "5700000.00",
+              "currency": "CNY",
+              "amountCny": "5700000.00",
+              "nextAction": null
+            },
+            {
+              "id": "CRM-OPP-00104",
+              "title": "润和晶圆 22nm Kibo 4895C 检测项目",
+              "accountId": "示例企业029有限公司",
+              "customerName": "示例企业029有限公司",
+              "region": "East China",
+              "salesId": "person063@staff.example.invalid",
+              "salesName": "演示员工155",
+              "stage": "po_received",
+              "stageChangedAt": "2025-08-06T05:30:00.415189Z",
+              "stageAgeDays": 412,
+              "stageUnchangedOver21Days": false,
+              "probabilityLevel": "committed",
+              "equipment": "Kibo 4895C",
+              "market": "Frontend",
+              "amount": "35500000.00",
+              "currency": "CNY",
+              "amountCny": "35500000.00",
+              "nextAction": {
+                "id": "u3acflenjr",
+                "title": "跟进采购流程与合同条款",
+                "due": "2025-08-24"
+              }
+            },
+            {
+              "id": "CRM-OPP-00137",
+              "title": "示例企业044光电 3D Veymont 量测项目",
+              "accountId": "示例企业043有限公司",
+              "customerName": "示例企业043有限公司",
+              "region": "Central China",
+              "salesId": "person063@staff.example.invalid",
+              "salesName": "演示员工155",
+              "stage": "lost",
+              "stageChangedAt": "2025-11-09T04:28:00.982325Z",
+              "stageAgeDays": 317,
+              "stageUnchangedOver21Days": false,
+              "probabilityLevel": "upside",
+              "equipment": "Veymont",
+              "market": "Frontend",
+              "amount": "9820000.00",
+              "currency": "CNY",
+              "amountCny": "9820000.00",
+              "nextAction": {
+                "id": "u3kfdg3bl2",
+                "title": "确认客户预算审批进度",
+                "due": "2025-11-14"
+              }
+            }
+          ],
+          "asOf": "2026-09-21T16:09:42.456598Z",
+          "summary": {
+            "count": 18,
+            "knownAmountCny": "306310000.00",
+            "missingAmountCount": 0,
+            "stageUnchangedOver21DaysCount": 6,
+            "unknownStageAgeCount": 0,
+            "byProbability": [
+              {
+                "level": "low_probability",
+                "count": 2,
+                "knownAmountCny": "65260000.00",
+                "missingAmountCount": 0
+              },
+              {
+                "level": "pipeline",
+                "count": 5,
+                "knownAmountCny": "83890000.00",
+                "missingAmountCount": 0
+              },
+              {
+                "level": "upside",
+                "count": 6,
+                "knownAmountCny": "53040000.00",
+                "missingAmountCount": 0
+              },
+              {
+                "level": "committed",
+                "count": 5,
+                "knownAmountCny": "104120000.00",
+                "missingAmountCount": 0
+              },
+              {
+                "level": "pending",
+                "count": 0,
+                "knownAmountCny": "0.00",
+                "missingAmountCount": 0
+              }
+            ]
+          },
+          "groups": []
+        },
+        "meta": {
+          "requestId": "req_2be2090f0a4242c59e989a48",
+          "generatedAt": "2026-09-22T04:09:42.485401Z",
+          "page": 1,
+          "pageSize": 3,
+          "total": 18
+        },
+        "warnings": []
+      }
+    },
+    {
+      "title": "Preset 'S6 not yet PO received', grouped by probability (Manager)",
+      "user": "person060@staff.example.invalid",
+      "request": {
+        "method": "POST",
+        "path": "/api/method/rayher_crm.api.v1.cockpit.query_opportunities",
+        "params": {
+          "input": {
+            "scope": {
+              "sales": [],
+              "regions": [],
+              "markets": [],
+              "equipment": []
+            },
+            "match": "all",
+            "conditions": [
+              {
+                "field": "stage",
+                "operator": "in",
+                "value": [
+                  "internal_validation"
+                ]
+              }
+            ],
+            "sort": {
+              "field": "amountCny",
+              "direction": "desc"
+            },
+            "groupBy": "probabilityLevel",
+            "page": 1,
+            "pageSize": 5
+          }
+        }
+      },
+      "httpStatus": 200,
+      "response": {
+        "data": {
+          "items": [
+            {
+              "id": "CRM-OPP-00170",
+              "title": "星晨功率 IGBT Kibo 4895C 检测项目",
+              "accountId": "示例企业020有限公司",
+              "customerName": "示例企业020有限公司",
+              "region": "West China",
+              "salesId": "person064@staff.example.invalid",
+              "salesName": "演示员工201",
+              "stage": "internal_validation",
+              "stageChangedAt": "2026-08-02T05:29:00.005578Z",
+              "stageAgeDays": 51,
+              "stageUnchangedOver21Days": true,
+              "probabilityLevel": "pipeline",
+              "equipment": "Kibo 4895C",
+              "market": "Power",
+              "amount": "28690000.00",
+              "currency": "CNY",
+              "amountCny": "28690000.00",
+              "nextAction": {
+                "id": "u4903tm20i",
+                "title": "更新交付计划并确认交期",
+                "due": "2026-10-03"
+              }
+            },
+            {
+              "id": "CRM-OPP-00157",
+              "title": "晶元封装 2.5D Veymont 量测项目",
+              "accountId": "示例企业023有限公司",
+              "customerName": "示例企业023有限公司",
+              "region": "East China",
+              "salesId": "person063@staff.example.invalid",
+              "salesName": "演示员工155",
+              "stage": "internal_validation",
+              "stageChangedAt": "2026-07-29T03:44:00.260845Z",
+              "stageAgeDays": 55,
+              "stageUnchangedOver21Days": true,
+              "probabilityLevel": "committed",
+              "equipment": "Veymont",
+              "market": "Advanced Packaging",
+              "amount": "23940000.00",
+              "currency": "CNY",
+              "amountCny": "23940000.00",
+              "nextAction": {
+                "id": "u45m2p428s",
+                "title": "确认厂务接口与搬入条件",
+                "due": "2026-07-17"
+              }
+            }
+          ],
+          "asOf": "2026-09-21T16:09:42.511539Z",
+          "summary": {
+            "count": 2,
+            "knownAmountCny": "52630000.00",
+            "missingAmountCount": 0,
+            "stageUnchangedOver21DaysCount": 2,
+            "unknownStageAgeCount": 0,
+            "byProbability": [
+              {
+                "level": "low_probability",
+                "count": 0,
+                "knownAmountCny": "0.00",
+                "missingAmountCount": 0
+              },
+              {
+                "level": "pipeline",
+                "count": 1,
+                "knownAmountCny": "28690000.00",
+                "missingAmountCount": 0
+              },
+              {
+                "level": "upside",
+                "count": 0,
+                "knownAmountCny": "0.00",
+                "missingAmountCount": 0
+              },
+              {
+                "level": "committed",
+                "count": 1,
+                "knownAmountCny": "23940000.00",
+                "missingAmountCount": 0
+              },
+              {
+                "level": "pending",
+                "count": 0,
+                "knownAmountCny": "0.00",
+                "missingAmountCount": 0
+              }
+            ]
+          },
+          "groups": [
+            {
+              "key": "pipeline",
+              "label": "Pipeline",
+              "count": 1,
+              "knownAmountCny": "28690000.00",
+              "missingAmountCount": 0
+            },
+            {
+              "key": "committed",
+              "label": "Committed",
+              "count": 1,
+              "knownAmountCny": "23940000.00",
+              "missingAmountCount": 0
+            }
+          ]
+        },
+        "meta": {
+          "requestId": "req_0717de277638405392e4306b",
+          "generatedAt": "2026-09-22T04:09:42.534409Z",
+          "page": 1,
+          "pageSize": 5,
+          "total": 2
+        },
+        "warnings": []
+      }
+    },
+    {
+      "title": "Open stages unchanged for more than 21 days, East China only (Manager)",
+      "user": "person060@staff.example.invalid",
+      "request": {
+        "method": "POST",
+        "path": "/api/method/rayher_crm.api.v1.cockpit.query_opportunities",
+        "params": {
+          "input": {
+            "scope": {
+              "regions": [
+                "East China"
+              ]
+            },
+            "match": "all",
+            "conditions": [
+              {
+                "field": "stage",
+                "operator": "not_in",
+                "value": [
+                  "po_received",
+                  "lost"
+                ]
+              },
+              {
+                "field": "stageAgeDays",
+                "operator": "gt",
+                "value": 21
+              }
+            ],
+            "sort": {
+              "field": "stageChangedAt",
+              "direction": "asc"
+            },
+            "groupBy": "region",
+            "page": 1,
+            "pageSize": 3
+          }
+        }
+      },
+      "httpStatus": 200,
+      "response": {
+        "data": {
+          "items": [
+            {
+              "id": "CRM-OPP-00157",
+              "title": "晶元封装 2.5D Veymont 量测项目",
+              "accountId": "示例企业023有限公司",
+              "customerName": "示例企业023有限公司",
+              "region": "East China",
+              "salesId": "person063@staff.example.invalid",
+              "salesName": "演示员工155",
+              "stage": "internal_validation",
+              "stageChangedAt": "2026-07-29T03:44:00.260845Z",
+              "stageAgeDays": 55,
+              "stageUnchangedOver21Days": true,
+              "probabilityLevel": "committed",
+              "equipment": "Veymont",
+              "market": "Advanced Packaging",
+              "amount": "23940000.00",
+              "currency": "CNY",
+              "amountCny": "23940000.00",
+              "nextAction": {
+                "id": "u45m2p428s",
+                "title": "确认厂务接口与搬入条件",
+                "due": "2026-07-17"
+              }
+            },
+            {
+              "id": "CRM-OPP-00236",
+              "title": "示例企业036 CIS Veymont 量测项目",
+              "accountId": "示例企业036有限公司",
+              "customerName": "示例企业036有限公司",
+              "region": "East China",
+              "salesId": "person064@staff.example.invalid",
+              "salesName": "演示员工201",
+              "stage": "rfq_validated",
+              "stageChangedAt": "2026-08-01T02:16:00.935556Z",
+              "stageAgeDays": 52,
+              "stageUnchangedOver21Days": true,
+              "probabilityLevel": "pipeline",
+              "equipment": "Veymont",
+              "market": "Frontend",
+              "amount": "30980000.00",
+              "currency": "CNY",
+              "amountCny": "30980000.00",
+              "nextAction": {
+                "id": "u527u8erf4",
+                "title": "确认客户预算审批进度",
+                "due": "2026-10-04"
+              }
+            },
+            {
+              "id": "CRM-OPP-00206",
+              "title": "凌云材料 SOI Veymont 量测项目",
+              "accountId": "示例企业009有限公司",
+              "customerName": "示例企业009有限公司",
+              "region": "East China",
+              "salesId": "person064@staff.example.invalid",
+              "salesName": "演示员工201",
+              "stage": "quotation_sent",
+              "stageChangedAt": "2026-08-16T03:02:00.586714Z",
+              "stageAgeDays": 37,
+              "stageUnchangedOver21Days": true,
+              "probabilityLevel": "low_probability",
+              "equipment": "Veymont",
+              "market": "Frontend",
+              "amount": "4812000.00",
+              "currency": "USD",
+              "amountCny": "34170000.00",
+              "nextAction": {
+                "id": "u4l8g3lu8b",
+                "title": "确认客户预算审批进度",
+                "due": "2026-09-22"
+              }
+            }
+          ],
+          "asOf": "2026-09-21T16:09:42.560825Z",
+          "summary": {
+            "count": 6,
+            "knownAmountCny": "180640000.00",
+            "missingAmountCount": 0,
+            "stageUnchangedOver21DaysCount": 6,
+            "unknownStageAgeCount": 0,
+            "byProbability": [
+              {
+                "level": "low_probability",
+                "count": 2,
+                "knownAmountCny": "66460000.00",
+                "missingAmountCount": 0
+              },
+              {
+                "level": "pipeline",
+                "count": 2,
+                "knownAmountCny": "59570000.00",
+                "missingAmountCount": 0
+              },
+              {
+                "level": "upside",
+                "count": 1,
+                "knownAmountCny": "30670000.00",
+                "missingAmountCount": 0
+              },
+              {
+                "level": "committed",
+                "count": 1,
+                "knownAmountCny": "23940000.00",
+                "missingAmountCount": 0
+              },
+              {
+                "level": "pending",
+                "count": 0,
+                "knownAmountCny": "0.00",
+                "missingAmountCount": 0
+              }
+            ]
+          },
+          "groups": [
+            {
+              "key": "East China",
+              "label": "East China",
+              "count": 6,
+              "knownAmountCny": "180640000.00",
+              "missingAmountCount": 0
+            }
+          ]
+        },
+        "meta": {
+          "requestId": "req_7596f88765844a26a2d2b422",
+          "generatedAt": "2026-09-22T04:09:42.580059Z",
+          "page": 1,
+          "pageSize": 3,
+          "total": 6
+        },
+        "warnings": []
+      }
+    },
+    {
+      "title": "Any-of conditions with a date range and an amount floor (Manager)",
+      "user": "person060@staff.example.invalid",
+      "request": {
+        "method": "POST",
+        "path": "/api/method/rayher_crm.api.v1.cockpit.query_opportunities",
+        "params": {
+          "input": {
+            "match": "any",
+            "conditions": [
+              {
+                "field": "stageChangedAt",
+                "operator": "between",
+                "value": [
+                  "2026-07-01",
+                  "2026-08-31"
+                ]
+              },
+              {
+                "field": "amountCny",
+                "operator": "gte",
+                "value": "5000000"
+              }
+            ],
+            "sort": {
+              "field": "customerName",
+              "direction": "asc"
+            },
+            "groupBy": null,
+            "page": 2,
+            "pageSize": 2
+          }
+        }
+      },
+      "httpStatus": 200,
+      "response": {
+        "data": {
+          "items": [
+            {
+              "id": "CRM-OPP-00297",
+              "title": "示例企业007 Fan-out Aconca 检测项目",
+              "accountId": "示例企业007有限公司",
+              "customerName": "示例企业007有限公司",
+              "region": "South China",
+              "salesId": "person063@staff.example.invalid",
+              "salesName": "演示员工155",
+              "stage": "qualified_opportunity",
+              "stageChangedAt": "2026-09-17T02:59:00.158762Z",
+              "stageAgeDays": 5,
+              "stageUnchangedOver21Days": false,
+              "probabilityLevel": "low_probability",
+              "equipment": "Aconca",
+              "market": "Advanced Packaging",
+              "amount": "4680000.00",
+              "currency": "USD",
+              "amountCny": "33230000.00",
+              "nextAction": {
+                "id": "u5tfefd1ej",
+                "title": "发送测试报告并约定评审会",
+                "due": "2026-10-08"
+              }
+            },
+            {
+              "id": "CRM-OPP-00067",
+              "title": "中原微纳 SiP Aconca 检测项目",
+              "accountId": "示例企业008有限公司",
+              "customerName": "示例企业008有限公司",
+              "region": "Central China",
+              "salesId": "person064@staff.example.invalid",
+              "salesName": "演示员工201",
+              "stage": "po_received",
+              "stageChangedAt": "2026-02-09T01:43:00.084695Z",
+              "stageAgeDays": 225,
+              "stageUnchangedOver21Days": false,
+              "probabilityLevel": "pipeline",
+              "equipment": "Aconca",
+              "market": "Advanced Packaging",
+              "amount": "32850000.00",
+              "currency": "CNY",
+              "amountCny": "32850000.00",
+              "nextAction": null
+            }
+          ],
+          "asOf": "2026-09-21T16:09:42.590247Z",
+          "summary": {
+            "count": 41,
+            "knownAmountCny": "828290000.00",
+            "missingAmountCount": 0,
+            "stageUnchangedOver21DaysCount": 14,
+            "unknownStageAgeCount": 0,
+            "byProbability": [
+              {
+                "level": "low_probability",
+                "count": 8,
+                "knownAmountCny": "203430000.00",
+                "missingAmountCount": 0
+              },
+              {
+                "level": "pipeline",
+                "count": 18,
+                "knownAmountCny": "376860000.00",
+                "missingAmountCount": 0
+              },
+              {
+                "level": "upside",
+                "count": 9,
+                "knownAmountCny": "132860000.00",
+                "missingAmountCount": 0
+              },
+              {
+                "level": "committed",
+                "count": 6,
+                "knownAmountCny": "115140000.00",
+                "missingAmountCount": 0
+              },
+              {
+                "level": "pending",
+                "count": 0,
+                "knownAmountCny": "0.00",
+                "missingAmountCount": 0
+              }
+            ]
+          },
+          "groups": []
+        },
+        "meta": {
+          "requestId": "req_66e16f0b033e4edba7dd71c2",
+          "generatedAt": "2026-09-22T04:09:42.602386Z",
+          "page": 2,
+          "pageSize": 2,
+          "total": 41
+        },
+        "warnings": []
+      }
+    },
+    {
+      "title": "Validation error: unknown stage value",
+      "user": "person060@staff.example.invalid",
+      "request": {
+        "method": "POST",
+        "path": "/api/method/rayher_crm.api.v1.cockpit.query_opportunities",
+        "params": {
+          "input": {
+            "conditions": [
+              {
+                "field": "stage",
+                "operator": "in",
+                "value": [
+                  "won"
+                ]
+              }
+            ]
+          }
+        }
+      },
+      "httpStatus": 422,
+      "response": {
+        "data": null,
+        "meta": {
+          "requestId": "req_31f1121a4c674892acb0ceee",
+          "generatedAt": "2026-09-22T04:09:42.676324Z"
+        },
+        "warnings": [],
+        "error": {
+          "code": "VALIDATION_ERROR",
+          "message": "conditions[0].value has an unknown value: won.",
+          "retryable": false,
+          "fieldErrors": {
+            "conditions[0].value": "conditions[0].value has an unknown value: won."
+          }
+        }
+      }
+    },
+    {
+      "title": "Validation error: Sales asking for another rep",
+      "user": "person063@staff.example.invalid",
+      "request": {
+        "method": "POST",
+        "path": "/api/method/rayher_crm.api.v1.cockpit.query_opportunities",
+        "params": {
+          "input": {
+            "scope": {
+              "sales": [
+                "person064@staff.example.invalid"
+              ]
+            }
+          }
+        }
+      },
+      "httpStatus": 422,
+      "response": {
+        "data": null,
+        "meta": {
+          "requestId": "req_92a2d91fe4414b1788d4f878",
+          "generatedAt": "2026-09-22T04:09:42.700924Z"
+        },
+        "warnings": [],
+        "error": {
+          "code": "VALIDATION_ERROR",
+          "message": "scope.sales has an unknown value: person064@staff.example.invalid.",
+          "retryable": false,
+          "fieldErrors": {
+            "scope.sales": "scope.sales has an unknown value: person064@staff.example.invalid."
+          }
+        }
+      }
+    },
+    {
+      "title": "Save a new query (Sales)",
+      "user": "person063@staff.example.invalid",
+      "request": {
+        "method": "POST",
+        "path": "/api/method/rayher_crm.api.v1.cockpit.save_opportunity_query",
+        "params": {
+          "input": {
+            "name": "Demo 已完成（7 月后）",
+            "definition": {
+              "scope": {
+                "sales": [],
+                "regions": [],
+                "markets": [],
+                "equipment": []
+              },
+              "match": "all",
+              "conditions": [
+                {
+                  "field": "stage",
+                  "operator": "in",
+                  "value": [
+                    "demo_done"
+                  ]
+                },
+                {
+                  "field": "stageChangedAt",
+                  "operator": "after",
+                  "value": "2026-07-01"
+                }
+              ],
+              "sort": {
+                "field": "stageChangedAt",
+                "direction": "asc"
+              },
+              "groupBy": null,
+              "columns": [
+                "customerName",
+                "region",
+                "sales",
+                "stage",
+                "stageChangedAt",
+                "probabilityLevel",
+                "equipment",
+                "market",
+                "amount",
+                "nextAction"
+              ]
+            }
+          }
+        }
+      },
+      "httpStatus": 200,
+      "response": {
+        "data": {
+          "id": "uq3i9iuugj",
+          "name": "Demo 已完成（7 月后）",
+          "definition": {
+            "columns": [
+              "customerName",
+              "region",
+              "sales",
+              "stage",
+              "stageChangedAt",
+              "probabilityLevel",
+              "equipment",
+              "market",
+              "amount",
+              "nextAction"
+            ],
+            "conditions": [
+              {
+                "field": "stage",
+                "operator": "in",
+                "value": [
+                  "demo_done"
+                ]
+              },
+              {
+                "field": "stageChangedAt",
+                "operator": "after",
+                "value": "2026-07-01"
+              }
+            ],
+            "groupBy": null,
+            "match": "all",
+            "scope": {
+              "equipment": [],
+              "markets": [],
+              "regions": [],
+              "sales": []
+            },
+            "sort": {
+              "direction": "asc",
+              "field": "stageChangedAt"
+            }
+          },
+          "modified": "2026-09-21T16:09:42.767558Z"
+        },
+        "meta": {
+          "requestId": "req_c9b4268c8a914cd4a46fdddd",
+          "generatedAt": "2026-09-22T04:09:42.793701Z"
+        },
+        "warnings": []
+      }
+    },
+    {
+      "title": "List own saved queries (Sales)",
+      "user": "person063@staff.example.invalid",
+      "request": {
+        "method": "GET",
+        "path": "/api/method/rayher_crm.api.v1.cockpit.list_opportunity_queries",
+        "params": {}
+      },
+      "httpStatus": 200,
+      "response": {
+        "data": {
+          "items": [
+            {
+              "id": "uq3i9iuugj",
+              "name": "Demo 已完成（7 月后）",
+              "definition": {
+                "columns": [
+                  "customerName",
+                  "region",
+                  "sales",
+                  "stage",
+                  "stageChangedAt",
+                  "probabilityLevel",
+                  "equipment",
+                  "market",
+                  "amount",
+                  "nextAction"
+                ],
+                "conditions": [
+                  {
+                    "field": "stage",
+                    "operator": "in",
+                    "value": [
+                      "demo_done"
+                    ]
+                  },
+                  {
+                    "field": "stageChangedAt",
+                    "operator": "after",
+                    "value": "2026-07-01"
+                  }
+                ],
+                "groupBy": null,
+                "match": "all",
+                "scope": {
+                  "equipment": [],
+                  "markets": [],
+                  "regions": [],
+                  "sales": []
+                },
+                "sort": {
+                  "direction": "asc",
+                  "field": "stageChangedAt"
+                }
+              },
+              "modified": "2026-09-21T16:09:42.767558Z"
+            }
+          ]
+        },
+        "meta": {
+          "requestId": "req_d3518f29190048b1b53025bb",
+          "generatedAt": "2026-09-22T04:09:42.811147Z"
+        },
+        "warnings": []
+      }
+    },
+    {
+      "title": "Another rep sees none of them",
+      "user": "person064@staff.example.invalid",
+      "request": {
+        "method": "GET",
+        "path": "/api/method/rayher_crm.api.v1.cockpit.list_opportunity_queries",
+        "params": {}
+      },
+      "httpStatus": 200,
+      "response": {
+        "data": {
+          "items": []
+        },
+        "meta": {
+          "requestId": "req_595acf995c394b24a350ce69",
+          "generatedAt": "2026-09-22T04:09:42.830864Z"
+        },
+        "warnings": []
+      }
+    },
+    {
+      "title": "Another rep cannot delete it",
+      "user": "person064@staff.example.invalid",
+      "request": {
+        "method": "POST",
+        "path": "/api/method/rayher_crm.api.v1.cockpit.delete_opportunity_query",
+        "params": {
+          "id": "uq3i9iuugj",
+          "expectedModified": "2026-09-21T16:09:42.767558Z"
+        }
+      },
+      "httpStatus": 404,
+      "response": {
+        "data": null,
+        "meta": {
+          "requestId": "req_a475924ad68e4748b17f61a8",
+          "generatedAt": "2026-09-22T04:09:42.842707Z"
+        },
+        "warnings": [],
+        "error": {
+          "code": "NOT_FOUND",
+          "message": "Saved query was not found.",
+          "retryable": false,
+          "fieldErrors": {}
+        }
+      }
+    },
+    {
+      "title": "Update with expectedModified (Sales)",
+      "user": "person063@staff.example.invalid",
+      "request": {
+        "method": "POST",
+        "path": "/api/method/rayher_crm.api.v1.cockpit.save_opportunity_query",
+        "params": {
+          "id": "uq3i9iuugj",
+          "expectedModified": "2026-09-21T16:09:42.767558Z",
+          "input": {
+            "name": "Demo 已完成（7 月后）",
+            "definition": {
+              "scope": {
+                "sales": [],
+                "regions": [],
+                "markets": [],
+                "equipment": []
+              },
+              "match": "all",
+              "conditions": [
+                {
+                  "field": "stage",
+                  "operator": "in",
+                  "value": [
+                    "demo_done"
+                  ]
+                },
+                {
+                  "field": "stageChangedAt",
+                  "operator": "after",
+                  "value": "2026-07-01"
+                }
+              ],
+              "sort": {
+                "field": "stageChangedAt",
+                "direction": "asc"
+              },
+              "groupBy": "sales",
+              "columns": [
+                "customerName",
+                "region",
+                "sales",
+                "stage",
+                "stageChangedAt",
+                "probabilityLevel",
+                "equipment",
+                "market",
+                "amount",
+                "nextAction"
+              ]
+            }
+          }
+        }
+      },
+      "httpStatus": 200,
+      "response": {
+        "data": {
+          "id": "uq3i9iuugj",
+          "name": "Demo 已完成（7 月后）",
+          "definition": {
+            "columns": [
+              "customerName",
+              "region",
+              "sales",
+              "stage",
+              "stageChangedAt",
+              "probabilityLevel",
+              "equipment",
+              "market",
+              "amount",
+              "nextAction"
+            ],
+            "conditions": [
+              {
+                "field": "stage",
+                "operator": "in",
+                "value": [
+                  "demo_done"
+                ]
+              },
+              {
+                "field": "stageChangedAt",
+                "operator": "after",
+                "value": "2026-07-01"
+              }
+            ],
+            "groupBy": "sales",
+            "match": "all",
+            "scope": {
+              "equipment": [],
+              "markets": [],
+              "regions": [],
+              "sales": []
+            },
+            "sort": {
+              "direction": "asc",
+              "field": "stageChangedAt"
+            }
+          },
+          "modified": "2026-09-21T16:09:42.866613Z"
+        },
+        "meta": {
+          "requestId": "req_93df19bf06474e4c8be4734a",
+          "generatedAt": "2026-09-22T04:09:42.871693Z"
+        },
+        "warnings": []
+      }
+    },
+    {
+      "title": "Stale expectedModified is rejected",
+      "user": "person063@staff.example.invalid",
+      "request": {
+        "method": "POST",
+        "path": "/api/method/rayher_crm.api.v1.cockpit.save_opportunity_query",
+        "params": {
+          "id": "uq3i9iuugj",
+          "expectedModified": "2026-09-21T16:09:42.767558Z",
+          "input": {
+            "name": "Renamed",
+            "definition": {
+              "scope": {
+                "sales": [],
+                "regions": [],
+                "markets": [],
+                "equipment": []
+              },
+              "match": "all",
+              "conditions": [
+                {
+                  "field": "stage",
+                  "operator": "in",
+                  "value": [
+                    "demo_done"
+                  ]
+                },
+                {
+                  "field": "stageChangedAt",
+                  "operator": "after",
+                  "value": "2026-07-01"
+                }
+              ],
+              "sort": {
+                "field": "stageChangedAt",
+                "direction": "asc"
+              },
+              "groupBy": null,
+              "columns": [
+                "customerName",
+                "region",
+                "sales",
+                "stage",
+                "stageChangedAt",
+                "probabilityLevel",
+                "equipment",
+                "market",
+                "amount",
+                "nextAction"
+              ]
+            }
+          }
+        }
+      },
+      "httpStatus": 409,
+      "response": {
+        "data": null,
+        "meta": {
+          "requestId": "req_4c57367c7ce14157a9a7fe97",
+          "generatedAt": "2026-09-22T04:09:42.900561Z"
+        },
+        "warnings": [],
+        "error": {
+          "code": "VERSION_CONFLICT",
+          "message": "The record was changed by another request.",
+          "retryable": false,
+          "fieldErrors": {}
+        }
+      }
+    },
+    {
+      "title": "Delete (Sales)",
+      "user": "person063@staff.example.invalid",
+      "request": {
+        "method": "POST",
+        "path": "/api/method/rayher_crm.api.v1.cockpit.delete_opportunity_query",
+        "params": {
+          "id": "uq3i9iuugj",
+          "expectedModified": "2026-09-21T16:09:42.866613Z"
+        }
+      },
+      "httpStatus": 200,
+      "response": {
+        "data": {
+          "id": "uq3i9iuugj",
+          "status": "Deleted"
+        },
+        "meta": {
+          "requestId": "req_e671b21d469a4d32bbbe3efc",
+          "generatedAt": "2026-09-22T04:09:44.045416Z"
+        },
+        "warnings": []
+      }
+    }
+  ]
+}

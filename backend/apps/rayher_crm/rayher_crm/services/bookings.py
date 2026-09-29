@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from decimal import Decimal
 from typing import Any
 
 import frappe
@@ -23,12 +24,66 @@ from rayher_crm.services.common import (
 from rayher_crm.services.concurrency import lock_document
 from rayher_crm.services.notifications import create_notification
 from rayher_crm.services.contacts import _contact_account
-from rayher_crm.services.money import MoneyValidationError, as_decimal, decimal_string
+from rayher_crm.services.money import (
+    MoneyValidationError,
+    as_decimal,
+    decimal_string,
+    optional_money_text,
+    required_positive_money,
+)
 
 
 BOOKING_STATUSES = {"Confirmed", "Pending", "Completed", "Cancelled"}
 BOOKING_SOURCES = {"Opportunity", "Upsell"}
 BOOKING_TYPES = {"Equipment", "Service"}
+# Where the date on the customer's PO came from: entered when the PO was confirmed, typed on an
+# Upsell Booking, or filled in or corrected later by a Manager.
+ACTUAL_PO_DATE_SOURCES = ("po_confirmation", "booking_entry", "backfill")
+
+
+def validate_actual_po_date(value: Any, *, required: bool) -> str | None:
+    """The date on the customer's PO: a real calendar date that is not in the future.
+
+    It is not the Opportunity's `po_date`, which is only the expected PO date.
+    """
+
+    actual_po_date = optional_date(value, "actualPoDate")
+    if not actual_po_date:
+        if required:
+            raise CrmApiException(
+                "VALIDATION_ERROR", "actualPoDate is required.", field_errors={"actualPoDate": "Required"},
+            )
+        return None
+    if actual_po_date > frappe.utils.today():
+        raise CrmApiException(
+            "VALIDATION_ERROR", "actualPoDate cannot be in the future.",
+            field_errors={"actualPoDate": "Cannot be in the future"},
+        )
+    return actual_po_date
+
+
+def validate_booking_amount_cny(currency: str, value: Any, *, required: bool) -> Decimal:
+    """The amount in CNY of a Booking in another currency; 0 means nobody has entered it.
+
+    A CNY Booking's amount is already in CNY, so nothing is stored for it and any value sent
+    is ignored. For another currency it is required once the order is confirmed.
+    """
+
+    if currency == "CNY":
+        return Decimal("0")
+    if value is None or str(value).strip() == "":
+        if required:
+            raise CrmApiException("VALIDATION_ERROR", "amountCny is required.", field_errors={"amountCny": "Required"})
+        return Decimal("0")
+    return required_positive_money(value, "amountCny")
+
+
+def cny_amount_text(currency: Any, amount: Any, amount_cny: Any) -> str:
+    """The order's amount in CNY: its amount for a CNY Booking, otherwise the entered CNY amount or ""."""
+
+    if str(currency or "CNY").upper() == "CNY":
+        return decimal_string(amount or 0)
+    return optional_money_text(amount_cny)
 
 
 def delete_booking(name: str) -> dict[str, str]:
@@ -130,6 +185,7 @@ def _validate_booking(payload: dict[str, Any], booking_id: str | None = None) ->
         "ddl": ddl,
         "amount": _nonnegative_money(payload.get("amount")),
         "currency": currency,
+        "amount_cny": validate_booking_amount_cny(currency, payload.get("amountCny"), required=status == "Confirmed"),
         "status": status,
         "booking_owner": _booking_owner(payload.get("owner")),
         "source": source,
@@ -144,9 +200,10 @@ def serialize_booking(doc) -> dict[str, Any]:
     contact = frappe.db.get_value("Contact", doc.primary_contact, ["first_name", "last_name"], as_dict=True)
     contact_name = " ".join(part for part in ((contact.first_name if contact else ""), (contact.last_name if contact else "")) if part).strip()
     exact_amount = frappe.db.sql(
-        "SELECT CAST(`amount` AS CHAR) AS `amount` FROM `tabCRM Booking` WHERE `name` = %s",
+        "SELECT CAST(`amount` AS CHAR) AS `amount`, CAST(`amount_cny` AS CHAR) AS `amount_cny` FROM `tabCRM Booking` WHERE `name` = %s",
         (doc.name,), as_dict=True,
     )
+    amount = exact_amount[0].amount if exact_amount else doc.amount or 0
     result = {
         "id": doc.name,
         "accountId": doc.account,
@@ -157,10 +214,15 @@ def serialize_booking(doc) -> dict[str, Any]:
         "equipment": doc.equipment,
         "quantity": int(doc.quantity or 0),
         "ddl": str(doc.ddl or ""),
-        "amount": decimal_string(exact_amount[0].amount if exact_amount else doc.amount or 0),
+        "amount": decimal_string(amount),
         "currency": doc.currency,
+        "amountCny": cny_amount_text(doc.currency, amount, exact_amount[0].amount_cny if exact_amount else 0),
+        "amountCnyNote": doc.amount_cny_note or "",
         "status": doc.status,
         "bookingDate": str(doc.booking_date or ""),
+        "actualPoDate": str(doc.actual_po_date or ""),
+        "actualPoDateSource": doc.actual_po_date_source or "",
+        "actualPoDateNote": doc.actual_po_date_note or "",
         "owner": doc.booking_owner,
         "source": doc.source,
         "bookingType": doc.booking_type or "Equipment",
@@ -242,6 +304,9 @@ def list_bookings(query: dict[str, Any] | None = None):
         if value and value != "All":
             where_parts.append(f"`{column}` = %s")
             values.append(value)
+    if str(query.get("actualPoDateMissing") or "").strip().lower() in {"1", "true"}:
+        # Orders whose PO is confirmed but whose PO date was never recorded, for a Manager to fill in.
+        where_parts.append("`actual_po_date` IS NULL AND `status` IN ('Confirmed', 'Completed')")
     date_from = str(query.get("dateFrom") or "").strip()
     date_to = str(query.get("dateTo") or "").strip()
     if date_from:
@@ -273,6 +338,9 @@ def create_booking(payload: dict[str, Any]) -> dict[str, Any]:
             "Opportunity Bookings are created by confirming the PO or approving an internal validation.",
         )
     values = _validate_booking(payload)
+    actual_po_date = validate_actual_po_date(payload.get("actualPoDate"), required=False)
+    if actual_po_date:
+        values.update({"actual_po_date": actual_po_date, "actual_po_date_source": "booking_entry"})
     savepoint = f"crm_booking_create_{frappe.generate_hash(length=8)}"
     frappe.db.savepoint(savepoint)
     try:
@@ -295,15 +363,18 @@ def create_booking(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 def _current_input(doc) -> dict[str, Any]:
-    exact_amount = frappe.db.sql(
-        "SELECT CAST(`amount` AS CHAR) FROM `tabCRM Booking` WHERE `name` = %s",
+    exact_amount, exact_amount_cny = frappe.db.sql(
+        "SELECT CAST(`amount` AS CHAR), CAST(`amount_cny` AS CHAR) FROM `tabCRM Booking` WHERE `name` = %s",
         (doc.name,),
-    )[0][0]
+    )[0]
     return {
         "accountId": doc.account, "primaryContactId": doc.primary_contact,
         "equipment": doc.equipment, "quantity": doc.quantity, "ddl": str(doc.ddl or ""),
         "amount": exact_amount, "currency": doc.currency or "CNY", "status": doc.status, "owner": doc.booking_owner,
         "source": doc.source, "bookingType": doc.booking_type or "Equipment", "sourceOpportunityId": doc.source_opportunity or "", "note": doc.note or "",
+        "actualPoDate": str(doc.actual_po_date or ""),
+        # Empty until someone enters it, so a confirmed foreign-currency order asks for it on any edit.
+        "amountCny": optional_money_text(exact_amount_cny),
     }
 
 
@@ -326,6 +397,58 @@ def _assert_opportunity_booking_edit(doc, merged: dict[str, Any]) -> None:
         raise CrmApiException("BOOKING_STATUS_INVALID", "An Opportunity Booking can only be changed to Cancelled.")
 
 
+def _edited_actual_po_date(doc, requested: Any) -> str | None:
+    """An ordinary edit may only give an Upsell Booking its first actual PO date.
+
+    The date of a confirmed Opportunity PO, and any date already recorded, changes only through
+    a Manager's correction. Returns the date to set, or None when nothing changes.
+    """
+
+    current = str(doc.actual_po_date or "")
+    if str(requested or "") == current:
+        return None
+    if doc.source == "Opportunity" or current:
+        raise CrmApiException(
+            "VALIDATION_ERROR",
+            "The actual PO date changes only through a Manager's correction.",
+            field_errors={"actualPoDate": "Manager correction only"},
+        )
+    return validate_actual_po_date(requested, required=True)
+
+
+def _assert_amount_cny_edit(doc, recorded: str, merged: dict[str, Any]) -> None:
+    """An ordinary edit may only give a foreign-currency order its first CNY amount.
+
+    Once recorded it changes only through a Manager's correction, which keeps the reason and
+    the Opportunity history; an edit that leaves it empty keeps the recorded amount. A Pending
+    Booking is not an order yet, so its amount stays editable.
+    """
+
+    if doc.status == "Pending":
+        return
+    currency = str(merged.get("currency") or "CNY").strip().upper()
+    if currency != str(doc.currency or "CNY").strip().upper():
+        # Switching to CNY clears the separately recorded amount. Switching back would then
+        # look like its first entry and bypass the Manager correction and its reason.
+        raise CrmApiException(
+            "VALIDATION_ERROR", "The currency of a confirmed order cannot change through an ordinary edit.",
+            field_errors={"currency": "Confirmed order currency is fixed"},
+        )
+    if currency == "CNY":
+        return
+    if not recorded:
+        return
+    requested = merged.get("amountCny")
+    if requested is None or str(requested).strip() == "":
+        merged["amountCny"] = recorded
+    elif required_positive_money(requested, "amountCny") != as_decimal(recorded):
+        raise CrmApiException(
+            "VALIDATION_ERROR",
+            "The CNY amount changes only through a Manager's correction.",
+            field_errors={"amountCny": "Manager correction only"},
+        )
+
+
 def update_booking(name: str, payload: dict[str, Any], expected_modified: Any) -> dict[str, Any]:
     assert_capability("deal:write")
     current = _require_booking(name)
@@ -338,6 +461,7 @@ def update_booking(name: str, payload: dict[str, Any], expected_modified: Any) -
     if doc.installed_tool or doc.status == "Completed":
         raise CrmApiException("BOOKING_LOCKED", "Converted Booking cannot be edited.")
     merged = _current_input(doc)
+    recorded_amount_cny = merged["amountCny"]
     merged.update(payload)
     if str(merged.get("source") or "").strip() != doc.source:
         # Opportunity Bookings only come from PO confirmation or internal validation, so an
@@ -345,11 +469,19 @@ def update_booking(name: str, payload: dict[str, Any], expected_modified: Any) -
         raise CrmApiException("BOOKING_SOURCE_INVALID", "A Booking's source cannot change.")
     if doc.source == "Opportunity":
         _assert_opportunity_booking_edit(doc, merged)
+    actual_po_date = _edited_actual_po_date(doc, merged.get("actualPoDate"))
+    _assert_amount_cny_edit(doc, recorded_amount_cny, merged)
     previous_owner = doc.booking_owner
     savepoint = f"crm_booking_update_{frappe.generate_hash(length=8)}"
     frappe.db.savepoint(savepoint)
     for fieldname, value in _validate_booking(merged, name).items():
         setattr(doc, fieldname, value)
+    if actual_po_date:
+        doc.actual_po_date = actual_po_date
+        doc.actual_po_date_source = "booking_entry"
+    if doc.amount_cny != as_decimal(recorded_amount_cny or 0):
+        # A correction's reason describes the amount it came with, so it goes when that amount does.
+        doc.amount_cny_note = None
     try:
         doc.save(ignore_permissions=True)
         touch_source_opportunity(doc)
@@ -367,6 +499,113 @@ def update_booking(name: str, payload: dict[str, Any], expected_modified: Any) -
         raise
     doc.reload()
     return serialize_booking(doc)
+
+
+def set_booking_actual_po_date(name: str, payload: dict[str, Any], expected_modified: Any) -> dict[str, Any]:
+    """A Manager fills in or corrects the date on a confirmed order's PO; a correction needs a reason."""
+
+    assert_capability("deal:write")
+    if resolve_crm_role() != "Manager":
+        raise CrmApiException("PERMISSION_DENIED", "Only a Manager can fill in or correct the actual PO date.")
+    current = _require_booking(name)
+    _lock_source_opportunity(current)
+    doc = lock_document("CRM Booking", name, expected_modified, "NOT_FOUND")
+    if not frappe.has_permission("CRM Booking", "read", doc=doc, user=frappe.session.user):
+        raise CrmApiException("SCOPE_DENIED", "The Booking is outside the current user scope.")
+    # Completed orders count too: converting to an Installed Tool locks every other edit.
+    if doc.status not in ("Confirmed", "Completed"):
+        raise CrmApiException(
+            "BOOKING_STATUS_INVALID", "Only a Confirmed or Completed Booking has an actual PO date.",
+        )
+    actual_po_date = validate_actual_po_date(payload.get("actualPoDate"), required=True)
+    previous = str(doc.actual_po_date or "")
+    if actual_po_date == previous:
+        raise CrmApiException(
+            "VALIDATION_ERROR", "actualPoDate is unchanged.", field_errors={"actualPoDate": "Unchanged"},
+        )
+    reason = str(payload.get("reason") or "").strip()
+    if previous and not reason:
+        raise CrmApiException(
+            "VALIDATION_ERROR", "A reason is required to correct the actual PO date.",
+            field_errors={"reason": "Required"},
+        )
+    savepoint = f"crm_booking_po_date_{frappe.generate_hash(length=8)}"
+    frappe.db.savepoint(savepoint)
+    try:
+        doc.actual_po_date = actual_po_date
+        doc.actual_po_date_source = "backfill"
+        doc.actual_po_date_note = reason or None
+        doc.save(ignore_permissions=True)
+        touch_source_opportunity(doc)
+        if doc.source_opportunity:
+            # Written inline: services.opportunities imports this module, not the other way round.
+            frappe.get_doc({
+                "doctype": "CRM Opportunity History", "opportunity": doc.source_opportunity,
+                "actor": frappe.session.user, "at": frappe.utils.now_datetime(), "field": "bookingPoDate",
+                "from_value": previous, "to_value": actual_po_date,
+            }).insert(ignore_permissions=True)
+    except Exception:
+        frappe.db.rollback(save_point=savepoint)
+        raise
+    doc.reload()
+    return serialize_booking(doc)
+
+
+def set_booking_amount_cny(name: str, payload: dict[str, Any], expected_modified: Any) -> dict[str, Any]:
+    """A Manager fills in or corrects the CNY amount of a confirmed foreign-currency order.
+
+    Completed orders are locked against ordinary edits, so this is how theirs gets filled in;
+    a correction needs a reason.
+    """
+
+    assert_capability("deal:write")
+    if resolve_crm_role() != "Manager":
+        raise CrmApiException("PERMISSION_DENIED", "Only a Manager can fill in or correct the CNY amount.")
+    current = _require_booking(name)
+    _lock_source_opportunity(current)
+    doc = lock_document("CRM Booking", name, expected_modified, "NOT_FOUND")
+    if not frappe.has_permission("CRM Booking", "read", doc=doc, user=frappe.session.user):
+        raise CrmApiException("SCOPE_DENIED", "The Booking is outside the current user scope.")
+    if doc.status not in ("Confirmed", "Completed"):
+        raise CrmApiException(
+            "BOOKING_STATUS_INVALID", "Only a Confirmed or Completed Booking has a CNY amount to record.",
+        )
+    if (doc.currency or "CNY").upper() == "CNY":
+        raise CrmApiException(
+            "VALIDATION_ERROR", "A CNY Booking uses its amount.", field_errors={"amountCny": "CNY Booking"},
+        )
+    amount_cny = required_positive_money(payload.get("amountCny"), "amountCny")
+    previous = as_decimal(
+        frappe.db.sql("SELECT CAST(`amount_cny` AS CHAR) FROM `tabCRM Booking` WHERE `name` = %s", (name,))[0][0] or 0
+    )
+    if amount_cny == previous:
+        raise CrmApiException("VALIDATION_ERROR", "amountCny is unchanged.", field_errors={"amountCny": "Unchanged"})
+    reason = str(payload.get("reason") or "").strip()
+    if previous and not reason:
+        raise CrmApiException(
+            "VALIDATION_ERROR", "A reason is required to correct the CNY amount.", field_errors={"reason": "Required"},
+        )
+    savepoint = f"crm_booking_amount_cny_{frappe.generate_hash(length=8)}"
+    frappe.db.savepoint(savepoint)
+    try:
+        doc.amount_cny = amount_cny
+        doc.amount_cny_note = reason or None
+        doc.save(ignore_permissions=True)
+        touch_source_opportunity(doc)
+        if doc.source_opportunity:
+            # Written inline: services.opportunities imports this module, not the other way round.
+            frappe.get_doc({
+                "doctype": "CRM Opportunity History", "opportunity": doc.source_opportunity,
+                "actor": frappe.session.user, "at": frappe.utils.now_datetime(), "field": "bookingAmountCny",
+                "from_value": optional_money_text(previous), "to_value": decimal_string(amount_cny),
+            }).insert(ignore_permissions=True)
+    except Exception:
+        frappe.db.rollback(save_point=savepoint)
+        raise
+    doc.reload()
+    return serialize_booking(doc)
+
+
 def complete_service_booking(name: str, expected_modified: Any) -> dict[str, Any]:
     assert_capability("deal:write")
     current = _require_booking(name)

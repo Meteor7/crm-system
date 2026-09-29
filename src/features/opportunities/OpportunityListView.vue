@@ -24,6 +24,8 @@ import { useAppStore } from '@/stores/app'
 import type { AccountSummaryDto, SiteDto } from '@/types/crm'
 import type { CreateStrategyOpportunityInput, OpportunityProbabilityLevelFilter, StrategyOpportunityDto } from '@/types/workspaces'
 import { formatMoney, moneyByCurrency } from '@/domain/money'
+import { EQUIPMENT_PRESETS } from '@/domain/equipment'
+import { loadEquipmentTypes } from '@/features/opportunities/equipment-types'
 import { useI18n, useLocaleMessage } from '@/i18n'
 
 const props = withDefaults(defineProps<{ apiClient?: CrmApi }>(), { apiClient: () => defaultApi })
@@ -44,6 +46,8 @@ const requestId = ref('')
 const busy = ref(false)
 const modalError = useLocaleMessage()
 const editorOpen = ref(false)
+const equipmentTypes = ref<string[]>([...EQUIPMENT_PRESETS])
+watch(editorOpen, (open) => { if (open) void loadEquipmentTypes(props.apiClient).then((types) => { equipmentTypes.value = types }) })
 const layout = ref<'list' | 'board'>('list')
 const stage = ref(normalizeStageFilter(route.query.status))
 const probabilityLevel = ref<OpportunityProbabilityLevelFilter>(normalizeOpportunityProbabilityLevelFilter(route.query.probabilityLevel))
@@ -174,6 +178,7 @@ watch(() => [route.query.page, route.query.pageSize, route.query.status, route.q
     </header>
 
     <div class="opportunity-list-toolbar">
+      <RouterLink class="secondary-button" to="/opportunity-board">{{ t("nav.opportunities") }} · {{ t("opportunities.board") }}</RouterLink>
       <select v-model="stage" :aria-label="t('opportunities.allStages')"><option value="All">{{ t('opportunities.allStages') }}</option><option v-for="item in OPPORTUNITY_STAGES" :key="item" :value="item">{{ stageLabel(item) }}</option></select>
       <select v-model="probabilityLevel" :aria-label="t('opportunities.allProbabilityLevels')"><option value="All">{{ t('opportunities.allProbabilityLevels') }}</option><option v-for="level in OPPORTUNITY_PROBABILITY_LEVELS" :key="level" :value="level">{{ opportunityProbabilityLevelLabel(level, locale) }}</option><option :value="PENDING_PROBABILITY_LEVEL_FILTER">{{ opportunityProbabilityLevelLabel('', locale) }}</option></select>
       <select v-model="owner" :aria-label="t('opportunities.allOwners')"><option value="All">{{ t('opportunities.allOwners') }}</option><option v-for="item in owners" :key="item" :value="item">{{ personnelDisplayName(item) }}</option></select>
@@ -200,7 +205,7 @@ watch(() => [route.query.page, route.query.pageSize, route.query.status, route.q
               <td><strong>{{ item.account }}</strong><small>{{ item.site }}</small></td>
               <td><strong>{{ stageLabel(item.stage) }}</strong></td>
               <td>{{ formatDisplayDate(item.poDate) }}</td>
-              <td><strong>{{ formatMoney(item.amount, item.currency) }}</strong><small>{{ locale === 'en-US' ? 'Original' : '原始金额' }} {{ formatMoney(item.originalAmount, item.currency) }}</small></td>
+              <td><strong>{{ formatMoney(item.amount, item.currency) }}</strong><small>{{ locale === 'en-US' ? 'Original' : '原始金额' }} {{ formatMoney(item.originalAmount, item.currency) }}</small><small :data-opportunity-amount-cny="item.id">{{ t('oppEditor.amountCny') }} {{ item.amountCny ? formatMoney(item.amountCny, 'CNY') : t('oppEditor.amountCnyPending') }}</small></td>
               <td data-opportunity-probability-level><StatusBadge :label="opportunityProbabilityLevelLabel(item.probabilityLevel, locale)" :tone="opportunityProbabilityLevelTone(item.probabilityLevel)" /></td>
               <td data-opportunity-intent><strong class="purchase-intent">{{ item.score }}/100</strong><small>{{ item.score >= 70 ? t('opportunities.highIntent') : item.score >= 50 ? t('opportunities.mediumIntent') : t('opportunities.lowIntent') }}</small></td>
               <td>{{ personnelDisplayName(item.owner) }}</td>
@@ -235,7 +240,7 @@ watch(() => [route.query.page, route.query.pageSize, route.query.status, route.q
       <PaginationControls v-if="layout === 'list' && !denied && !error && total > pageSize" :page="page" :page-size="pageSize" :total="total" @change="goPage" @page-size-change="changePageSize" />
     </div>
 
-    <OpportunityEditorModal v-if="editorOpen" :accounts="opportunityAccounts" :sites-by-account="sitesByAccount" :default-owner="app.bootstrap?.user.id ?? ''" :current-user-id="app.bootstrap?.user.id ?? ''" :busy="busy" :error="modalError" @close="editorOpen = false" @submit="saveOpportunity" />
+    <OpportunityEditorModal v-if="editorOpen" :accounts="opportunityAccounts" :sites-by-account="sitesByAccount" :equipment-types="equipmentTypes" :default-owner="app.bootstrap?.user.id ?? ''" :current-user-id="app.bootstrap?.user.id ?? ''" :busy="busy" :error="modalError" @close="editorOpen = false" @submit="saveOpportunity" />
   </section>
 </template>
 

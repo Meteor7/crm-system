@@ -186,6 +186,7 @@ describe('Leads pages', () => {
     await wrapper.get('[aria-label="业务领域自定义"]').setValue('Power Semiconductor')
     await wrapper.get('[aria-label="Opportunity 名称"]').setValue('示例企业016缺陷检测正式商机')
     await wrapper.get('[aria-label="金额"]').setValue(9800000)
+    await wrapper.get('[aria-label="人民币金额"]').setValue(9800000)
     const toolTypeSelect = wrapper.get<HTMLSelectElement>('select[aria-label="设备类型"]')
     expect(toolTypeSelect.element.value).toBe('')
     expect(wrapper.find('input[aria-label="设备类型"]').exists()).toBe(false)
@@ -197,6 +198,14 @@ describe('Leads pages', () => {
 
     await wrapper.get('[data-testid="qualification-confirmed"]').setValue(true)
     expect(wrapper.find('[data-field-error="qualificationConfirmed"]').exists()).toBe(false)
+    // Confirming the need is not enough: the conversion also sets the new Opportunity's first level.
+    await wrapper.get('[data-modal-submit]').trigger('submit')
+    await flushPromises()
+    expect(convertLead).not.toHaveBeenCalled()
+    expect(wrapper.get('[data-field-error="opportunityProbabilityLevel"]').text()).toBe('请选择成功概率')
+
+    await wrapper.get('[data-testid="lead-convert-probability-level"]').setValue('upside')
+    expect(wrapper.find('[data-field-error="opportunityProbabilityLevel"]').exists()).toBe(false)
     await wrapper.get('[data-modal-submit]').trigger('submit')
     await flushPromises()
 
@@ -204,6 +213,8 @@ describe('Leads pages', () => {
     expect(convertLead).toHaveBeenCalledWith('LEAD-001', expect.objectContaining({
       newAccount: expect.objectContaining({ segment: 'Power Semiconductor' }),
       toolType: 'Aconca',
+      opportunityProbabilityLevel: 'upside',
+      opportunityAmountCny: '9800000',
       qualificationConfirmed: true,
     }))
     expect(wrapper.text()).toContain('OPP-')

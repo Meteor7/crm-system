@@ -62,10 +62,11 @@ class TestOpportunityInternalValidation(FrappeTestCase):
             "owner": self.sales, "status": "Active",
         })
         opportunity = create_strategy_opportunity({
+            "probabilityLevel": "pipeline",
             "accountId": account["id"], "siteId": site["id"], "title": f"{suffix} Opportunity",
             "owner": self.sales, "amount": "880000.00", "intentScore": 70, "poDate": "2026-12-31",
             "toolType": "Inspection", "saleType": sale_type, "subRegion": "华东", "currency": "CNY",
-            "originalAmount": "880000.00", "qualificationConfirmed": True,
+            "originalAmount": "880000.00", "amountCny": "880000.00", "qualificationConfirmed": True,
         })
         return site, contact, opportunity
 
@@ -262,7 +263,9 @@ class TestOpportunityInternalValidation(FrappeTestCase):
 
         _, other_contact, other = self._quoted("IvCancelByPo")
         pending = request_internal_validation(other["id"], self._request(other_contact), other["modified"])
-        received = confirm_po(other["id"], {"booking": self._request(other_contact)["booking"]}, pending["modified"])
+        received = confirm_po(other["id"], {
+            "booking": self._request(other_contact)["booking"], "actualPoDate": frappe.utils.today(),
+        }, pending["modified"])
         self.assertEqual((received["stage"], received["internalValidation"]["status"]), ("po_received", "cancelled"))
 
     def test_approval_revalidates_the_booking_draft(self):

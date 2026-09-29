@@ -20,8 +20,35 @@ afterEach(() => {
 })
 
 describe('Frappe method contract', () => {
+  it('posts recovery edits with both parent and recovery versions', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(success({ id: 'REC-1', plan: 'Meet buyer' }))
+    const api = createFrappeApi({ fetchImpl: fetchMock })
+    const input = { plan: 'Meet buyer', recoveryModified: '2026-09-22T00:00:00.000000Z' }
+    await api.saveProbabilityRecovery('OPP-1', 'EVENT-1', input, '2026-09-21T00:00:00.000000Z')
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit]
+    expect(url).toBe('/api/method/rayher_crm.api.v1.opportunities.save_probability_recovery')
+    expect(init.method).toBe('POST')
+    const body = new URLSearchParams(init.body as string)
+    expect(Object.fromEntries(body)).toEqual({ id: 'OPP-1', eventId: 'EVENT-1', input: JSON.stringify(input), expectedModified: '2026-09-21T00:00:00.000000Z' })
+  })
+
   it('freezes every CrmApi method to a rayher_crm v1 whitelist endpoint', () => {
     expect(FRAPPE_METHODS).toEqual({
+      queryOpportunities: 'cockpit.query_opportunities',
+      getOpportunityFilters: 'cockpit.get_opportunity_filters',
+      listOpportunityQueries: 'cockpit.list_opportunity_queries',
+      saveOpportunityQuery: 'cockpit.save_opportunity_query',
+      deleteOpportunityQuery: 'cockpit.delete_opportunity_query',
+      getPlan: 'cockpit.get_plan',
+      getPlanDetails: 'cockpit.get_plan_details',
+      getReview: 'cockpit.get_review',
+      getReviewDetails: 'cockpit.get_details',
+      getWarnings: 'cockpit.get_warnings',
+      saveReviewTarget: 'cockpit.save_target',
+      getCockpitSettings: 'cockpit.get_cockpit_settings',
+      saveCockpitSettings: 'cockpit.save_cockpit_settings',
+      saveWarningPlan: 'cockpit.save_warning_plan',
+      recordWarningAction: 'cockpit.record_warning_action',
       getBootstrap: 'bootstrap.get_bootstrap',
       changeCurrentUserPassword: 'account.change_password',
       listNotifications: 'notifications.list_notifications',
@@ -30,6 +57,7 @@ describe('Frappe method contract', () => {
       getDashboard: 'dashboard.get_dashboard',
       listAccounts: 'accounts.list_accounts',
       listAccountSegments: 'accounts.list_account_segments',
+      listAccountRegions: 'accounts.list_account_regions',
       listAccountCities: 'accounts.list_account_cities',
       createAccount: 'accounts.create_account',
       updateAccount: 'accounts.update_account',
@@ -73,6 +101,8 @@ describe('Frappe method contract', () => {
       updateBooking: 'bookings.update_booking',
       deleteBooking: 'bookings.delete_booking',
       completeServiceBooking: 'bookings.complete_service_booking',
+      setBookingActualPoDate: 'bookings.set_actual_po_date',
+      setBookingAmountCny: 'bookings.set_amount_cny',
       listDemoRequests: 'demo_requests.list_demo_requests',
       importDemoRequestForm: 'demo_requests.import_form',
       createDemoRequest: 'demo_requests.create_demo_request',
@@ -83,6 +113,8 @@ describe('Frappe method contract', () => {
       completeEvaluationPreparation: 'evaluations.complete_evaluation_preparation',
       updateEvaluationStatus: 'evaluations.update_evaluation_status',
       addEvaluationRun: 'evaluations.add_evaluation_run',
+      updateEvaluationRun: 'evaluations.update_evaluation_run',
+      cancelEvaluationRun: 'evaluations.cancel_evaluation_run',
       setEvaluationTestRunDeadline: 'evaluations.set_evaluation_test_run_deadline',
       saveDemoArtifact: 'demo_artifacts.save_artifact',
       getDemoArtifact: 'demo_artifacts.download_artifact',
@@ -112,9 +144,13 @@ describe('Frappe method contract', () => {
       previewRfqFile: 'rfqs.preview_rfq_file',
       downloadRfqFile: 'rfqs.download_rfq_file',
       listStrategyOpportunities: 'opportunities.list_strategy_opportunities',
+      listEquipmentTypes: 'opportunities.list_equipment_types',
       getStrategyOpportunity: 'opportunities.get_strategy_opportunity',
       createStrategyOpportunity: 'opportunities.create_strategy_opportunity',
       updateStrategyOpportunity: 'opportunities.update_strategy_opportunity',
+      reviewOpportunityLoss: 'opportunities.review_opportunity_loss',
+      saveProbabilityRecovery: 'opportunities.save_probability_recovery',
+      recordProbabilityRecoveryAction: 'opportunities.record_probability_recovery_action',
       rollbackOpportunityStage: 'opportunities.rollback_opportunity_stage',
       confirmBudgetApproved: 'opportunities.confirm_budget_approved',
       requestInternalValidation: 'opportunities.request_internal_validation',
@@ -125,6 +161,9 @@ describe('Frappe method contract', () => {
       createOpportunityStakeholder: 'opportunities.create_opportunity_stakeholder',
       updateOpportunityStakeholder: 'opportunities.update_opportunity_stakeholder',
       deleteOpportunityStakeholder: 'opportunities.delete_opportunity_stakeholder',
+      listOpportunityStatuses: 'opportunity_status.list_records',
+      saveOpportunityStatus: 'opportunity_status.save_record',
+      getOpportunityStatusFile: 'opportunity_status.download_file',
       createOpportunityAction: 'opportunities.create_opportunity_action',
       updateOpportunityAction: 'opportunities.update_opportunity_action',
       deleteOpportunityAction: 'opportunities.delete_opportunity_action',
@@ -196,6 +235,18 @@ describe('Frappe JSON transport', () => {
     expect(result.data).toEqual(['Frontend', 'Advanced Packaging'])
     const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit]
     expect(url).toBe('/api/method/rayher_crm.api.v1.accounts.list_account_segments')
+    expect(init).toMatchObject({ method: 'GET', credentials: 'same-origin' })
+  })
+
+  it('loads the shared account regions through the Frappe GET endpoint', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(success(['East China', 'South China', 'Southeast Asia']))
+    const api = createFrappeApi({ fetchImpl: fetchMock })
+
+    const result = await api.listAccountRegions()
+
+    expect(result.data).toEqual(['East China', 'South China', 'Southeast Asia'])
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit]
+    expect(url).toBe('/api/method/rayher_crm.api.v1.accounts.list_account_regions')
     expect(init).toMatchObject({ method: 'GET', credentials: 'same-origin' })
   })
 
@@ -492,5 +543,65 @@ describe('Installed Tool audit transport', () => {
     expect(JSON.parse(bodies[0].get('input') ?? '{}')).toEqual(transition)
     expect(JSON.parse(bodies[1].get('input') ?? '{}')).toEqual(version)
     expect(JSON.parse(bodies[2].get('input') ?? '{}')).toEqual(service)
+  })
+})
+
+describe('Warnings business reads and loss reviews', () => {
+  it('reads the Warnings page with the Review scope and posts a Manager post-mortem with the review version', async () => {
+    const fetchMock = vi.fn().mockImplementation(() => Promise.resolve(success({})))
+    const api = createFrappeApi({ fetchImpl: fetchMock })
+    const query = { period: 'month' as const, anchor: '2026-09-01', sales: 'sales@example.com', region: 'East China', market: 'Frontend' }
+    await api.getWarnings(query)
+    await api.reviewOpportunityLoss('OPP-1', 'LOSS-1', { status: 'Reviewed', reviewNote: 'Report shared' }, '2026-09-22T00:00:00.000000Z')
+    const [[readUrl, readInit], [writeUrl, writeInit]] = fetchMock.mock.calls
+    const url = new URL(readUrl, 'http://localhost')
+    expect(url.pathname).toBe('/api/method/rayher_crm.api.v1.cockpit.get_warnings')
+    for (const [key, value] of Object.entries(query)) expect(url.searchParams.get(key)).toBe(value)
+    expect(readInit.method).toBe('GET')
+    expect(new URL(writeUrl, 'http://localhost').pathname).toBe('/api/method/rayher_crm.api.v1.opportunities.review_opportunity_loss')
+    expect(writeInit.method).toBe('POST')
+    const body = new URLSearchParams(writeInit.body)
+    expect(body.get('id')).toBe('OPP-1')
+    expect(body.get('reviewId')).toBe('LOSS-1')
+    expect(body.get('expectedModified')).toBe('2026-09-22T00:00:00.000000Z')
+    expect(JSON.parse(body.get('input') ?? '{}')).toEqual({ status: 'Reviewed', reviewNote: 'Report shared' })
+  })
+
+  it('reads and saves the thresholds and posts next steps and stage 6 actions with the handling version', async () => {
+    const fetchMock = vi.fn().mockImplementation(() => Promise.resolve(success({})))
+    const api = createFrappeApi({ fetchImpl: fetchMock })
+    const settings = { quoteExpiryDays: 21, stage6NoPoDays: 45 }
+    const plan = { warningType: 'quotation_expiry' as const, sourceId: 'Q-1', sourceEvent: 'V-2', nextStep: 'Re-price before Friday' }
+    const action = { warningType: 'stage6_no_po' as const, sourceId: 'OPP-6', sourceEvent: 'EVT-6', actionTaken: 'GM call with the buyer', followUpOn: '2026-10-08' }
+    await api.getCockpitSettings()
+    await api.saveCockpitSettings(settings, '2026-09-20T00:00:00.000000Z')
+    await api.saveWarningPlan(plan, null)
+    await api.recordWarningAction(action, '2026-09-22T00:00:00.000000Z')
+    const urls = fetchMock.mock.calls.map(([url]) => new URL(url, 'http://localhost').pathname)
+    expect(urls).toEqual(['get_cockpit_settings', 'save_cockpit_settings', 'save_warning_plan', 'record_warning_action'].map(name => `/api/method/rayher_crm.api.v1.cockpit.${name}`))
+    expect(fetchMock.mock.calls.map(([, init]) => init.method)).toEqual(['GET', 'POST', 'POST', 'POST'])
+    const bodies = fetchMock.mock.calls.slice(1).map(([, init]) => Object.fromEntries(new URLSearchParams(String(init.body))))
+    expect(bodies[0]).toEqual({ input: JSON.stringify(settings), expectedModified: '2026-09-20T00:00:00.000000Z' })
+    // A first next step has no record yet: no expectedModified is sent.
+    expect(bodies[1]).toEqual({ input: JSON.stringify(plan) })
+    expect(bodies[2]).toEqual({ input: JSON.stringify(action), expectedModified: '2026-09-22T00:00:00.000000Z' })
+  })
+})
+
+describe('Plan business reads', () => {
+  it('sends future periods and identical filters to the dedicated summary and detail endpoints', async () => {
+    const fetchMock = vi.fn().mockImplementation(() => Promise.resolve(success({})))
+    const api = createFrappeApi({ fetchImpl: fetchMock })
+    const query = { period: 'week' as const, anchor: '2026-09-21', sales: 'sales@example.com', region: 'East China', market: 'Advanced Packaging' }
+    await api.getPlan(query)
+    await api.getPlanDetails({ ...query, metric: 'po', page: 2, pageSize: 50, includeOverdue: false })
+    const urls = fetchMock.mock.calls.map(([url]) => new URL(url, 'http://localhost'))
+    expect(urls[1].searchParams.get('includeOverdue')).toBe('false')
+    expect(urls.map(url => url.pathname)).toEqual(['/api/method/rayher_crm.api.v1.cockpit.get_plan', '/api/method/rayher_crm.api.v1.cockpit.get_plan_details'])
+    for (const url of urls) for (const [key, value] of Object.entries(query)) expect(url.searchParams.get(key)).toBe(value)
+    expect(urls[1].searchParams.get('metric')).toBe('po')
+    expect(urls[1].searchParams.get('page')).toBe('2')
+    expect(urls[1].searchParams.get('pageSize')).toBe('50')
+    expect(fetchMock.mock.calls.every(([, init]) => init.method === 'GET')).toBe(true)
   })
 })

@@ -1,24 +1,31 @@
 from __future__ import annotations
 
+import json
+import os
+
 import frappe
 from frappe.tests.utils import FrappeTestCase
 
 from rayher_crm.api.v1.errors import CrmApiException
 from rayher_crm.services.demo_requests import transition_demo_request
 from rayher_crm.services.demo_reports import release_demo_test_report
+from rayher_crm.services import cockpit
 from rayher_crm.services.evaluations import (
     add_evaluation_run,
+    cancel_evaluation_run,
     complete_evaluation_preparation,
     get_evaluation,
     get_demo_workflow,
     list_demo_workflows,
     list_evaluations,
     set_evaluation_test_run_deadline,
+    update_evaluation_run,
     update_evaluation_status,
 )
-from rayher_crm.services.opportunities import create_strategy_opportunity, get_strategy_opportunity, mark_opportunity_lost
+from rayher_crm.services.opportunities import create_opportunity_action, create_strategy_opportunity, get_strategy_opportunity, mark_opportunity_lost
 from rayher_crm.services.opportunity_stages import CUSTOMER_BUDGET_APPROVED, DEMO_DONE, LOST, QUALIFIED_OPPORTUNITY
 from rayher_crm.services.sites import create_site
+from rayher_crm.services.visits import create_visit
 from rayher_crm.tests._opportunity_fixtures import advance_opportunity_fixture
 
 
@@ -80,12 +87,13 @@ class TestEvaluationApi(FrappeTestCase):
             "process": "Frontend", "status": "量产",
         })
         opportunity = create_strategy_opportunity({
+            "probabilityLevel": "pipeline",
             "accountId": account.name, "siteId": site["id"],
             "title": f"Evaluation {suffix} Opportunity", "owner": sales,
             "stage": QUALIFIED_OPPORTUNITY, "forecast": "Pipeline", "amount": 200000,
             "intentScore": 70, "poDate": "2026-12-31", "toolType": "Inspection",
             "saleType": "New Equipment", "subRegion": "East China", "currency": "CNY",
-            "originalAmount": 200000, "qualificationConfirmed": True,
+            "originalAmount": 200000, "amountCny": 200000, "qualificationConfirmed": True,
         })
         frappe.set_user("Administrator")
         request = frappe.get_doc({
@@ -271,6 +279,169 @@ class TestEvaluationApi(FrappeTestCase):
         })
         self.assertEqual((completed["runs"][1]["status"], completed["wafers"]), ("Completed", 5))
         self.assertEqual(completed["reportStatus"], "Not Ready")
+
+    def _planned_run(self, evaluation_id: str, day: str = "2026-12-10") -> dict:
+        evaluation = get_evaluation(evaluation_id)
+        for status in ("Scope Confirmed", "Sample Received", "Scheduled", "Testing"):
+            evaluation = update_evaluation_status(evaluation_id, {"status": status}, evaluation["modified"])
+        return add_evaluation_run(evaluation_id, {
+            "date": day, "lot": "LOT-PLAN", "wafers": 2, "expectedModified": evaluation["modified"],
+        })
+
+    def _plan_test_ids(self, anchor: str) -> list[str]:
+        user = frappe.session.user
+        frappe.set_user(self.manager)
+        try:
+            query = {"period": "week", "anchor": anchor, "sales": self.sales}
+            details = cockpit.get_plan_details({**query, "metric": "tests"})
+            self.assertEqual(cockpit.get_plan(query)["summary"]["tests"], {"value": details["total"], "state": "ready", "reason": None})
+            return [row["id"] for row in details["items"]]
+        finally:
+            frappe.set_user(user)
+
+    def test_demo_enters_plan_after_preparation_without_a_run_or_deadline(self):
+        evaluation_id = self.request["evaluationId"]
+        frappe.set_user(self.engineer)
+        current = get_evaluation(evaluation_id)
+        self.assertNotIn(evaluation_id, self._plan_test_ids("2026-12-10"))
+        current = complete_evaluation_preparation(evaluation_id, "wafer", current["modified"])
+        self.assertNotIn(evaluation_id, self._plan_test_ids("2026-12-10"))
+        current = complete_evaluation_preparation(evaluation_id, "test", current["modified"])
+        self.assertEqual((current["status"], current["runs"], current["testRunDeadline"]), ("Scheduled", [], ""))
+        self.assertIn(evaluation_id, self._plan_test_ids("2026-12-10"))
+        current = update_evaluation_status(evaluation_id, {"status": "Testing"}, current["modified"])
+        self.assertIn(evaluation_id, self._plan_test_ids("2026-12-10"))
+        current = add_evaluation_run(evaluation_id, {
+            "date": "2026-12-11", "lot": "LOT-REVIEW", "wafers": 1,
+            "capture": 96, "falsePositive": 1, "wph": 12, "summary": "Passed",
+            "expectedModified": current["modified"],
+        })
+        self.assertIn(evaluation_id, self._plan_test_ids("2026-12-10"))
+        release_demo_test_report(
+            evaluation_id,
+            {"file_name": "results.csv", "mime_type": "text/csv", "content": b"metric,value\ncapture,96\n"},
+            {"file_name": "customer-results.csv", "mime_type": "text/csv", "content": b"metric,value\ncapture,96\n"},
+            scanner=CleanScanner(), expected_round=current["testRound"],
+        )
+        current = get_evaluation(evaluation_id)
+        current = update_evaluation_status(evaluation_id, {"status": "Internal Review"}, current["modified"])
+        self.assertNotIn(evaluation_id, self._plan_test_ids("2026-12-10"))
+
+    def test_planned_run_is_rescheduled_completed_or_cancelled_in_place(self):
+        evaluation_id = self.request["evaluationId"]
+        frappe.set_user(self.engineer)
+        planned = self._planned_run(evaluation_id)
+        run_id = planned["runs"][0]["id"]
+        self.assertIn(evaluation_id, self._plan_test_ids("2026-12-10"))
+
+        with self.assertRaises(CrmApiException) as stale:
+            update_evaluation_run(evaluation_id, run_id, {"date": "2026-12-17", "lot": "LOT-PLAN", "wafers": 2, "expectedModified": "2000-01-01T00:00:00Z"})
+        self.assertEqual(stale.exception.code, "VERSION_CONFLICT")
+        with self.assertRaises(CrmApiException) as foreign:
+            update_evaluation_run(self.foreign_request["evaluationId"], run_id, {"date": "2026-12-17", "lot": "LOT-PLAN", "wafers": 2})
+        self.assertEqual(foreign.exception.code, "SCOPE_DENIED")
+        frappe.set_user(self.sales)
+        with self.assertRaises(frappe.PermissionError):
+            cancel_evaluation_run(evaluation_id, run_id, {"reason": "No"})
+        frappe.set_user(self.engineer)
+
+        moved = update_evaluation_run(evaluation_id, run_id, {
+            "date": "2026-12-17", "lot": "LOT-PLAN", "wafers": 4, "expectedModified": planned["modified"],
+        })
+        self.assertEqual([(r["id"], r["date"], r["status"], r["wafers"]) for r in moved["runs"]], [(run_id, "2026-12-17", "Planned", 4)])
+        self.assertIn(f"Rescheduled Test Run {run_id} to 2026-12-17", moved["history"][0]["summary"])
+        self.assertIn(evaluation_id, self._plan_test_ids("2026-12-10"))
+        self.assertIn(evaluation_id, self._plan_test_ids("2026-12-17"))
+
+        done = update_evaluation_run(evaluation_id, run_id, {
+            "date": "2026-12-17", "lot": "LOT-PLAN", "wafers": 4, "capture": 96, "falsePositive": 1, "wph": 12,
+            "summary": "Passed", "expectedModified": moved["modified"],
+        })
+        self.assertEqual([(r["id"], r["status"], r["capture"]) for r in done["runs"]], [(run_id, "Completed", 96.0)])
+        self.assertIn(evaluation_id, self._plan_test_ids("2026-12-17"))
+        with self.assertRaises(CrmApiException) as finished:
+            update_evaluation_run(evaluation_id, run_id, {"date": "2026-12-18", "lot": "LOT-PLAN", "wafers": 4, "expectedModified": done["modified"]})
+        self.assertEqual(finished.exception.code, "INVALID_TRANSITION")
+
+    def test_cancelled_run_keeps_its_record_and_demo_stays_in_plan(self):
+        evaluation_id = self.request["evaluationId"]
+        frappe.set_user(self.engineer)
+        planned = self._planned_run(evaluation_id)
+        run_id = planned["runs"][0]["id"]
+        with self.assertRaises(CrmApiException) as reason:
+            cancel_evaluation_run(evaluation_id, run_id, {"reason": " "})
+        self.assertEqual(reason.exception.code, "VALIDATION_ERROR")
+        cancelled = cancel_evaluation_run(evaluation_id, run_id, {"reason": "Customer wafers delayed", "expectedModified": planned["modified"]})
+        self.assertEqual([(r["id"], r["status"], r["summary"]) for r in cancelled["runs"]], [(run_id, "Cancelled", "Customer wafers delayed")])
+        self.assertEqual(cancelled["wafers"], 0)
+        self.assertEqual(cancelled["history"][0]["summary"], f"Cancelled Test Run {run_id}: Customer wafers delayed")
+        self.assertIn(evaluation_id, self._plan_test_ids("2026-12-10"))
+        with self.assertRaises(CrmApiException) as again:
+            cancel_evaluation_run(evaluation_id, run_id, {"reason": "Twice", "expectedModified": cancelled["modified"]})
+        self.assertEqual(again.exception.code, "INVALID_TRANSITION")
+
+    def test_plan_reads_every_source_with_one_counting_rule(self):
+        evaluation_id = self.request["evaluationId"]
+        opportunity_id = self.request["opportunityId"]
+        frappe.set_user(self.engineer)
+        run_id = self._planned_run(evaluation_id)["runs"][0]["id"]
+        frappe.set_user(self.sales)
+        visit = create_visit({"accountId": self.account, "opportunityId": opportunity_id, "subject": "Plan visit",
+                              "date": "2026-12-13", "type": "On-site", "owner": self.sales, "objective": "Agree the test scope"})
+        due = create_opportunity_action(opportunity_id, {"title": "Confirm budget", "owner": self.sales, "due": "2026-12-09", "status": "Open"})
+        late = create_opportunity_action(opportunity_id, {"title": "Send the site survey", "owner": self.sales, "due": "2026-11-27", "status": "Open"})
+        frappe.set_user(self.other_sales)
+        advance_opportunity_fixture(get_strategy_opportunity(self.foreign_request["opportunityId"]), CUSTOMER_BUDGET_APPROVED)
+
+        frappe.set_user(self.manager)
+        query = {"period": "month", "anchor": "2026-12-10", "sales": self.sales}
+        plan = cockpit.get_plan(query)
+        self.assertEqual(plan["period"], {"kind": "month", "start": "2026-12-01", "end": "2026-12-31",
+                                          "previousAnchor": "2026-11-01", "nextAnchor": "2027-01-01"})
+
+        def listed(metric, **scope):
+            return cockpit.get_plan_details({**query, **scope, "metric": metric, "pageSize": 100})
+
+        # The class shares one transaction, so other tests' records of the same owner may be present:
+        # check this test's records, and that summary, sales row and details always agree.
+        own = {"visits": visit["id"], "tests": evaluation_id, "actions": due["id"], "po": opportunity_id, "overdue": late["id"]}
+        for metric, record in own.items():
+            rows = listed(metric)
+            self.assertIn(record, [row["id"] for row in rows["items"]], metric)
+            summary = plan["overdue"] if metric == "overdue" else plan["summary"][metric]
+            self.assertEqual(summary, {"value": rows["total"], "state": "ready", "reason": None}, metric)
+        self.assertEqual([row["id"] for row in plan["sales"]], [self.sales])
+        self.assertEqual({key: plan["sales"][0][key] for key in plan["summary"]}, plan["summary"])
+        self.assertEqual([(row["name"], row["activities"]["value"]) for row in plan["markets"]],
+                         [("Frontend", sum(plan["summary"][key]["value"] for key in ("visits", "tests", "actions")))])
+        self.assertNotIn(late["id"], [row["id"] for row in listed("actions")["items"]])
+        overdue = next(row for row in listed("overdue")["items"] if row["id"] == late["id"])
+        self.assertEqual((overdue["date"], overdue["carryover"], overdue["kind"], overdue["opportunityId"]), ("2026-11-27", True, "actions", opportunity_id))
+        # Stage 1 is counted, and its amount reported as missing rather than as 0.
+        mine = next(row for row in listed("po")["items"] if row["id"] == opportunity_id)
+        self.assertEqual((mine["amount"], mine["currency"], mine["date"], mine["probabilityLevel"]), (None, None, "2026-12-31", "pipeline"))
+        self.assertTrue(plan["poAmountIncomplete"])
+
+        everything = listed("all")
+        self.assertEqual(everything["total"], sum(listed(metric)["total"] for metric in own))
+        self.assertTrue(everything["items"][0]["carryover"])
+        paged = [row for page in range(1, everything["total"] // 2 + 2)
+                 for row in cockpit.get_plan_details({**query, "metric": "all", "page": page, "pageSize": 2})["items"]]
+        self.assertEqual(paged, everything["items"])
+
+        everyone = cockpit.get_plan({"period": "month", "anchor": "2026-12-10"})
+        theirs = next(row for row in listed("po", sales=self.other_sales)["items"] if row["id"] == self.foreign_request["opportunityId"])
+        self.assertEqual((theirs["amount"], theirs["currency"], theirs["status"]), ("200000.00", "CNY", CUSTOMER_BUDGET_APPROVED))
+        self.assertIn({"currency": "CNY", "value": "200000.00"}, [money for row in everyone["sales"] if row["id"] == self.other_sales for money in row["poAmounts"]][:1])
+        if os.environ.get("CRM_PLAN_SAMPLE"):
+            print("PLAN_SAMPLE " + json.dumps({"get_plan": everyone, "get_plan_details": everything}, ensure_ascii=False))
+
+        frappe.set_user(self.sales)
+        mark_opportunity_lost(opportunity_id, {"lostReason": "Budget withdrawn"}, get_strategy_opportunity(opportunity_id)["modified"])
+        frappe.set_user(self.manager)
+        remaining = [row["id"] for row in listed("all")["items"]]
+        self.assertTrue({visit["id"], evaluation_id} <= set(remaining))
+        self.assertFalse({due["id"], late["id"], opportunity_id} & set(remaining))
 
     def test_deadline_forward_completion_and_read_only_workflow_projection(self):
         evaluation_id = self.request["evaluationId"]

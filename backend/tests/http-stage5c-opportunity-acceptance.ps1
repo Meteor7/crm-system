@@ -54,7 +54,7 @@ function Remove-TestDoc {
 function Remove-OpportunityChildren {
     param([string]$OpportunityId)
     if ([string]::IsNullOrWhiteSpace($OpportunityId)) { return }
-    foreach ($docType in @('CRM Opportunity Stakeholder', 'CRM Opportunity Action', 'CRM Opportunity History', 'CRM Opportunity Stage History', 'CRM Opportunity Probability History', 'CRM Opportunity Internal Validation')) {
+    foreach ($docType in @('CRM Opportunity Stakeholder', 'CRM Opportunity Action', 'CRM Opportunity History', 'CRM Opportunity Stage History', 'CRM Opportunity Probability History', 'CRM Opportunity Internal Validation', 'CRM Opportunity Loss Review Revision', 'CRM Opportunity Loss Review')) {
         $pythonArgs = "[$(ConvertTo-PythonStringLiteral $docType),{'opportunity':$(ConvertTo-PythonStringLiteral $OpportunityId)}]"
         & docker compose @composeArgs exec -T backend bench --site $SiteName execute frappe.db.delete --args $pythonArgs | Out-Null
         if ($LASTEXITCODE -ne 0) { throw "Cleanup failed for $docType children of $OpportunityId" }
@@ -135,7 +135,7 @@ try {
         accountId = $created.Account; siteId = $created.Site; title = "Stage 5C Opportunity $stamp"
         owner = $salesEmail; stage = $qualifiedStage; qualificationConfirmed = $true; forecast = 'Pipeline'; amount = '123456.78'
         probability = 20; intentScore = 30; poDate = '2026-12-31'; toolType = 'Inspection'
-        saleType = 'New Equipment'; subRegion = 'East China'; currency = 'CNY'; originalAmount = '123456.78'
+        saleType = 'New Equipment'; subRegion = 'East China'; currency = 'CNY'; originalAmount = '123456.78'; amountCny = '123456.78'
         paymentMilestones = @('30% PO', '70% FAT'); strengths = @('Local support'); redFlags = @(); informationNeeded = @('Budget')
     }
     $opportunity = Invoke-CrmPost $salesSession 'rayher_crm.api.v1.opportunities.create_strategy_opportunity' @{ input = $opportunityInput }

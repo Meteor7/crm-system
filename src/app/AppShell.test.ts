@@ -99,6 +99,51 @@ describe('AppShell', () => {
     }
   })
 
+  it('hands a Manager who becomes Sales the information centre instead of ejecting them', async () => {
+    const router = createAppRouter()
+    await router.push('/dashboard')
+    await router.isReady()
+    const pinia = createPinia()
+    const app = useAppStore(pinia)
+    app.bootstrap = (await createMockApi({ latency: 0, role: 'Manager' }).getBootstrap()).data
+    const wrapper = mount(AppShell, { global: { plugins: [pinia, router], stubs: { CrmChart: { template: '<div />' } } } })
+    await flushPromises()
+
+    await app.switchDemoIdentity('sales-user')
+    await flushPromises()
+
+    expect(app.bootstrap?.user.role).toBe('Sales')
+    await vi.waitFor(() => expect(wrapper.find('.dashboard-page').exists()).toBe(true), { timeout: 10_000 })
+    expect(router.currentRoute.value.path).toBe('/dashboard')
+    expect(wrapper.find('[data-testid="review-page"]').exists()).toBe(false)
+  }, 20_000)
+
+  it('keeps Plan closed to Sales even though the dashboard section is theirs again', async () => {
+    const router = createAppRouter()
+    await router.push('/plan')
+    await router.isReady()
+    const pinia = createPinia()
+    useAppStore(pinia).bootstrap = (await createMockApi({ latency: 0, role: 'Sales' }).getBootstrap()).data
+    const wrapper = mount(AppShell, { global: { plugins: [pinia, router], stubs: { CrmChart: { template: '<div />' } } } })
+
+    await vi.waitFor(() => expect(router.currentRoute.value.path).not.toBe('/plan'), { timeout: 10_000 })
+    expect(wrapper.find('[data-testid="plan-page"]').exists()).toBe(false)
+  }, 20_000)
+
+  it('names the dashboard entry for the page each role actually opens', async () => {
+    for (const [role, present, absent] of [['Manager', 'review', 'dashboard'], ['Sales', 'dashboard', 'review'], ['Engineer', 'dashboard', 'review']] as const) {
+      const router = createAppRouter()
+      await router.push('/dashboard')
+      await router.isReady()
+      const pinia = createPinia()
+      useAppStore(pinia).bootstrap = (await createMockApi({ latency: 0, role }).getBootstrap()).data
+      const wrapper = mount(AppShell, { global: { plugins: [pinia, router], stubs: { RouterView: true, CrmChart: { template: '<div />' } } } })
+
+      expect(wrapper.find(`[data-route="${present}"]`).exists()).toBe(true)
+      expect(wrapper.find(`[data-route="${absent}"]`).exists()).toBe(false)
+    }
+  })
+
   it('opens and closes the compact navigation', async () => {
     const router = createAppRouter()
     await router.push('/dashboard')
@@ -247,7 +292,7 @@ describe('AppShell', () => {
     expect(router.currentRoute.value.path).toBe('/demo-workflow')
   })
 
-  it('makes the data center available to the Engineer perspective', async () => {
+  it('keeps Calendar available and hides Review from Engineers', async () => {
     const router = createAppRouter()
     await router.push('/dashboard')
     await router.isReady()
@@ -258,10 +303,15 @@ describe('AppShell', () => {
 
     await app.switchDemoIdentity('fae')
     await flushPromises()
-    await new Promise((resolve) => setTimeout(resolve, 100))
-    await flushPromises()
+    await vi.waitFor(() => {
+      expect(app.bootstrap?.user.name).toBe('演示员工14')
+      expect(router.currentRoute.value.path).toBe('/dashboard')
+      expect(wrapper.find('[data-route="calendar"]').exists()).toBe(true)
+      expect(wrapper.find('[data-route="review"]').exists()).toBe(false)
+    })
 
     expect(app.bootstrap?.user.name).toBe('演示员工14')
+    expect(wrapper.find('[data-route="review"]').exists()).toBe(false)
     expect(wrapper.find('[data-route="dashboard"]').exists()).toBe(true)
     expect(wrapper.find('[data-route="calendar"]').exists()).toBe(true)
     expect(wrapper.find('[data-route="procedure-run"]').exists()).toBe(false)
@@ -313,6 +363,7 @@ describe('AppShell', () => {
     await flushPromises()
 
     expect(wrapper.find('[data-route="dashboard"]').exists()).toBe(true)
+    expect(wrapper.find('[data-route="review"]').exists()).toBe(false)
     expect(wrapper.find('[data-route="calendar"]').exists()).toBe(true)
     expect(wrapper.find('[data-route="procedure-run"]').exists()).toBe(false)
   })

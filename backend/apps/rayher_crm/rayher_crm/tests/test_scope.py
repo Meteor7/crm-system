@@ -497,6 +497,76 @@ class TestCrmScope(FrappeTestCase):
             # Requests change only through the Opportunity review workflow.
             self.assertFalse(frappe.has_permission(doctype, "write", doc=rows["owned"], user=user))
 
+    def _action_and_field_history(self, opportunity: str, owner: str) -> dict[str, str]:
+        return {
+            "CRM Opportunity Action": frappe.get_doc({
+                "doctype": "CRM Opportunity Action", "opportunity": opportunity, "title": "Send the revised quote",
+                "action_owner": owner, "due": "2026-12-31", "status": "Open",
+            }).insert(ignore_permissions=True).name,
+            "CRM Opportunity History": frappe.get_doc({
+                "doctype": "CRM Opportunity History", "opportunity": opportunity, "actor": owner,
+                "at": frappe.utils.now_datetime(), "field": "amount", "from_value": "1000", "to_value": "2500",
+            }).insert(ignore_permissions=True).name,
+        }
+
+    def test_action_and_field_history_scope_follows_the_parent_opportunity(self):
+        """The standard document API stops at the Opportunity scope; field history carries amounts."""
+
+        owned = self._action_and_field_history(self.owned_opportunity, self.sales)
+        foreign = self._action_and_field_history(self.foreign_opportunity, self.other_sales)
+
+        for doctype in ("CRM Opportunity Action", "CRM Opportunity History"):
+            self.assertIn(f"`tab{doctype}`.`opportunity`", conditions_for_doctype(doctype, self.sales))
+            manager_names = self._visible_names(doctype, self.manager)
+            self.assertIn(owned[doctype], manager_names)
+            self.assertIn(foreign[doctype], manager_names)
+            for user in (self.sales, self.engineer):
+                names = self._visible_names(doctype, user)
+                self.assertIn(owned[doctype], names, user)
+                self.assertNotIn(foreign[doctype], names, user)
+                # Rows other tests left on the site count too: each listed row sits on an
+                # Opportunity the user can open.
+                reachable = set(frappe.db.sql_list(
+                    "SELECT `name` FROM `tabCRM Opportunity` "
+                    f"WHERE {conditions_for_doctype('CRM Opportunity', user)}"
+                ))
+                listed = set(frappe.get_list(doctype, pluck="opportunity", limit_page_length=0))
+                self.assertLessEqual(listed, reachable, f"{doctype} {user}")
+                self.assertTrue(frappe.has_permission(doctype, "read", doc=owned[doctype], user=user))
+                self.assertFalse(frappe.has_permission(doctype, "read", doc=foreign[doctype], user=user))
+                # Both are written only by the Opportunity service.
+                self.assertFalse(frappe.has_permission(doctype, "write", doc=owned[doctype], user=user))
+                self.assertFalse(frappe.has_permission(doctype, "delete", doc=owned[doctype], user=user))
+
+    def test_opportunity_and_review_services_still_read_actions_and_field_history(self):
+        """They read with get_all, so the standard-API scope leaves what they return unchanged."""
+
+        from rayher_crm.services import cockpit
+        from rayher_crm.services.opportunities import get_strategy_opportunity
+
+        owned = self._action_and_field_history(self.owned_opportunity, self.sales)
+        foreign = self._action_and_field_history(self.foreign_opportunity, self.other_sales)
+
+        # Engineers work the Opportunity, so its detail gives them the actions as well.
+        for user in (self.sales, self.engineer):
+            frappe.set_user(user)
+            detail = get_strategy_opportunity(self.owned_opportunity)
+            self.assertIn(owned["CRM Opportunity Action"], {row["id"] for row in detail["actions"]}, user)
+            self.assertIn(
+                ("amount", "1000", "2500"),
+                {(row["field"], row["from"], row["to"]) for row in detail["history"]},
+                user,
+            )
+
+        frappe.set_user(self.manager)
+        customers, people, _filters = cockpit.options()
+        review = cockpit.load_data(customers, people)
+        plan = cockpit.load_plan_data(customers, people)
+        for rows in (owned, foreign):
+            self.assertIn(rows["CRM Opportunity Action"], {row["name"] for row in review["actions"]})
+            self.assertIn(rows["CRM Opportunity History"], {row["name"] for row in review["history"]})
+            self.assertIn(rows["CRM Opportunity Action"], {row["name"] for row in plan["actions"]})
+
     def test_all_sales_child_scopes_include_the_private_parent_guard(self):
         for doctype in (
             "Lead",
@@ -504,6 +574,8 @@ class TestCrmScope(FrappeTestCase):
             "CRM Opportunity Probability History",
             "CRM Opportunity Stage History",
             "CRM Opportunity Internal Validation",
+            "CRM Opportunity Action",
+            "CRM Opportunity History",
             "CRM Booking",
             "CRM Installed Tool",
             "CRM Demo Request",

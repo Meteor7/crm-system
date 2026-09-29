@@ -7,6 +7,8 @@ from copy import deepcopy
 import frappe
 from frappe.custom.doctype.custom_field.custom_field import create_custom_fields
 
+from rayher_crm.services.regions import REGION_PRESETS, options_text
+
 
 CRM_CUSTOM_FIELDS = {
     "Customer": [
@@ -15,7 +17,7 @@ CRM_CUSTOM_FIELDS = {
         {"fieldname": "custom_crm_segment", "label": "CRM Segment", "fieldtype": "Select", "options": "Frontend\nAdvanced Packaging", "insert_after": "custom_crm_short_name"},
         {"fieldname": "custom_crm_tier", "label": "CRM Tier", "fieldtype": "Select", "options": "S\nA\nB", "insert_after": "custom_crm_segment"},
         {"fieldname": "custom_crm_city", "label": "CRM City", "fieldtype": "Data", "insert_after": "custom_crm_tier"},
-        {"fieldname": "custom_crm_region", "label": "CRM Region", "fieldtype": "Data", "insert_after": "custom_crm_city"},
+        {"fieldname": "custom_crm_region", "label": "CRM Region", "fieldtype": "Select", "options": options_text(list(REGION_PRESETS)), "insert_after": "custom_crm_city"},
         {"fieldname": "custom_crm_visibility", "label": "CRM Visibility", "fieldtype": "Select", "options": "Private\nPublic", "default": "Private", "insert_after": "custom_crm_region"},
     ],
     "Contact": [
@@ -53,22 +55,49 @@ CRM_CUSTOM_FIELDS = {
 
 LEGACY_STANDARD_OPPORTUNITY_FIELD = "Opportunity-custom_crm_tool_type"
 ACCOUNT_SEGMENT_FIELD = "Customer-custom_crm_segment"
+ACCOUNT_REGION_FIELD = "Customer-custom_crm_region"
 
 
-def _custom_fields_for_install() -> dict:
-    fields = deepcopy(CRM_CUSTOM_FIELDS)
-    existing_options = frappe.db.get_value("Custom Field", ACCOUNT_SEGMENT_FIELD, "options")
-    if not existing_options:
-        return fields
-    segment_field = next(
-        field for field in fields["Customer"] if field["fieldname"] == "custom_crm_segment"
-    )
+def _merged_options(defaults: str, existing: str) -> list[str]:
     options: list[str] = []
-    for value in f"{segment_field['options']}\n{existing_options}".splitlines():
+    for value in f"{defaults}\n{existing}".splitlines():
         normalized = value.strip()
         if normalized and normalized not in options:
             options.append(normalized)
-    segment_field["options"] = "\n".join(options)
+    return options
+
+
+def _regions_in_use() -> set[str]:
+    """Regions stored on any Customer or Opportunity."""
+
+    used: set[str] = set()
+    for table, column in (("Customer", "custom_crm_region"), ("CRM Opportunity", "sub_region")):
+        if frappe.db.table_exists(table) and frappe.db.has_column(table, column):
+            used.update(row[0] for row in frappe.db.sql(f"SELECT DISTINCT `{column}` FROM `tab{table}`") if row[0])
+    return used
+
+
+def _custom_fields_for_install() -> dict:
+    """Keep the segments Sales registered, and the custom regions still in use, when the schema is reinstalled.
+
+    A custom region nobody uses any more is dropped, so the region filters list only real regions.
+    """
+
+    fields = deepcopy(CRM_CUSTOM_FIELDS)
+    customer_fields = {field["fieldname"]: field for field in fields["Customer"]}
+    segment_options = frappe.db.get_value("Custom Field", ACCOUNT_SEGMENT_FIELD, "options")
+    if segment_options:
+        segment_field = customer_fields["custom_crm_segment"]
+        segment_field["options"] = "\n".join(_merged_options(segment_field["options"], segment_options))
+    region_options = frappe.db.get_value("Custom Field", ACCOUNT_REGION_FIELD, "options")
+    if region_options:
+        region_field = customer_fields["custom_crm_region"]
+        in_use = _regions_in_use()
+        kept = [
+            option for option in _merged_options(region_field["options"], region_options)
+            if option in REGION_PRESETS or option in in_use
+        ]
+        region_field["options"] = options_text(kept)
     return fields
 
 

@@ -127,9 +127,10 @@ class TestRealSemiconductorFlow(FrappeTestCase):
         })
         converted = convert_lead(lead["id"], {
             "accountId": account["id"], "contactId": procurement["id"], "siteId": site["id"],
-            "opportunityTitle": "CIS 缺陷检测设备项目", "opportunityAmount": "4860000.00",
+            "opportunityTitle": "CIS 缺陷检测设备项目", "opportunityAmount": "4860000.00", "opportunityAmountCny": "4860000.00",
             "opportunityCloseDate": "2026-12-31", "opportunityOwner": self.sales,
             "toolType": "CIS Wafer Defect Inspection", "qualificationConfirmed": True,
+            "opportunityProbabilityLevel": "pipeline",
         })
         opportunity_id = converted["opportunityId"]
         opportunity = get_strategy_opportunity(opportunity_id)
@@ -292,7 +293,7 @@ class TestRealSemiconductorFlow(FrappeTestCase):
             "equipment": "CIS Defect Inspector X8", "quantity": 1, "ddl": "2026-12-20",
             "amount": "4860000.00", "currency": "CNY",
             "owner": self.sales, "note": f"runId={self.run_id}; dataOrigin=test-acceptance",
-        }}, opportunity["modified"])
+        }, "actualPoDate": frappe.utils.today()}, opportunity["modified"])
         self.assertEqual(opportunity["stage"], PO_RECEIVED)
 
         booking = get_booking(opportunity["liveBooking"]["id"])

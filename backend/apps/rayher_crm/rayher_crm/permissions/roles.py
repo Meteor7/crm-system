@@ -17,6 +17,7 @@ CRM_ROLE_TO_PROFILE = {
 }
 
 ALL_CAPABILITIES = (
+    "cockpit:view",
     "dashboard:view",
     "account:view",
     "account:write",

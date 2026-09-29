@@ -3,6 +3,7 @@ import { computed, ref, watch } from 'vue'
 import ModalShell from '@/design-system/ModalShell.vue'
 import RequiredMark from '@/design-system/RequiredMark.vue'
 import { preferredPersonnelId } from '@/demo/personnel'
+import { shanghaiDate } from '@/domain/time'
 import BookingFields from './BookingFields.vue'
 import type { AccountSummaryDto, BookingDto, ContactSummaryDto, OpportunityDto, UpsertBookingInput } from '@/types/crm'
 import type { BookingDraft } from '@/types/workspaces'
@@ -33,7 +34,13 @@ const form = ref({
   bookingType: props.booking?.bookingType ?? 'Equipment',
   sourceOpportunityId: props.booking?.sourceOpportunityId ?? '',
   status: props.booking?.status ?? 'Pending',
+  actualPoDate: props.booking?.actualPoDate ?? '',
 })
+// Only an Upsell Booking without a date takes one here; any other change is a Manager's correction.
+const actualPoDateLocked = computed(() => opportunityBooking.value || Boolean(props.booking?.actualPoDate))
+// Mirrors bookings._assert_amount_cny_edit: only a Pending Booking, or an order without one, takes a CNY amount here.
+const amountCnyLocked = computed(() => Boolean(props.booking && props.booking.status !== 'Pending' && props.booking.currency !== 'CNY' && props.booking.amountCny))
+const latestPoDate = shanghaiDate()
 const draft = ref<BookingDraft>({
   primaryContactId: props.booking?.primaryContactId ?? props.selectedContactId ?? '',
   equipment: props.booking?.equipment ?? '',
@@ -41,6 +48,7 @@ const draft = ref<BookingDraft>({
   ddl: props.booking?.ddl ?? '2026-09-30',
   amount: props.booking?.amount ?? '0.00',
   currency: props.booking?.currency ?? 'CNY',
+  amountCny: props.booking && props.booking.currency !== 'CNY' ? props.booking.amountCny ?? '' : '',
   owner: preferredPersonnelId('Sales', props.booking?.owner ?? props.defaultOwner),
   note: props.booking?.note ?? '',
 })
@@ -77,6 +85,8 @@ function submit() {
     bookingType: form.value.bookingType,
     sourceOpportunityId: form.value.sourceOpportunityId,
     note: draft.value.note.trim(),
+    actualPoDate: form.value.actualPoDate,
+    ...(draft.value.currency !== 'CNY' ? { amountCny: String(draft.value.amountCny ?? '').trim() } : {}),
   })
 }
 </script>
@@ -92,8 +102,9 @@ function submit() {
       <label v-else><span>{{ t('bookingEditor.sourceNote') }}</span><input :value="salesEnumLabel('Existing Customer Upsell', locale)" :aria-label="t('bookingEditor.sourceNote')" disabled /></label>
       <label><span>{{ t('detail.account') }}<RequiredMark :show="!booking" /></span><select v-model="form.accountId" :aria-label="t('detail.account')" :disabled="opportunityBooking" required><option value="" disabled>{{ t('quotations.selectAccount') }}</option><option v-for="account in accounts" :key="account.id" :value="account.id">{{ account.shortName }} · {{ account.name }}</option></select></label>
       <label><span>{{ t('detail.status') }}<RequiredMark :show="!booking" /></span><select v-model="form.status" :aria-label="t('detail.status')" required><option v-for="item in statusOptions" :key="item" :value="item">{{ salesEnumLabel(item, locale) }}</option></select></label>
+      <label class="wide"><span>{{ actualPoDateLocked ? t('actualPoDate.label') : t('actualPoDate.optionalLabel') }}</span><input v-model="form.actualPoDate" :aria-label="t('actualPoDate.label')" type="date" :max="latestPoDate" :disabled="actualPoDateLocked" /><small v-if="actualPoDateLocked" class="field-hint">{{ t('actualPoDate.managerOnly') }}</small></label>
     </div>
-    <BookingFields v-model="draft" class="booking-draft-fields" :contacts="contacts" :account-id="form.accountId" :show-required-marks="!booking" @create-contact="emit('create-contact', $event)" />
+    <BookingFields v-model="draft" class="booking-draft-fields" :contacts="contacts" :account-id="form.accountId" :show-required-marks="!booking" :amount-cny-locked="amountCnyLocked" @create-contact="emit('create-contact', $event)" />
   </ModalShell>
 </template>
 
@@ -103,5 +114,6 @@ function submit() {
 .booking-form-grid{display:grid;grid-template-columns:1fr 1fr;gap:13px;margin-bottom:13px}.booking-form-grid label{display:grid;gap:6px}
 .booking-form-grid span{color:var(--crm-text-muted);font-size:9px;font-weight:700}.booking-form-grid input,.booking-form-grid select{box-sizing:border-box;width:100%;height:38px;padding:9px 10px;background:#fff;border:1px solid var(--crm-line);border-radius:8px;font:inherit}.booking-form-grid :focus{border-color:var(--crm-teal);outline:0}
 .booking-form-grid input:disabled,.booking-form-grid select:disabled{color:var(--crm-text-muted);background:var(--crm-surface-muted);cursor:not-allowed}
+.booking-form-grid .wide{grid-column:1/-1}.booking-form-grid .field-hint{color:var(--crm-text-muted);font-size:9px;font-weight:400}
 @media(max-width:560px){.booking-form-grid{grid-template-columns:1fr}}
 </style>

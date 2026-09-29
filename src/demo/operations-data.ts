@@ -202,7 +202,7 @@ export const opportunities: StrategyOpportunity[] = [
       { id: 'OSH-OPP-003-2', from: 'rfq_validated', to: 'quotation_sent', source: 'event', event: 'quotation_published', referenceDoctype: '', referenceName: '', reason: '', actor: 'person002@crm.example.invalid', recordedAt: '2026-07-14T01:30:00Z', reachedAt: '2026-07-14T01:30:00Z', reachedAtBasis: 'recorded' },
       { id: 'OSH-OPP-003-1', from: '', to: 'rfq_validated', source: 'migration', event: 'migration', referenceDoctype: '', referenceName: '', reason: '旧阶段 报价', actor: 'Administrator', recordedAt: '2026-07-01T02:00:00Z', reachedAt: '', reachedAtBasis: 'unknown' },
     ],
-    toolType: 'Inspection Tool', saleType: 'New Tool', subRegion: 'Central China', currency: 'CNY', originalAmount: 32500000, shipmentDate: '2026-11-12', fatDate: '2026-10-28', paymentMilestones: ['30% PO', '60% Shipment', '10% SAT'], competition: 'KLA · Final shortlist', winReason: '技术指标与本地服务领先', lostReason: '', history: [], probabilityHistory: [{ id: 'PLH-OPP-003-2', from: 'upside', to: 'committed', actor: 'Demo Staff 01', at: '2026-07-16T09:20:00Z' }, { id: 'PLH-OPP-003-1', from: '', to: 'upside', actor: 'Demo Staff 01', at: '2026-07-10T02:00:00Z' }],
+    toolType: 'Inspection Tool', saleType: 'New Tool', subRegion: 'Central China', currency: 'CNY', originalAmount: 32500000, shipmentDate: '2026-11-12', fatDate: '2026-10-28', paymentMilestones: ['30% PO', '60% Shipment', '10% SAT'], competition: 'KLA · Final shortlist', winReason: '技术指标与本地服务领先', lostReason: '', history: [], probabilityHistory: [{ id: 'PLH-OPP-003-2', from: 'upside', to: 'committed', reason: '', actor: 'Demo Staff 01', at: '2026-07-16T09:20:00Z' }, { id: 'PLH-OPP-003-1', from: '', to: 'upside', reason: '', actor: 'Demo Staff 01', at: '2026-07-10T02:00:00Z' }],
     strengths: ['技术指标在客户基准测试中排名第一', '技术负责人愿意作为内部 Champion', '交付窗口与客户扩线计划匹配'],
     redFlags: ['集团采购要求追加 5% 价格让步', '最终预算批复尚未完成'],
     informationNeeded: ['CFO 最终预算签批日期', '竞争对手最新服务承诺'],
@@ -224,7 +224,7 @@ export const opportunities: StrategyOpportunity[] = [
     stageHistory: [
       { id: 'OSH-OPP-001-1', from: '', to: 'qualified_opportunity', source: 'migration', event: 'migration', referenceDoctype: '', referenceName: '', reason: '旧阶段 Wafer Demo确认；旧历史记录 2026-07-15 推进', actor: 'Administrator', recordedAt: '2026-07-01T02:00:00Z', reachedAt: '2026-07-15T06:00:00Z', reachedAtBasis: 'evidence' },
     ],
-    toolType: 'Macro Inspection', saleType: 'Capacity Expansion', subRegion: 'East China', currency: 'CNY', originalAmount: 16800000, shipmentDate: '2026-12-05', fatDate: '2026-11-20', paymentMilestones: ['30% PO', '50% FAT', '20% SAT'], competition: 'Onto Innovation · Benchmarking', winReason: '', lostReason: '', history: [], probabilityHistory: [{ id: 'PLH-OPP-001-1', from: '', to: 'upside', actor: 'Demo Staff 01', at: '2026-07-15T06:30:00Z' }],
+    toolType: 'Macro Inspection', saleType: 'Capacity Expansion', subRegion: 'East China', currency: 'CNY', originalAmount: 16800000, shipmentDate: '2026-12-05', fatDate: '2026-11-20', paymentMilestones: ['30% PO', '50% FAT', '20% SAT'], competition: 'Onto Innovation · Benchmarking', winReason: '', lostReason: '', history: [], probabilityHistory: [{ id: 'PLH-OPP-001-1', from: '', to: 'upside', reason: '', actor: 'Demo Staff 01', at: '2026-07-15T06:30:00Z' }],
     strengths: ['客户对低 false-positive 指标高度认可', '已有同类量产案例'], redFlags: ['样片到达延迟一周', '决策人覆盖不足'], informationNeeded: ['竞争工具复测数据', '客户量产节拍目标'],
     stakeholders: [
       { name: '周楠', title: '研发总监', role: 'Technical Buyer', influence: 'High', stance: 'Support', coverage: 'Demo steering meeting' },
@@ -277,7 +277,7 @@ export const opportunities: StrategyOpportunity[] = [
       { at: '2026-07-20 09:00', actor: '演示员工24', field: 'internalValidationApproved', from: 'CRM-VAL-00001', to: 'BKG-003' },
       { at: '2026-07-18 10:00', actor: 'Demo Staff 01', field: 'internalValidationRequested', from: '', to: 'CRM-VAL-00001' },
     ],
-    probabilityHistory: [{ id: 'PLH-OPP-008-1', from: '', to: 'pipeline', actor: 'Demo Staff 01', at: '2026-07-08T02:10:00Z' }],
+    probabilityHistory: [{ id: 'PLH-OPP-008-1', from: '', to: 'pipeline', reason: '', actor: 'Demo Staff 01', at: '2026-07-08T02:10:00Z' }],
     strengths: ['武汉一厂已在量产线使用同型号设备', '客户扩产排期已锁定'], redFlags: ['客户 PO 预计 8 月中旬才能下达'], informationNeeded: ['客户 PO 下达日期'],
     stakeholders: [],
     actions: [{ title: '跟进客户 PO 下达进度', owner: 'Demo Staff 01', due: '07-28', status: 'Open' }],

@@ -23,6 +23,7 @@ from rayher_crm.services.common import (
     validate_choice,
 )
 from rayher_crm.services.concurrency import lock_document
+from rayher_crm.services.equipment import normalize_equipment
 from rayher_crm.services.notifications import create_notification
 
 
@@ -261,7 +262,12 @@ def _lock_lead_for_conversion(name: str):
 
 
 def _validate_conversion(payload: dict[str, Any]) -> dict[str, Any]:
-    from rayher_crm.services.opportunities import assert_qualification_confirmed
+    from rayher_crm.services.opportunities import (
+        assert_initial_probability_level,
+        assert_qualification_confirmed,
+        required_positive_money,
+    )
+    from rayher_crm.services.opportunity_stages import PROBABILITY_LEVEL_CHOICES
 
     assert_qualification_confirmed(payload)
     po_date = optional_date(payload.get("opportunityCloseDate"), "opportunityCloseDate")
@@ -274,13 +280,20 @@ def _validate_conversion(payload: dict[str, Any]) -> dict[str, Any]:
     currency = str(payload.get("currency") or "CNY").strip().upper()
     if not frappe.db.exists("Currency", currency):
         raise CrmApiException("VALIDATION_ERROR", "currency is invalid.", field_errors={"currency": "Invalid value"})
+    # Whoever converts sets the new Opportunity's first level, a Manager converting for Sales included.
+    probability_level = validate_choice(
+        payload.get("opportunityProbabilityLevel") or "", "opportunityProbabilityLevel", PROBABILITY_LEVEL_CHOICES,
+    )
+    assert_initial_probability_level(probability_level, "opportunityProbabilityLevel")
     return {
         "title": required_text(payload, "opportunityTitle"),
         "amount": _opportunity_amount(payload.get("opportunityAmount")),
+        "amount_cny": required_positive_money(payload.get("opportunityAmountCny"), "opportunityAmountCny"),
         "po_date": po_date,
         "currency": currency,
         "owner": resolve_write_owner(payload.get("opportunityOwner")),
-        "tool_type": required_text(payload, "toolType"),
+        "tool_type": normalize_equipment(payload.get("toolType"), "toolType"),
+        "probability_level": probability_level,
     }
 
 
@@ -367,9 +380,11 @@ def convert_lead(
                 "amount": values["amount"],
                 "currency": values["currency"],
                 "original_amount": values["amount"],
+                "amount_cny": values["amount_cny"],
                 "po_date": values["po_date"],
                 "opportunity_owner": values["owner"],
                 "tool_type": values["tool_type"],
+                "probability_level": values["probability_level"],
                 "score": 20,
                 "sale_type": "New Equipment",
                 "sub_region": sub_region,

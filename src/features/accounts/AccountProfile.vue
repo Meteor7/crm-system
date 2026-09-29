@@ -17,6 +17,7 @@ import { formatMoney, moneyByCurrency } from '@/domain/money'
 import { formatDisplayDate } from '@/domain/time'
 import { useI18n, useLocaleMessage } from '@/i18n'
 import { salesEnumLabel, recordTypeLabel } from '@/features/shared/sales-i18n'
+import { regionLabel } from '@/domain/regions'
 import { isOpportunityStage, opportunityStageLabel, opportunityStageTone } from '@/domain/opportunity-stages'
 
 const props = defineProps<{ accountId: string; apiClient: CrmApi }>()
@@ -214,7 +215,7 @@ watch(selectedProject, resetSectionPages)
       <div class="account-360" data-testid="account-360">
         <header class="profile-hero">
           <span class="hero-mark">{{ detail.account.shortName.slice(0, 2) }}</span>
-          <div><span class="eyebrow">ACCOUNT 360</span><h2>{{ detail.account.name }}</h2><p><MapPin :size="13" />{{ detail.account.city }} · {{ detail.account.region }} · {{ salesEnumLabel(detail.account.segment, locale) }} · {{ locale === 'en-US' ? 'Owner' : '负责人' }} {{ personnelDisplayName(detail.account.owner) }}</p></div>
+          <div><span class="eyebrow">ACCOUNT 360</span><h2>{{ detail.account.name }}</h2><p><MapPin :size="13" />{{ detail.account.city }} · {{ regionLabel(detail.account.region, locale) }} · {{ salesEnumLabel(detail.account.segment, locale) }} · {{ locale === 'en-US' ? 'Owner' : '负责人' }} {{ personnelDisplayName(detail.account.owner) }}</p></div>
           <div class="hero-actions"><StatusBadge :label="locale === 'en-US' ? `Tier ${detail.account.tier} account` : `${detail.account.tier} 级客户`" tone="positive" /><button v-if="canExport" class="report-button" type="button" data-testid="export-customer-report" @click="exportReport"><Download :size="14" />{{ locale === 'en-US' ? 'Export account report' : '导出客户报告' }}</button><small v-if="exportError" class="export-error">{{ exportError }}</small></div>
         </header>
 

@@ -26,6 +26,9 @@ $composeArgs = @('compose', '--project-name', $ProjectName, '--env-file', $EnvFi
 $benchArgs = $composeArgs + @('exec', '-T', '--env', 'CI=1', 'backend', 'bench', '--site', $SiteName,
     'run-tests', '--app', 'rayher_crm', '--junit-xml-output', $remoteReport)
 if ($Module) { $benchArgs += @('--module', $Module) }
+# Checked before run-tests: the test runner switches the scheduler off while it runs, so a test
+# inside it cannot tell whether the site really has the daily CRM jobs enabled.
+& (Join-Path $PSScriptRoot 'scheduler-contract.ps1') -ProjectName $ProjectName -SiteName $SiteName -EnvFile $EnvFile -ComposeFile $ComposeFile
 try {
     # Frappe can return zero outside CI even on failure; validate native XML AND stdout.
     $ErrorActionPreference = 'Continue'

@@ -389,6 +389,7 @@ describe('delivery workflow pages', () => {
 
   it('uses three active groups without On Hold and saves a Preparation DDL warning', async () => {
     const repository = createDemoRepository(createMemoryDemoStorage(), seedDemoSnapshot)
+    const expectedModified = (await repository.read()).evaluations.find(item => item.id === 'EVAL-101')!.modified
     const api = createMockApi({ repository, latency: 0 })
     const setDeadline = vi.spyOn(api, 'setEvaluationTestRunDeadline')
     const wrapper = mount(EvaluationsPage, { props: { apiClient: api }, global: await globals('/evaluations') })
@@ -404,7 +405,7 @@ describe('delivery workflow pages', () => {
     await wrapper.get('.modal-card form').trigger('submit')
     await flushPromises()
 
-    expect(setDeadline).toHaveBeenCalledWith('EVAL-101', { testRunDeadline: '2026-09-30' })
+    expect(setDeadline).toHaveBeenCalledWith('EVAL-101', { testRunDeadline: '2026-09-30', expectedModified })
     expect(wrapper.get('[data-api-warning]').text()).toContain('Test Run DDL 晚于客户预期时间')
     expect((await repository.read()).evaluations.find((item) => item.id === 'EVAL-101')?.testRunDeadline).toBe('2026-09-30')
 

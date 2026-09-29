@@ -109,6 +109,7 @@ Assert-Contract ($composeText -match 'REALTIME_AUTH_ORIGIN: http://frontend:8080
 Assert-Contract ($composeText -match 'REALTIME_AUTH_HOST: frontend:8080') 'WebSocket Host must match the internal auth origin'
 Assert-Contract ($composeText -match '/tmp/frappe\.conf\.template') 'frontend must patch a writable copy of the read-only nginx template'
 Assert-Contract ($composeText -match 'exec nginx -g') 'frontend must run nginx in the foreground'
+Assert-Contract ($composeText -match '(?m)^\s+bench --site "\$\$\{SITE_NAME\}" enable-scheduler\s*$') 'install-app must enable the Frappe scheduler: a new site starts with it off and the daily CRM jobs (DDL reminders, quotation expiry) never run'
 
 $volumeNames = @($localRendered.volumes.PSObject.Properties.Value.name)
 Assert-Contract ($volumeNames.Count -ge 6) 'independent persistent volumes are incomplete'

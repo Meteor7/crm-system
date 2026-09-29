@@ -95,7 +95,7 @@ try {
 
     $contact = Invoke-CrmPost $salesSession 'rayher_crm.api.v1.contacts.create_contact' @{input=@{accountId=$created.Account;siteId=$created.Site;name="Stage 5D Contact $stamp";title='Director';department='Engineering';phone='13800000010';email="stage5d-contact-$stamp@example.invalid";relationship='Developing';status='Active';owner=$created.Sales}}
     $created.Contact = $contact.data.id
-    $opportunity = Invoke-CrmPost $salesSession 'rayher_crm.api.v1.opportunities.create_strategy_opportunity' @{input=@{probabilityLevel='pipeline';accountId=$created.Account;siteId=$created.Site;title="Stage 5D Opportunity $stamp";owner=$created.Sales;stage='qualified_opportunity';qualificationConfirmed=$true;forecast='Pipeline';amount='300000.00';probability=20;intentScore=90;poDate='2026-12-31';toolType='Inspection';saleType='New Equipment';subRegion='East China';currency='CNY';originalAmount='300000.00'}}
+    $opportunity = Invoke-CrmPost $salesSession 'rayher_crm.api.v1.opportunities.create_strategy_opportunity' @{input=@{probabilityLevel='pipeline';accountId=$created.Account;siteId=$created.Site;title="Stage 5D Opportunity $stamp";owner=$created.Sales;stage='qualified_opportunity';qualificationConfirmed=$true;forecast='Pipeline';amount='300000.00';probability=20;intentScore=90;poDate='2026-12-31';toolType='Inspection';saleType='New Equipment';subRegion='East China';currency='CNY';originalAmount='300000.00';amountCny='300000.00'}}
     $created.Opportunity = $opportunity.data.id
     $fixtureArgs = "[$(ConvertTo-PythonStringLiteral $created.Opportunity),'quotation_sent']"
     & docker compose @composeArgs exec -T backend bench --site $SiteName execute rayher_crm.tests._opportunity_fixtures.advance_opportunity_fixture_by_id --args $fixtureArgs | Out-Null
@@ -109,7 +109,7 @@ try {
 
     $quoted = (Invoke-RestMethod -Uri "$BaseUrl/api/method/rayher_crm.api.v1.opportunities.get_strategy_opportunity?id=$([Uri]::EscapeDataString($created.Opportunity))" -WebSession $salesSession).message.data
     if ($quoted.stage -ne 'quotation_sent') { throw "Fixture left the Opportunity at $($quoted.stage) instead of quotation_sent." }
-    $confirmed = Invoke-CrmPost $salesSession 'rayher_crm.api.v1.opportunities.confirm_po' @{id=$created.Opportunity;input=@{booking=$bookingDraft};expectedModified=$quoted.modified}
+    $confirmed = Invoke-CrmPost $salesSession 'rayher_crm.api.v1.opportunities.confirm_po' @{id=$created.Opportunity;input=@{booking=$bookingDraft;actualPoDate=(Get-Date).AddDays(-1).ToString('yyyy-MM-dd')};expectedModified=$quoted.modified}
     $created.Booking = $confirmed.data.liveBooking.id
     if ($confirmed.data.stage -ne 'po_received' -or -not $created.Booking -or $confirmed.data.liveBooking.status -ne 'Confirmed') { throw 'HTTP PO confirmation did not create a Confirmed Opportunity Booking.' }
     $booking = (Invoke-RestMethod -Uri "$BaseUrl/api/method/rayher_crm.api.v1.bookings.get_booking?id=$([Uri]::EscapeDataString($created.Booking))" -WebSession $salesSession).message

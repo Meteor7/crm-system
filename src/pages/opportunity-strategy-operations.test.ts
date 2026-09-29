@@ -83,6 +83,33 @@ describe('Mock customer and opportunity operations', () => {
     expect(createAccountSite).not.toHaveBeenCalled()
   })
 
+  it('offers the preset regions in Chinese and saves a custom region in English', async () => {
+    const router = createAppRouter()
+    await router.push('/accounts')
+    await router.isReady()
+    const apiClient = createMockApi({ latency: 0 })
+    const createAccount = vi.spyOn(apiClient, 'createAccount')
+    const wrapper = mount(AccountsPage, {
+      props: { apiClient },
+      global: { plugins: [setRole('Manager'), router] },
+    })
+    await flushPromises()
+
+    await wrapper.get('[data-testid="new-account"]').trigger('click')
+    const region = wrapper.get('[aria-label="客户区域"]')
+    expect((region.element as HTMLSelectElement).value).toBe('East China')
+    expect(region.findAll('option').map((option) => option.text())).toEqual(['华东', '华南', '华西', '华北', '华中', '＋自定义区域'])
+    await wrapper.get('[aria-label="客户全称"]').setValue('示例企业006有限公司')
+    await wrapper.get('[aria-label="客户简称"]').setValue('NE Fab')
+    await region.setValue('__custom_account_segment__')
+    await wrapper.get('[aria-label="客户区域自定义"]').setValue('Northeast China')
+    await wrapper.findAll('[data-modal-submit]').at(-1)!.trigger('submit')
+    await flushPromises()
+
+    expect(createAccount).toHaveBeenCalledWith(expect.objectContaining({ region: 'Northeast China' }))
+    expect((await apiClient.listAccountRegions()).data).toContain('Northeast China')
+  })
+
   it('creates optional sites after creating a customer', async () => {
     const router = createAppRouter()
     await router.push('/accounts')
@@ -186,13 +213,6 @@ describe('Mock customer and opportunity operations', () => {
     await router.push('/leads-opportunities?view=opportunities')
     await router.isReady()
     const apiClient = createMockApi({ latency: 0 })
-    const version = '2026-08-06T04:00:00.000Z'
-    const listStrategyOpportunities = apiClient.listStrategyOpportunities.bind(apiClient)
-    apiClient.listStrategyOpportunities = async (query) => {
-      const result = await listStrategyOpportunities(query)
-      result.data.items = result.data.items.map((opportunity) => ({ ...opportunity, modified: version }))
-      return result
-    }
     const updateStrategyOpportunity = vi.spyOn(apiClient, 'updateStrategyOpportunity')
     const wrapper = mount(OpportunityStrategyPage, {
       props: { apiClient },
@@ -204,10 +224,15 @@ describe('Mock customer and opportunity operations', () => {
     await flushPromises()
     await wrapper.get('[aria-label="Opportunity 名称"]').setValue('Demo 新机会')
     await wrapper.get('[aria-label="金额"]').setValue('100000.00')
+    await wrapper.get('[aria-label="人民币金额"]').setValue('100000.00')
+    await wrapper.get('select[aria-label="设备类型"]').setValue('Nansi')
     await wrapper.get('[data-testid="qualification-confirmed"]').setValue(true)
+    await wrapper.get('[data-testid="opportunity-probability-level"]').setValue('pipeline')
     await wrapper.findAll('[data-modal-submit]').at(-1)!.trigger('submit')
     await flushPromises()
     expect(wrapper.text()).toContain('Demo 新机会')
+
+    const version = (await apiClient.listStrategyOpportunities()).data.items.find(row => row.title === 'Demo 新机会')!.modified
 
     await wrapper.get('[data-testid="edit-opportunity"]').trigger('click')
     await wrapper.get('[aria-label="Opportunity 名称"]').setValue('Demo 新机会（已更新）')

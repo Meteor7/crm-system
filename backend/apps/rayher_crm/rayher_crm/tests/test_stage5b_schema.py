@@ -14,7 +14,7 @@ EXPECTED_FIELDS = {
         "custom_crm_segment": ("Select", "Frontend\nAdvanced Packaging"),
         "custom_crm_tier": ("Select", "S\nA\nB"),
         "custom_crm_city": ("Data", None),
-        "custom_crm_region": ("Data", None),
+        "custom_crm_region": ("Select", "\nEast China\nSouth China\nWest China\nNorth China\nCentral China"),
         "custom_crm_visibility": ("Select", "Private\nPublic"),
     },
     "Contact": {
@@ -340,7 +340,7 @@ class TestStage5BSchema(FrappeTestCase):
             "Requested\nScope Confirmed\nSample Received\nScheduled\nTesting\nAnalysis\nInternal Review\nCustomer Review\nAccepted\nRejected",
         )
         self.assertEqual(test_run.get_field("evaluation").options, "CRM Evaluation")
-        self.assertEqual(test_run.get_field("status").options, "Planned\nCompleted")
+        self.assertEqual(test_run.get_field("status").options, "Planned\nCompleted\nCancelled")
         for meta in (request, evaluation, test_run):
             for forbidden in ("company", "project", "task", "quality_inspection", "warehouse"):
                 self.assertIsNone(meta.get_field(forbidden))

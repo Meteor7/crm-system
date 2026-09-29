@@ -25,6 +25,7 @@ export function migrateDemoSnapshot(snapshot: DemoSnapshot): DemoSnapshot {
     const migrated = cloneSnapshot(snapshot)
     migrated.comments ??= []
     migrateDemoTestRounds(migrated)
+    backfillEvaluationVersions(migrated)
     migrated.version = DEMO_SNAPSHOT_VERSION
     return migrateDemoIdentityReferences(migrated)
   }
@@ -44,6 +45,14 @@ function migrateDemoTestRounds(snapshot: DemoSnapshot) {
   })
   snapshot.artifacts.forEach((artifact) => {
     if (artifact.type === 'Test Report' || artifact.type === 'Customer Report') artifact.round ??= 1
+  })
+}
+
+function backfillEvaluationVersions(snapshot: DemoSnapshot) {
+  // Deterministic on old snapshots: reading through another API client must not
+  // manufacture a different lock token before any business write occurs.
+  snapshot.evaluations.forEach((evaluation) => {
+    if (!evaluation.modified?.trim()) evaluation.modified = '1970-01-01T00:00:00.000Z'
   })
 }
 
@@ -205,6 +214,7 @@ export function seedDemoSnapshot(): DemoSnapshot {
     ],
   }
   const migrated = migrateDemoIdentityReferences(snapshot)
+  backfillEvaluationVersions(migrated)
   validateDemoSnapshot(migrated)
   return migrated
 }

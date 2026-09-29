@@ -72,10 +72,11 @@ class TestStage5GProjections(FrappeTestCase):
         booking: dict | None = None,
     ):
         opportunity = create_strategy_opportunity({
+            "probabilityLevel": "pipeline",
             "accountId": account["id"], "siteId": site["id"], "title": title,
             "owner": owner, "stage": QUALIFIED_OPPORTUNITY, "amount": amount, "intentScore": 70,
             "poDate": "2026-12-31", "toolType": "Inspection", "saleType": "New Equipment",
-            "subRegion": "East", "currency": "CNY", "originalAmount": amount, "qualificationConfirmed": True,
+            "subRegion": "East", "currency": "CNY", "originalAmount": amount, "amountCny": amount, "qualificationConfirmed": True,
         })
         return advance_opportunity_fixture(opportunity, stage, booking=booking)
 

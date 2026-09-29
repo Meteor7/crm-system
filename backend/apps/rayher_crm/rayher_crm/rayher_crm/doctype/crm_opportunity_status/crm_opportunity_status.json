@@ -1,0 +1,38 @@
+{
+  "actions": [],
+  "autoname": "hash",
+  "creation": "2026-09-21 00:00:00.000000",
+  "doctype": "DocType",
+  "engine": "InnoDB",
+  "field_order": [
+    "opportunity",
+    "information"
+  ],
+  "fields": [
+    {
+      "fieldname": "opportunity",
+      "fieldtype": "Link",
+      "label": "Opportunity",
+      "options": "CRM Opportunity",
+      "reqd": 1,
+      "search_index": 1
+    },
+    {
+      "fieldname": "information",
+      "fieldtype": "Text",
+      "label": "Information",
+      "reqd": 1
+    }
+  ],
+  "index_web_pages_for_search": 0,
+  "modified": "2026-09-22 00:00:00.000000",
+  "modified_by": "Administrator",
+  "module": "Rayher CRM",
+  "name": "CRM Opportunity Status",
+  "naming_rule": "Random",
+  "owner": "Administrator",
+  "permissions": [],
+  "sort_field": "modified",
+  "sort_order": "DESC",
+  "states": []
+}

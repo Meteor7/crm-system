@@ -44,6 +44,7 @@ const referenceWarning = computed(() => referencesUnavailable.value
   : '')
 const status = ref<BookingDto['status'] | 'All'>(typeof route.query.status === 'string' ? route.query.status as BookingDto['status'] | 'All' : 'All')
 const bookingSource = ref<BookingSource | 'All'>(typeof route.query.source === 'string' ? route.query.source as BookingSource | 'All' : 'All')
+const poDateFilter = ref<'All' | 'missing'>(route.query.actualPoDate === 'missing' ? 'missing' : 'All')
 const modalOpen = ref(false)
 const editing = ref<BookingDto | null>(null)
 const contactModal = ref(false)
@@ -86,6 +87,7 @@ async function load() {
     const accountId = typeof route.query.accountId === 'string' ? route.query.accountId : ''
     const result = await props.apiClient.listBookings({
       contactId, accountId, status: status.value, source: bookingSource.value,
+      ...(poDateFilter.value === 'missing' ? { actualPoDateMissing: '1' } : {}),
       page: page.value, pageSize: pageSize.value,
     })
     if (current !== sequence) return
@@ -193,18 +195,19 @@ async function completeService(booking: BookingDto) {
 }
 
 let restoringRoute = false
-function syncUrl() { if (!restoringRoute) void router.replace({ query: { ...route.query, page: String(page.value), pageSize: String(pageSize.value), status: status.value === 'All' ? undefined : status.value, source: bookingSource.value === 'All' ? undefined : bookingSource.value } }) }
+function syncUrl() { if (!restoringRoute) void router.replace({ query: { ...route.query, page: String(page.value), pageSize: String(pageSize.value), status: status.value === 'All' ? undefined : status.value, source: bookingSource.value === 'All' ? undefined : bookingSource.value, actualPoDate: poDateFilter.value === 'missing' ? 'missing' : undefined } }) }
 function reloadFromFirstPage() { if (restoringRoute) return; page.value = 1; syncUrl(); void load() }
 function goPage(value: number) { page.value = value; syncUrl(); void load() }
 function changePageSize(value: number) { pageSize.value = value; page.value = 1; syncUrl(); void load() }
-watch([status, bookingSource], reloadFromFirstPage, { flush: 'sync' })
-watch(() => [route.query.page, route.query.pageSize, route.query.status, route.query.source], ([nextPage, nextSize, nextStatus, nextSource]) => {
+watch([status, bookingSource, poDateFilter], reloadFromFirstPage, { flush: 'sync' })
+watch(() => [route.query.page, route.query.pageSize, route.query.status, route.query.source, route.query.actualPoDate], ([nextPage, nextSize, nextStatus, nextSource, nextPoDate]) => {
   const restoredPage = typeof nextPage === 'string' && Number(nextPage) > 0 ? Number(nextPage) : 1
   const restoredSize = typeof nextSize === 'string' && [10, 25, 50].includes(Number(nextSize)) ? Number(nextSize) : 10
   const restoredStatus = typeof nextStatus === 'string' ? nextStatus as BookingDto['status'] : 'All'
   const restoredSource = typeof nextSource === 'string' ? nextSource as BookingSource : 'All'
-  if (restoredPage === page.value && restoredSize === pageSize.value && restoredStatus === status.value && restoredSource === bookingSource.value) return
-  restoringRoute = true; page.value = restoredPage; pageSize.value = restoredSize; status.value = restoredStatus; bookingSource.value = restoredSource; restoringRoute = false; void load()
+  const restoredPoDate = nextPoDate === 'missing' ? 'missing' : 'All'
+  if (restoredPage === page.value && restoredSize === pageSize.value && restoredStatus === status.value && restoredSource === bookingSource.value && restoredPoDate === poDateFilter.value) return
+  restoringRoute = true; page.value = restoredPage; pageSize.value = restoredSize; status.value = restoredStatus; bookingSource.value = restoredSource; poDateFilter.value = restoredPoDate; restoringRoute = false; void load()
 })
 
 onMounted(async () => {
@@ -233,6 +236,7 @@ onMounted(async () => {
         <div class="booking-filters">
           <select v-model="bookingSource" :aria-label="t('booking.source')"><option value="All">{{ t('booking.allSources') }}</option><option v-for="item in ['Opportunity', 'Upsell']" :key="item" :value="item">{{ salesEnumLabel(item, locale) }}</option></select>
           <select v-model="status" :aria-label="t('booking.status')"><option value="All">{{ t('booking.allStatuses') }}</option><option v-for="item in ['Pending', 'Confirmed', 'Completed', 'Cancelled']" :key="item" :value="item">{{ salesEnumLabel(item, locale) }}</option></select>
+          <select v-model="poDateFilter" :aria-label="t('actualPoDate.label')" data-testid="actual-po-date-filter"><option value="All">{{ t('actualPoDate.filterAll') }}</option><option value="missing">{{ t('actualPoDate.filterMissing') }}</option></select>
         </div>
       </header>
       <DataState v-if="loading && !rows.length" type="loading" />
@@ -247,8 +251,8 @@ onMounted(async () => {
               <td><button class="booking-link record-name-link" type="button" :data-open-booking-detail="item.id" @click="openDetail(item)"><span><PackageCheck :size="14" /></span><div><strong>{{ item.id }}</strong><small>{{ bookingTitle(item, locale) }}</small></div></button><small>{{ item.accountName }}</small><RouterLink v-if="item.primaryContactId" :to="{ name: 'contact-detail', params: { contactId: item.primaryContactId } }">{{ item.customerContact }}</RouterLink><span v-else>{{ item.customerContact || t('booking.missingContact') }}</span></td>
               <td><StatusBadge :label="salesEnumLabel(item.source ?? '', locale)" :tone="item.source === 'Opportunity' ? 'info' : 'neutral'" /><RouterLink v-if="item.sourceOpportunityId" :data-booking-source="item.sourceOpportunityId" :to="{ name: 'opportunity-detail', params: { opportunityId: item.sourceOpportunityId } }">{{ item.sourceOpportunityId }}</RouterLink><small v-else>{{ salesEnumLabel('Existing Customer Upsell', locale) }}</small></td>
               <td><strong>{{ item.equipment }}</strong><small>{{ salesEnumLabel(item.bookingType ?? '', locale) }} · {{ item.quantity }} {{ salesUnits(locale) }}</small><small v-if="item.installedToolId" class="installed-tool-link">{{ locale === 'en-US' ? 'Installed tool' : '已安装设备' }} · {{ item.installedToolId }}</small></td>
-              <td><strong>{{ formatDisplayDate(item.ddl) }}</strong><small>{{ t('booking.entered') }} {{ formatDisplayDate(item.bookingDate) }}</small></td>
-              <td><strong>{{ formatMoney(item.amount, item.currency) }}</strong><StatusBadge :label="salesEnumLabel(item.status, locale)" :tone="item.status === 'Confirmed' || item.status === 'Completed' ? 'positive' : item.status === 'Cancelled' ? 'danger' : 'warning'" /></td>
+              <td><strong>{{ formatDisplayDate(item.ddl) }}</strong><small>{{ t('booking.entered') }} {{ formatDisplayDate(item.bookingDate) }}</small><small v-if="item.actualPoDate || item.status === 'Confirmed' || item.status === 'Completed'" :data-booking-actual-po-date="item.id">{{ t('actualPoDate.label') }} {{ item.actualPoDate ? formatDisplayDate(item.actualPoDate) : t('actualPoDate.missing') }}</small></td>
+              <td><strong>{{ formatMoney(item.amount, item.currency) }}</strong><small v-if="item.currency !== 'CNY'" :data-booking-amount-cny="item.id">{{ item.amountCny ? `${t('bookingEditor.amountCny')} ${formatMoney(item.amountCny, 'CNY')}` : t('booking.amountCnyPending') }}</small><StatusBadge :label="salesEnumLabel(item.status, locale)" :tone="item.status === 'Confirmed' || item.status === 'Completed' ? 'positive' : item.status === 'Cancelled' ? 'danger' : 'warning'" /></td>
               <td>{{ personnelDisplayName(item.owner) }}</td>
               <td>{{ item.note || '—' }}</td>
               <td v-if="canWrite">

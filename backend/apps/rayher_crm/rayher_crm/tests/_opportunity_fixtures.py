@@ -36,6 +36,7 @@ def advance_opportunity_fixture(
     changes: dict[str, Any] | None = None,
     *,
     booking: dict[str, Any] | None = None,
+    actual_po_date: str | None = None,
 ) -> dict[str, Any]:
     """Advance downstream test data through the same server-owned gates as production.
 
@@ -66,7 +67,9 @@ def advance_opportunity_fixture(
         elif next_stage == PO_RECEIVED:
             if booking is None:
                 raise ValueError("Reaching po_received needs the Booking fields of the PO confirmation.")
-            current = confirm_po(current["id"], {"booking": booking}, current["modified"])
+            current = confirm_po(current["id"], {
+                "booking": booking, "actualPoDate": actual_po_date or frappe.utils.today(),
+            }, current["modified"])
 
     if changes:
         current = update_strategy_opportunity(current["id"], changes, current["modified"])

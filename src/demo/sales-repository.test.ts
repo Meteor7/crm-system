@@ -105,6 +105,18 @@ describe('sales repository Contact cleanup', () => {
       .resolves.toBeDefined()
   })
 
+  it('stores regions cached in Chinese under their English preset', () => {
+    const cached = structuredClone(createMemorySalesRepository().snapshot)
+    cached.accounts[0]!.region = '华东'
+    cached.accounts[1]!.region = ' Southeast  Asia '
+    cached.opportunities[0]!.subRegion = '华中区'
+
+    const repository = createMemorySalesRepository(cached)
+
+    expect(repository.snapshot.accounts.slice(0, 2).map((account) => account.region)).toEqual(['East China', 'Southeast Asia'])
+    expect(repository.snapshot.opportunities[0]!.subRegion).toBe('Central China')
+  })
+
   it('keeps Opportunity normalization when the cache also triggers retired Contact cleanup', () => {
     const cached = structuredClone(createMemorySalesRepository().snapshot)
     const staleOpportunity = cached.opportunities[0] as unknown as Record<string, unknown>

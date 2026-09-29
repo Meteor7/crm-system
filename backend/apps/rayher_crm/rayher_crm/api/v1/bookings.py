@@ -43,5 +43,17 @@ def delete_booking(id: str) -> dict:
     return success_response(bookings.delete_booking(id))
 @frappe.whitelist(methods=["POST"])
 @api_endpoint
+def set_actual_po_date(id: str, input: Any, expectedModified: str | None = None) -> dict:
+    return success_response(bookings.set_booking_actual_po_date(id, as_payload(input), expectedModified))
+
+
+@frappe.whitelist(methods=["POST"])
+@api_endpoint
+def set_amount_cny(id: str, input: Any, expectedModified: str | None = None) -> dict:
+    return success_response(bookings.set_booking_amount_cny(id, as_payload(input), expectedModified))
+
+
+@frappe.whitelist(methods=["POST"])
+@api_endpoint
 def complete_service_booking(id: str, expectedModified: str | None = None) -> dict:
     return success_response(bookings.complete_service_booking(id, expectedModified))

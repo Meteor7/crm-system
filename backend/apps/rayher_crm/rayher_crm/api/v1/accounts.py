@@ -28,6 +28,12 @@ def list_account_segments() -> dict:
 
 @frappe.whitelist(methods=["GET"])
 @api_endpoint
+def list_account_regions() -> dict:
+    return success_response(accounts.list_account_regions())
+
+
+@frappe.whitelist(methods=["GET"])
+@api_endpoint
 def list_account_cities() -> dict:
     return success_response(accounts.list_account_cities())
 

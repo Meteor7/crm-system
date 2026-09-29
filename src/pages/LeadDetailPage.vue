@@ -17,6 +17,9 @@ import { readAllPages } from '@/features/shared/read-all-pages'
 import { formatDisplayDate } from '@/domain/time'
 import { useI18n, useLocaleMessage } from '@/i18n'
 import { salesEnumLabel } from '@/features/shared/sales-i18n'
+import { REGION_PRESETS } from '@/domain/regions'
+import { EQUIPMENT_PRESETS } from '@/domain/equipment'
+import { loadEquipmentTypes } from '@/features/opportunities/equipment-types'
 
 const props = withDefaults(defineProps<{ apiClient?: CrmApi }>(), { apiClient: () => defaultApi })
 const route = useRoute()
@@ -26,6 +29,8 @@ const { locale, t, message } = useI18n()
 const lead = ref<LeadDto | null>(null)
 const accounts = ref<AccountSummaryDto[]>([])
 const segments = ref<string[]>(['Frontend', 'Advanced Packaging'])
+const regions = ref<string[]>([...REGION_PRESETS])
+const equipmentTypes = ref<string[]>([...EQUIPMENT_PRESETS])
 const contacts = ref<ContactSummaryDto[]>([])
 const sites = ref<Array<SiteDto & { accountId: string }>>([])
 const loading = ref(false)
@@ -89,6 +94,12 @@ async function loadReferences() {
   } catch {
     segments.value = ['Frontend', 'Advanced Packaging']
   }
+  try {
+    regions.value = (await props.apiClient.listAccountRegions()).data
+  } catch {
+    regions.value = [...REGION_PRESETS]
+  }
+  equipmentTypes.value = await loadEquipmentTypes(props.apiClient)
   if (!app.can('contact:view')) {
     contacts.value = []
     sites.value = []
@@ -307,7 +318,7 @@ onMounted(async () => {
       </div>
 
       <LeadEditorModal v-if="editOpen" :lead="lead" :busy="busy" :error="actionError" @close="editOpen = false" @submit="saveLead" />
-      <LeadConvertModal v-if="convertOpen" :lead="lead" :accounts="accounts" :contacts="contacts" :sites="sites" :segments="segments" :busy="busy" :error="actionError" @close="convertOpen = false" @submit="convertLead" />
+      <LeadConvertModal v-if="convertOpen" :lead="lead" :accounts="accounts" :contacts="contacts" :sites="sites" :segments="segments" :regions="regions" :equipment-types="equipmentTypes" :busy="busy" :error="actionError" @close="convertOpen = false" @submit="convertLead" />
     </template>
   </div>
 </template>

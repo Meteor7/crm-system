@@ -46,6 +46,19 @@ describe('Booking page', () => {
     expect(wrapper.get('select[aria-label="来源"]').text()).toContain('客户增购')
   })
 
+  it('lists confirmed Bookings still missing their actual PO date', async () => {
+    const { api, pinia, router } = await context()
+    const wrapper = mount(BookingPage, { props: { apiClient: api }, global: { plugins: [pinia, router] } })
+    await flushPromises()
+
+    expect(wrapper.get('[data-booking-actual-po-date="BKG-002"]').text()).toBe('实际 PO 日期 待补录')
+    await wrapper.get('[data-testid="actual-po-date-filter"]').setValue('missing')
+    await flushPromises()
+
+    expect(wrapper.findAll('[data-booking-id]').map((row) => row.attributes('data-booking-id'))).toEqual(['BKG-002'])
+    expect(router.currentRoute.value.query.actualPoDate).toBe('missing')
+  })
+
   it('keeps Booking visible when optional account or contact references fail', async () => {
     const base = createMockApi({ latency: 0 })
     const degraded: CrmApi = {

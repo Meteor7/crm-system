@@ -8,6 +8,7 @@ import { useAppStore } from '@/stores/app'
 import { useI18n } from '@/i18n'
 import type { AccountSummaryDto, BuyingRole, ContactDto, CreateStakeholderInput, Tone } from '@/types/crm'
 import { buildStakeholderForest, type StakeholderNode } from '@/domain/stakeholders'
+import { regionLabel } from '@/domain/regions'
 import PageHeader from '@/design-system/PageHeader.vue'
 import DataState from '@/design-system/DataState.vue'
 import StatusBadge from '@/design-system/StatusBadge.vue'
@@ -81,7 +82,7 @@ onMounted(async () => {
       <main class="relationship-panel">
         <p v-if="error" class="form-error">{{ error }}<small v-if="requestId">Request ID {{ requestId }}</small></p>
         <template v-if="selectedAccount">
-          <header class="account-heading"><div><span>{{ selectedAccount.segment }} · {{ selectedAccount.region }}</span><h2>{{ selectedAccount.name }}</h2><p>{{ locale === 'en-US' ? `${contacts.length} stakeholders · detailed records are the source of truth` : `${contacts.length} 位详细关键人 · 详情记录为人数事实来源` }}</p></div><Network :size="32" /></header>
+          <header class="account-heading"><div><span>{{ selectedAccount.segment }} · {{ regionLabel(selectedAccount.region, locale) }}</span><h2>{{ selectedAccount.name }}</h2><p>{{ locale === 'en-US' ? `${contacts.length} stakeholders · detailed records are the source of truth` : `${contacts.length} 位详细关键人 · 详情记录为人数事实来源` }}</p></div><Network :size="32" /></header>
           <div class="role-coverage"><span v-for="item in roleCoverage" :key="item.role" :class="{ missing: !item.covered }"><UserRoundCheck :size="13" />{{ item.covered ? (locale === 'en-US' ? `${item.role} covered` : `${item.role} 已覆盖`) : (locale === 'en-US' ? `${item.role} missing` : `缺少 ${item.role}`) }}</span></div>
 
           <DataState v-if="loading && !contacts.length" type="loading" />

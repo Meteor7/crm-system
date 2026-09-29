@@ -1,0 +1,136 @@
+.route-content:has(.opportunity-board-page){max-width:2000px;padding:20px 24px}
+.opportunity-board-page *{box-sizing:border-box}
+.opportunity-board-page{display:grid;gap:16px;min-width:0;color:var(--crm-text);font-size:13px;container-type:inline-size;font-variant-numeric:tabular-nums}
+.opportunity-board-page button,.opportunity-board-page input,.opportunity-board-page select,.opportunity-board-page summary{font:inherit}
+.opportunity-board-page button,.opportunity-board-page select,.opportunity-board-page summary{cursor:pointer}
+.opportunity-board-page button{display:inline-flex;align-items:center;justify-content:center;gap:6px;min-height:34px;padding:6px 12px;background:#fff;border:1px solid var(--crm-line);border-radius:var(--crm-radius-sm);color:var(--crm-text)}
+.opportunity-board-page button:disabled{opacity:.5;cursor:not-allowed}
+.opportunity-board-page :is(button,input,select,summary,a):focus-visible{outline:2px solid var(--crm-brand);outline-offset:3px}
+.opportunity-board-page :is(input:not([type=checkbox]),select){min-width:0;min-height:34px;padding:6px 9px;background:#fff;border:1px solid var(--crm-line);border-radius:var(--crm-radius-sm);color:var(--crm-text)}
+.opportunity-board-page input[type=checkbox]{width:15px;height:15px;accent-color:var(--crm-brand)}
+.board-hero{position:relative;isolation:isolate;z-index:5;padding:20px;background:linear-gradient(120deg,#fff3df 0%,#fffaf3 48%,var(--crm-surface) 100%);border:1px solid var(--crm-line);border-top:3px solid var(--crm-brand);border-radius:var(--crm-radius-md)}
+.board-brand-art{position:absolute;z-index:-1;right:12px;top:0;width:300px;height:100%;object-fit:contain;object-position:right center;opacity:.12;pointer-events:none;mask-image:linear-gradient(90deg,transparent,#000 65%)}
+/* Same masthead heading height as Review, Plan and Warnings. */
+.board-heading{display:flex;align-items:flex-start;justify-content:space-between;gap:20px;min-height:88px;margin-bottom:16px}
+.board-heading h1{margin:0;font-size:28px;letter-spacing:-.6px;line-height:1.15}
+.board-heading h1 span{font-size:inherit}
+.board-heading p{margin:5px 0 0;color:var(--crm-text-muted);font-size:13px}
+.board-list-link{color:var(--crm-link);white-space:nowrap;text-decoration:none;font-size:12px}
+.board-navigation{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.board-navigation a,.board-navigation strong{display:inline-flex;align-items:center;padding:7px 16px;min-height:34px;border:1px solid var(--crm-line);border-radius:var(--crm-radius-sm);text-decoration:none;color:var(--crm-text);background:white}
+.board-navigation strong{background:var(--crm-navy);border-color:var(--crm-navy);color:white}
+.board-scope{display:contents}
+.scope-item{display:flex;align-items:center;gap:6px;min-width:0;min-height:34px;padding:5px 8px;background:white;border:1px solid var(--crm-line);border-radius:var(--crm-radius-sm);color:var(--crm-text-muted)}
+.scope-item>span{font-size:13px;white-space:nowrap}
+.board-multiselect{position:relative;min-width:0;flex:1}
+.board-multiselect summary{display:flex;align-items:center;justify-content:space-between;gap:8px;min-height:34px;padding:6px 9px;background:#fff;border:1px solid var(--crm-line);border-radius:var(--crm-radius-sm);list-style:none}
+.board-multiselect summary::-webkit-details-marker{display:none}
+.board-multiselect summary>span:first-child{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.board-multiselect summary[aria-disabled=true]{opacity:.55;cursor:not-allowed}
+.board-options{position:absolute;z-index:25;top:calc(100% + 6px);left:0;width:max(100%,240px);max-width:340px;max-height:310px;overflow:auto;display:grid;gap:6px;padding:12px;background:#fff;border:1px solid var(--crm-line);border-radius:8px;box-shadow:0 10px 30px #1e354820}
+.board-options label{display:flex;align-items:center;gap:8px;padding:5px 0}
+.board-options label span{overflow-wrap:anywhere}
+.board-options p{color:var(--crm-text-muted);margin:4px}
+.board-query-panel{background:#fff;border:1px solid var(--crm-line);border-radius:var(--crm-radius-md)}
+.board-panel-heading{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;padding:16px 18px 10px}
+.board-panel-heading h2,.board-table-tools h2{display:flex;align-items:center;gap:8px;margin:0;font-size:16px}
+.board-panel-heading p,.board-table-tools p{margin:4px 0 0;color:var(--crm-text-muted);font-size:12px;line-height:1.4}
+.query-tools{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.board-segmented{display:flex;flex-shrink:0;border:1px solid var(--crm-line);border-radius:var(--crm-radius-sm);overflow:hidden}
+.board-segmented button{border:0;border-radius:0;padding:6px 10px;font-weight:600}
+.board-segmented button:first-child{border-radius:0}
+.board-segmented button:last-child{border-radius:0}
+.board-segmented button.active{color:var(--crm-brand-ink);background:var(--crm-brand)}
+.board-presets{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:0 22px 10px}
+.board-presets>span{color:var(--crm-text-muted);font-size:11px;margin-right:2px}
+.board-presets button{min-height:28px;padding:4px 10px;border-radius:var(--crm-radius-sm);background:white;font-size:11px}
+.board-conditions{display:grid;grid-template-columns:1fr 1fr;gap:12px 22px;padding:4px 22px 22px}
+.board-condition{display:grid;grid-template-columns:38px minmax(110px,1fr) minmax(115px,.9fr) minmax(160px,1.5fr) 25px;gap:7px;align-items:center;min-width:0}
+.condition-join{color:var(--crm-text-muted);font-size:10px;font-weight:750}
+.condition-range{display:flex;gap:5px;min-width:0}
+.condition-range input{width:50%}
+.board-condition .condition-remove{padding:0;min-height:28px;border:0;color:var(--crm-text-muted);font-size:20px}
+.board-query-empty{padding:8px 22px 16px;margin:0;color:var(--crm-text-muted);font-size:12px}
+.board-validation{margin:0;padding:10px 22px;color:var(--crm-link);background:#fff9ed;font-size:12px}
+.board-saved{display:flex;align-items:center;flex-wrap:wrap;gap:8px;padding:10px 18px;background:var(--crm-surface-muted);border-top:1px solid var(--crm-line);border-radius:0 0 var(--crm-radius-md) var(--crm-radius-md)}
+.board-saved label{display:flex;align-items:center;gap:9px;font-size:11px;color:var(--crm-text-muted)}
+.board-saved select{width:220px}
+.board-saved button{font-size:11px}
+.query-dirty{color:var(--crm-link);font-size:11px}
+.board-saved .icon-button{padding:6px}
+.board-error{color:var(--crm-danger)!important}
+.board-saved .board-error{flex-basis:100%;margin:2px 0}
+.board-state{display:flex;align-items:center;justify-content:center;flex-wrap:wrap;gap:12px;min-height:145px;padding:25px;text-align:center;color:var(--crm-text-muted);background:#fff;border:1px solid var(--crm-line);border-radius:var(--crm-radius-md)}
+.board-state p{width:100%;margin:0}
+.board-state small{width:100%}
+.board-results-summary{display:grid;grid-template-columns:auto 1fr;gap:12px 24px;align-items:center;padding:14px 18px;background:white;border:1px solid var(--crm-line);border-radius:var(--crm-radius-md)}
+.board-total{display:grid;gap:6px}
+.board-total>strong{font-size:32px;line-height:1.4;font-weight:750;letter-spacing:-.5px}
+.board-total strong small{font-size:12px;font-weight:500}
+.board-total>span{font-size:13px;font-variant-numeric:tabular-nums}
+.board-total span small{font-size:10px;color:var(--crm-text-muted)}
+.board-probabilities{display:flex;justify-content:flex-end;gap:8px;flex-wrap:wrap}
+.probability-chip{display:grid;gap:5px;padding:9px 13px;border-radius:var(--crm-radius-sm);background:var(--crm-surface-muted);color:var(--crm-text-muted);font-size:11px}
+.probability-chip>span{display:flex;gap:14px;justify-content:space-between;font-weight:650}
+.probability-chip small{font-size:10px}
+.probability-chip.committed,.probability-badge.committed{background:#e3f0e9;color:#2e8064}
+.probability-chip.upside,.probability-badge.upside{background:#e2edf8;color:#2866a1}
+.probability-chip.pipeline,.probability-badge.pipeline{background:#fff0d8;color:#a76910}
+.probability-chip.pending,.probability-badge.pending{background:#f0eef5;color:#746485}
+.board-quality{display:flex;gap:18px;flex-wrap:wrap;grid-column:1/-1;font-size:11px;color:var(--crm-text-muted)}
+.stage-warning{color:var(--crm-danger)!important;font-weight:700}
+.board-table-panel{min-width:0;background:#fff;border:1px solid var(--crm-line);border-radius:var(--crm-radius-md)}
+.board-table-tools{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;padding:16px 18px 10px}
+.table-actions{display:flex;align-items:center;gap:10px}
+.table-actions>label{display:flex;align-items:center;gap:6px;font-size:11px}
+.board-columns{position:relative}
+.board-columns summary{padding:8px 12px;border:1px solid var(--crm-line);border-radius:var(--crm-radius-sm);list-style:none}
+.board-columns>div{position:absolute;z-index:20;right:0;top:calc(100% + 5px);width:200px;display:grid;gap:8px;padding:14px;background:#fff;border:1px solid var(--crm-line);border-radius:8px;box-shadow:0 8px 25px #1e354820}
+.board-columns label{display:flex;align-items:center;gap:8px}
+.opportunity-board-page .board-export{background:var(--crm-brand);border-color:var(--crm-brand);color:var(--crm-brand-ink);font-weight:650}
+.board-table-scroll{overflow:auto;max-height:610px;padding:0 18px}
+.board-table{width:100%;min-width:1150px;border-collapse:separate;border-spacing:0;font-size:12px}
+.board-table thead th{position:sticky;top:0;z-index:2;padding:13px 7px;text-align:left;background:white;border-bottom:1px solid var(--crm-line);white-space:nowrap}
+.board-table thead button{padding:0;min-height:26px;border:0;background:transparent;font-size:11px;font-weight:650;color:var(--crm-text-muted)}
+.board-table td{padding:13px 7px;border-bottom:1px solid var(--crm-line);vertical-align:top;line-height:1.5}
+.board-table tr:last-child td{border-bottom:0}
+.board-table tbody tr:not(.board-group-row):hover{background:var(--crm-surface-muted)}
+.board-table td a{display:block;text-decoration:none;color:inherit;font-weight:650}
+.board-table td a:hover{text-decoration:underline}
+.board-table td small{display:block;max-width:230px;margin-top:3px;color:var(--crm-text-muted);font-size:10px;font-weight:400}
+.col-customerName{min-width:205px}
+.col-nextAction{min-width:250px;color:var(--crm-text-muted)}
+.col-stageChangedAt,.col-amountCny,.col-amount{white-space:nowrap;font-variant-numeric:tabular-nums}
+.col-amountCny,.col-amount{text-align:right}
+.stage-badge,.probability-badge{display:inline-block;white-space:nowrap;padding:3px 8px;border-radius:5px;font-size:10px;font-weight:650;background:var(--crm-surface-muted);color:var(--crm-text-muted)}
+.board-group-row th{padding:12px 7px;background:var(--crm-surface-muted);border-bottom:1px solid var(--crm-line);text-align:left;font-size:12px}
+.board-group-row span{margin-left:16px;font-weight:400;color:var(--crm-text-muted);font-size:11px}
+.board-table-note{padding:12px 18px;border-top:1px solid var(--crm-line);font-size:10px;color:var(--crm-text-muted)}
+.board-table-panel>.board-error{padding:0 20px}
+.board-dialog{width:min(480px,calc(100vw - 32px));padding:24px;border:1px solid var(--crm-line);border-radius:var(--crm-radius-md);color:var(--crm-text);box-shadow:0 20px 70px #152b3840}
+.board-dialog::backdrop{background:#132b3a66}
+.board-dialog header,.board-dialog footer{display:flex;align-items:center;justify-content:space-between;gap:10px}
+.board-dialog h2{margin:0;font-size:20px}
+.board-dialog p{font-size:13px;line-height:1.7}
+.board-dialog label{display:grid;gap:8px}
+.board-dialog footer{margin-top:24px;justify-content:flex-end}
+.opportunity-board-page .board-primary{color:var(--crm-brand-ink);background:var(--crm-brand);border-color:var(--crm-brand)}
+.opportunity-board-page .board-danger{color:#fff;background:#ad3834;border-color:#ad3834}
+
+.board-controls{display:flex;align-items:center;flex-wrap:wrap;gap:8px}
+.board-scope .board-multiselect{width:130px;flex:0 1 auto}
+.board-scope .board-multiselect summary{border:0;background:transparent;padding:0;min-height:22px;font-weight:600;color:inherit}
+.board-navigation a:hover,.board-presets button:hover{background:var(--crm-surface-muted)}
+.board-heading a:hover{text-decoration:underline}
+.board-panel-heading h2,.board-table-tools h2{line-height:1.25;letter-spacing:-.2px}
+.board-table :is(th,td):first-child{padding-left:0}
+.board-table :is(th,td):last-child{padding-right:0}
+@container(max-width:1350px){.board-heading h1{font-size:24px}.board-conditions{grid-template-columns:1fr}.board-panel-heading,.board-table-tools{padding:14px 15px 8px}.board-table-scroll{padding:0 15px}}
+@container(max-width:850px){.board-results-summary{grid-template-columns:1fr}.board-probabilities{justify-content:flex-start}.board-panel-heading,.board-table-tools{flex-wrap:wrap}.board-conditions{padding:4px 15px 16px}.board-condition{grid-template-columns:32px minmax(100px,1fr) minmax(105px,1fr) minmax(140px,1.5fr) 25px}}
+@container(max-width:680px){.board-hero{padding:14px}.board-heading{align-items:flex-start}.board-heading h1 span{display:none}.board-list-link{font-size:11px}.board-navigation{width:100%}.scope-item{flex:1 1 calc(50% - 8px)}.board-scope .board-multiselect{width:auto;flex:1}.board-scope .scope-item:nth-of-type(even) .board-options{left:auto;right:0}.board-panel-heading,.board-table-tools{flex-direction:column;align-items:stretch}.board-condition{grid-template-columns:30px minmax(0,1fr) minmax(0,1fr) 25px}.board-condition>.board-multiselect,.board-condition>.condition-range,.board-condition>input{grid-column:2/4;grid-row:2}.board-condition .condition-remove{grid-column:4;grid-row:1/3}.board-saved label{width:100%}.board-saved select{flex:1;min-width:0}.table-actions{flex-wrap:wrap}.board-options{width:240px;max-width:75vw}.board-probabilities{display:grid;grid-template-columns:repeat(2,minmax(0,1fr))}.board-query-panel{min-width:0}}
+@media(forced-colors:active){.board-brand-art{display:none}}
+/* Cockpit mastheads wrap the same way below a 1860px page (above it the widest first row, English Review with its
+   target button and four 135px-capped selects, about 1810px, still fits): the period (or scope) controls take their own
+   second row on Review, Plan, Warnings and Opportunities, and the filters share the first row instead of
+   wrapping, so the four top cards stay the same height. */
+@container(max-width:1860px){.board-controls .board-navigation{flex-basis:100%}}

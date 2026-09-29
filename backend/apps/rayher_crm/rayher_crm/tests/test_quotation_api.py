@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from datetime import datetime
 from html import unescape
 from unittest.mock import patch
 
@@ -71,11 +72,12 @@ class TestQuotationApi(FrappeTestCase):
             "owner": self.sales, "status": "Active",
         })
         opportunity = create_strategy_opportunity({
+            "probabilityLevel": "pipeline",
             "accountId": account["id"], "siteId": site["id"], "title": f"Quotation Project {suffix}",
             "owner": self.sales, "stage": QUALIFIED_OPPORTUNITY, "forecast": "Pipeline", "amount": "100000.00",
             "probability": 60, "intentScore": 70, "poDate": "2026-12-31", "toolType": "Inspection",
             "saleType": "New Equipment", "subRegion": "\u534e\u4e1c", "currency": "CNY",
-            "originalAmount": "100000.00", "paymentMilestones": [],
+            "originalAmount": "100000.00", "amountCny": "100000.00", "paymentMilestones": [],
             "strengths": [], "redFlags": [], "informationNeeded": [], "qualificationConfirmed": True,
         })
         opportunity = advance_opportunity_fixture(opportunity, RFQ_VALIDATED)
@@ -111,6 +113,85 @@ class TestQuotationApi(FrappeTestCase):
 
         self.assertIn(created["quotation"]["id"], {row["id"] for row in account["quotations"]})
         self.assertTrue(all(row["accountId"] == opportunity["accountId"] for row in account["quotations"]))
+
+    def test_review_expiry_reads_formal_version_and_current_owner_despite_new_draft(self):
+        from rayher_crm.services.cockpit import get_details, get_review
+
+        saved, _ = self._ready_quotation()
+        published = self._publish(saved["quotation"]["id"], saved["version"]["modified"])
+        quote_id, version_id = published["quotation"]["id"], published["version"]["id"]
+        frappe.db.set_value("CRM Quotation Version", version_id, {
+            "published_at": "2026-09-01 10:00:00", "valid_until": "2026-10-06",
+        }, update_modified=False)
+        draft = create_version(quote_id)
+        frappe.db.set_value("CRM Quotation", quote_id, "quotation_owner", self.other_sales, update_modified=False)
+        query = {"period": "week", "anchor": "2026-09-22", "sales": self.other_sales}
+        with self.assertRaises(CrmApiException) as denied:
+            get_review(query)
+        self.assertEqual(denied.exception.code, "PERMISSION_DENIED")
+        frappe.set_user(self.manager)
+        with patch("frappe.utils.now_datetime", return_value=datetime(2026, 9, 22, 12)):
+            review = get_review(query)
+            self.assertEqual(review["quotationExpiry"], {"referenceDate": "2026-09-22", "thresholdDays": 14})
+            self.assertEqual(next(w["count"]["value"] for w in review["warnings"] if w["key"] == "quotation_expiry"), 1)
+            result = get_details({**query, "metric": "quotation_expiry", "pageSize": 1})
+            self.assertEqual(result["total"], 1)
+            row = result["items"][0]
+            self.assertEqual((row["id"], row["quotationVersionId"], row["owner"], row["daysToExpiry"]),
+                             (quote_id, version_id, self.other_sales, 14))
+            self.assertNotEqual(row["quotationVersionId"], draft["version"]["id"])
+            self.assertEqual(get_details({**query, "sales": self.sales, "metric": "quotation_expiry"})["total"], 0)
+            self.assertEqual(get_quotation(quote_id, row["quotationVersionId"])["version"]["id"], version_id)
+            with patch.dict(frappe.conf, {"crm_cockpit_quote_expiry_days": 13}):
+                self.assertEqual(get_details({**query, "metric": "quotation_expiry"})["total"], 0)
+            for invalid in (-1, "invalid", True, 366, "1.5"):
+                with patch.dict(frappe.conf, {"crm_cockpit_quote_expiry_days": invalid}):
+                    self.assertEqual(get_review(query)["quotationExpiry"]["thresholdDays"], 14)
+
+    def test_review_expiry_clears_after_customer_decision(self):
+        from rayher_crm.services.cockpit import get_details
+
+        for decision in ("Accepted", "Rejected"):
+            saved, _ = self._ready_quotation()
+            published = self._publish(saved["quotation"]["id"], saved["version"]["modified"])
+            quote_id = published["quotation"]["id"]
+            frappe.db.set_value("CRM Quotation Version", published["version"]["id"], {
+                "published_at": "2026-09-01 10:00:00", "valid_until": "2026-09-22",
+            }, update_modified=False)
+            query = {"period": "week", "anchor": "2026-09-22", "sales": self.sales, "metric": "quotation_expiry"}
+            frappe.set_user(self.manager)
+            with patch("frappe.utils.now_datetime", return_value=datetime(2026, 9, 22, 12)):
+                self.assertIn(quote_id, {r["id"] for r in get_details(query)["items"]})
+            frappe.set_user(self.sales)
+            record_decision(quote_id, decision, "2026-09-22", "Customer response", published["version"]["modified"])
+            frappe.set_user(self.manager)
+            with patch("frappe.utils.now_datetime", return_value=datetime(2026, 9, 22, 12)):
+                self.assertNotIn(quote_id, {r["id"] for r in get_details(query)["items"]})
+
+    def test_closed_quote_stays_excluded_after_opportunity_changes_customer_outside_market(self):
+        from rayher_crm.services.cockpit import get_details, load_data
+
+        saved, _ = self._ready_quotation()
+        published = self._publish(saved["quotation"]["id"], saved["version"]["modified"])
+        quote_id, opportunity_id = published["quotation"]["id"], published["quotation"]["opportunityId"]
+        frappe.db.set_value("CRM Quotation Version", published["version"]["id"], {
+            "published_at": "2026-09-01 10:00:00", "valid_until": "2026-09-29",
+        }, update_modified=False)
+        destination = create_account({"name": f"Moved customer {random_string(6)}", "shortName": random_string(6), "segment": "Backend",
+                                      "tier": "A", "city": "Shanghai", "region": "East China", "owner": self.sales})
+        # Reassignment does not rewrite the already-published quotation snapshot.
+        frappe.db.set_value("CRM Opportunity", opportunity_id, "account", destination["id"], update_modified=False)
+        frappe.set_user(self.manager)
+        query = {"period": "week", "anchor": "2026-09-22", "sales": self.sales, "metric": "quotation_expiry"}
+        with patch("frappe.utils.now_datetime", return_value=datetime(2026, 9, 22, 12)):
+            for closed_stage in ("lost", "po_received"):
+                frappe.db.set_value("CRM Opportunity", opportunity_id, "stage", closed_stage, update_modified=False)
+                for scope in ({}, {"market": "Frontend"}):
+                    self.assertNotIn(quote_id, {r["id"] for r in get_details({**query, **scope})["items"]})
+            original_customer = frappe.get_doc("Customer", published["quotation"]["accountId"]).as_dict()
+            loaded = load_data([original_customer], [])
+            self.assertNotIn(opportunity_id, {r["name"] for r in loaded["opportunities"]})
+            self.assertIn(opportunity_id, {r["name"] for r in loaded["quotation_opportunities"]})
 
     def test_public_non_owner_sales_gets_redacted_address_and_cannot_download_full_pdf(self):
         saved, _ = self._ready_quotation()

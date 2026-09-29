@@ -200,17 +200,20 @@ class TestOpportunityStageMigrationPatch(FrappeTestCase):
     def _legacy_opportunity(self, account: dict, site: dict, title: str, legacy_stage: str) -> str:
         frappe.set_user(self.sales)
         created = create_strategy_opportunity({
+            "probabilityLevel": "pipeline",
             "accountId": account["id"], "siteId": site["id"], "title": title, "owner": self.sales,
             "amount": "100000.00", "intentScore": 30, "poDate": "2026-12-31", "toolType": "Inspection",
-            "saleType": "New Equipment", "subRegion": "华东", "currency": "CNY", "originalAmount": "100000.00",
+            "saleType": "New Equipment", "subRegion": "华东", "currency": "CNY", "originalAmount": "100000.00", "amountCny": "100000.00",
             "qualificationConfirmed": True,
         })
         frappe.set_user("Administrator")
         self.legacy_ids.append(created["id"])
-        # Recreate the state before the upgrade: a legacy stage and no stage history.
+        # Recreate the state before the upgrade: a legacy stage, no level and no history.
         frappe.db.delete("CRM Opportunity Stage History", {"opportunity": created["id"]})
+        frappe.db.delete("CRM Opportunity Probability History", {"opportunity": created["id"]})
         frappe.db.set_value(
-            "CRM Opportunity", created["id"], {"stage": legacy_stage, "stage_changed_at": None}, update_modified=False,
+            "CRM Opportunity", created["id"],
+            {"stage": legacy_stage, "stage_changed_at": None, "probability_level": ""}, update_modified=False,
         )
         return created["id"]
 
@@ -267,9 +270,10 @@ class TestOpportunityStageMigrationPatch(FrappeTestCase):
         # Already on the new stages: `lost` must not be mistaken for the legacy `Lost`.
         frappe.set_user(self.sales)
         current = create_strategy_opportunity({
+            "probabilityLevel": "pipeline",
             "accountId": account["id"], "siteId": site["id"], "title": "Already migrated", "owner": self.sales,
             "amount": "100000.00", "intentScore": 30, "poDate": "2026-12-31", "toolType": "Inspection",
-            "saleType": "New Equipment", "subRegion": "华东", "currency": "CNY", "originalAmount": "100000.00",
+            "saleType": "New Equipment", "subRegion": "华东", "currency": "CNY", "originalAmount": "100000.00", "amountCny": "100000.00",
             "qualificationConfirmed": True,
         })
         current = mark_opportunity_lost(current["id"], {"lostReason": "Lost after the upgrade"}, current["modified"])

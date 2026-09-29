@@ -2,7 +2,7 @@
   "actions": [], "autoname": "hash", "creation": "2026-08-04 00:00:00.000000", "doctype": "DocType", "engine": "InnoDB",
   "field_order": ["entity_type", "entity_id", "account", "actor", "action", "outcome", "reason", "at", "access_id", "request_id"],
   "fields": [
-    {"fieldname": "entity_type", "fieldtype": "Select", "label": "Entity Type", "options": "Contact File\nDemo Artifact\nControlled Document\nRFQ", "reqd": 1},
+    {"fieldname": "entity_type", "fieldtype": "Select", "label": "Entity Type", "options": "Contact File\nStatus Attachment\nDemo Artifact\nControlled Document\nRFQ", "reqd": 1},
     {"fieldname": "entity_id", "fieldtype": "Data", "label": "Entity ID", "reqd": 1},
     {"fieldname": "account", "fieldtype": "Link", "label": "Account", "options": "Customer"},
     {"fieldname": "actor", "fieldtype": "Link", "label": "Actor", "options": "User", "reqd": 1},

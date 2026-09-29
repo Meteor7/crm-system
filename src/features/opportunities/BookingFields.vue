@@ -13,8 +13,10 @@ const props = withDefaults(defineProps<{
   showRequiredMarks?: boolean
   /** A Sales user can only assign a Booking to themselves. */
   ownerDisabled?: boolean
+  /** A recorded CNY amount of an order changes only through a Manager's correction. */
+  amountCnyLocked?: boolean
   errors?: Partial<Record<keyof BookingDraft, string>>
-}>(), { showRequiredMarks: true, ownerDisabled: false, errors: () => ({}) })
+}>(), { showRequiredMarks: true, ownerDisabled: false, amountCnyLocked: false, errors: () => ({}) })
 const emit = defineEmits<{ 'update:modelValue': [value: BookingDraft]; 'create-contact': [accountId: string] }>()
 const { t } = useI18n()
 
@@ -63,6 +65,13 @@ function valueOf(event: Event) {
       <span>{{ t('bookingEditor.currency') }}<RequiredMark :show="showRequiredMarks" /></span>
       <select :value="modelValue.currency" :aria-label="t('bookingEditor.currency')" required @change="update('currency', valueOf($event))"><option>CNY</option><option>USD</option><option>EUR</option></select>
       <small v-if="errors.currency" data-field-error="currency">{{ errors.currency }}</small>
+    </label>
+    <!-- A CNY order's amount already is its CNY amount; another currency needs one to count toward targets. -->
+    <label v-if="modelValue.currency !== 'CNY'" class="field">
+      <span>{{ t('bookingEditor.amountCny') }}<RequiredMark :show="showRequiredMarks" /></span>
+      <input :value="modelValue.amountCny ?? ''" :aria-label="t('bookingEditor.amountCny')" type="text" inputmode="decimal" pattern="\d+(?:\.\d{1,2})?" required placeholder="0.00" :disabled="amountCnyLocked" @input="update('amountCny', valueOf($event))" />
+      <small v-if="amountCnyLocked" class="field-hint">{{ t('amountCny.managerOnly') }}</small>
+      <small v-if="errors.amountCny" data-field-error="amountCny">{{ errors.amountCny }}</small>
     </label>
     <label class="field wide">
       <span>{{ t('detail.notes') }}</span>

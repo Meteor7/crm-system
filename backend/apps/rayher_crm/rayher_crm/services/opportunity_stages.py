@@ -6,6 +6,13 @@ from __future__ import annotations
 PROBABILITY_LEVELS = ("low_probability", "pipeline", "upside", "committed")
 PROBABILITY_LEVEL_CHOICES = {"", *PROBABILITY_LEVELS}
 
+
+def probability_level_rank(level: str) -> int:
+    """Pending is 0, then low_probability 1 through committed 4."""
+
+    return PROBABILITY_LEVELS.index(level) + 1 if level else 0
+
+
 QUALIFIED_OPPORTUNITY = "qualified_opportunity"
 DEMO_DONE = "demo_done"
 CUSTOMER_BUDGET_APPROVED = "customer_budget_approved"

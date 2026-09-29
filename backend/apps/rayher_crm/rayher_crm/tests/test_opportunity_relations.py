@@ -58,11 +58,12 @@ class TestOpportunityRelations(FrappeTestCase):
             "process": "Frontend", "status": "量产",
         })
         opportunity = create_strategy_opportunity({
+            "probabilityLevel": "pipeline",
             "accountId": account["id"], "siteId": site["id"], "title": f"{suffix} Opportunity",
             "owner": owner, "stage": QUALIFIED_OPPORTUNITY, "forecast": "Pipeline", "amount": 100000,
             "probability": 20, "intentScore": 20, "poDate": "2026-12-31", "toolType": "Inspection",
             "saleType": "New Equipment", "subRegion": "华东", "currency": "CNY",
-            "originalAmount": 100000, "qualificationConfirmed": True,
+            "originalAmount": 100000, "amountCny": 100000, "qualificationConfirmed": True,
         })
         contact = create_contact({
             "accountId": account["id"], "name": f"{suffix} Contact", "title": "Director",

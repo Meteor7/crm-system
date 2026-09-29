@@ -40,35 +40,38 @@ describe('OpportunityEditorModal sale type', () => {
     expect((select.element as HTMLSelectElement).value).toBe('New Equipment')
   })
 
-  it('offers pending plus the four success probability levels instead of a forecast or an automatic percentage', () => {
+  it('asks for one of the four success probability levels on create instead of a forecast or an automatic percentage', () => {
     const wrapper = mount(OpportunityEditorModal, { props: { ...props, defaultOwner: 'person002@crm.example.invalid', currentUserId: 'person002@crm.example.invalid' } })
     const select = wrapper.get('[aria-label="成功概率"]')
 
     expect(select.findAll('option').map((option) => option.attributes('value'))).toEqual(['', 'low_probability', 'pipeline', 'upside', 'committed'])
-    expect(select.findAll('option').map((option) => option.text())).toEqual(['待销售确认', '低', '在途', '有望', '确定'])
+    expect(select.findAll('option').map((option) => option.text())).toEqual(['请选择成功概率', '低', '在途', '有望', '确定'])
+    // The empty entry only prompts; it cannot be chosen.
+    expect(select.get('option[value=""]').attributes('disabled')).toBeDefined()
     expect((select.element as HTMLSelectElement).value).toBe('')
-    expect(select.attributes('required')).toBeUndefined()
+    expect(select.attributes('required')).toBeDefined()
     expect(wrapper.find('[aria-label="预测分类"]').exists()).toBe(false)
     expect(wrapper.find('[data-testid="calculated-opportunity-probability"]').exists()).toBe(false)
     expect(wrapper.get('[aria-label="购买意愿"]').attributes('type')).toBe('range')
   })
 
-  it('lets a creator set the level only for an Opportunity they own and sends pending otherwise', async () => {
-    const wrapper = mount(OpportunityEditorModal, { props: { ...props, defaultOwner: 'person002@crm.example.invalid', currentUserId: 'person002@crm.example.invalid' } })
+  it('requires a level on create and lets whoever opens the Opportunity set it for another owner', async () => {
+    const wrapper = mount(OpportunityEditorModal, { props: { ...props, defaultOwner: 'person002@crm.example.invalid', currentUserId: 'person029@crm.example.invalid' } })
     const select = wrapper.get('[aria-label="成功概率"]')
-
-    expect((select.element as HTMLSelectElement).disabled).toBe(false)
-    await select.setValue('upside')
     await wrapper.get('[data-testid="qualification-confirmed"]').setValue(true)
+
+    await wrapper.get('form').trigger('submit')
+    expect(wrapper.emitted('submit')).toBeUndefined()
+    expect(wrapper.get('[data-field-error="probabilityLevel"]').text()).toBe('请选择成功概率')
+
+    // The Manager opening this for Alex still sets the first level.
+    expect((select.element as HTMLSelectElement).disabled).toBe(false)
+    expect(wrapper.find('[data-testid="opportunity-probability-level-owner-only"]').exists()).toBe(false)
+    await select.setValue('upside')
+    expect(wrapper.find('[data-field-error="probabilityLevel"]').exists()).toBe(false)
     await wrapper.get('form').trigger('submit')
     expect(wrapper.emitted('submit')?.[0]?.[0]).toMatchObject({ owner: 'person002@crm.example.invalid', probabilityLevel: 'upside', qualificationConfirmed: true })
-
-    await wrapper.get('[aria-label="负责人"]').setValue('person005@crm.example.invalid')
-    expect((select.element as HTMLSelectElement).disabled).toBe(true)
-    expect((select.element as HTMLSelectElement).value).toBe('')
-    expect(wrapper.get('[data-testid="opportunity-probability-level-owner-only"]').text()).toBe('仅商机负责人可设置成功概率')
-    await wrapper.get('form').trigger('submit')
-    expect(wrapper.emitted('submit')?.[1]?.[0]).toMatchObject({ owner: 'person005@crm.example.invalid', probabilityLevel: '' })
+    expect(wrapper.emitted('submit')?.[0]?.[0]).not.toHaveProperty('probabilityReason')
   })
 
   it('keeps the level read-only for everyone except the Opportunity owner when editing', async () => {
@@ -88,12 +91,24 @@ describe('OpportunityEditorModal sale type', () => {
     expect(owner.emitted('submit')?.[0]?.[0]).toMatchObject({ probabilityLevel: 'committed', intentScore: 20 })
   })
 
-  it('uses Inspection Tool as a hint without pre-filling the equipment type', () => {
-    const wrapper = mount(OpportunityEditorModal, { props })
-    const input = wrapper.get('[aria-label="设备类型"]')
+  it('offers the equipment catalog without pre-filling a type', () => {
+    const wrapper = mount(OpportunityEditorModal, { props: { ...props, equipmentTypes: ['Aconca', 'Drakens', 'Kibo', 'Nansi', 'Veymont', 'Probe 9'] } })
+    const select = wrapper.get('select[aria-label="设备类型"]')
 
-    expect(input.attributes('placeholder')).toBe('检测设备示例')
-    expect((input.element as HTMLInputElement).value).toBe('')
+    expect((select.element as HTMLSelectElement).value).toBe('')
+    expect(select.findAll('option').map((option) => option.text())).toEqual(
+      ['请选择设备类型', 'Aconca', 'Drakens', 'Kibo', 'Nansi', 'Veymont', 'Probe 9', '＋自定义设备类型'],
+    )
+  })
+
+  it('falls back to the five presets and keeps a stored type that is not an option', async () => {
+    const wrapper = mount(OpportunityEditorModal, { props: { ...props, opportunity: { ...legacyOpportunity('Service'), toolType: 'kibo  4895c' } } })
+    const select = wrapper.get('select[aria-label="设备类型"]')
+
+    expect(select.findAll('option').map((option) => option.text()).slice(0, 5)).toEqual(['Aconca', 'Drakens', 'Kibo', 'Nansi', 'Veymont'])
+    expect((wrapper.get('input[aria-label="设备类型"]').element as HTMLInputElement).value).toBe('kibo  4895c')
+    await select.setValue('Kibo')
+    expect(wrapper.find('input[aria-label="设备类型"]').exists()).toBe(false)
   })
 
   it.each([
@@ -124,6 +139,7 @@ describe('OpportunityEditorModal qualification and level rules', () => {
 
     await checkbox.setValue(true)
     expect(wrapper.find('[data-field-error="qualificationConfirmed"]').exists()).toBe(false)
+    await wrapper.get('[aria-label="成功概率"]').setValue('pipeline')
     await wrapper.get('form').trigger('submit')
     expect(wrapper.emitted('submit')?.[0]?.[0]).toMatchObject({ qualificationConfirmed: true })
     expect(wrapper.emitted('submit')?.[0]?.[0]).not.toHaveProperty('stage')
@@ -145,18 +161,69 @@ describe('OpportunityEditorModal qualification and level rules', () => {
     expect(wrapper.emitted('submit')?.[0]?.[0]).not.toHaveProperty('probabilityLevel')
   })
 
-  it('keeps pending selectable only before the demo is done', () => {
+  it('never lets a set level return to pending, at any stage', () => {
     const owner = { ...props, currentUserId: 'person002@crm.example.invalid' }
-    const early = mount(OpportunityEditorModal, {
-      props: { ...owner, opportunity: { ...legacyOpportunity('New Equipment'), owner: 'person002@crm.example.invalid', stage: 'qualified_opportunity' } as StrategyOpportunityDto },
+    const leveled = mount(OpportunityEditorModal, {
+      props: { ...owner, opportunity: { ...legacyOpportunity('New Equipment'), owner: 'person002@crm.example.invalid', stage: 'qualified_opportunity', probabilityLevel: 'pipeline' } as StrategyOpportunityDto },
     })
-    const later = mount(OpportunityEditorModal, {
-      props: { ...owner, opportunity: { ...legacyOpportunity('New Equipment'), owner: 'person002@crm.example.invalid', stage: 'demo_done' } as StrategyOpportunityDto },
+    const older = mount(OpportunityEditorModal, {
+      props: { ...owner, opportunity: { ...legacyOpportunity('New Equipment'), owner: 'person002@crm.example.invalid', stage: 'qualified_opportunity', probabilityLevel: '' } as StrategyOpportunityDto },
     })
 
-    expect(early.get('[aria-label="成功概率"] option[value=""]').attributes('disabled')).toBeUndefined()
-    expect(later.get('[aria-label="成功概率"] option[value=""]').attributes('disabled')).toBeDefined()
-    expect((later.get('[aria-label="成功概率"]').element as HTMLSelectElement).disabled).toBe(false)
+    expect(leveled.find('[aria-label="成功概率"] option[value=""]').exists()).toBe(false)
+    // An Opportunity from before the levels still shows pending, but nothing can be put back to it.
+    const pending = older.get('[aria-label="成功概率"] option[value=""]')
+    expect(pending.text()).toBe('待销售确认')
+    expect(pending.attributes('disabled')).toBeDefined()
+    expect((older.get('[aria-label="成功概率"]').element as HTMLSelectElement).value).toBe('')
+  })
+
+  it('asks the owner for a reason before lowering the level, and only then', async () => {
+    const opportunity = { ...legacyOpportunity('New Equipment'), owner: 'person002@crm.example.invalid', stage: 'quotation_sent', probabilityLevel: 'upside' } as StrategyOpportunityDto
+    const wrapper = mount(OpportunityEditorModal, { props: { ...props, opportunity, currentUserId: 'person002@crm.example.invalid' } })
+    const select = wrapper.get('[aria-label="成功概率"]')
+
+    await select.setValue('committed')
+    expect(wrapper.find('[data-testid="opportunity-probability-reason"]').exists()).toBe(false)
+
+    await select.setValue('pipeline')
+    await wrapper.get('form').trigger('submit')
+    expect(wrapper.emitted('submit')).toBeUndefined()
+    expect(wrapper.get('[data-field-error="probabilityReason"]').text()).toBe('降低成功概率时请填写原因')
+
+    await wrapper.get('[data-testid="opportunity-probability-reason"]').setValue('  客户预算推迟  ')
+    expect(wrapper.find('[data-field-error="probabilityReason"]').exists()).toBe(false)
+    await wrapper.get('form').trigger('submit')
+    expect(wrapper.emitted('submit')).toBeUndefined()
+    expect(wrapper.find('[data-field-error="probabilityActionPlan"]').exists()).toBe(true)
+    await wrapper.get('[data-testid="opportunity-probability-plan"]').setValue('  与采购确认预算时间  ')
+    await wrapper.get('form').trigger('submit')
+    expect(wrapper.emitted('submit')?.[0]?.[0]).toMatchObject({ probabilityLevel: 'pipeline', probabilityReason: '客户预算推迟', probabilityActionPlan: '与采购确认预算时间' })
+
+    // Raising it back needs no reason and sends none.
+    await select.setValue('committed')
+    await wrapper.get('form').trigger('submit')
+    expect(wrapper.emitted('submit')?.[1]?.[0]).toMatchObject({ probabilityLevel: 'committed' })
+    expect(wrapper.emitted('submit')?.[1]?.[0]).not.toHaveProperty('probabilityReason')
+    expect(wrapper.emitted('submit')?.[1]?.[0]).not.toHaveProperty('probabilityActionPlan')
+  })
+})
+
+describe('OpportunityEditorModal amount in CNY', () => {
+  it('asks for the amount in CNY on every Opportunity and flags one that has none yet', async () => {
+    const create = mount(OpportunityEditorModal, { props })
+    expect(create.get('[aria-label="人民币金额"]').attributes('required')).toBeDefined()
+    expect(create.find('[data-testid="opportunity-amount-cny-missing"]').exists()).toBe(false)
+
+    const filled = mount(OpportunityEditorModal, { props: { ...props, opportunity: { ...legacyOpportunity('Service'), amountCny: '32500000.00' } } })
+    expect((filled.get('[aria-label="人民币金额"]').element as HTMLInputElement).value).toBe('32500000.00')
+    expect(filled.find('[data-testid="opportunity-amount-cny-missing"]').exists()).toBe(false)
+
+    const missing = mount(OpportunityEditorModal, { props: { ...props, opportunity: { ...legacyOpportunity('Service'), amountCny: '' } } })
+    expect(missing.get('[data-testid="opportunity-amount-cny-missing"]').text()).toBe('这个商机还没有人民币金额，保存前请先填写。')
+    await missing.get('[aria-label="人民币金额"]').setValue('1234.5')
+    await missing.get('form').trigger('submit')
+    expect(missing.emitted('submit')?.[0]?.[0]).toMatchObject({ amountCny: '1234.5' })
   })
 })
 

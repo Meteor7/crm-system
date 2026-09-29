@@ -56,11 +56,12 @@ class TestBookingApi(FrappeTestCase):
             "owner": owner, "status": "Active",
         })
         opportunity = create_strategy_opportunity({
+            "probabilityLevel": "pipeline",
             "accountId": account["id"], "siteId": site["id"], "title": f"{suffix} Opportunity",
             "owner": owner, "stage": QUALIFIED_OPPORTUNITY, "forecast": "Pipeline",
             "amount": 200000, "intentScore": 80, "qualificationConfirmed": True,
             "poDate": "2026-12-31", "toolType": "Inspection", "saleType": sale_type,
-            "subRegion": "华东", "currency": "CNY", "originalAmount": 200000,
+            "subRegion": "华东", "currency": "CNY", "originalAmount": 200000, "amountCny": 200000,
         })
         # Opportunity Bookings are only created by the PO confirmation that reaches po_received.
         booking = self._booking_draft(contact, owner) if stage == PO_RECEIVED else None
@@ -143,7 +144,9 @@ class TestBookingApi(FrappeTestCase):
         )
         self.assertTrue(unique_indexes)
         with self.assertRaises(CrmApiException) as duplicate:
-            confirm_po(won["id"], {"booking": self._booking_draft(contact, self.sales)}, won["modified"])
+            confirm_po(won["id"], {
+                "booking": self._booking_draft(contact, self.sales), "actualPoDate": frappe.utils.today(),
+            }, won["modified"])
         self.assertEqual(duplicate.exception.code, "CONFLICT")
 
         # An Opportunity Booking follows its Opportunity: details may change, the status only to Cancelled.
@@ -167,7 +170,10 @@ class TestBookingApi(FrappeTestCase):
         self.assertEqual(restored.exception.code, "INVALID_TRANSITION")
         # Cancelling the Booking moved the Opportunity version; the replacement needs the current one.
         replacement = confirm_po(
-            won["id"], {"booking": self._booking_draft(contact, self.sales)}, get_strategy_opportunity(won["id"])["modified"],
+            won["id"], {
+                "booking": self._booking_draft(contact, self.sales),
+                "actualPoDate": frappe.utils.today(),
+            }, get_strategy_opportunity(won["id"])["modified"],
         )
         self.assertEqual(replacement["stage"], PO_RECEIVED)
         self.assertNotEqual(replacement["liveBooking"]["id"], first["id"])

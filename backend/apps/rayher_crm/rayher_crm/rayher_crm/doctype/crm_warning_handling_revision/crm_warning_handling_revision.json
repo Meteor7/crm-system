@@ -1,0 +1,84 @@
+{
+  "doctype": "DocType",
+  "name": "CRM Warning Handling Revision",
+  "module": "Rayher CRM",
+  "engine": "InnoDB",
+  "autoname": "hash",
+  "naming_rule": "Random",
+  "owner": "Administrator",
+  "modified_by": "Administrator",
+  "creation": "2026-09-24 00:00:00.000000",
+  "modified": "2026-09-24 00:00:00.000000",
+  "field_order": [
+    "handling",
+    "warning_type",
+    "kind",
+    "next_step",
+    "action_taken",
+    "follow_up_on",
+    "actor",
+    "recorded_at"
+  ],
+  "fields": [
+    {
+      "fieldname": "handling",
+      "fieldtype": "Link",
+      "options": "CRM Warning Handling",
+      "label": "Handling",
+      "reqd": 1
+    },
+    {
+      "fieldname": "warning_type",
+      "fieldtype": "Select",
+      "options": "overdue\nquotation_expiry\nstage6_no_po",
+      "label": "Warning Type",
+      "reqd": 1
+    },
+    {
+      "fieldname": "kind",
+      "fieldtype": "Select",
+      "options": "PlanUpdated\nActionRecorded",
+      "label": "Change",
+      "reqd": 1
+    },
+    {
+      "fieldname": "next_step",
+      "fieldtype": "Small Text",
+      "label": "Next Step"
+    },
+    {
+      "fieldname": "action_taken",
+      "fieldtype": "Small Text",
+      "label": "Action Taken"
+    },
+    {
+      "fieldname": "follow_up_on",
+      "fieldtype": "Date",
+      "label": "Follow Up On"
+    },
+    {
+      "fieldname": "actor",
+      "fieldtype": "Link",
+      "options": "User",
+      "label": "Author",
+      "reqd": 1
+    },
+    {
+      "fieldname": "recorded_at",
+      "fieldtype": "Datetime",
+      "label": "Recorded At",
+      "reqd": 1
+    }
+  ],
+  "permissions": [
+    {
+      "role": "CRM Manager",
+      "read": 1
+    }
+  ],
+  "sort_field": "recorded_at",
+  "sort_order": "DESC",
+  "actions": [],
+  "states": [],
+  "index_web_pages_for_search": 0
+}

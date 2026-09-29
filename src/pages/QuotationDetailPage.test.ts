@@ -63,9 +63,9 @@ function api() {
   } as unknown as CrmApi, save, publish, submit, calls }
 }
 
-async function mountPage(client: CrmApi) {
+async function mountPage(client: CrmApi, path = '/quotations/CRM-QTN-00001') {
   const pinia = createPinia(); useAppStore(pinia).bootstrap = (await client.getBootstrap()).data
-  const router = createAppRouter(); await router.push('/quotations/CRM-QTN-00001'); await router.isReady()
+  const router = createAppRouter(); await router.push(path); await router.isReady()
   const wrapper = mount(QuotationDetailPage, { props: { apiClient: client }, global: { plugins: [pinia, router] } })
   await flushPromises()
   return wrapper
@@ -79,6 +79,31 @@ beforeEach(() => {
 })
 
 describe('QuotationDetailPage', () => {
+  it('opens the formal version from a warning even when a newer draft exists', async () => {
+    const { client, save } = api()
+    const published = structuredClone(detail)
+    published.quotation.currentVersionId = 'draft-v2'
+    published.quotation.currentPublishedVersionId = published.version.id
+    published.version.status = 'Published'
+    client.getQuotation = vi.fn(async () => ({ data: published, warnings: [] }))
+    const wrapper = await mountPage(client, '/quotations/CRM-QTN-00001?version=CRM-QTV-00001')
+    expect(client.getQuotation).toHaveBeenCalledWith('CRM-QTN-00001', 'CRM-QTV-00001')
+    expect(wrapper.getComponent(QuotationEditor).props('readonly')).toBe(true)
+    expect(save).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
+  it('retains the linked version when retrying a failed warning link', async () => {
+    const { client } = api()
+    client.getQuotation = vi.fn().mockRejectedValueOnce(new Error('Temporary outage')).mockResolvedValue({ data: structuredClone(detail), warnings: [] })
+    const wrapper = await mountPage(client, '/quotations/CRM-QTN-00001?version=CRM-QTV-00001')
+    expect(wrapper.text()).toContain('Temporary outage')
+    await wrapper.get('.data-state button').trigger('click'); await flushPromises()
+    expect(client.getQuotation).toHaveBeenLastCalledWith('CRM-QTN-00001', 'CRM-QTV-00001')
+    expect(client.getQuotation).toHaveBeenCalledTimes(2)
+    wrapper.unmount()
+  })
+
   it('downloads a published quotation through the shared blob helper', async () => {
     const { client } = api()
     const published = structuredClone(detail)

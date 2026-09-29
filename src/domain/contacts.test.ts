@@ -46,6 +46,7 @@ const legacyOpportunity = (stakeholders: LegacyStrategyOpportunityDto['stakehold
   saleType: 'New Tool',
   subRegion: 'East',
   originalAmount: '100.00',
+  amountCny: '100.00',
   shipmentDate: '2027-01-01',
   fatDate: '2026-12-01',
   paymentMilestones: [],

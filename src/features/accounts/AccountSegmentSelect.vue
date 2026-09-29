@@ -13,6 +13,8 @@ const props = withDefaults(defineProps<{
   customPlaceholder?: string
   emptyPlaceholder?: string
   customOnEmpty?: boolean
+  /** Display text for a stored option, such as a preset region shown in Chinese. */
+  optionLabel?: (value: string) => string
 }>(), {
   required: false,
   customOptionLabel: undefined,
@@ -20,6 +22,7 @@ const props = withDefaults(defineProps<{
   customPlaceholder: undefined,
   emptyPlaceholder: undefined,
   customOnEmpty: true,
+  optionLabel: undefined,
 })
 const emit = defineEmits<{ 'update:modelValue': [value: string] }>()
 const { locale, t } = useI18n()
@@ -57,7 +60,7 @@ function updateCustomSegment(event: Event) {
   <div class="account-segment-select">
     <select :value="selectedValue" :aria-label="label" :required="required" @change="selectSegment">
       <option v-if="!customMode && !modelValue && emptyPlaceholder" value="" disabled>{{ emptyPlaceholder }}</option>
-      <option v-for="segment in options" :key="segment" :value="segment">{{ segment }}</option>
+      <option v-for="segment in options" :key="segment" :value="segment">{{ optionLabel ? optionLabel(segment) : segment }}</option>
       <option :value="CUSTOM_SEGMENT">{{ customOptionLabel || (locale === 'en-US' ? '+ Custom area' : '＋自定义领域') }}</option>
     </select>
     <input

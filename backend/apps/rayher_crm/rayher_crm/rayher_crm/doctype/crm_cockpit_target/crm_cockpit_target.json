@@ -1,0 +1,17 @@
+{
+  "doctype": "DocType", "name": "CRM Cockpit Target", "module": "Rayher CRM", "engine": "InnoDB",
+  "creation": "2026-09-16 00:00:00.000000", "modified": "2026-09-16 00:00:00.000000",
+  "owner": "Administrator", "modified_by": "Administrator", "naming_rule": "Set by user",
+  "autoname": "prompt", "track_changes": 1, "sort_field": "modified", "sort_order": "DESC",
+  "field_order": ["sales_owner", "metric", "period", "anchor", "target_value", "changed_by"],
+  "fields": [
+    {"fieldname": "sales_owner", "fieldtype": "Link", "options": "User", "label": "Sales Owner", "reqd": 1},
+    {"fieldname": "metric", "fieldtype": "Select", "options": "visits\nleads\ntests\nquotes\norders", "label": "Metric", "reqd": 1},
+    {"fieldname": "period", "fieldtype": "Select", "options": "week\nmonth\nquarter\nyear\nweekly_default", "label": "Period", "reqd": 1},
+    {"fieldname": "anchor", "fieldtype": "Date", "label": "Period Start / Effective From", "reqd": 1},
+    {"fieldname": "target_value", "fieldtype": "Data", "label": "Target", "reqd": 1},
+    {"fieldname": "changed_by", "fieldtype": "Link", "options": "User", "label": "Changed By", "reqd": 1}
+  ],
+  "permissions": [{"role": "CRM Manager", "read": 1}],
+  "actions": [], "links": [], "states": []
+}

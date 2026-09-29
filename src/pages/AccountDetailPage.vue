@@ -14,6 +14,7 @@ import ModalShell from '@/design-system/ModalShell.vue'
 import RequiredMark from '@/design-system/RequiredMark.vue'
 import PersonnelSelect from '@/design-system/PersonnelSelect.vue'
 import AccountSegmentSelect from '@/features/accounts/AccountSegmentSelect.vue'
+import { REGION_PRESETS, regionLabel } from '@/domain/regions'
 import SectionCard from '@/design-system/SectionCard.vue'
 import StatusBadge from '@/design-system/StatusBadge.vue'
 import { useI18n, useLocaleMessage } from '@/i18n'
@@ -34,6 +35,7 @@ const editBusy = ref(false)
 const editError = useLocaleMessage()
 const accountForm = ref<CreateAccountInput>({ name: '', shortName: '', segment: 'Frontend', tier: 'A', city: '', region: '', owner: '', visibility: 'Private' })
 const segments = ref<string[]>(['Frontend', 'Advanced Packaging'])
+const regions = ref<string[]>([...REGION_PRESETS])
 const siteDrafts = ref<Array<SiteDto & { isNew?: boolean }>>([])
 const removedSiteIds = ref<string[]>([])
 const accountId = computed(() => String(route.params.accountId || ''))
@@ -43,6 +45,7 @@ const canWrite = computed(() => {
   return app.bootstrap?.user.role === 'Manager' || app.bootstrap?.user.id === accountDetail.value.account.owner
 })
 let equipmentSequence = 0
+const regionOptionLabel = (value: string) => regionLabel(value, locale.value)
 
 function captureAccount(detail: Account360Dto) { accountDetail.value = detail }
 function openEdit() {
@@ -60,6 +63,7 @@ async function saveAccount() {
   try {
     const accountResult = await props.apiClient.updateAccount(accountId.value, accountForm.value, accountDetail.value?.account.modified)
     if (!segments.value.includes(accountResult.data.segment)) segments.value = [...segments.value, accountResult.data.segment]
+    if (accountResult.data.region && !regions.value.includes(accountResult.data.region)) regions.value = [...regions.value, accountResult.data.region]
     if (accountDetail.value) {
       accountDetail.value = { ...accountDetail.value, account: accountResult.data }
     }
@@ -140,8 +144,16 @@ async function loadSegments() {
   }
 }
 
+async function loadRegions() {
+  try {
+    regions.value = (await props.apiClient.listAccountRegions()).data
+  } catch {
+    regions.value = [...REGION_PRESETS]
+  }
+}
+
 watch(accountId, loadEquipment)
-onMounted(() => { void loadEquipment(); void loadSegments() })
+onMounted(() => { void loadEquipment(); void loadSegments(); void loadRegions() })
 </script>
 
 <template>
@@ -176,7 +188,7 @@ onMounted(() => { void loadEquipment(); void loadSegments() })
          <label><span>{{ t('detail.businessArea') }}<RequiredMark /></span><AccountSegmentSelect v-model="accountForm.segment" :segments="segments" :label="t('detail.businessArea')" required /></label>
         <label><span>{{ t('detail.accountTier') }}</span><select v-model="accountForm.tier" :aria-label="t('detail.accountTier')"><option>S</option><option>A</option><option>B</option></select></label>
         <label><span>{{ t('detail.city') }}<RequiredMark /></span><input v-model="accountForm.city" :aria-label="t('detail.city')" required /></label>
-        <label><span>{{ t('detail.region') }}<RequiredMark /></span><input v-model="accountForm.region" :aria-label="t('detail.region')" required /></label>
+        <label><span>{{ t('detail.region') }}<RequiredMark /></span><AccountSegmentSelect v-model="accountForm.region" :segments="regions" :label="t('detail.region')" :option-label="regionOptionLabel" :custom-option-label="t('region.customOption')" :custom-placeholder="t('region.customPlaceholder')" :empty-placeholder="t('region.choose')" :custom-on-empty="false" required /></label>
         <label class="wide"><span>{{ t('detail.owner') }}<RequiredMark /></span><PersonnelSelect v-model="accountForm.owner" :roles="['Sales']" :ariaLabel="t('detail.owner')" required /></label>
         <label class="wide"><span>{{ t('detail.access') }}<RequiredMark /></span><select v-model="accountForm.visibility" :aria-label="t('detail.access')" required><option value="Private">{{ t('detail.privateAccess') }}</option><option value="Public">{{ t('detail.publicAccess') }}</option></select></label>
       </div>

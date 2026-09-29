@@ -85,11 +85,12 @@ class TestVisitApi(FrappeTestCase):
             "process": "CIS", "status": "量产",
         })
         opportunity = create_strategy_opportunity({
+            "probabilityLevel": "pipeline",
             "accountId": account["id"], "siteId": site["id"], "title": "CIS defect inspection",
             "owner": self.sales, "stage": QUALIFIED_OPPORTUNITY, "forecast": "Pipeline", "amount": "4860000",
             "probability": 20, "intentScore": 35, "poDate": "2026-12-31", "toolType": "Inspection",
             "saleType": "New Equipment", "subRegion": "East", "currency": "CNY",
-            "originalAmount": "4860000", "paymentMilestones": [], "strengths": [],
+            "originalAmount": "4860000", "amountCny": "4860000", "paymentMilestones": [], "strengths": [],
             "redFlags": [], "informationNeeded": [], "qualificationConfirmed": True,
         })
         created = create_visit(self._input(account, contact, self.sales, opportunityId=opportunity["id"]))

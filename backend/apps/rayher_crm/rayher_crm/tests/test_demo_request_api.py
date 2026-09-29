@@ -100,11 +100,12 @@ class TestDemoRequestApi(FrappeTestCase):
             "owner": owner, "status": "Active",
         })
         opportunity = create_strategy_opportunity({
+            "probabilityLevel": "pipeline",
             "accountId": account["id"], "siteId": site["id"], "title": f"{suffix} Demo Opportunity",
             "owner": owner, "stage": QUALIFIED_OPPORTUNITY, "forecast": "Pipeline", "amount": 200000,
             "probability": 40, "intentScore": 70, "poDate": "2026-12-31", "toolType": "Inspection",
             "saleType": "New Equipment", "subRegion": "East China", "currency": "CNY",
-            "originalAmount": 200000, "qualificationConfirmed": True,
+            "originalAmount": 200000, "amountCny": 200000, "qualificationConfirmed": True,
         })
         return account, contact, opportunity
 
@@ -136,12 +137,13 @@ class TestDemoRequestApi(FrappeTestCase):
     def _new_opportunity(self, suffix: str) -> dict:
         frappe.set_user(self.sales)
         return create_strategy_opportunity({
+            "probabilityLevel": "pipeline",
             "accountId": self.account["id"], "siteId": self.opportunity["siteId"],
             "title": f"Demo {suffix} Opportunity", "owner": self.sales,
             "stage": QUALIFIED_OPPORTUNITY, "forecast": "Pipeline", "amount": 200000,
             "intentScore": 70, "poDate": "2026-12-31", "toolType": "Inspection",
             "saleType": "New Equipment", "subRegion": "East China", "currency": "CNY",
-            "originalAmount": 200000, "qualificationConfirmed": True,
+            "originalAmount": 200000, "amountCny": 200000, "qualificationConfirmed": True,
         })
 
     def test_create_draft_and_submit_are_server_owned_and_derive_contact(self):

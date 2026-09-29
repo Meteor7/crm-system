@@ -93,11 +93,12 @@ class TestRfqApi(FrappeTestCase):
             "process": "Frontend", "status": "\u91cf\u4ea7",
         })
         return create_strategy_opportunity({
+            "probabilityLevel": "pipeline",
             "accountId": account["id"], "siteId": site["id"], "title": f"RFQ Project {suffix}",
             "owner": self.sales, "stage": QUALIFIED_OPPORTUNITY, "forecast": "Pipeline", "amount": "100000.00",
             "probability": 20, "intentScore": 70, "poDate": "2026-12-31", "toolType": "Inspection",
             "saleType": "New Equipment", "subRegion": "East China", "currency": "CNY",
-            "originalAmount": "100000.00", "paymentMilestones": [], "strengths": [],
+            "originalAmount": "100000.00", "amountCny": "100000.00", "paymentMilestones": [], "strengths": [],
             "redFlags": [], "informationNeeded": [], "qualificationConfirmed": True,
         })
 

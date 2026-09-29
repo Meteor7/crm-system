@@ -6,6 +6,7 @@ export type UserRole = PersonnelRole
 export type UserId = string
 
 export type Capability =
+  | 'cockpit:view'
   | 'dashboard:view'
   | 'account:view' | 'account:write'
   | 'stakeholder:view' | 'stakeholder:write'
@@ -67,6 +68,7 @@ export interface ListQuery {
   search?: string
   segment?: string
   city?: string
+  region?: string
   status?: string
   accountId?: string
   owner?: string
@@ -76,6 +78,8 @@ export interface ListQuery {
   contactId?: string
   opportunityId?: string
   source?: string
+  /** '1' lists Confirmed and Completed Bookings whose actual PO date is missing. */
+  actualPoDateMissing?: string
   page?: number
   pageSize?: number
 }
@@ -250,9 +254,13 @@ export interface LeadConversionInput {
   newContact?: Omit<CreateContactInput, 'accountId' | 'siteId' | 'reportsToContactId'>
   opportunityTitle: string
   opportunityAmount: DecimalAmount
+  /** The new Opportunity's amount in CNY, entered by Sales. */
+  opportunityAmountCny: DecimalAmount
   opportunityCloseDate: string
   opportunityOwner: string
   toolType: string
+  /** Whoever converts sets the new Opportunity's first level. */
+  opportunityProbabilityLevel: OpportunityProbabilityLevel
   /** Sales confirms the customer need and the budget owner; conversion requires `true`. */
   qualificationConfirmed?: boolean
 }
@@ -326,6 +334,8 @@ export interface OpportunityDto {
 
 export type BookingSource = 'Opportunity' | 'Upsell'
 export type BookingType = 'Equipment' | 'Service'
+/** Where a Booking's actual PO date came from. */
+export type ActualPoDateSource = 'po_confirmation' | 'booking_entry' | 'backfill'
 
 export interface BookingDto {
   id: string
@@ -341,6 +351,15 @@ export interface BookingDto {
   currency: string
   status: 'Confirmed' | 'Pending' | 'Completed' | 'Cancelled'
   bookingDate: string
+  /** Date on the customer's PO (YYYY-MM-DD), empty until recorded. Not the Opportunity's expected poDate. */
+  actualPoDate?: string
+  actualPoDateSource?: ActualPoDateSource | ''
+  /** Reason given with the latest Manager correction. */
+  actualPoDateNote?: string
+  /** The order's amount in CNY: the amount of a CNY Booking, '' until entered for another currency. */
+  amountCny?: DecimalAmount | ''
+  /** Reason given with the latest Manager correction of the CNY amount. */
+  amountCnyNote?: string
   owner: string
   source: BookingSource
   bookingType?: BookingType
@@ -365,6 +384,23 @@ export interface UpsertBookingInput {
   bookingType?: BookingType
   sourceOpportunityId: string
   note: string
+  /** Optional on an Upsell Booking; once recorded, only a Manager's correction changes it. */
+  actualPoDate?: string
+  /** Required for a confirmed Booking in another currency; ignored for CNY. */
+  amountCny?: DecimalAmount | ''
+}
+
+export interface SetBookingAmountCnyInput {
+  amountCny: DecimalAmount
+  /** Required when the Booking already has a CNY amount. */
+  reason?: string
+}
+
+export interface SetActualPoDateInput {
+  /** YYYY-MM-DD, not later than today. */
+  actualPoDate: string
+  /** Required when the Booking already has a date. */
+  reason?: string
 }
 
 export type DemoRequestStatus = 'Draft' | 'Engineer Review' | 'Engineer Returned' | 'Manager Approval' | 'Manager Rejected' | 'Converted' | 'Cancelled'
@@ -520,7 +556,8 @@ export interface TestRunDto {
   /** Test round the run belongs to; a retest opens a new round and only that round's runs gate Internal Review. */
   round: number
   wafers: number
-  status: 'Planned' | 'Completed'
+  /** Cancelled keeps the record with its reason in `summary`; it no longer counts as a plan or towards wafers. */
+  status: 'Planned' | 'Completed' | 'Cancelled'
   capture: number | null
   falsePositive: number | null
   wph: number | null
@@ -529,6 +566,9 @@ export interface TestRunDto {
 
 export type CreateTestRunInput = Omit<TestRunDto, 'id' | 'status' | 'round'>
 export type AddEvaluationRunInput = CreateTestRunInput & { expectedModified?: string }
+/** Same fields as a new run: without results the Planned run is rescheduled or edited, with results it is completed. */
+export type UpdateEvaluationRunInput = CreateTestRunInput & { expectedModified: string }
+export type CancelEvaluationRunInput = { reason: string; expectedModified: string }
 export type SetEvaluationTestRunDeadlineInput = { testRunDeadline: string; expectedModified?: string }
 
 export type EvaluationPreparationBranch = 'wafer' | 'test'
@@ -836,5 +876,5 @@ export interface PipelineDto {
 }
 import type { DecimalAmount } from '@/domain/money'
 import type { MultipartFilePart } from '@/api/binary-transport'
-import type { OpportunityProbabilityLevelValue } from './workspaces'
+import type { OpportunityProbabilityLevel, OpportunityProbabilityLevelValue } from './workspaces'
 import type { OpportunityStage } from '@/domain/opportunity-stages'

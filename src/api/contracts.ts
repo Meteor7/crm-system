@@ -1,3 +1,4 @@
+import type { BoardFilters, BoardQuery, BoardResult, SavedBoardQuery, SaveBoardQueryInput } from '@/features/opportunity-board/types'
 /**
  * ============================================================================
  *  CRM 后端数据库对接契约(BINDING)— Frappe / MariaDB
@@ -19,6 +20,8 @@
  *  合规门(Go/No-Go Checklist)必须全绿后才可作为 Stage/Production 后端验收依据。
  * ============================================================================
  */
+import type { PlanDto, PlanQuery, PlanDetails, PlanDetailQuery } from '@/features/cockpit/plan-types'
+import type { CockpitSettings, CockpitSettingsInput, ReviewDto, ReviewQuery, ReviewDetails, Target, TargetInput, WarningActionInput, WarningHandling, WarningPlanInput, WarningsDto } from '@/features/cockpit/types'
 import type {
   Account360Dto,
   AccountSummaryDto,
@@ -50,7 +53,11 @@ import type {
   UpdateStakeholderInput,
   CreateTestRunInput,
   AddEvaluationRunInput,
+  UpdateEvaluationRunInput,
+  CancelEvaluationRunInput,
   SetEvaluationTestRunDeadlineInput,
+  SetActualPoDateInput,
+  SetBookingAmountCnyInput,
   UpsertBookingInput,
   VisitDto,
   VisitDetailDto,
@@ -170,6 +177,23 @@ export interface DashboardQuery {
 }
 
 export interface CrmApi {
+  queryOpportunities(input: BoardQuery): Promise<ApiResponse<BoardResult>>
+  getOpportunityFilters(): Promise<ApiResponse<BoardFilters>>
+  listOpportunityQueries(): Promise<ApiResponse<{ items: SavedBoardQuery[] }>>
+  saveOpportunityQuery(input: SaveBoardQueryInput, id?: string, expectedModified?: string): Promise<ApiResponse<SavedBoardQuery>>
+  deleteOpportunityQuery(id: string, expectedModified: string): Promise<ApiResponse<{ id: string; status: 'Deleted' }>>
+  getPlan(query: PlanQuery): Promise<ApiResponse<PlanDto>>
+  getPlanDetails(query: PlanDetailQuery): Promise<ApiResponse<PlanDetails>>
+  getReview(query: ReviewQuery): Promise<ApiResponse<ReviewDto>>
+  getReviewDetails(query: ReviewQuery & { metric: string; page?: number; pageSize?: number }): Promise<ApiResponse<ReviewDetails>>
+  getWarnings(query: ReviewQuery): Promise<ApiResponse<WarningsDto>>
+  saveReviewTarget(input: TargetInput, expectedModified?: string): Promise<ApiResponse<Target>>
+  // Warnings handling (Manager): thresholds, a warning's next step, and the action taken on a stage 6 row.
+  // expectedModified is null until the record exists.
+  getCockpitSettings(): Promise<ApiResponse<CockpitSettings>>
+  saveCockpitSettings(input: CockpitSettingsInput, expectedModified: string | null): Promise<ApiResponse<CockpitSettings>>
+  saveWarningPlan(input: WarningPlanInput, expectedModified: string | null): Promise<ApiResponse<WarningHandling>>
+  recordWarningAction(input: WarningActionInput, expectedModified: string | null): Promise<ApiResponse<WarningHandling>>
   getBootstrap(): Promise<ApiResponse<BootstrapDto>>
   changeCurrentUserPassword(input: { currentPassword: string; newPassword: string }): Promise<ApiResponse<{ updated: true }>>
   listNotifications(query?: NotificationListQuery): Promise<ApiResponse<PageData<NotificationDto>>>
@@ -178,6 +202,7 @@ export interface CrmApi {
   getDashboard(query: DashboardQuery): Promise<ApiResponse<DashboardDto>>
   listAccounts(query: ListQuery): Promise<ApiResponse<PageData<AccountSummaryDto>>>
   listAccountSegments(): Promise<ApiResponse<string[]>>
+  listAccountRegions(): Promise<ApiResponse<string[]>>
   listAccountCities(): Promise<ApiResponse<string[]>>
   createAccount(input: CreateAccountInput): Promise<ApiResponse<AccountSummaryDto>>
   updateAccount(id: string, input: CreateAccountInput, expectedModified?: string): Promise<ApiResponse<AccountSummaryDto>>
@@ -231,6 +256,8 @@ export interface CrmApi {
   completeEvaluationPreparation(id: string, branch: EvaluationPreparationBranch, expectedModified: string): Promise<ApiResponse<EvaluationDto>>
   updateEvaluationStatus(id: string, command: EvaluationStatusCommand, expectedModified?: string): Promise<ApiResponse<EvaluationDto>>
   addEvaluationRun(id: string, input: AddEvaluationRunInput): Promise<ApiResponse<EvaluationDto>>
+  updateEvaluationRun(id: string, runId: string, input: UpdateEvaluationRunInput): Promise<ApiResponse<EvaluationDto>>
+  cancelEvaluationRun(id: string, runId: string, input: CancelEvaluationRunInput): Promise<ApiResponse<EvaluationDto>>
   setEvaluationTestRunDeadline(id: string, input: SetEvaluationTestRunDeadlineInput): Promise<ApiResponse<EvaluationDto>>
   saveDemoArtifact(input: DemoArtifactUploadInput): Promise<ApiResponse<DemoArtifactMetaDto>>
   getDemoArtifact(id: string): Promise<BinaryDownload>
@@ -261,9 +288,13 @@ export interface CrmApi {
   previewRfqFile(id: string, versionId?: string): Promise<BinaryDownload>
   downloadRfqFile(id: string, versionId?: string): Promise<BinaryDownload>
   listStrategyOpportunities(query?: StrategyOpportunityListQuery): Promise<ApiResponse<PageData<StrategyOpportunityDto>>>
+  /** Equipment type options: the five presets, then custom types in the order they were added. */
+  listEquipmentTypes(): Promise<ApiResponse<string[]>>
   getStrategyOpportunity(id: string): Promise<ApiResponse<StrategyOpportunityDto>>
   createStrategyOpportunity(input: CreateStrategyOpportunityInput): Promise<ApiResponse<StrategyOpportunityDto>>
   updateStrategyOpportunity(id: string, input: UpdateStrategyOpportunityInput, expectedModified?: string): Promise<ApiResponse<StrategyOpportunityDto>>
+  saveProbabilityRecovery(id: string, eventId: string, input: import('@/types/workspaces').SaveProbabilityRecoveryInput, expectedModified: string): Promise<ApiResponse<import('@/types/workspaces').ProbabilityRecoveryDto>>
+  recordProbabilityRecoveryAction(id: string, eventId: string, input: import('@/types/workspaces').RecordProbabilityRecoveryActionInput, expectedModified: string): Promise<ApiResponse<import('@/types/workspaces').ProbabilityRecoveryDto>>
   /** Manager only (deal:rollback). A lost Opportunity reopens at or below the stage it was lost at. */
   rollbackOpportunityStage(id: string, input: RollbackOpportunityStageInput, expectedModified?: string): Promise<ApiResponse<StrategyOpportunityDto>>
   /** demo_done -> customer_budget_approved with the declared approval date. */
@@ -276,10 +307,14 @@ export interface CrmApi {
   confirmPo(id: string, input: ConfirmPoInput, expectedModified?: string): Promise<ApiResponse<StrategyOpportunityDto>>
   /** Only at the open stages and without a live Booking. */
   markOpportunityLost(id: string, input: MarkOpportunityLostInput, expectedModified?: string): Promise<ApiResponse<StrategyOpportunityDto>>
+  reviewOpportunityLoss(id: string, reviewId: string, input: import('@/types/workspaces').LossReviewInput, expectedModified: string): Promise<ApiResponse<import('@/types/workspaces').LossReviewDto>>
   deleteStrategyOpportunity(id: string): Promise<ApiResponse<{ id: string; status: 'Deleted' }>>
   createOpportunityStakeholder(opportunityId: string, input: CreateOpportunityStakeholderInput): Promise<ApiResponse<OpportunityStakeholderDto>>
   updateOpportunityStakeholder(opportunityId: string, stakeholderId: string, input: UpdateOpportunityStakeholderInput): Promise<ApiResponse<OpportunityStakeholderDto>>
   deleteOpportunityStakeholder(opportunityId: string, stakeholderId: string): Promise<ApiResponse<{ id: string }>>
+  listOpportunityStatuses(opportunityId: string): Promise<ApiResponse<import('@/features/opportunities/status-types').OpportunityStatusRecord[]>>
+  saveOpportunityStatus(opportunityId: string, input: import('@/features/opportunities/status-types').SaveOpportunityStatusInput, files: MultipartFilePart[]): Promise<ApiResponse<import('@/features/opportunities/status-types').OpportunityStatusRecord>>
+  getOpportunityStatusFile(opportunityId: string, recordId: string, fileId: string): Promise<BinaryDownload>
   createOpportunityAction(opportunityId: string, input: CreateOpportunityActionInput): Promise<ApiResponse<OpportunityActionDto>>
   updateOpportunityAction(opportunityId: string, actionId: string, input: UpdateOpportunityActionInput): Promise<ApiResponse<OpportunityActionDto>>
   deleteOpportunityAction(opportunityId: string, actionId: string): Promise<ApiResponse<{ id: string }>>
@@ -291,6 +326,9 @@ export interface CrmApi {
   getInstalledTool(id: string): Promise<ApiResponse<InstalledToolDetailDto>>
   convertBookingToInstalledTool(id: string, input: ConvertBookingToInstalledToolInput, expectedModified?: string): Promise<ApiResponse<{ booking: BookingDto; installedTool: InstalledToolDto }>>
   completeServiceBooking(id: string, expectedModified?: string): Promise<ApiResponse<BookingDto>>
+  /** Manager only: fill in or correct the actual PO date of a Confirmed or Completed Booking. */
+  setBookingActualPoDate(id: string, input: SetActualPoDateInput, expectedModified?: string): Promise<ApiResponse<BookingDto>>
+  setBookingAmountCny(id: string, input: SetBookingAmountCnyInput, expectedModified?: string): Promise<ApiResponse<BookingDto>>
   transitionInstalledTool(id: string, input: TransitionInstalledToolInput, expectedModified?: string): Promise<ApiResponse<InstalledToolDetailDto>>
   addInstalledToolVersionRecord(id: string, input: AddInstalledToolVersionRecordInput, expectedModified?: string): Promise<ApiResponse<InstalledToolDetailDto>>
   addInstalledToolServiceRecord(id: string, input: AddInstalledToolServiceRecordInput, expectedModified?: string): Promise<ApiResponse<InstalledToolDetailDto>>

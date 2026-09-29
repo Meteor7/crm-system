@@ -62,9 +62,61 @@ export interface OpportunityProbabilityHistoryDto {
   id: string
   from: OpportunityProbabilityLevelValue
   to: OpportunityProbabilityLevelValue
+  /** Why the owner lowered the level. Required on a downgrade, empty otherwise. */
+  reason: string
   actor: string
   /** UTC ISO timestamp ending in Z. */
   at: string
+  /** Legacy events can have no recorded plan; never infer one from other actions. */
+  recovery?: ProbabilityRecoveryDto | null
+}
+
+export interface LossReviewInput {
+  status: 'Reviewed' | 'Pending'
+  /** The conclusion; required to mark the loss reviewed, kept unchanged by a revert. */
+  reviewNote: string
+  /** Required to revert a reviewed loss to pending; recorded in the audit trail. */
+  revertReason?: string
+}
+
+/** One post-mortem per marked_lost event; it survives reopening the Opportunity. */
+export interface LossReviewDto {
+  id: string
+  opportunityId: string
+  stageEventId: string
+  lostAt: string
+  lostAtStage: string
+  lostBy: string
+  lostReason: string
+  status: 'pending' | 'reviewed'
+  reviewNote: string
+  reviewedBy: string | null
+  reviewedAt: string | null
+  reopenedAt: string | null
+  modified: string
+  history: { id: string; kind: string; status: 'pending' | 'reviewed'; note: string; reason: string; actor: string; at: string }[]
+}
+
+export interface ProbabilityRecoveryDto {
+  id: string
+  plan: string
+  modified: string
+  state?: 'pending' | 'handled'
+  actionTaken?: string | null
+  actedBy?: string | null
+  actedAt?: string | null
+  history: Array<{ id: string; kind: 'Created' | 'PlanUpdated' | 'ActionRecorded'; plan: string; actor: string; at: string; actionTaken?: string | null }>
+}
+
+export interface RecordProbabilityRecoveryActionInput {
+  actionTaken: string
+  recoveryModified: string
+}
+
+export interface SaveProbabilityRecoveryInput {
+  plan: string
+  /** null explicitly creates a missing legacy plan; edits require its loaded version. */
+  recoveryModified: string | null
 }
 
 export interface StrategyOpportunityListQuery extends ListQuery {
@@ -78,14 +130,26 @@ export interface CreateStrategyOpportunityInput {
   owner: string
   amount: DecimalAmount
   intentScore?: number
-  /** Only the owner may set a level; creating for another owner sends ''. */
+  /**
+   * Required when creating: whoever opens the Opportunity sets its first level, including a Manager
+   * opening one for Sales. Afterwards only the owner may change it, and a set level is never cleared.
+   */
   probabilityLevel?: OpportunityProbabilityLevelValue
+  /** Required when the owner lowers the level. */
+  probabilityReason?: string
+  /** Required in the same save as a probability downgrade. */
+  probabilityActionPlan?: string
   poDate: string
   toolType: string
   saleType: string
   subRegion: string
   currency: string
   originalAmount?: DecimalAmount
+  /**
+   * Entered by Sales in CNY on every Opportunity, whatever its currency. Required when creating, and any
+   * edit of an Opportunity that has none must fill it in.
+   */
+  amountCny: DecimalAmount
   shipmentDate?: string
   fatDate?: string
   paymentMilestones?: string[]
@@ -118,6 +182,8 @@ export interface BookingDraft {
   ddl: string
   amount: DecimalAmount
   currency: string
+  /** The order's amount in CNY when its currency is not CNY; required when the PO is confirmed. Ignored for CNY. */
+  amountCny?: DecimalAmount | ''
   owner: string
   note: string
 }
@@ -144,6 +210,8 @@ export interface ConfirmPoInput {
   booking: BookingDraft
   /** `liveBooking.modified` the form was prefilled from; the server requires it while a Pending Booking exists. */
   expectedBookingModified?: string
+  /** Date on the customer's PO, not later than today; not the Opportunity's expected poDate. */
+  actualPoDate: string
 }
 
 export interface MarkOpportunityLostInput {
@@ -202,6 +270,9 @@ export interface OpportunityLiveBookingDto {
   note?: string
   /** Version to send back as `expectedBookingModified` when the PO confirms this Pending Booking. */
   modified?: string
+  /** The order's amount in CNY: the amount of a CNY Booking, '' until entered for another currency. */
+  amountCny?: DecimalAmount | ''
+  actualPoDate?: string
 }
 
 export interface StrategyOpportunityDto {
@@ -243,12 +314,16 @@ export interface StrategyOpportunityDto {
   subRegion: string
   currency: string
   originalAmount: DecimalAmount
+  /** The amount in CNY entered by Sales; '' until someone enters it, never a CNY 0. */
+  amountCny: DecimalAmount | ''
   shipmentDate: string
   fatDate: string
   paymentMilestones: string[]
   competition: string
   winReason: string
   lostReason: string
+  /** Post-mortems, newest first. Absent from adapters that predate loss reviews. */
+  lossReviews?: LossReviewDto[]
   history: Array<{ at: string; actor: string; field: string; from: string; to: string }>
   strengths: string[]
   redFlags: string[]
@@ -354,7 +429,7 @@ export interface DemoWorkflowDto {
       /** Retest round the run belongs to; earlier rounds stay in the archive next to the current one. */
       round: number
       wafers: number
-      status: 'Planned' | 'Completed'
+      status: 'Planned' | 'Completed' | 'Cancelled'
       summary: string
       capture: number | null
       falsePositive: number | null

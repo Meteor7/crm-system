@@ -1,0 +1,33 @@
+{
+  "actions": [],
+  "autoname": "hash",
+  "creation": "2026-09-22 00:00:00.000000",
+  "doctype": "DocType",
+  "engine": "InnoDB",
+  "field_order": ["status", "opportunity", "private_file", "file_name", "mime_type", "size_bytes", "content_hash", "uploaded_by", "uploaded_at", "deleted", "deleted_by", "deleted_at"],
+  "fields": [
+    {"fieldname": "status", "fieldtype": "Link", "label": "Status", "options": "CRM Opportunity Status", "reqd": 1, "search_index": 1},
+    {"fieldname": "opportunity", "fieldtype": "Link", "label": "Opportunity", "options": "CRM Opportunity", "reqd": 1, "search_index": 1},
+    {"fieldname": "private_file", "fieldtype": "Link", "label": "Private File", "options": "File", "reqd": 1, "unique": 1},
+    {"fieldname": "file_name", "fieldtype": "Data", "label": "File Name", "reqd": 1},
+    {"fieldname": "mime_type", "fieldtype": "Data", "label": "MIME Type", "reqd": 1},
+    {"fieldname": "size_bytes", "fieldtype": "Int", "label": "Size Bytes", "reqd": 1},
+    {"fieldname": "content_hash", "fieldtype": "Data", "label": "SHA-256", "reqd": 1},
+    {"fieldname": "uploaded_by", "fieldtype": "Link", "label": "Uploaded By", "options": "User", "reqd": 1},
+    {"fieldname": "uploaded_at", "fieldtype": "Datetime", "label": "Uploaded At", "reqd": 1},
+    {"default": "0", "fieldname": "deleted", "fieldtype": "Check", "label": "Deleted", "reqd": 1},
+    {"fieldname": "deleted_by", "fieldtype": "Link", "label": "Deleted By", "options": "User", "read_only": 1},
+    {"fieldname": "deleted_at", "fieldtype": "Datetime", "label": "Deleted At", "read_only": 1}
+  ],
+  "index_web_pages_for_search": 0,
+  "modified": "2026-09-23 00:00:00.000000",
+  "modified_by": "Administrator",
+  "module": "Rayher CRM",
+  "name": "CRM Status Attachment",
+  "naming_rule": "Random",
+  "owner": "Administrator",
+  "permissions": [],
+  "sort_field": "uploaded_at",
+  "sort_order": "DESC",
+  "states": []
+}

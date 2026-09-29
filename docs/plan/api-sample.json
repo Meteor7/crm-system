@@ -1,0 +1,277 @@
+{
+  "_note": "Captured 2026-09-20 from the rayher-crm.test site by test_plan_reads_every_source_with_one_counting_rule (month, anchor 2026-12-10). Lists are shortened; totals are as returned. Both calls are wrapped in the usual {data, meta, warnings} envelope over HTTP.",
+  "get_plan": {
+    "period": {
+      "kind": "month",
+      "start": "2026-12-01",
+      "end": "2026-12-31",
+      "previousAnchor": "2026-11-01",
+      "nextAnchor": "2027-01-01"
+    },
+    "asOf": "2026-09-20T04:20:27.472535Z",
+    "summary": {
+      "visits": {
+        "value": 1,
+        "state": "ready",
+        "reason": null
+      },
+      "tests": {
+        "value": 1,
+        "state": "ready",
+        "reason": null
+      },
+      "actions": {
+        "value": 1,
+        "state": "ready",
+        "reason": null
+      },
+      "po": {
+        "value": 9,
+        "state": "ready",
+        "reason": null
+      }
+    },
+    "overdue": {
+      "value": 1,
+      "state": "ready",
+      "reason": null
+    },
+    "poAmounts": [
+      {
+        "currency": "CNY",
+        "value": "400000.00"
+      }
+    ],
+    "poAmountIncomplete": true,
+    "sales": [
+      {
+        "id": "crm-eval-other-sales@example.invalid",
+        "name": "crm-eval-other-sales",
+        "visits": {
+          "value": 0,
+          "state": "ready",
+          "reason": null
+        },
+        "tests": {
+          "value": 0,
+          "state": "ready",
+          "reason": null
+        },
+        "actions": {
+          "value": 0,
+          "state": "ready",
+          "reason": null
+        },
+        "po": {
+          "value": 4,
+          "state": "ready",
+          "reason": null
+        },
+        "poAmounts": [
+          {
+            "currency": "CNY",
+            "value": "200000.00"
+          }
+        ],
+        "poAmountIncomplete": true
+      },
+      {
+        "id": "crm-eval-sales@example.invalid",
+        "name": "crm-eval-sales",
+        "visits": {
+          "value": 1,
+          "state": "ready",
+          "reason": null
+        },
+        "tests": {
+          "value": 1,
+          "state": "ready",
+          "reason": null
+        },
+        "actions": {
+          "value": 1,
+          "state": "ready",
+          "reason": null
+        },
+        "po": {
+          "value": 5,
+          "state": "ready",
+          "reason": null
+        },
+        "poAmounts": [
+          {
+            "currency": "CNY",
+            "value": "200000.00"
+          }
+        ],
+        "poAmountIncomplete": true
+      }
+    ],
+    "markets": [
+      {
+        "name": "Frontend",
+        "activities": {
+          "value": 3,
+          "state": "ready",
+          "reason": null
+        },
+        "po": {
+          "value": 9,
+          "state": "ready",
+          "reason": null
+        },
+        "poAmounts": [
+          {
+            "currency": "CNY",
+            "value": "400000.00"
+          }
+        ],
+        "poAmountIncomplete": true
+      }
+    ],
+    "expectedPO": {
+      "items": [
+        {
+          "id": "CRM-OPP-05112",
+          "kind": "po",
+          "title": "Evaluation Core Opportunity",
+          "accountId": "Evaluation Core",
+          "customer": "Evaluation Core",
+          "date": "2026-12-31",
+          "salesOwner": "crm-eval-sales@example.invalid",
+          "market": "Frontend",
+          "status": "qualified_opportunity",
+          "carryover": false,
+          "opportunityId": "CRM-OPP-05112",
+          "amount": null,
+          "currency": null,
+          "probabilityLevel": "pipeline"
+        },
+        {
+          "id": "CRM-OPP-05117",
+          "kind": "po",
+          "title": "Evaluation Foreign Opportunity",
+          "accountId": "Evaluation Foreign",
+          "customer": "Evaluation Foreign",
+          "date": "2026-12-31",
+          "salesOwner": "crm-eval-other-sales@example.invalid",
+          "market": "Frontend",
+          "status": "qualified_opportunity",
+          "carryover": false,
+          "opportunityId": "CRM-OPP-05117",
+          "amount": null,
+          "currency": null,
+          "probabilityLevel": "pipeline"
+        }
+      ],
+      "total": 9
+    },
+    "filters": {
+      "sales": [
+        {
+          "id": "crm-eval-other-sales@example.invalid",
+          "name": "crm-eval-other-sales"
+        },
+        {
+          "id": "crm-eval-sales@example.invalid",
+          "name": "crm-eval-sales"
+        },
+        {
+          "id": "person064@staff.example.invalid",
+          "name": "演示员工201"
+        }
+      ],
+      "markets": [
+        "Frontend",
+        "Advanced Packaging"
+      ],
+      "regions": [
+        "East China",
+        "South China",
+        "West China",
+        "North China",
+        "Central China"
+      ],
+      "regionReady": true
+    }
+  },
+  "get_plan_details (metric=all, sales filter)": {
+    "items": [
+      {
+        "id": "djgu2dc39i",
+        "kind": "actions",
+        "title": "Send the site survey",
+        "accountId": "Evaluation Core - 4",
+        "customer": "Evaluation Core",
+        "date": "2026-11-27",
+        "salesOwner": "crm-eval-sales@example.invalid",
+        "market": "Frontend",
+        "status": "Open",
+        "carryover": true,
+        "actionOwner": "crm-eval-sales@example.invalid",
+        "opportunityId": "CRM-OPP-05194"
+      },
+      {
+        "id": "djgmcm2p27",
+        "kind": "actions",
+        "title": "Confirm budget",
+        "accountId": "Evaluation Core - 4",
+        "customer": "Evaluation Core",
+        "date": "2026-12-09",
+        "salesOwner": "crm-eval-sales@example.invalid",
+        "market": "Frontend",
+        "status": "Open",
+        "carryover": false,
+        "actionOwner": "crm-eval-sales@example.invalid",
+        "opportunityId": "CRM-OPP-05194"
+      },
+      {
+        "id": "CRM-RUN-05208",
+        "kind": "tests",
+        "title": "Evaluation Core Demo",
+        "accountId": "Evaluation Core - 4",
+        "customer": "Evaluation Core",
+        "date": "2026-12-10",
+        "salesOwner": "crm-eval-sales@example.invalid",
+        "market": "Frontend",
+        "status": "Planned",
+        "carryover": false,
+        "evaluationId": "CRM-EVAL-05196",
+        "opportunityId": "CRM-OPP-05194"
+      },
+      {
+        "id": "CRM-VIS-05209",
+        "kind": "visits",
+        "title": "Plan visit",
+        "accountId": "Evaluation Core - 4",
+        "customer": "Evaluation Core",
+        "date": "2026-12-13",
+        "salesOwner": "crm-eval-sales@example.invalid",
+        "market": "Frontend",
+        "status": "Planned",
+        "carryover": false,
+        "opportunityId": "CRM-OPP-05194"
+      },
+      {
+        "id": "CRM-OPP-05112",
+        "kind": "po",
+        "title": "Evaluation Core Opportunity",
+        "accountId": "Evaluation Core",
+        "customer": "Evaluation Core",
+        "date": "2026-12-31",
+        "salesOwner": "crm-eval-sales@example.invalid",
+        "market": "Frontend",
+        "status": "qualified_opportunity",
+        "carryover": false,
+        "opportunityId": "CRM-OPP-05112",
+        "amount": null,
+        "currency": null,
+        "probabilityLevel": "pipeline"
+      }
+    ],
+    "total": 9,
+    "page": 1,
+    "pageSize": 100,
+    "asOf": "2026-09-20T04:20:27.413921Z"
+  }
+}

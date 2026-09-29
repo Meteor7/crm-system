@@ -1,0 +1,101 @@
+{
+  "doctype": "DocType",
+  "name": "CRM Warning Handling",
+  "module": "Rayher CRM",
+  "engine": "InnoDB",
+  "autoname": "prompt",
+  "naming_rule": "Set by user",
+  "owner": "Administrator",
+  "modified_by": "Administrator",
+  "creation": "2026-09-24 00:00:00.000000",
+  "modified": "2026-09-24 00:00:00.000000",
+  "field_order": [
+    "warning_type",
+    "source_id",
+    "source_event",
+    "opportunity",
+    "next_step",
+    "plan_updated_by",
+    "plan_updated_at",
+    "action_taken",
+    "acted_by",
+    "acted_at",
+    "follow_up_on"
+  ],
+  "fields": [
+    {
+      "fieldname": "warning_type",
+      "fieldtype": "Select",
+      "options": "overdue\nquotation_expiry\nstage6_no_po",
+      "label": "Warning Type",
+      "reqd": 1
+    },
+    {
+      "fieldname": "source_id",
+      "fieldtype": "Data",
+      "label": "Source",
+      "reqd": 1,
+      "search_index": 1
+    },
+    {
+      "fieldname": "source_event",
+      "fieldtype": "Data",
+      "label": "Source Event",
+      "reqd": 1
+    },
+    {
+      "fieldname": "opportunity",
+      "fieldtype": "Data",
+      "label": "Opportunity",
+      "search_index": 1
+    },
+    {
+      "fieldname": "next_step",
+      "fieldtype": "Small Text",
+      "label": "Next Step"
+    },
+    {
+      "fieldname": "plan_updated_by",
+      "fieldtype": "Link",
+      "options": "User",
+      "label": "Next Step By"
+    },
+    {
+      "fieldname": "plan_updated_at",
+      "fieldtype": "Datetime",
+      "label": "Next Step At"
+    },
+    {
+      "fieldname": "action_taken",
+      "fieldtype": "Small Text",
+      "label": "Action Taken"
+    },
+    {
+      "fieldname": "acted_by",
+      "fieldtype": "Link",
+      "options": "User",
+      "label": "Acted By"
+    },
+    {
+      "fieldname": "acted_at",
+      "fieldtype": "Datetime",
+      "label": "Acted At"
+    },
+    {
+      "fieldname": "follow_up_on",
+      "fieldtype": "Date",
+      "label": "Follow Up On"
+    }
+  ],
+  "permissions": [
+    {
+      "role": "CRM Manager",
+      "read": 1
+    }
+  ],
+  "sort_field": "modified",
+  "sort_order": "DESC",
+  "actions": [],
+  "states": [],
+  "index_web_pages_for_search": 0
+}

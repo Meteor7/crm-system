@@ -9,6 +9,7 @@ export interface NavigationItem {
   path: string
   icon: Component
   badge?: string
+  hiddenRoles?: UserRole[]
   capabilities: Capability[]
 }
 
@@ -24,7 +25,9 @@ export const navigation: NavigationGroup[] = [
     label: '管理中心',
     i18nKey: 'nav.management',
     items: [
-      { key: 'dashboard', label: '信息中心', i18nKey: 'nav.dashboard', path: '/dashboard', icon: BarChart3, capabilities: ['dashboard:view'] },
+      // Manager reviews the sales cockpit at /dashboard; Sales and Engineer keep the information centre there.
+      { key: 'review', label: '销售经营看板', i18nKey: 'nav.review', path: '/dashboard', icon: BarChart3, capabilities: ['cockpit:view'] },
+      { key: 'dashboard', label: '信息中心', i18nKey: 'nav.dashboard', path: '/dashboard', icon: BarChart3, hiddenRoles: ['Manager'], capabilities: ['dashboard:view'] },
       { key: 'calendar', label: 'Calendar', i18nKey: 'nav.calendar', path: '/calendar', icon: CalendarDays, capabilities: ['service:view'] },
     ],
   },

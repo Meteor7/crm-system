@@ -1,0 +1,15 @@
+{
+  "doctype": "DocType", "name": "CRM Opportunity Saved Query", "module": "Rayher CRM", "engine": "InnoDB",
+  "creation": "2026-09-22 00:00:00.000000", "modified": "2026-09-22 13:00:00.000000",
+  "owner": "Administrator", "modified_by": "Administrator", "naming_rule": "Random",
+  "autoname": "hash", "track_changes": 0, "sort_field": "modified", "sort_order": "DESC",
+  "field_order": ["query_owner", "query_name", "definition"],
+  "fields": [
+    {"fieldname": "query_owner", "fieldtype": "Link", "options": "User", "label": "Owner", "reqd": 1, "search_index": 1},
+    {"fieldname": "query_name", "fieldtype": "Data", "label": "Name", "ignore_xss_filter": 1,
+     "description": "Required by the service; not reqd here because Frappe treats tag-only text such as <x> as empty."},
+    {"fieldname": "definition", "fieldtype": "Long Text", "label": "Definition", "reqd": 1, "ignore_xss_filter": 1}
+  ],
+  "permissions": [],
+  "actions": [], "links": [], "states": []
+}

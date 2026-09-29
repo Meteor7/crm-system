@@ -81,7 +81,11 @@ describe('createNotifyingApi', () => {
     const api = createNotifyingApi(createMockApi({ latency: 0, role: 'Manager' }), (message) => messages.push(message))
     const opportunity = (await api.getStrategyOpportunity('OPP-008')).data
 
-    await api.confirmPo('OPP-008', { booking: { ...opportunity.internalValidation!.booking } })
+    await api.confirmPo('OPP-008', {
+      booking: { ...opportunity.internalValidation!.booking },
+      expectedBookingModified: opportunity.liveBooking?.modified,
+      actualPoDate: '2026-07-15',
+    })
 
     expect(messages.at(-1)).toMatchObject({
       category: 'Booking', title: 'Booking 已确认', recipientId: 'person002@crm.example.invalid', route: '/booking/BKG-003',

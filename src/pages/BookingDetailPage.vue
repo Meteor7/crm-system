@@ -6,12 +6,17 @@ import { ArrowLeft, Building2, CalendarClock, CircleDollarSign, Cpu, ExternalLin
 import { RouterLink, useRoute, useRouter } from 'vue-router'
 import { api as defaultApi, type CrmApi } from '@/api'
 import { mapRequestError } from '@/api/request-state'
-import type { BookingDto, Tone } from '@/types/crm'
+import type { AccountSummaryDto, BookingDto, ContactSummaryDto, CreateContactInput, OpportunityDto, SetActualPoDateInput, SetBookingAmountCnyInput, Tone, UpsertBookingInput } from '@/types/crm'
 import type { InstalledToolDto } from '@/types/workspaces'
 import DataState from '@/design-system/DataState.vue'
 import PageHeader from '@/design-system/PageHeader.vue'
 import SectionCard from '@/design-system/SectionCard.vue'
 import StatusBadge from '@/design-system/StatusBadge.vue'
+import ActualPoDateModal from '@/features/opportunities/ActualPoDateModal.vue'
+import BookingAmountCnyModal from '@/features/opportunities/BookingAmountCnyModal.vue'
+import BookingEditorModal from '@/features/opportunities/BookingEditorModal.vue'
+import ContactModal from '@/features/contacts/ContactModal.vue'
+import { readAllPages } from '@/features/shared/read-all-pages'
 import { formatMoney } from '@/domain/money'
 import { formatDisplayDate } from '@/domain/time'
 import { useAppStore } from '@/stores/app'
@@ -31,7 +36,19 @@ const error = useLocaleMessage()
 const requestId = ref('')
 const deleting = ref(false), deleteError = useLocaleMessage(), deleteRequestId = ref('')
 const equipmentWarning = useLocaleMessage()
+const poDateModal = ref(false), poDateBusy = ref(false), poDateError = useLocaleMessage()
+// Only a Manager fills in or corrects the date on a confirmed order's PO.
+const canSetActualPoDate = computed(() => app.bootstrap?.user.role === 'Manager'
+  && (booking.value?.status === 'Confirmed' || booking.value?.status === 'Completed'))
+const amountCnyModal = ref(false), amountCnyBusy = ref(false), amountCnyError = useLocaleMessage()
+// A CNY order's amount already is its CNY amount; a Manager fills in the rest, Completed orders included.
+const canSetAmountCny = computed(() => canSetActualPoDate.value && booking.value?.currency !== 'CNY')
 const equipmentWarningRequestId = ref('')
+// Same rule as the edit button on the Booking list.
+const canEdit = computed(() => app.can('deal:write') && booking.value?.status !== 'Completed')
+const editOpen = ref(false), editBusy = ref(false), editError = useLocaleMessage()
+const editAccounts = ref<AccountSummaryDto[]>([]), editContacts = ref<ContactSummaryDto[]>([]), editOpportunities = ref<OpportunityDto[]>([])
+const contactModal = ref(false), contactAccountId = ref(''), selectedContactId = ref('')
 let loadSequence = 0
 async function deleteBooking() {
   if (!booking.value || deleting.value || !window.confirm(t('detail.confirmDeleteBooking', { id: booking.value.id }))) return
@@ -47,6 +64,95 @@ async function deleteBooking() {
     deleteRequestId.value = mapped.requestId
   } finally {
     deleting.value = false
+  }
+}
+async function saveActualPoDate(input: SetActualPoDateInput) {
+  if (!booking.value || poDateBusy.value) return
+  poDateBusy.value = true
+  poDateError.value = ''
+  try {
+    booking.value = (await props.apiClient.setBookingActualPoDate(booking.value.id, input, booking.value.modified)).data
+    poDateModal.value = false
+  } catch (reason) {
+    const mapped = mapRequestError(reason)
+    poDateError.value = mapped.localizedMessage ?? mapped.message
+  } finally {
+    poDateBusy.value = false
+  }
+}
+function openActualPoDate() {
+  poDateError.value = ''
+  poDateModal.value = true
+}
+async function saveAmountCny(input: SetBookingAmountCnyInput) {
+  if (!booking.value || amountCnyBusy.value) return
+  amountCnyBusy.value = true
+  amountCnyError.value = ''
+  try {
+    booking.value = (await props.apiClient.setBookingAmountCny(booking.value.id, input, booking.value.modified)).data
+    amountCnyModal.value = false
+  } catch (reason) {
+    const mapped = mapRequestError(reason)
+    amountCnyError.value = mapped.localizedMessage ?? mapped.message
+  } finally {
+    amountCnyBusy.value = false
+  }
+}
+function openAmountCny() {
+  amountCnyError.value = ''
+  amountCnyModal.value = true
+}
+const readActiveContacts = () => readAllPages((page, pageSize) => props.apiClient.listContacts({ contactStatus: 'Active', page, pageSize }))
+async function openEdit() {
+  if (!booking.value || editBusy.value) return
+  editBusy.value = true
+  editError.value = ''
+  try {
+    ;[editAccounts.value, editContacts.value] = await Promise.all([
+      readAllPages((page, pageSize) => props.apiClient.listAccounts({ page, pageSize })),
+      readActiveContacts(),
+    ])
+    selectedContactId.value = booking.value.primaryContactId ?? ''
+    editOpen.value = true
+  } catch (reason) {
+    const mapped = mapRequestError(reason)
+    editError.value = mapped.localizedMessage ?? mapped.message
+  } finally {
+    editBusy.value = false
+  }
+}
+async function saveBooking(input: UpsertBookingInput) {
+  if (!booking.value || editBusy.value) return
+  editBusy.value = true
+  editError.value = ''
+  try {
+    await props.apiClient.updateBooking(booking.value.id, input, booking.value.modified)
+    editOpen.value = false
+    await load()
+  } catch (reason) {
+    const mapped = mapRequestError(reason)
+    editError.value = mapped.localizedMessage ?? mapped.message
+  } finally {
+    editBusy.value = false
+  }
+}
+function openContact(accountId: string) {
+  contactAccountId.value = accountId
+  editError.value = ''
+  contactModal.value = true
+}
+async function saveContact(input: CreateContactInput) {
+  editBusy.value = true
+  editError.value = ''
+  try {
+    selectedContactId.value = (await props.apiClient.createContact(input)).data.id
+    editContacts.value = await readActiveContacts()
+    contactModal.value = false
+  } catch (reason) {
+    const mapped = mapRequestError(reason)
+    editError.value = mapped.localizedMessage ?? mapped.message
+  } finally {
+    editBusy.value = false
   }
 }
 const bookingId = computed(() => String(route.params.bookingId || ''))
@@ -72,6 +178,7 @@ async function load() {
     requestId.value = mapped.requestId
   } else {
     booking.value = pipelineResult.value.data.bookings.find((item) => item.id === bookingId.value) ?? null
+    editOpportunities.value = pipelineResult.value.data.opportunities
     if (!booking.value) error.value = message('detail.notFoundBookingId', { id: bookingId.value })
   }
   if (booking.value?.installedToolId) {
@@ -99,12 +206,13 @@ onMounted(load)
     <DataState v-else-if="error || !booking" type="error" :message="error || t('detail.notFoundBooking')" :request-id="requestId" @retry="load" />
     <template v-else>
       <RouterLink class="detail-back-button" :to="{ name: 'booking' }"><ArrowLeft :size="14" />{{ t('detail.backBookings') }}</RouterLink>
-      <PageHeader eyebrow="BOOKING DETAIL" :title="bookingTitle(booking, locale)" :description="`${booking.id} · ${booking.accountName} · ${t('detail.owner')} ${personnelDisplayName(booking.owner)}`"><button v-if="canDelete" class="danger-button" type="button" data-delete-booking :disabled="deleting" @click="deleteBooking">{{ t('detail.delete') }} Booking</button></PageHeader>
+      <PageHeader eyebrow="BOOKING DETAIL" :title="bookingTitle(booking, locale)" :description="`${booking.id} · ${booking.accountName} · ${t('detail.owner')} ${personnelDisplayName(booking.owner)}`"><button v-if="canEdit" class="secondary-button" type="button" data-testid="edit-booking" :disabled="editBusy" @click="openEdit">{{ t('bookingEditor.edit') }}</button><button v-if="canSetActualPoDate" class="secondary-button" type="button" data-testid="set-actual-po-date" @click="openActualPoDate">{{ t('actualPoDate.action') }}</button><button v-if="canSetAmountCny" class="secondary-button" type="button" data-testid="set-amount-cny" @click="openAmountCny">{{ t('amountCny.action') }}</button><button v-if="canDelete" class="danger-button" type="button" data-delete-booking :disabled="deleting" @click="deleteBooking">{{ t('detail.delete') }} Booking</button></PageHeader>
       <p v-if="deleteError" class="form-error" data-delete-error>{{ deleteError }}<small v-if="deleteRequestId">{{ locale === 'en-US' ? 'Request ID' : '请求编号' }} {{ deleteRequestId }}</small></p>
+      <p v-if="editError && !editOpen && !contactModal" class="form-error" data-edit-error>{{ editError }}</p>
 
       <section class="booking-summary">
         <article><span><PackageCheck :size="18" /></span><div><small>{{ t('detail.currentStatus') }}</small><StatusBadge :label="salesEnumLabel(booking.status, locale)" :tone="statusTone" /></div></article>
-        <article><span><CircleDollarSign :size="18" /></span><div><small>{{ t('detail.bookingAmount') }}</small><strong>{{ formatMoney(booking.amount, booking.currency) }}</strong></div></article>
+        <article><span><CircleDollarSign :size="18" /></span><div><small>{{ t('detail.bookingAmount') }}</small><strong>{{ formatMoney(booking.amount, booking.currency) }}</strong><small v-if="booking.currency !== 'CNY'" data-testid="booking-amount-cny">{{ booking.amountCny ? `${t('bookingEditor.amountCny')} ${formatMoney(booking.amountCny, 'CNY')}` : t('booking.amountCnyPending') }}</small></div></article>
         <article><span><CalendarClock :size="18" /></span><div><small>{{ t('detail.customerDdl') }}</small><strong>{{ formatDisplayDate(booking.ddl) }}</strong></div></article>
         <article><span><Cpu :size="18" /></span><div><small>{{ t('detail.equipmentQuantity') }}</small><strong>{{ booking.quantity }} {{ salesUnits(locale) }}</strong></div></article>
       </section>
@@ -114,6 +222,9 @@ onMounted(load)
           <SectionCard :title="t('detail.bookingInfo')" eyebrow="INFORMATION">
             <dl class="booking-fields">
               <div><dt>{{ t('detail.bookingNumber') }}</dt><dd>{{ booking.id }}</dd></div><div><dt>{{ t('detail.enteredDate') }}</dt><dd>{{ formatDisplayDate(booking.bookingDate) }}</dd></div>
+              <div><dt>{{ t('actualPoDate.label') }}</dt><dd data-testid="booking-actual-po-date">{{ booking.actualPoDate ? formatDisplayDate(booking.actualPoDate) : (booking.status === 'Confirmed' || booking.status === 'Completed' ? t('actualPoDate.missing') : '—') }}<small v-if="booking.actualPoDateSource">{{ t(`actualPoDate.source.${booking.actualPoDateSource}`) }}</small></dd></div>
+              <div v-if="booking.actualPoDateNote"><dt>{{ t('actualPoDate.reason') }}</dt><dd data-testid="booking-actual-po-date-note">{{ booking.actualPoDateNote }}</dd></div>
+              <div v-if="booking.amountCnyNote"><dt>{{ t('amountCny.reason') }}</dt><dd data-testid="booking-amount-cny-note">{{ booking.amountCnyNote }}</dd></div>
               <div><dt>{{ t('detail.equipmentNeed') }}</dt><dd>{{ booking.equipment }}</dd></div><div><dt>{{ t('detail.quantity') }}</dt><dd>{{ booking.quantity }} {{ salesUnits(locale) }}</dd></div>
               <div><dt>{{ t('detail.sourceType') }}</dt><dd><StatusBadge :label="salesEnumLabel(booking.source, locale)" :tone="booking.source === 'Opportunity' ? 'info' : 'neutral'" /></dd></div>
               <div><dt>{{ t('detail.owner') }}</dt><dd>{{ personnelDisplayName(booking.owner) }}</dd></div><div class="wide"><dt>{{ t('detail.notes') }}</dt><dd>{{ booking.note || '—' }}</dd></div>
@@ -138,6 +249,10 @@ onMounted(load)
           </SectionCard>
         </aside>
       </div>
+      <ActualPoDateModal v-if="poDateModal" :current-date="booking.actualPoDate" :busy="poDateBusy" :error="poDateError" @close="poDateModal = false" @submit="saveActualPoDate" />
+      <BookingAmountCnyModal v-if="amountCnyModal" :current-amount="booking.amountCny" :busy="amountCnyBusy" :error="amountCnyError" @close="amountCnyModal = false" @submit="saveAmountCny" />
+      <BookingEditorModal v-if="editOpen" :booking="booking" :accounts="editAccounts" :opportunities="editOpportunities" :contacts="editContacts" :selected-contact-id="selectedContactId" :default-owner="app.bootstrap?.user.id ?? ''" :busy="editBusy" :error="editError" @close="editOpen = false" @create-contact="openContact" @submit="saveBooking" />
+      <ContactModal v-if="contactModal" :accounts="editAccounts" :sites="[]" :contacts="editContacts" :fixed-account-id="contactAccountId" :busy="editBusy" :error="editError" @close="contactModal = false" @submit="saveContact" />
     </template>
   </div>
 </template>

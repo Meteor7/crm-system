@@ -116,11 +116,12 @@ class TestDemoArtifactApi(FrappeTestCase):
             "process": "Frontend", "status": "量产",
         })
         opportunity = create_strategy_opportunity({
+            "probabilityLevel": "pipeline",
             "accountId": account, "siteId": site["id"], "title": f"Artifact Opportunity {suffix}",
             "owner": sales, "stage": QUALIFIED_OPPORTUNITY, "forecast": "Pipeline", "amount": 100000,
             "intentScore": 70, "poDate": "2026-12-31", "toolType": "Inspection",
             "saleType": "New Equipment", "subRegion": "East China", "currency": "CNY",
-            "originalAmount": 100000, "qualificationConfirmed": True,
+            "originalAmount": 100000, "amountCny": 100000, "qualificationConfirmed": True,
         })
         frappe.set_user(previous_user)
         request = frappe.get_doc({

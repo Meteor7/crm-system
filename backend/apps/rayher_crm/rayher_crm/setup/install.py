@@ -8,6 +8,7 @@ from rayher_crm.setup.custom_fields import install_crm_schema
 from rayher_crm.setup.controlled_documents import install_approved_controlled_documents
 from rayher_crm.setup.demo_report_cleanup import cleanup_external_demo_reports
 from rayher_crm.setup.enum_normalization import normalize_crm_enums
+from rayher_crm.setup.equipment_types import sync_after_migrate as sync_equipment_types
 from rayher_crm.setup.indexes import install_stage5f_indexes
 from rayher_crm.setup.money_schema import enforce_money_column_contract
 from erpnext.regional.address_template.setup import set_up_address_templates
@@ -53,3 +54,4 @@ def after_migrate() -> None:
     normalize_crm_enums()
     install_approved_controlled_documents()
     cleanup_external_demo_reports()
+    sync_equipment_types()

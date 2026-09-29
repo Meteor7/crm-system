@@ -1,6 +1,6 @@
 {
   "actions": [], "autoname": "format:CRM-BKG-{#####}", "creation": "2026-08-04 00:00:00.000000", "doctype": "DocType", "engine": "InnoDB",
-  "field_order": ["account", "primary_contact", "booking_type", "equipment", "quantity", "ddl", "amount", "currency", "status", "booking_date", "booking_owner", "source", "source_opportunity", "live_source_opportunity", "installed_tool", "installed_tool_converted_at", "note"],
+  "field_order": ["account", "primary_contact", "booking_type", "equipment", "quantity", "ddl", "amount", "currency", "amount_cny", "status", "booking_date", "actual_po_date", "actual_po_date_source", "actual_po_date_note", "amount_cny_note", "booking_owner", "source", "source_opportunity", "live_source_opportunity", "installed_tool", "installed_tool_converted_at", "note"],
   "fields": [
     {"fieldname": "account", "fieldtype": "Link", "label": "Account", "options": "Customer", "reqd": 1},
     {"fieldname": "primary_contact", "fieldtype": "Link", "label": "Primary Contact", "options": "Contact", "reqd": 1},
@@ -10,8 +10,13 @@
     {"fieldname": "ddl", "fieldtype": "Date", "label": "DDL", "reqd": 1},
     {"fieldname": "amount", "fieldtype": "Currency", "label": "Amount", "options": "currency", "reqd": 1},
     {"default": "CNY", "fieldname": "currency", "fieldtype": "Link", "label": "Currency", "options": "Currency", "reqd": 1},
+    {"description": "The amount in CNY of a Booking in another currency. A CNY Booking's amount is already in CNY, so this stays 0.", "fieldname": "amount_cny", "fieldtype": "Currency", "label": "Amount (CNY)"},
     {"fieldname": "status", "fieldtype": "Select", "label": "Status", "options": "Confirmed\nPending\nCompleted\nCancelled", "reqd": 1},
     {"fieldname": "booking_date", "fieldtype": "Date", "label": "Booking Date", "reqd": 1},
+    {"fieldname": "actual_po_date", "fieldtype": "Date", "label": "Actual PO Date"},
+    {"fieldname": "actual_po_date_source", "fieldtype": "Select", "label": "Actual PO Date Source", "options": "\npo_confirmation\nbooking_entry\nbackfill", "read_only": 1},
+    {"fieldname": "actual_po_date_note", "fieldtype": "Small Text", "label": "Actual PO Date Note", "read_only": 1},
+    {"fieldname": "amount_cny_note", "fieldtype": "Small Text", "label": "CNY Amount Note", "read_only": 1},
     {"fieldname": "booking_owner", "fieldtype": "Link", "label": "Owner", "options": "User", "reqd": 1},
     {"fieldname": "source", "fieldtype": "Select", "label": "Source", "options": "Opportunity\nUpsell", "reqd": 1},
     {"fieldname": "source_opportunity", "fieldtype": "Link", "label": "Source Opportunity", "options": "CRM Opportunity"},
@@ -20,10 +25,10 @@
     {"fieldname": "installed_tool_converted_at", "fieldtype": "Datetime", "label": "Installed Tool Converted At", "read_only": 1},
     {"fieldname": "note", "fieldtype": "Small Text", "label": "Note"}
   ],
-  "index_web_pages_for_search": 0, "modified": "2026-08-04 00:00:00.000000", "modified_by": "Administrator", "module": "Rayher CRM", "name": "CRM Booking", "naming_rule": "Expression", "owner": "Administrator",
+  "index_web_pages_for_search": 0, "modified": "2026-09-18 20:00:00.000000", "modified_by": "Administrator", "module": "Rayher CRM", "name": "CRM Booking", "naming_rule": "Expression", "owner": "Administrator",
   "permissions": [
     {"read": 1, "role": "CRM Manager"},
     {"read": 1, "role": "CRM Sales"},
     {"read": 1, "role": "CRM Engineer"}
-  ], "sort_field": "modified", "sort_order": "DESC", "states": []
+  ], "sort_field": "modified", "sort_order": "DESC", "states": [], "track_changes": 1
 }

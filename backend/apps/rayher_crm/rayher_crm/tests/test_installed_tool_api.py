@@ -75,10 +75,11 @@ class TestInstalledToolApi(FrappeTestCase):
             "owner": owner, "status": "Active",
         })
         opportunity = create_strategy_opportunity({
+            "probabilityLevel": "pipeline",
             "accountId": account["id"], "siteId": site["id"], "title": f"{suffix} Opportunity",
             "owner": owner, "stage": QUALIFIED_OPPORTUNITY, "forecast": "Pipeline", "amount": 300000,
             "probability": 100, "intentScore": 90, "poDate": "2026-12-31", "toolType": "Inspection",
-            "saleType": "New Equipment", "subRegion": "华东", "currency": "CNY", "originalAmount": 300000,
+            "saleType": "New Equipment", "subRegion": "华东", "currency": "CNY", "originalAmount": 300000, "amountCny": 300000,
             "qualificationConfirmed": True,
         })
         opportunity = advance_opportunity_fixture(opportunity, PO_RECEIVED, booking={

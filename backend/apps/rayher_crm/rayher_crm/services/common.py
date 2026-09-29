@@ -24,7 +24,7 @@ def _positive_integer(value: Any, default: int, fieldname: str) -> int:
         raise CrmApiException("VALIDATION_ERROR", f"{fieldname} must be a positive integer.")
     try:
         parsed = int(value)
-    except (TypeError, ValueError) as exc:
+    except (TypeError, ValueError, OverflowError) as exc:  # OverflowError: JSON 1e999 parses as inf
         raise CrmApiException("VALIDATION_ERROR", f"{fieldname} must be a positive integer.") from exc
     if str(value).strip() != str(parsed) or parsed < 1:
         raise CrmApiException("VALIDATION_ERROR", f"{fieldname} must be a positive integer.")
@@ -146,7 +146,10 @@ def normalize_expected_modified(value: Any) -> str:
         raise CrmApiException("VALIDATION_ERROR", "expectedModified must be an ISO timestamp.") from exc
     if parsed.tzinfo is None:
         raise CrmApiException("VALIDATION_ERROR", "expectedModified must include a timezone.")
-    return to_iso_timestamp(parsed)
+    try:
+        return to_iso_timestamp(parsed)
+    except OverflowError as exc:  # e.g. 9999-12-31T23:59:59-14:00 has no UTC equivalent
+        raise CrmApiException("VALIDATION_ERROR", "expectedModified must be an ISO timestamp.") from exc
 
 
 def delete_manager_scoped_document(

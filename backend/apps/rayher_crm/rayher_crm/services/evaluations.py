@@ -159,7 +159,7 @@ def serialize_evaluation(doc) -> dict[str, Any]:
         "segment": frappe.db.get_value("Customer", doc.account, "custom_crm_segment") or "",
         "title": doc.title, "status": doc.status, "owner": doc.evaluation_owner,
         "plannedEnd": str(doc.planned_end or ""), "testRunDeadline": str(doc.test_run_deadline or ""),
-        "wafers": sum(run["wafers"] for run in runs), "acceptance": doc.acceptance,
+        "wafers": sum(run["wafers"] for run in runs if run["status"] != "Cancelled"), "acceptance": doc.acceptance,
         "reportStatus": doc.report_status,
         "reportVersion": int(doc.report_version or 0), "criteria": doc.criteria or "",
         "testRound": int(doc.test_round or 1), "customerReviews": _customer_reviews(doc.name),
@@ -494,6 +494,80 @@ def add_evaluation_run(name: str, payload: dict[str, Any]) -> dict[str, Any]:
             doc, "Test Run", f"{run.status} Test Run {run.name}", "", run.name,
         )
         _update_request_tracking(doc, f"{'Completed' if run.status == 'Completed' else 'Created'} Test Run {run.name}")
+    except Exception:
+        frappe.db.rollback(save_point=savepoint)
+        raise
+    doc.reload()
+    return serialize_evaluation(doc)
+
+
+def _lock_planned_run(name: str, run_id: Any, payload: dict[str, Any]):
+    """Lock the Evaluation, then return it with its still-Planned run of the current round."""
+    current = _require_evaluation(name)
+    if current.status in TERMINAL_STATUSES:
+        raise CrmApiException("INVALID_REPORT_STAGE", "Terminal Evaluation cannot change Test Runs.")
+    expected_modified = payload.get("expectedModified") if "expectedModified" in payload else None
+    doc = lock_document("CRM Evaluation", name, expected_modified, "NOT_FOUND")
+    if not frappe.has_permission("CRM Evaluation", "read", doc=doc, user=frappe.session.user):
+        raise CrmApiException("SCOPE_DENIED", "The Evaluation is outside the current user scope.")
+    if doc.status in TERMINAL_STATUSES:
+        raise CrmApiException("INVALID_REPORT_STAGE", "Terminal Evaluation cannot change Test Runs.")
+    if doc.status not in RUN_STATUSES:
+        raise CrmApiException("INVALID_RUN_STAGE", "Test Runs can only change in Scheduled or Testing.")
+    if not isinstance(run_id, str) or not frappe.db.exists("CRM Test Run", {"name": run_id, "evaluation": doc.name}):
+        raise CrmApiException("NOT_FOUND", "Test Run was not found on this Evaluation.")
+    run = frappe.get_doc("CRM Test Run", run_id)
+    if run.status != "Planned":
+        raise CrmApiException("INVALID_RUN_STAGE", f"Only a Planned Test Run can change; this one is {run.status}.")
+    if int(run.test_round or 1) != int(doc.test_round or 1):
+        raise CrmApiException("INVALID_RUN_STAGE", "A Test Run of an earlier round is history and cannot change.")
+    return doc, run
+
+
+def update_evaluation_run(name: str, run_id: Any, payload: dict[str, Any]) -> dict[str, Any]:
+    """Reschedule or edit a Planned run, or complete it by providing its results."""
+    assert_capability("evaluation:write")
+    values = _validate_run(payload)
+    doc, run = _lock_planned_run(name, run_id, payload)
+    savepoint = f"crm_test_run_{frappe.generate_hash(length=8)}"
+    frappe.db.savepoint(savepoint)
+    try:
+        previous_date = str(run.run_date or "")
+        run.update(values)
+        run.save(ignore_permissions=True)
+        doc.save(ignore_permissions=True)
+        if run.status == "Completed":
+            summary, before, after = f"Completed Test Run {run.name}", "Planned", "Completed"
+        elif previous_date != str(run.run_date):
+            summary, before, after = f"Rescheduled Test Run {run.name} to {run.run_date}", previous_date, str(run.run_date)
+        else:
+            summary, before, after = f"Updated Test Run {run.name}", "", run.name
+        append_evaluation_history(doc, "Test Run", summary, before, after)
+        _update_request_tracking(doc, summary)
+    except Exception:
+        frappe.db.rollback(save_point=savepoint)
+        raise
+    doc.reload()
+    return serialize_evaluation(doc)
+
+
+def cancel_evaluation_run(name: str, run_id: Any, payload: dict[str, Any]) -> dict[str, Any]:
+    """A plan that will not happen is cancelled with its reason; the record itself stays."""
+    assert_capability("evaluation:write")
+    reason = required_text(payload, "reason")
+    if len(reason) > 500:
+        raise CrmApiException("VALIDATION_ERROR", "reason is too long.", field_errors={"reason": "Maximum length is 500"})
+    doc, run = _lock_planned_run(name, run_id, payload)
+    savepoint = f"crm_test_run_{frappe.generate_hash(length=8)}"
+    frappe.db.savepoint(savepoint)
+    try:
+        run.status = "Cancelled"
+        run.summary = reason
+        run.save(ignore_permissions=True)
+        doc.save(ignore_permissions=True)
+        summary = f"Cancelled Test Run {run.name}: {reason}"
+        append_evaluation_history(doc, "Test Run", summary, "Planned", "Cancelled")
+        _update_request_tracking(doc, summary)
     except Exception:
         frappe.db.rollback(save_point=savepoint)
         raise

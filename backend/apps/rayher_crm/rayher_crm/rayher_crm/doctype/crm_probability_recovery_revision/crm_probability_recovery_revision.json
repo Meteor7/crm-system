@@ -1,0 +1,87 @@
+{
+  "doctype": "DocType",
+  "name": "CRM Probability Recovery Revision",
+  "module": "Rayher CRM",
+  "engine": "InnoDB",
+  "autoname": "hash",
+  "naming_rule": "Random",
+  "owner": "Administrator",
+  "modified_by": "Administrator",
+  "creation": "2026-09-22 00:00:00.000000",
+  "modified": "2026-09-22 00:00:00.000000",
+  "field_order": [
+    "opportunity",
+    "recovery",
+    "kind",
+    "plan",
+    "action_taken",
+    "actor",
+    "recorded_at"
+  ],
+  "fields": [
+    {
+      "fieldname": "opportunity",
+      "fieldtype": "Link",
+      "options": "CRM Opportunity",
+      "label": "Opportunity",
+      "reqd": 1
+    },
+    {
+      "fieldname": "recovery",
+      "fieldtype": "Link",
+      "options": "CRM Probability Recovery",
+      "label": "Recovery",
+      "reqd": 1
+    },
+    {
+      "fieldname": "kind",
+      "fieldtype": "Select",
+      "options": "Created\nPlanUpdated\nActionRecorded",
+      "label": "Change",
+      "reqd": 1
+    },
+    {
+      "fieldname": "plan",
+      "fieldtype": "Small Text",
+      "label": "Plan",
+      "reqd": 1
+    },
+    {
+      "fieldname": "actor",
+      "fieldtype": "Link",
+      "options": "User",
+      "label": "Author",
+      "reqd": 1
+    },
+    {
+      "fieldname": "recorded_at",
+      "fieldtype": "Datetime",
+      "label": "Recorded At",
+      "reqd": 1
+    },
+    {
+      "fieldname": "action_taken",
+      "fieldtype": "Small Text",
+      "label": "Action Taken"
+    }
+  ],
+  "permissions": [
+    {
+      "role": "CRM Manager",
+      "read": 1
+    },
+    {
+      "role": "CRM Sales",
+      "read": 1
+    },
+    {
+      "role": "CRM Engineer",
+      "read": 1
+    }
+  ],
+  "sort_field": "recorded_at",
+  "sort_order": "DESC",
+  "actions": [],
+  "states": [],
+  "index_web_pages_for_search": 0
+}

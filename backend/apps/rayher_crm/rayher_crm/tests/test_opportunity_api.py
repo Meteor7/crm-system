@@ -72,9 +72,9 @@ class TestOpportunityApi(FrappeTestCase):
             "owner": owner, "amount": "125000.25",
             "intentScore": 35, "poDate": "2026-12-31", "toolType": "Inspection",
             "saleType": "New Equipment", "subRegion": "华东", "currency": "CNY",
-            "originalAmount": "125000.25", "paymentMilestones": ["30% PO", "70% FAT"],
+            "originalAmount": "125000.25", "amountCny": "125000.25", "paymentMilestones": ["30% PO", "70% FAT"],
             "strengths": ["Local service"], "redFlags": [], "informationNeeded": ["Budget"],
-            "qualificationConfirmed": True,
+            "qualificationConfirmed": True, "probabilityLevel": "pipeline",
         }
         payload.update(overrides)
         return payload
@@ -116,9 +116,13 @@ class TestOpportunityApi(FrappeTestCase):
         self.assertEqual(created["owner"], self.sales)
         self.assertEqual(created["paymentMilestones"], ["30% PO", "70% FAT"])
         self.assertRegex(created["modified"], r"Z$")
-        self.assertEqual((created["stage"], created["probabilityLevel"], created["probabilityHistory"]), (
-            "qualified_opportunity", "", [],
-        ))
+        self.assertEqual(
+            (created["stage"], created["probabilityLevel"]), ("qualified_opportunity", "pipeline"),
+        )
+        self.assertEqual(
+            [(row["from"], row["to"], row["actor"]) for row in created["probabilityHistory"]],
+            [("", "pipeline", self.sales)],
+        )
         self.assertEqual(self._stage_rows(created), [("", "qualified_opportunity", "creation", "created")])
         creation = created["stageHistory"][0]
         self.assertEqual((creation["actor"], creation["reachedAtBasis"]), (self.sales, "recorded"))
@@ -207,13 +211,18 @@ class TestOpportunityApi(FrappeTestCase):
             created["id"], {"title": "Manager edit keeps the level"}, budget["modified"],
         )
         self.assertEqual((renamed["title"], renamed["probabilityLevel"]), ("Manager edit keeps the level", "upside"))
-        with self.assertRaises(CrmApiException) as manager_create:
-            create_strategy_opportunity(
-                self._input(account, site, self.sales, title="Manager chosen level", probabilityLevel="committed"),
-            )
-        self.assertEqual(manager_create.exception.code, "PERMISSION_DENIED")
+        # A Manager opening an Opportunity for Sales sets its first level.
+        manager_created = create_strategy_opportunity(
+            self._input(account, site, self.sales, title="Manager chosen level", probabilityLevel="committed"),
+        )
+        self.assertEqual(
+            [(row["from"], row["to"], row["actor"]) for row in manager_created["probabilityHistory"]],
+            [("", "committed", self.manager)],
+        )
 
+        # Only an Opportunity from before the levels can still be pending.
         pending = create_strategy_opportunity(self._input(account, site, self.sales, title="Pending level"))
+        frappe.db.set_value("CRM Opportunity", pending["id"], "probability_level", "", update_modified=False)
         upside_rows, upside_total, _, _ = list_strategy_opportunities({
             "accountId": account["id"], "probabilityLevel": "upside", "page": 1, "pageSize": 20,
         })
@@ -223,9 +232,94 @@ class TestOpportunityApi(FrappeTestCase):
         })
         self.assertEqual(([item["id"] for item in pending_rows], pending_total), ([pending["id"]], 1))
 
+    def test_a_new_opportunity_needs_a_level_and_a_set_level_is_never_cleared(self):
+        account, site = self._account_site(self.sales, "Level rules")
+        with self.assertRaises(CrmApiException) as missing:
+            create_strategy_opportunity(self._input(account, site, self.sales, probabilityLevel=""))
+        self.assertEqual(
+            (missing.exception.code, missing.exception.field_errors),
+            ("VALIDATION_ERROR", {"probabilityLevel": "Required"}),
+        )
+
+        created = create_strategy_opportunity(self._input(account, site, self.sales, probabilityLevel="upside"))
+        # Refused from the first milestone on, not only once the demo is done.
+        self.assertEqual(created["stage"], "qualified_opportunity")
+        with self.assertRaises(CrmApiException) as cleared:
+            update_strategy_opportunity(created["id"], {"probabilityLevel": ""}, created["modified"])
+        self.assertEqual(
+            (cleared.exception.code, cleared.exception.field_errors),
+            ("VALIDATION_ERROR", {"probabilityLevel": "Required"}),
+        )
+        self.assertEqual(get_strategy_opportunity(created["id"])["probabilityLevel"], "upside")
+
+    def test_lowering_the_level_needs_a_reason_saved_with_the_change(self):
+        account, site = self._account_site(self.sales, "Downgrade")
+        created = create_strategy_opportunity(self._input(account, site, self.sales, probabilityLevel="committed"))
+
+        for reason in ("", "   "):
+            with self.assertRaises(CrmApiException) as unexplained:
+                update_strategy_opportunity(
+                    created["id"], {"probabilityLevel": "pipeline", "probabilityReason": reason}, created["modified"],
+                )
+            self.assertEqual(
+                (unexplained.exception.code, unexplained.exception.field_errors),
+                ("VALIDATION_ERROR", {"probabilityReason": "Required"}),
+            )
+        self.assertEqual(get_strategy_opportunity(created["id"])["probabilityLevel"], "committed")
+        self.assertEqual(self._probability_history_count(created["id"]), 1)
+
+        lowered = update_strategy_opportunity(
+            created["id"],
+            {"probabilityLevel": "pipeline", "probabilityReason": "  客户预算推迟到明年  ", "probabilityActionPlan": "Follow up with procurement"},
+            created["modified"],
+        )
+        self.assertEqual(
+            [(row["from"], row["to"], row["reason"]) for row in lowered["probabilityHistory"]],
+            [("committed", "pipeline", "客户预算推迟到明年"), ("", "committed", "")],
+        )
+
+        # Raising the level needs no reason.
+        raised = update_strategy_opportunity(created["id"], {"probabilityLevel": "upside"}, lowered["modified"])
+        self.assertEqual(
+            (raised["probabilityHistory"][0]["to"], raised["probabilityHistory"][0]["reason"]), ("upside", ""),
+        )
+
+    def test_the_level_the_manager_sets_on_opening_then_belongs_to_the_owner(self):
+        account, site = self._account_site(self.sales, "Manager opened")
+        frappe.set_user(self.manager)
+        created = create_strategy_opportunity(self._input(account, site, self.sales, probabilityLevel="upside"))
+        self.assertEqual((created["owner"], created["probabilityLevel"]), (self.sales, "upside"))
+        self.assertEqual(
+            [(row["from"], row["to"], row["actor"]) for row in created["probabilityHistory"]],
+            [("", "upside", self.manager)],
+        )
+        with self.assertRaises(CrmApiException) as not_owner:
+            update_strategy_opportunity(created["id"], {"probabilityLevel": "committed"}, created["modified"])
+        self.assertEqual(not_owner.exception.code, "PERMISSION_DENIED")
+
+    def test_an_opportunity_from_before_the_levels_gets_its_first_one_without_a_reason(self):
+        account, site = self._account_site(self.sales, "Legacy level")
+        created = create_strategy_opportunity(self._input(account, site, self.sales))
+        frappe.db.delete("CRM Opportunity Probability History", {"opportunity": created["id"]})
+        frappe.db.set_value("CRM Opportunity", created["id"], "probability_level", "", update_modified=False)
+        legacy = get_strategy_opportunity(created["id"])
+
+        # Other fields stay editable while the level is still pending.
+        renamed = update_strategy_opportunity(created["id"], {"title": "Still pending"}, legacy["modified"])
+        self.assertEqual((renamed["title"], renamed["probabilityLevel"]), ("Still pending", ""))
+
+        first = update_strategy_opportunity(created["id"], {"probabilityLevel": "low_probability"}, renamed["modified"])
+        self.assertEqual(
+            [(row["from"], row["to"], row["reason"]) for row in first["probabilityHistory"]],
+            [("", "low_probability", "")],
+        )
+
     def test_budget_confirmation_is_a_declared_date_and_needs_a_level(self):
         account, site = self._account_site(self.sales, "Budget")
         opportunity = create_strategy_opportunity(self._input(account, site, self.sales))
+        # Only an Opportunity from before the levels can reach this point without one.
+        frappe.db.delete("CRM Opportunity Probability History", {"opportunity": opportunity["id"]})
+        frappe.db.set_value("CRM Opportunity", opportunity["id"], "probability_level", "", update_modified=False)
         with self.assertRaises(CrmApiException) as too_early:
             confirm_budget_approved(opportunity["id"], {"approvedOn": self._days_ago(1)}, opportunity["modified"])
         self.assertEqual(too_early.exception.code, "INVALID_TRANSITION")

@@ -1,8 +1,10 @@
+import { createMockStatusApi } from '@/features/opportunities/mock-status-api'
 import type { CrmApi, DashboardQuery } from './contracts'
+import type { LossReviewDto, LossReviewInput, ProbabilityRecoveryDto } from '@/types/workspaces'
 import { CrmApiError } from './contracts'
 import type { DemoArtifactUploadInput, MultipartFilePart } from './binary-transport'
 import { actions, contracts, requirements } from './mock-data'
-import type { ApiResponse, AccountSummaryDto, ContactDetailDto, ContactDto, ContactFileMetaDto, ContactListQuery, ContactSummaryDto, CreateAccountInput, CreateContactInput, CreateDemoRequestInput, CreateLeadInput, CreateStakeholderInput, CreateTestRunInput, CreateVisitInput, DemoRequestCommand, DemoRequestDto, EvaluationDto, EvaluationPreparationBranch, EvaluationStatusCommand, LeadConversionInput, LeadConversionResult, LeadDto, LeadListQuery, ListQuery, OpportunityDto, PersonnelRole, SiteDto, UpdateContactInput, UpdateLeadInput, UpdateStakeholderInput, UpdateVisitInput, UpsertBookingInput, UserRole, VisitDetailDto, VisitMeetingRecordDto, VisitMeetingRecordInput } from '@/types/crm'
+import type { ApiResponse, AccountSummaryDto, ContactDetailDto, ContactDto, ContactFileMetaDto, ContactListQuery, ContactSummaryDto, CreateAccountInput, CreateContactInput, CreateDemoRequestInput, CreateLeadInput, CreateStakeholderInput, CreateTestRunInput, CreateVisitInput, DemoRequestCommand, DemoRequestDto, EvaluationDto, EvaluationPreparationBranch, EvaluationStatusCommand, LeadConversionInput, LeadConversionResult, LeadDto, LeadListQuery, ListQuery, OpportunityDto, PersonnelRole, SetActualPoDateInput, SetBookingAmountCnyInput, SiteDto, UpdateContactInput, UpdateLeadInput, UpdateStakeholderInput, UpdateVisitInput, UpsertBookingInput, UserRole, VisitDetailDto, VisitMeetingRecordDto, VisitMeetingRecordInput } from '@/types/crm'
 import type { AddInstalledToolServiceRecordInput, AddInstalledToolVersionRecordInput, ControlledDocumentAccessRequestDto, ControlledDocumentDto, DocumentUploadRequestDto, ConvertBookingToInstalledToolInput, CreateOpportunityActionInput, CreateOpportunityStakeholderInput, CreateStrategyOpportunityInput, DemoCommentDto, DemoWorkflowDto, InstalledToolDetailDto, InstalledToolDto, InstalledToolLifecycleHistoryDto, InstalledToolServiceHistoryDto, InstalledToolVersionHistoryDto, RollbackOpportunityStageInput, StrategyOpportunityDto, StrategyOpportunityListQuery, TransitionInstalledToolInput, UpdateInstalledToolInput, UpdateOpportunityActionInput, UpdateOpportunityStakeholderInput, UpdateStrategyOpportunityInput } from '@/types/workspaces'
 import type { BookingDto } from '@/types/crm'
 import type { BookingDraft, ConfirmBudgetApprovedInput, ConfirmPoInput, MarkOpportunityLostInput, OpportunityInternalValidationDto, OpportunityLiveBookingDto, OpportunityStageHistoryDto, RequestInternalValidationInput, ReviewInternalValidationInput } from '@/types/workspaces'
@@ -38,7 +40,9 @@ import { createMemorySalesRepository, isRetiredLocalContact, type SalesRepositor
 import { createMemoryContactFileRepository, type ContactFileRepository } from '@/demo/contact-file-repository'
 import type { StoredContactFile, StoredDemoArtifact } from '@/demo/binary-storage'
 import { expandOpportunityContact, formatContactDisplayLine, migrateLegacyPrimaryContacts } from '@/domain/contacts'
-import { isOpportunityProbabilityLevelValue, matchesOpportunityProbabilityLevelFilter } from '@/domain/opportunity-probability'
+import { isOpportunityProbabilityLevelValue, matchesOpportunityProbabilityLevelFilter, opportunityProbabilityLevelRank } from '@/domain/opportunity-probability'
+import { collapseRegion, isEnglishRegion, matchingRegion, regionOptions } from '@/domain/regions'
+import { equipmentOptions, equipmentText, matchingEquipment } from '@/domain/equipment'
 import { PERSONNEL, assertPersonnelRole } from '@/demo/personnel'
 import { migrateLegacyUserId } from '@/demo/identity-migration'
 import { addMoney, normalizeMoney } from '@/domain/money'
@@ -240,11 +244,20 @@ export function createMockApi(options: {
     'Advanced Packaging',
     ...localAccounts.map((account) => account.segment.trim()).filter(Boolean),
   ])
+  const localAccountRegions = new Set(regionOptions(localAccounts.map((account) => account.region)))
   const localSites = salesRepository.snapshot.sites
   const localDocumentRequests: ControlledDocumentAccessRequestDto[] = []
   const localDocumentUploadRequests: DocumentUploadRequestDto[] = []
   const localControlledDocuments = clone(controlledDocuments) as unknown as ControlledDocumentDto[]
   const localStrategyOpportunities: StrategyOpportunityDto[] = salesRepository.snapshot.opportunities
+  const localEquipmentTypes = new Set(equipmentOptions(localStrategyOpportunities.map((opportunity) => opportunity.toolType ?? '')))
+  // Mirrors services.equipment: a preset in another spelling is stored as the preset; anything else becomes a
+  // custom type, added to the options only once the save succeeds.
+  function equipmentTypeFor(value: unknown) {
+    const text = typeof value === 'string' ? equipmentText(value) : ''
+    if (!text) throw new CrmApiError('VALIDATION_ERROR', 'toolType is invalid.', requestId(), false, { toolType: 'Invalid value' })
+    return matchingEquipment(text, [...localEquipmentTypes]) || text
+  }
   const rfqFiles = mockRfqFilesByRepository.get(salesRepository) ?? new Map<string, { blob: Blob; fileName: string; mimeType: string }>()
   const localRfqs = mockRfqsByRepository.get(salesRepository) ?? []
   mockRfqsByRepository.set(salesRepository, localRfqs)
@@ -253,6 +266,7 @@ export function createMockApi(options: {
   localStrategyOpportunities.forEach((opportunity) => {
     opportunity.stakeholders = opportunity.stakeholders.map((stakeholder, index) => ({ ...stakeholder, id: stakeholder.id ?? `STK-${opportunity.id}-${index + 1}` }))
     opportunity.actions = opportunity.actions.map((action, index) => ({ ...action, id: action.id ?? `ACT-${opportunity.id}-${index + 1}` }))
+    backfillLossReviews(opportunity)
   })
 
   function nextRfqModified() {
@@ -520,6 +534,36 @@ export function createMockApi(options: {
     }
   }
 
+  function validateTestRun(input: CreateTestRunInput) {
+    const validWafers = Number.isFinite(input.wafers) && Number.isInteger(input.wafers) && input.wafers > 0
+    if (!isIsoDate(input.date) || !input.lot.trim() || !validWafers) throw new CrmApiError('VALIDATION_ERROR', '有效日期、Lot 和正整数 Wafer 数量不能为空', requestId(), false)
+    const metrics = [input.capture, input.falsePositive, input.wph]
+    const hasMetrics = metrics.some((value) => value != null)
+    const completeMetrics = metrics.every((value) => value != null && Number.isFinite(value))
+    if (hasMetrics && !completeMetrics) throw new CrmApiError('VALIDATION_ERROR', '完成测试时 Capture、False Positive 和 WPH 必须同时填写', requestId(), false)
+    if (completeMetrics && (input.capture! < 0 || input.capture! > 100 || input.falsePositive! < 0 || input.falsePositive! > 100 || input.wph! < 0)) throw new CrmApiError('VALIDATION_ERROR', 'Capture/False Positive 必须在 0–100，WPH 不能为负数', requestId(), false)
+    if (completeMetrics && !input.summary.trim()) throw new CrmApiError('VALIDATION_ERROR', '完成 Test Run 时结果摘要不能为空', requestId(), false)
+    return completeMetrics
+  }
+
+  function activeRunWafers(evaluation: EvaluationDto) {
+    return evaluation.runs.filter((run) => run.status !== 'Cancelled').reduce((sum, run) => sum + run.wafers, 0)
+  }
+
+  function touchEvaluation(evaluation: EvaluationDto) {
+    // The previous token is persisted, so same-tick writes and new API instances
+    // cannot reuse a version as an instance-local counter or timestamp alone can.
+    const previous = Date.parse(evaluation.modified ?? '')
+    evaluation.modified = new Date(Math.max(Date.now(), Number.isFinite(previous) ? previous + 1 : 0)).toISOString()
+  }
+
+  function appendTestRunHistory(evaluation: EvaluationDto, summary: string, from: string, to: string) {
+    evaluation.history = [{
+      id: `${evaluation.id}-H-${(evaluation.history?.length ?? 0) + 1}`,
+      actor: userId, at: shanghaiTimestamp(), eventType: 'Test Run', from, to, summary,
+    }, ...(evaluation.history ?? [])]
+  }
+
   function accountForViewer(account: AccountSummaryDto) {
     if (canAccessBusinessAccount(account.id)) return account
     return {
@@ -567,7 +611,39 @@ export function createMockApi(options: {
     return opportunity
   }
 
-  function validateOpportunity(input: Pick<CreateStrategyOpportunityInput, 'accountId' | 'siteId' | 'title' | 'owner' | 'amount' | 'poDate'> & { score: number; probabilityLevel: unknown }) {
+  // Mirrors rayher_crm.services.regions: any spelling of a known region is stored as that region,
+  // and a new custom region must be written in English.
+  function accountRegion(value: string) {
+    const text = collapseRegion(value)
+    const region = matchingRegion(text, [...localAccountRegions]) || text
+    if (!region) throw new CrmApiError('VALIDATION_ERROR', 'region is required.', requestId(), false, { region: 'Required' })
+    if (!localAccountRegions.has(region) && !isEnglishRegion(region)) {
+      throw new CrmApiError('VALIDATION_ERROR', 'region must be an English region name.', requestId(), false, { region: 'Use an English region name' })
+    }
+    return region
+  }
+
+  function opportunityRegion(value: string) {
+    const text = collapseRegion(value)
+    if (!text) throw new CrmApiError('VALIDATION_ERROR', 'subRegion is required.', requestId(), false, { subRegion: 'Required' })
+    const region = matchingRegion(text, [...localAccountRegions])
+    if (!region) throw new CrmApiError('VALIDATION_ERROR', 'subRegion is not a known region.', requestId(), false, { subRegion: 'Unknown region' })
+    return region
+  }
+
+  // Mirrors opportunities.required_positive_money: an amount Sales must enter, above 0 with at most two decimals.
+  function requiredPositiveMoney(value: unknown, field: string): string {
+    const text = String(value ?? '').trim()
+    if (!text) throw new CrmApiError('VALIDATION_ERROR', `${field} is required.`, requestId(), false, { [field]: 'Required' })
+    let normalized = ''
+    try { normalized = normalizeMoney(text) } catch { normalized = '' }
+    if (!normalized || Number(normalized) <= 0) {
+      throw new CrmApiError('VALIDATION_ERROR', `${field} must be positive with at most two decimal places.`, requestId(), false, { [field]: 'Invalid amount' })
+    }
+    return normalized
+  }
+
+  function validateOpportunity(input: Pick<CreateStrategyOpportunityInput, 'accountId' | 'siteId' | 'title' | 'owner' | 'amount' | 'poDate'> & { amountCny?: unknown; score: number; probabilityLevel: unknown }) {
     if ([input.accountId, input.siteId, input.title, input.owner, input.poDate].some((value) => !String(value ?? '').trim())) {
       throw new CrmApiError('VALIDATION_ERROR', '请完整填写 Opportunity 必填信息', requestId(), false)
     }
@@ -575,6 +651,7 @@ export function createMockApi(options: {
     try { normalizedAmount = normalizeMoney(input.amount) }
     catch { throw new CrmApiError('VALIDATION_ERROR', '金额必须为 DECIMAL(20,2) 字符串', requestId(), false) }
     if (Number(normalizedAmount) <= 0) throw new CrmApiError('VALIDATION_ERROR', '金额必须大于 0', requestId(), false)
+    requiredPositiveMoney(input.amountCny, 'amountCny')
     if (!Number.isFinite(input.score) || input.score < 0 || input.score > 100) {
       throw new CrmApiError('VALIDATION_ERROR', '金额必须为非负数，购买意愿必须在 0 到 100 之间', requestId(), false)
     }
@@ -584,29 +661,49 @@ export function createMockApi(options: {
     validateOwner(input.owner, role === 'Manager' ? ['Sales', 'Manager'] : ['Sales'])
   }
 
-  // Success probability is owner-set: a Manager, or a creator acting for another owner, may not choose it.
+  // Whoever opens an Opportunity sets its first level; every change after that is the owner's.
   function assertProbabilityLevelOwner(owner: string) {
     if (owner !== userId) throw new CrmApiError('PERMISSION_DENIED', 'Only the Opportunity owner can set the probability level.', requestId(), false)
   }
 
-  function probabilityHistoryEntry(from: StrategyOpportunityDto['probabilityLevel'], to: StrategyOpportunityDto['probabilityLevel']) {
+  function probabilityHistoryEntry(from: StrategyOpportunityDto['probabilityLevel'], to: StrategyOpportunityDto['probabilityLevel'], reason = '') {
     return {
       id: nextId('PLH', localStrategyOpportunities.flatMap((item) => item.probabilityHistory)),
       from,
       to,
+      reason,
       actor: userId,
       at: new Date(now).toISOString(),
     }
   }
 
   const localInternalValidations: StoredOpportunityInternalValidation[] = salesRepository.snapshot.internalValidations
-  let opportunityMutationSequence = 0
-
   // Every Opportunity write moves `modified`, so a workflow action sent with a stale version is refused as on the server.
   function touchOpportunity(opportunity: StrategyOpportunityDto) {
-    opportunityMutationSequence += 1
     opportunity.updated = '刚刚'
-    opportunity.modified = `${new Date(now).toISOString()}#opportunity-${opportunity.id}-${opportunityMutationSequence}`
+    opportunity.modified = nextRecoveryVersion(opportunity.modified)
+  }
+
+  function nextRecoveryVersion(previous?: string) {
+    const previousTime = Date.parse(previous ?? '')
+    return new Date(Math.max(Date.parse(now), Number.isFinite(previousTime) ? previousTime + 1 : 0)).toISOString()
+  }
+
+  function recoveryPlan(value: unknown, field = 'plan') {
+    if (typeof value !== 'string' || !value.trim() || value.trim().length > 4000) {
+      throw new CrmApiError('VALIDATION_ERROR', 'A recovery plan of 1–4000 characters is required.', requestId(), false, { [field]: 'Enter 1–4000 characters' })
+    }
+    return value.trim()
+  }
+
+  function newRecovery(eventId: string, plan: string): ProbabilityRecoveryDto {
+    const modified = nextRecoveryVersion()
+    return { id: `REC-${eventId}`, plan, modified, state: 'pending', history: [{ id: `REC-${eventId}-1`, kind: 'Created', plan, actor: userId, at: modified }] }
+  }
+
+  function requireOpportunityVersion(opportunity: StrategyOpportunityDto, expectedModified?: string) {
+    if (!expectedModified?.trim()) throw new CrmApiError('VALIDATION_ERROR', 'expectedModified is required.', requestId(), false)
+    if (expectedModified !== opportunity.modified) throw new CrmApiError('VERSION_CONFLICT', 'The record was changed by another request.', requestId(), false)
   }
 
   function lockOpportunityForAction(id: string, expectedModified?: string) {
@@ -676,6 +773,66 @@ export function createMockApi(options: {
     opportunity.stage = to
     opportunity.stageChangedAt = row.reachedAt || row.recordedAt
     touchOpportunity(opportunity)
+    return row
+  }
+
+  // Mirrors services.loss_review: one post-mortem per marked_lost event, kept when the deal reopens,
+  // newest first; a review is its own record, so it never moves the Opportunity's `modified`.
+  function appendLossReviewRevision(review: LossReviewDto, kind: string, options: { actor?: string; at?: string; reason?: string } = {}) {
+    review.history.unshift({
+      id: `${review.id}-${review.history.length + 1}`, kind, status: review.status, note: review.reviewNote,
+      reason: options.reason ?? '', actor: options.actor ?? userId, at: options.at ?? review.modified,
+    })
+  }
+
+  function createLossReview(opportunity: StrategyOpportunityDto, event: OpportunityStageHistoryDto, reopening?: OpportunityStageHistoryDto) {
+    const review: LossReviewDto = {
+      id: `LR-${event.id}`, opportunityId: opportunity.id, stageEventId: event.id,
+      lostAt: event.reachedAt || event.recordedAt, lostAtStage: event.from, lostBy: event.actor, lostReason: event.reason,
+      status: 'pending', reviewNote: '', reviewedBy: null, reviewedAt: null, reopenedAt: reopening?.recordedAt ?? null,
+      modified: nextRecoveryVersion(), history: [],
+    }
+    appendLossReviewRevision(review, 'Created', { actor: event.actor, at: event.recordedAt })
+    if (reopening) appendLossReviewRevision(review, 'Reopened', { actor: reopening.actor, at: reopening.recordedAt })
+    opportunity.lossReviews = [review, ...(opportunity.lossReviews ?? [])]
+    return review
+  }
+
+  // Like backfill_loss_reviews: stored deals lost before reviews existed get a pending one per loss; safe to repeat.
+  // The stage history is kept newest first, and the mock clock can stamp several rows alike, so order is by position.
+  function backfillLossReviews(opportunity: StrategyOpportunityDto) {
+    const events = [...(opportunity.stageHistory ?? [])].reverse()
+    const known = new Set((opportunity.lossReviews ?? []).map((review) => review.stageEventId))
+    const missing = events.filter((event) => event.event === 'marked_lost' && !known.has(event.id))
+    if (!missing.length) return
+    for (const event of missing) createLossReview(opportunity, event, events.slice(events.indexOf(event) + 1).find((row) => row.event === 'reopened'))
+    // Keep the list newest first even when only older losses were missing.
+    const position = new Map(opportunity.stageHistory.map((row, index) => [row.id, index]))
+    opportunity.lossReviews!.sort((a, b) => (position.get(a.stageEventId) ?? -1) - (position.get(b.stageEventId) ?? -1))
+  }
+
+  function markLossReviewsReopened(opportunity: StrategyOpportunityDto, event: OpportunityStageHistoryDto) {
+    for (const review of opportunity.lossReviews ?? []) {
+      if (review.reopenedAt) continue
+      review.reopenedAt = event.recordedAt
+      review.modified = nextRecoveryVersion(review.modified)
+      appendLossReviewRevision(review, 'Reopened', { at: event.recordedAt })
+    }
+  }
+
+  function lossReviewText(value: unknown, field: 'reviewNote' | 'revertReason', message: string) {
+    const text = typeof value === 'string' ? value.trim() : ''
+    if (!text || text.length > 4000) throw new CrmApiError('VALIDATION_ERROR', message, requestId(), false, { [field]: 'Enter 1-4000 characters' })
+    return text
+  }
+
+  function expectedTimestamp(value: unknown) {
+    if (typeof value !== 'string' || !value.trim()) throw new CrmApiError('VALIDATION_ERROR', 'expectedModified is required.', requestId(), false)
+    const text = value.trim()
+    const parsed = Date.parse(text)
+    if (!Number.isFinite(parsed)) throw new CrmApiError('VALIDATION_ERROR', 'expectedModified must be an ISO timestamp.', requestId(), false)
+    if (!/(Z|[+-]\d{2}:?\d{2})$/i.test(text)) throw new CrmApiError('VALIDATION_ERROR', 'expectedModified must include a timezone.', requestId(), false)
+    return parsed
   }
 
   function appendOpportunityHistory(opportunity: StrategyOpportunityDto, field: string, from: string, to: string) {
@@ -739,7 +896,10 @@ export function createMockApi(options: {
       currency: booking.currency,
       owner: booking.owner,
       note: booking.note,
+      /** Version used by PO confirmation to reject a stale Pending Booking form. */
       modified: booking.modified,
+      actualPoDate: booking.actualPoDate ?? '',
+      amountCny: booking.amountCny ?? '',
     }
   }
 
@@ -768,8 +928,19 @@ export function createMockApi(options: {
     return `CRM-VAL-${String(next).padStart(5, '0')}`
   }
 
+  // Mirrors bookings.validate_booking_amount_cny and cny_amount_text: a CNY order's amount already is its CNY amount,
+  // another currency needs one once the order is confirmed.
+  function bookingAmountCny(currency: string, amount: string, value: unknown, required: boolean): string {
+    if (currency === 'CNY') return amount
+    if (!String(value ?? '').trim()) {
+      if (required) throw new CrmApiError('VALIDATION_ERROR', 'amountCny is required.', requestId(), false, { amountCny: 'Required' })
+      return ''
+    }
+    return requiredPositiveMoney(value, 'amountCny')
+  }
+
   // Mirrors validate_booking_draft: account, source and type follow the Opportunity, and Sales fills in the rest.
-  function validateOpportunityBookingDraft(opportunity: StrategyOpportunityDto, draft: unknown): BookingDraft {
+  function validateOpportunityBookingDraft(opportunity: StrategyOpportunityDto, draft: unknown, requireAmountCny = false): BookingDraft {
     if (!draft || typeof draft !== 'object' || Array.isArray(draft)) {
       throw new CrmApiError('VALIDATION_ERROR', 'booking is required.', requestId(), false, { booking: 'Required' })
     }
@@ -788,11 +959,15 @@ export function createMockApi(options: {
     try { amount = normalizeMoney(String(value.amount ?? '')) }
     catch { throw new CrmApiError('VALIDATION_ERROR', 'amount must be non-negative with at most two decimal places.', requestId(), false) }
     const owner = validateOwner(typeof value.owner === 'string' ? value.owner : '', ['Sales'])
-    return { primaryContactId, equipment, quantity, ddl, amount, currency, owner, note: typeof value.note === 'string' ? value.note.trim() : '' }
+    const amountCny = currency === 'CNY' ? '' : bookingAmountCny(currency, amount, value.amountCny, requireAmountCny)
+    return { primaryContactId, equipment, quantity, ddl, amount, currency, amountCny, owner, note: typeof value.note === 'string' ? value.note.trim() : '' }
   }
 
   function applyOpportunityBookingDraft(booking: BookingDto, draft: BookingDraft) {
     const contact = localContacts.find((item) => item.id === draft.primaryContactId)
+    const amountCny = draft.currency === 'CNY' ? draft.amount : draft.amountCny ?? ''
+    // A correction's reason describes the amount it came with, so it goes when that amount does.
+    if (amountCny !== (booking.currency === 'CNY' ? booking.amount : booking.amountCny ?? '')) booking.amountCnyNote = ''
     Object.assign(booking, {
       title: `${draft.equipment} · ${draft.quantity} 台`,
       primaryContactId: draft.primaryContactId,
@@ -802,6 +977,7 @@ export function createMockApi(options: {
       ddl: draft.ddl,
       amount: draft.amount,
       currency: draft.currency,
+      amountCny,
       owner: draft.owner,
       note: draft.note,
       modified: `${now}#${requestId()}`,
@@ -809,8 +985,20 @@ export function createMockApi(options: {
     return booking
   }
 
+  // Mirrors bookings.validate_actual_po_date: the date on the customer's PO, never in the future.
+  function validateActualPoDate(value: unknown, required: boolean) {
+    const date = String(value ?? '').trim()
+    if (!date) {
+      if (required) throw new CrmApiError('VALIDATION_ERROR', 'actualPoDate is required.', requestId(), false, { actualPoDate: 'Required' })
+      return ''
+    }
+    if (!isIsoDate(date)) throw new CrmApiError('VALIDATION_ERROR', 'actualPoDate must be a real YYYY-MM-DD date.', requestId(), false)
+    if (date > today) throw new CrmApiError('VALIDATION_ERROR', 'actualPoDate cannot be in the future.', requestId(), false, { actualPoDate: 'Cannot be in the future' })
+    return date
+  }
+
   // Only PO confirmation and an approved internal validation create Opportunity Bookings.
-  function createOpportunityBooking(opportunity: StrategyOpportunityDto, draft: BookingDraft, status: 'Pending' | 'Confirmed') {
+  function createOpportunityBooking(opportunity: StrategyOpportunityDto, draft: BookingDraft, status: 'Pending' | 'Confirmed', actualPoDate = '') {
     const booking: BookingDto = {
       id: nextId('BKG', localBookings),
       accountId: opportunity.accountId,
@@ -830,6 +1018,10 @@ export function createMockApi(options: {
       bookingType: opportunity.saleType === 'Service' ? 'Service' : 'Equipment',
       sourceOpportunityId: opportunity.id,
       note: '',
+      // An approved internal validation creates a Pending Booking before any PO exists.
+      actualPoDate,
+      actualPoDateSource: actualPoDate ? 'po_confirmation' : '',
+      actualPoDateNote: '',
     }
     localBookings.unshift(applyOpportunityBookingDraft(booking, draft))
     return booking
@@ -1432,7 +1624,64 @@ export function createMockApi(options: {
     }
   }
 
+  const reviewUnavailable = async (): Promise<never> => {
+    assertCapability(capabilities, 'cockpit:view')
+    throw new CrmApiError('BACKEND_NOT_CONNECTED', 'Review requires the business API.', 'review_unavailable', false)
+  }
+  const boardUnavailable = async (): Promise<never> => {
+    assertCapability(capabilities, "deal:view")
+    throw new CrmApiError("BACKEND_NOT_CONNECTED", "Opportunities board requires the business API.", "board_unavailable", false)
+  }
   const mockApi: CrmApi = {
+    queryOpportunities: boardUnavailable,
+    getOpportunityFilters: boardUnavailable,
+    listOpportunityQueries: boardUnavailable,
+    saveOpportunityQuery: boardUnavailable,
+    deleteOpportunityQuery: boardUnavailable,
+    getPlan: async () => {
+      assertCapability(capabilities, 'cockpit:view')
+      throw new CrmApiError('BACKEND_NOT_CONNECTED', 'Plan requires the business API.', 'plan_unavailable', false)
+    },
+    getPlanDetails: async () => {
+      assertCapability(capabilities, 'cockpit:view')
+      throw new CrmApiError('BACKEND_NOT_CONNECTED', 'Plan requires the business API.', 'plan_unavailable', false)
+    },
+    getReview: reviewUnavailable,
+    getReviewDetails: reviewUnavailable,
+    saveReviewTarget: reviewUnavailable,
+    getWarnings: reviewUnavailable,
+    getCockpitSettings: reviewUnavailable,
+    saveCockpitSettings: reviewUnavailable,
+    saveWarningPlan: reviewUnavailable,
+    recordWarningAction: reviewUnavailable,
+    // Same rules and order of checks as services.loss_review.review_loss.
+    async reviewOpportunityLoss(id: string, reviewId: string, input: LossReviewInput, expectedModified: string) {
+      await wait()
+      assertCapability(capabilities, 'deal:write')
+      if (role !== 'Manager') throw new CrmApiError('PERMISSION_DENIED', 'Only a Manager can confirm a lost-deal post-mortem.', requestId(), false)
+      const opportunity = assertOpportunity(id)
+      const status = input?.status
+      if (status !== 'Reviewed' && status !== 'Pending') throw new CrmApiError('VALIDATION_ERROR', 'status is invalid.', requestId(), false, { status: 'Invalid value' })
+      // Marking done needs the conclusion; reverting needs its own reason and keeps the conclusion.
+      const note = status === 'Reviewed' ? lossReviewText(input.reviewNote, 'reviewNote', 'A post-mortem conclusion of 1-4000 characters is required.') : ''
+      const reason = status === 'Pending' ? lossReviewText(input.revertReason, 'revertReason', 'A reason of 1-4000 characters is required to revert a post-mortem.') : ''
+      const expected = expectedTimestamp(expectedModified)
+      const review = localStrategyOpportunities.flatMap((item) => item.lossReviews ?? []).find((item) => item.id === reviewId)
+      if (!review) throw new CrmApiError('NOT_FOUND', 'CRM Opportunity Loss Review was not found.', requestId(), false)
+      if (expected !== Date.parse(review.modified)) throw new CrmApiError('VERSION_CONFLICT', 'The record was changed by another request.', requestId(), false)
+      if (review.opportunityId !== opportunity.id) throw new CrmApiError('NOT_FOUND', 'The loss review was not found.', requestId(), false)
+      if (status === 'Pending' && review.status !== 'reviewed') {
+        throw new CrmApiError('INVALID_TRANSITION', 'Only a reviewed loss can be reverted to pending.', requestId(), false)
+      }
+      if (status === 'Reviewed' && review.status === 'reviewed' && review.reviewNote === note) return response(review)
+      const kind = status === 'Pending' ? 'ReviewReverted' : review.status === 'reviewed' ? 'ReviewUpdated' : 'Reviewed'
+      review.modified = nextRecoveryVersion(review.modified)
+      if (status === 'Reviewed') Object.assign(review, { status: 'reviewed', reviewNote: note, reviewedBy: userId, reviewedAt: review.modified })
+      else Object.assign(review, { status: 'pending', reviewedBy: null, reviewedAt: null })
+      appendLossReviewRevision(review, kind, { reason })
+      salesRepository.save()
+      return response(review)
+    },
     async getBootstrap() {
       await wait()
       return response({
@@ -1469,7 +1718,8 @@ export function createMockApi(options: {
         (!query.search || includes(`${item.name} ${item.shortName} ${item.owner}`, query.search)) &&
         (!query.accountId || item.id === query.accountId) &&
         (!query.segment || query.segment === 'All' || item.segment === query.segment) &&
-        (!query.city || query.city === 'All' || item.city === query.city),
+        (!query.city || query.city === 'All' || item.city === query.city) &&
+        (!query.region || query.region === 'All' || item.region === (matchingRegion(query.region, [...localAccountRegions]) || collapseRegion(query.region))),
       )
       const start = (page - 1) * pageSize
       const result = response({ items: filtered.slice(start, start + pageSize) })
@@ -1481,6 +1731,18 @@ export function createMockApi(options: {
       await wait()
       assertCapability(capabilities, 'account:view')
       return response([...localAccountSegments])
+    },
+
+    async listEquipmentTypes() {
+      await wait()
+      assertCapability(capabilities, 'deal:view')
+      return response(equipmentOptions([...localEquipmentTypes]))
+    },
+
+    async listAccountRegions() {
+      await wait()
+      assertCapability(capabilities, 'account:view')
+      return response(regionOptions([...localAccountRegions]))
     },
 
     async listAccountCities() {
@@ -1500,15 +1762,17 @@ export function createMockApi(options: {
       }
       const owner = validateOwner(input.owner, ['Sales'])
       const segment = input.segment.trim()
+      const region = accountRegion(input.region)
       const account: AccountSummaryDto = {
         id: nextId('ACC', localAccounts), name: input.name.trim(), shortName: input.shortName.trim(), segment,
-        tier: input.tier, city: input.city.trim(), region: input.region.trim(), owner, pipelineAmount: 0, intentScore: 0,
+        tier: input.tier, city: input.city.trim(), region, owner, pipelineAmount: 0, intentScore: 0,
         stakeholderCount: 0, siteCount: 0, requirementCount: 0, completeness: 45, risk: '关注' as const,
         nextAction: '补齐客户档案与关键人', nextActionDue: today, updatedAt: '刚刚', visibility: input.visibility ?? 'Private',
       }
       account.modified = nextAccountModified(account.id)
       localAccounts.unshift(account)
       localAccountSegments.add(segment)
+      localAccountRegions.add(region)
       localSites[account.id] = []
       salesRepository.save()
       return response(account)
@@ -1532,6 +1796,7 @@ export function createMockApi(options: {
       const owner = validateOwner(input.owner, ['Sales'])
       const name = input.name.trim()
       const segment = input.segment.trim()
+      const region = accountRegion(input.region)
       localAccounts[index] = {
         ...localAccounts[index],
         name,
@@ -1539,13 +1804,14 @@ export function createMockApi(options: {
         segment,
         tier: input.tier,
         city: input.city.trim(),
-        region: input.region.trim(),
+        region,
         owner,
          modified: nextAccountModified(id),
         visibility: input.visibility ?? localAccounts[index].visibility ?? 'Private',
         updatedAt: '刚刚',
       }
       localAccountSegments.add(segment)
+      localAccountRegions.add(region)
       localBookings.forEach((item) => { if (item.accountId === id) item.accountName = name })
       localVisits.forEach((item) => { if (item.accountId === id) item.accountName = name })
       localContracts.forEach((item) => { if (item.accountId === id) item.accountName = name })
@@ -1908,13 +2174,22 @@ export function createMockApi(options: {
       if (input.qualificationConfirmed !== true) {
         throw new CrmApiError('VALIDATION_ERROR', 'Confirm the customer need and the budget owner before creating the Opportunity.', requestId(), false, { qualificationConfirmed: 'Required' })
       }
+      const conversionLevel = input.opportunityProbabilityLevel ?? ''
+      if (!isOpportunityProbabilityLevelValue(conversionLevel)) {
+        throw new CrmApiError('VALIDATION_ERROR', 'opportunityProbabilityLevel is invalid.', requestId(), false, { opportunityProbabilityLevel: 'Invalid value' })
+      }
+      if (!conversionLevel) {
+        throw new CrmApiError('VALIDATION_ERROR', 'opportunityProbabilityLevel is required.', requestId(), false, { opportunityProbabilityLevel: 'Required' })
+      }
       let validOpportunityAmount = true
       try { normalizeMoney(input.opportunityAmount) } catch { validOpportunityAmount = false }
       if ([input.opportunityTitle, input.opportunityCloseDate, input.opportunityOwner, input.toolType].some((value) => !String(value ?? '').trim()) ||
         !validOpportunityAmount) {
         throw new CrmApiError('VALIDATION_ERROR', '请完整填写 Opportunity 名称、金额、预计成交日期、负责人和产品', requestId(), false)
       }
+      const opportunityAmountCny = requiredPositiveMoney(input.opportunityAmountCny, 'opportunityAmountCny')
       const opportunityOwner = validateOwner(input.opportunityOwner, ['Sales', 'Manager'])
+      const toolType = equipmentTypeFor(input.toolType)
 
       let account = input.accountId
         ? localAccounts.find((item) => item.id === input.accountId)
@@ -1932,7 +2207,7 @@ export function createMockApi(options: {
           segment: draft?.segment ?? 'Frontend',
           tier: draft?.tier ?? 'B',
           city: draft?.city.trim() || '待补充',
-          region: draft?.region.trim() || '待补充',
+          region: draft?.region.trim() ? accountRegion(draft.region) : '',
           owner: accountOwner,
           pipelineAmount: 0,
           intentScore: 50,
@@ -1946,6 +2221,7 @@ export function createMockApi(options: {
           updatedAt: '刚刚',
         }
         localAccounts.unshift(account)
+        if (account.region) localAccountRegions.add(account.region)
         const siteDraft = input.newSite
         localSites[account.id] = [{
           id: `${account.id}-SITE-01`,
@@ -2009,16 +2285,17 @@ export function createMockApi(options: {
         internalValidation: null,
         liveBooking: null,
         amount: normalizeMoney(input.opportunityAmount),
-        probabilityLevel: '',
-        probabilityHistory: [],
+        probabilityLevel: conversionLevel,
+        probabilityHistory: [probabilityHistoryEntry('', conversionLevel)],
         poDate: input.opportunityCloseDate,
         updated: '刚刚',
         score: 20,
-        toolType: input.toolType.trim(),
+        toolType,
         saleType: 'New Equipment',
         subRegion: account.region,
         currency: 'CNY',
         originalAmount: normalizeMoney(input.opportunityAmount),
+        amountCny: opportunityAmountCny,
         shipmentDate: '',
         fatDate: '',
         paymentMilestones: [],
@@ -2046,6 +2323,7 @@ export function createMockApi(options: {
       opportunity.stageChangedAt = conversion.recordedAt
       touchOpportunity(opportunity)
       localStrategyOpportunities.unshift(opportunity)
+      localEquipmentTypes.add(toolType)
       Object.assign(lead, {
         status: 'Converted',
         convertedAt: now,
@@ -2135,7 +2413,8 @@ export function createMockApi(options: {
         (!query.owner || query.owner === 'All' || item.owner === query.owner) &&
         (!query.source || query.source === 'All' || item.source === query.source) &&
         (!query.dateFrom || item.ddl >= query.dateFrom) &&
-        (!query.dateTo || item.ddl <= query.dateTo),
+        (!query.dateTo || item.ddl <= query.dateTo) &&
+        (!query.actualPoDateMissing || (!item.actualPoDate && (item.status === 'Confirmed' || item.status === 'Completed'))),
       ).map(expandBookingContact)
       return pageResponse(filtered, query)
     },
@@ -2158,6 +2437,7 @@ export function createMockApi(options: {
       const owner = validateOwner(input.owner, ['Sales'])
       if (input.status === 'Completed') throw new CrmApiError('BOOKING_STATUS_INVALID', 'Completed 只能由转入 Installed Tool 自动生成', requestId(), false)
       validateBookingSource(input)
+      const actualPoDate = validateActualPoDate(input.actualPoDate, false)
       const booking = {
         id: nextId('BKG', localBookings),
         accountId: account.id,
@@ -2170,6 +2450,8 @@ export function createMockApi(options: {
         ddl: input.ddl,
         amount: normalizeMoney(input.amount),
         currency: input.currency.trim().toUpperCase(),
+        amountCny: bookingAmountCny(input.currency.trim().toUpperCase(), normalizeMoney(input.amount), input.amountCny, input.status === 'Confirmed'),
+        amountCnyNote: '',
         status: input.status,
         bookingDate: today,
         owner,
@@ -2179,6 +2461,9 @@ export function createMockApi(options: {
           : input.bookingType ?? 'Equipment',
         sourceOpportunityId: input.sourceOpportunityId,
         note: input.note.trim(),
+        actualPoDate,
+        actualPoDateSource: actualPoDate ? 'booking_entry' as const : '' as const,
+        actualPoDateNote: '',
       }
       localBookings.unshift(booking)
       salesRepository.save()
@@ -2211,9 +2496,32 @@ export function createMockApi(options: {
       const owner = validateOwner(input.owner, ['Sales'])
       if (input.status === 'Completed') throw new CrmApiError('BOOKING_STATUS_INVALID', 'Completed 只能由转入 Installed Tool 自动生成', requestId(), false)
       validateBookingSource(input, id)
+      // Mirrors bookings._edited_actual_po_date: an edit may only give an Upsell Booking its first date.
+      const current = localBookings[index]
+      const requestedPoDate = input.actualPoDate === undefined ? current.actualPoDate ?? '' : String(input.actualPoDate ?? '').trim()
+      let poDate = { actualPoDate: current.actualPoDate ?? '', actualPoDateSource: current.actualPoDateSource ?? '', actualPoDateNote: current.actualPoDateNote ?? '' }
+      if (requestedPoDate !== (current.actualPoDate ?? '')) {
+        if (current.source === 'Opportunity' || current.actualPoDate) {
+          throw new CrmApiError('VALIDATION_ERROR', "The actual PO date changes only through a Manager's correction.", requestId(), false, { actualPoDate: 'Manager correction only' })
+        }
+        poDate = { ...poDate, actualPoDate: validateActualPoDate(requestedPoDate, true), actualPoDateSource: 'booking_entry' }
+      }
+      // Mirrors update_booking: a stored CNY amount carries over unless the edit sends a new one.
+      let requestedAmountCny = input.amountCny === undefined ? (current.currency === 'CNY' ? '' : current.amountCny ?? '') : input.amountCny
+      // Mirrors bookings._assert_amount_cny_edit: once recorded, the CNY amount of an order changes only through a Manager's correction.
+      const recordedAmountCny = current.currency === 'CNY' ? '' : current.amountCny ?? ''
+      if (current.status !== 'Pending' && input.currency.trim().toUpperCase() !== 'CNY' && recordedAmountCny) {
+        if (String(requestedAmountCny ?? '').trim() === '') requestedAmountCny = recordedAmountCny
+        else if (requiredPositiveMoney(requestedAmountCny, 'amountCny') !== normalizeMoney(recordedAmountCny)) throw new CrmApiError('VALIDATION_ERROR', "The CNY amount changes only through a Manager's correction.", requestId(), false, { amountCny: 'Manager correction only' })
+      }
+      const amountCny = bookingAmountCny(input.currency.trim().toUpperCase(), normalizeMoney(input.amount), requestedAmountCny, input.status === 'Confirmed')
       localBookings[index] = {
         ...localBookings[index],
         ...clone(input),
+        ...poDate,
+        amountCny,
+        // A correction's reason describes a CNY amount; it goes when the order turns into CNY.
+        amountCnyNote: input.currency.trim().toUpperCase() !== 'CNY' && amountCny && amountCny === normalizeMoney(recordedAmountCny || '0') ? current.amountCnyNote ?? '' : '',
         bookingType: input.source === 'Opportunity'
           ? (localStrategyOpportunities.find((item) => item.id === input.sourceOpportunityId)?.saleType === 'Service' ? 'Service' : 'Equipment')
           : input.bookingType ?? 'Equipment',
@@ -2311,6 +2619,57 @@ export function createMockApi(options: {
       booking.modified = `${now}#${requestId()}`
       salesRepository.save()
       return response({ booking, installedTool })
+    },
+
+    async setBookingActualPoDate(id: string, input: SetActualPoDateInput, expectedModified?: string) {
+      await wait()
+      assertCapability(capabilities, 'deal:write')
+      if (role !== 'Manager') throw new CrmApiError('PERMISSION_DENIED', 'Only a Manager can fill in or correct the actual PO date.', requestId(), false)
+      const booking = localBookings.find((item) => item.id === id)
+      if (!booking) throw new CrmApiError('BOOKING_NOT_FOUND', '未找到该 Booking', requestId(), false)
+      assertAccountScope(booking.accountId)
+      if (expectedModified && booking.modified && expectedModified !== booking.modified) {
+        throw new CrmApiError('VERSION_CONFLICT', 'Booking 已被其他请求修改', requestId(), false)
+      }
+      if (booking.status !== 'Confirmed' && booking.status !== 'Completed') {
+        throw new CrmApiError('BOOKING_STATUS_INVALID', 'Only a Confirmed or Completed Booking has an actual PO date.', requestId(), false)
+      }
+      const actualPoDate = validateActualPoDate(input?.actualPoDate, true)
+      const previous = booking.actualPoDate ?? ''
+      if (actualPoDate === previous) throw new CrmApiError('VALIDATION_ERROR', 'actualPoDate is unchanged.', requestId(), false, { actualPoDate: 'Unchanged' })
+      const reason = String(input?.reason ?? '').trim()
+      if (previous && !reason) throw new CrmApiError('VALIDATION_ERROR', 'A reason is required to correct the actual PO date.', requestId(), false, { reason: 'Required' })
+      Object.assign(booking, { actualPoDate, actualPoDateSource: 'backfill', actualPoDateNote: reason, modified: `${now}#${requestId()}` })
+      const opportunity = localStrategyOpportunities.find((item) => item.id === booking.sourceOpportunityId)
+      if (opportunity) appendOpportunityHistory(opportunity, 'bookingPoDate', previous, actualPoDate)
+      salesRepository.save()
+      return response(booking)
+    },
+
+    async setBookingAmountCny(id: string, input: SetBookingAmountCnyInput, expectedModified?: string) {
+      await wait()
+      assertCapability(capabilities, 'deal:write')
+      if (role !== 'Manager') throw new CrmApiError('PERMISSION_DENIED', 'Only a Manager can fill in or correct the CNY amount.', requestId(), false)
+      const booking = localBookings.find((item) => item.id === id)
+      if (!booking) throw new CrmApiError('BOOKING_NOT_FOUND', '未找到该 Booking', requestId(), false)
+      assertAccountScope(booking.accountId)
+      if (expectedModified && booking.modified && expectedModified !== booking.modified) {
+        throw new CrmApiError('VERSION_CONFLICT', 'Booking 已被其他请求修改', requestId(), false)
+      }
+      if (booking.status !== 'Confirmed' && booking.status !== 'Completed') {
+        throw new CrmApiError('BOOKING_STATUS_INVALID', 'Only a Confirmed or Completed Booking has a CNY amount to record.', requestId(), false)
+      }
+      if (booking.currency === 'CNY') throw new CrmApiError('VALIDATION_ERROR', 'A CNY Booking uses its amount.', requestId(), false, { amountCny: 'CNY Booking' })
+      const amountCny = requiredPositiveMoney(input?.amountCny, 'amountCny')
+      const previous = booking.amountCny ?? ''
+      if (previous && normalizeMoney(previous) === amountCny) throw new CrmApiError('VALIDATION_ERROR', 'amountCny is unchanged.', requestId(), false, { amountCny: 'Unchanged' })
+      const reason = String(input?.reason ?? '').trim()
+      if (previous && !reason) throw new CrmApiError('VALIDATION_ERROR', 'A reason is required to correct the CNY amount.', requestId(), false, { reason: 'Required' })
+      Object.assign(booking, { amountCny, amountCnyNote: reason, modified: `${now}#${requestId()}` })
+      const opportunity = localStrategyOpportunities.find((item) => item.id === booking.sourceOpportunityId)
+      if (opportunity) appendOpportunityHistory(opportunity, 'bookingAmountCny', previous, amountCny)
+      salesRepository.save()
+      return response(booking)
     },
 
     async completeServiceBooking(id: string, expectedModified?: string) {
@@ -2533,6 +2892,7 @@ export function createMockApi(options: {
           reportStatus: 'Not Ready' as const, reportVersion: 0, testRound: 1,
           criteria: request.acceptanceCriteria, runs: [],
         }
+        touchEvaluation(evaluation)
          snapshot.evaluations.unshift(evaluation)
          request.status = 'Converted'; request.managerDecision = 'Approved'; request.managerComment = command.comment.trim(); request.evaluationId = evaluation.id
         request.approvedBy = userId; request.approvedDate = today
@@ -2588,6 +2948,7 @@ export function createMockApi(options: {
           evaluation.testPreparationCompletedAt = now
         }
         if (isEvaluationPreparationComplete(evaluation)) evaluation.status = 'Scheduled'
+        touchEvaluation(evaluation)
         markProgress(snapshot.demoRequests.find((item) => item.id === evaluation.demoRequestId), `Completed ${branch} preparation`)
         return response(evaluation)
       })
@@ -2691,6 +3052,7 @@ export function createMockApi(options: {
             ? `Demo Test archived with customer comment: ${customerComment}`
             : `Demo Test moved to ${command.status}`,
       }, ...(evaluation.history ?? [])]
+      touchEvaluation(evaluation)
       markProgress(
         snapshot.demoRequests.find((item) => item.id === evaluation.demoRequestId),
         isRetest ? `Demo Test 第 ${evaluation.testRound} 轮重测` : `Demo Test 推进至 ${command.status}`,
@@ -2713,24 +3075,27 @@ export function createMockApi(options: {
       if (!['Scheduled', 'Testing'].includes(evaluation.status)) {
         throw new CrmApiError('INVALID_RUN_STAGE', '只有 Test Execution 阶段可以录入 Test Run', requestId(), false)
       }
-      const validWafers = Number.isFinite(input.wafers) && Number.isInteger(input.wafers) && input.wafers > 0
-      if (!isIsoDate(input.date) || !input.lot.trim() || !validWafers) throw new CrmApiError('VALIDATION_ERROR', '有效日期、Lot 和正整数 Wafer 数量不能为空', requestId(), false)
-      const metrics = [input.capture, input.falsePositive, input.wph]
-      const hasMetrics = metrics.some((value) => value != null)
-      const completeMetrics = metrics.every((value) => value != null && Number.isFinite(value))
-      if (hasMetrics && !completeMetrics) throw new CrmApiError('VALIDATION_ERROR', '完成测试时 Capture、False Positive 和 WPH 必须同时填写', requestId(), false)
-      if (completeMetrics && (input.capture! < 0 || input.capture! > 100 || input.falsePositive! < 0 || input.falsePositive! > 100 || input.wph! < 0)) throw new CrmApiError('VALIDATION_ERROR', 'Capture/False Positive 必须在 0–100，WPH 不能为负数', requestId(), false)
-      if (completeMetrics && !input.summary.trim()) throw new CrmApiError('VALIDATION_ERROR', '完成 Test Run 时结果摘要不能为空', requestId(), false)
+      const completeMetrics = validateTestRun(input)
       const nextRunNumber = Math.max(0, ...evaluation.runs.map((run) => Number(run.id.match(/-R(\d+)$/)?.[1] ?? 0))) + 1
       const runId = `${evaluation.id}-R${String(nextRunNumber).padStart(2, '0')}`
-      evaluation.runs.push({ ...input, id: runId, round: evaluation.testRound, summary: input.summary.trim(), status: completeMetrics ? 'Completed' : 'Planned' })
-      evaluation.wafers = evaluation.runs.reduce((sum, run) => sum + run.wafers, 0)
+      const { expectedModified: _expected, ...fields } = input
+      evaluation.runs.push({ ...fields, id: runId, round: evaluation.testRound, summary: input.summary.trim(), status: completeMetrics ? 'Completed' : 'Planned' })
+      evaluation.wafers = activeRunWafers(evaluation)
+      appendTestRunHistory(evaluation, `${completeMetrics ? 'Completed' : 'Planned'} Test Run ${runId}`, '', runId)
+      touchEvaluation(evaluation)
       const request = snapshot.demoRequests.find((item) => item.id === evaluation.demoRequestId)
       if (request) markProgress(request, `${completeMetrics ? '完成' : '创建'} Test Run ${runId}`)
       return response(evaluation)
       })
     },
 
+    async updateEvaluationRun() {
+      throw new CrmApiError('BACKEND_NOT_CONNECTED', 'Test Run edits require the Frappe API.', requestId(), false)
+    },
+
+    async cancelEvaluationRun() {
+      throw new CrmApiError('BACKEND_NOT_CONNECTED', 'Test Run cancellation requires the Frappe API.', requestId(), false)
+    },
     async setEvaluationTestRunDeadline(id: string, input: { testRunDeadline: string; expectedModified?: string }) {
       await wait()
       return repository.transact((snapshot) => {
@@ -2748,6 +3113,7 @@ export function createMockApi(options: {
           throw new CrmApiError('VALIDATION_ERROR', 'Test Run DDL 不能早于今天', requestId(), false)
         }
         evaluation.testRunDeadline = testRunDeadline
+        touchEvaluation(evaluation)
         markProgress(request, `更新 Test Run DDL 为 ${testRunDeadline}`)
         const warnings = isIsoDate(request.customerExpectedDate) && testRunDeadline > request.customerExpectedDate
           ? ['Test Run DDL 晚于客户预期时间，请 Sales 与客户沟通']
@@ -2848,6 +3214,7 @@ export function createMockApi(options: {
           externalReportArtifact,
           reportVersion: version,
         })
+        touchEvaluation(evaluation)
         markProgress(request, `上传第 ${evaluation.testRound} 轮 Test Report v${version}`)
         return response({ internalReportArtifact, externalReportArtifact, version })
       })
@@ -2882,6 +3249,7 @@ export function createMockApi(options: {
         const { blob: _blob, ...meta } = artifact
         evaluation.customerReportArtifactId = artifact.id
         evaluation.customerReportArtifact = meta
+        touchEvaluation(evaluation)
         markProgress(request, `上传第 ${evaluation.testRound} 轮 Customer Report v${version}`)
         return response({ artifact: meta, round: evaluation.testRound, version })
       })
@@ -2955,11 +3323,14 @@ export function createMockApi(options: {
       if (requestedStage !== 'qualified_opportunity') {
         throw new CrmApiError('INVALID_TRANSITION', 'New Opportunity must start at qualified_opportunity.', requestId(), false)
       }
-      if (probabilityLevel) assertProbabilityLevelOwner(input.owner.trim())
+      if (!probabilityLevel) {
+        throw new CrmApiError('VALIDATION_ERROR', 'probabilityLevel is required.', requestId(), false, { probabilityLevel: 'Required' })
+      }
       const account = localAccounts.find((item) => item.id === input.accountId)
       const site = (localSites[input.accountId] ?? []).find((item) => item.id === input.siteId)
       if (!account) throw new CrmApiError('ACCOUNT_NOT_FOUND', '未找到该客户', requestId(), false)
       if (!site) throw new CrmApiError('SITE_NOT_FOUND', '所选厂区不属于该客户', requestId(), false)
+      const toolType = equipmentTypeFor(input.toolType)
       const created = stageHistoryRow('', 'qualified_opportunity', { source: 'creation', event: 'created' })
       const opportunity: StrategyOpportunityDto = {
         id: nextId('OPP', localStrategyOpportunities), accountId: account.id, siteId: site.id, title: input.title.trim(),
@@ -2967,17 +3338,19 @@ export function createMockApi(options: {
         stageChangedAt: created.recordedAt, budgetApprovedOn: '', lostAtStage: '', lostAt: '', lostBy: '',
         stageHistory: [created], internalValidation: null, liveBooking: null,
         amount: normalizeMoney(input.amount), probabilityLevel, probabilityHistory: [], poDate: input.poDate, updated: '刚刚',
-        score, toolType: input.toolType.trim(), saleType: input.saleType.trim(),
-        subRegion: input.subRegion.trim(), currency: input.currency, originalAmount: normalizeMoney(input.originalAmount ?? input.amount),
+        score, toolType, saleType: input.saleType.trim(),
+        subRegion: opportunityRegion(input.subRegion), currency: input.currency, originalAmount: normalizeMoney(input.originalAmount ?? input.amount),
+        amountCny: normalizeMoney(String(input.amountCny).trim()),
         shipmentDate: input.shipmentDate ?? '', fatDate: input.fatDate ?? '', paymentMilestones: clone(input.paymentMilestones ?? []),
         competition: input.competition?.trim() ?? '', winReason: input.winReason?.trim() ?? '', lostReason: input.lostReason?.trim() ?? '',
         history: [{ at: historyAt, actor: userId, field: 'Opportunity', from: '', to: input.title.trim() }],
         strengths: clone(input.strengths ?? []), redFlags: clone(input.redFlags ?? []), informationNeeded: clone(input.informationNeeded ?? []),
         stakeholders: [], actions: [],
       }
-      if (probabilityLevel) opportunity.probabilityHistory.push(probabilityHistoryEntry('', probabilityLevel))
+      opportunity.probabilityHistory.push(probabilityHistoryEntry('', probabilityLevel))
       touchOpportunity(opportunity)
       localStrategyOpportunities.unshift(opportunity)
+      localEquipmentTypes.add(toolType)
       salesRepository.save()
       return opportunityResponse(opportunity)
     },
@@ -2986,12 +3359,15 @@ export function createMockApi(options: {
       await wait()
       assertCapability(capabilities, 'deal:write')
       const opportunity = assertOpportunity(id)
+      if (expectedModified !== undefined) requireOpportunityVersion(opportunity, expectedModified)
       if (input.accountId) assertAccountScope(input.accountId)
       const previous = clone(opportunity)
       // Retired clients may still send the percentage or forecast, which are ignored, or a stage, which only workflow actions change.
       const {
         intentScore,
         probabilityLevel: requestedLevel,
+        probabilityReason: requestedReason,
+        probabilityActionPlan: requestedPlan,
         probability: _retiredProbability,
         forecast: _retiredForecast,
         stage: requestedStage,
@@ -3000,6 +3376,14 @@ export function createMockApi(options: {
       } = clone(input) as UpdateStrategyOpportunityInput & { probability?: unknown; forecast?: unknown; stage?: unknown; qualificationConfirmed?: unknown }
       const score = Math.round(Number(intentScore ?? opportunity.score))
       const probabilityLevel = requestedLevel ?? opportunity.probabilityLevel
+      if (changesInput.subRegion !== undefined) changesInput.subRegion = opportunityRegion(changesInput.subRegion)
+      // An unchanged type keeps its stored spelling, even one from before the catalog.
+      if (changesInput.toolType !== undefined) {
+        const current = opportunity.toolType ?? ''
+        changesInput.toolType = typeof changesInput.toolType === 'string' && current.trim() && changesInput.toolType.trim() === current.trim()
+          ? current
+          : equipmentTypeFor(changesInput.toolType)
+      }
       const next = {
         ...opportunity,
         ...changesInput,
@@ -3007,6 +3391,8 @@ export function createMockApi(options: {
         probabilityLevel,
       }
       validateOpportunity(next)
+      // Stored normalized, so re-entering the same CNY amount is not recorded as a change.
+      if (changesInput.amountCny !== undefined) next.amountCny = changesInput.amountCny = normalizeMoney(String(changesInput.amountCny).trim())
       if (requestedStage !== undefined && requestedStage !== opportunity.stage) {
         throw new CrmApiError('INVALID_TRANSITION', 'Opportunity stages change only through their workflow actions.', requestId(), false)
       }
@@ -3014,13 +3400,24 @@ export function createMockApi(options: {
         throw new CrmApiError('VALIDATION_ERROR', 'Lost Reason is required for a lost Opportunity.', requestId(), false, { lostReason: 'Required' })
       }
       const probabilityLevelChanged = probabilityLevel !== previous.probabilityLevel
+      const lowered = probabilityLevelChanged && Boolean(previous.probabilityLevel)
+        && opportunityProbabilityLevelRank(probabilityLevel) < opportunityProbabilityLevelRank(previous.probabilityLevel)
+      let plan: string | null = null
       if (probabilityLevelChanged) {
         assertProbabilityLevelOwner(previous.owner)
         if (isClosedOpportunityStage(opportunity.stage)) {
           throw new CrmApiError('INVALID_TRANSITION', 'The probability level is frozen once the PO is received or the Opportunity is lost.', requestId(), false)
         }
-        if (!probabilityLevel && opportunityStageIndex(opportunity.stage) >= opportunityStageIndex('demo_done')) {
-          throw new CrmApiError('VALIDATION_ERROR', 'probabilityLevel cannot be cleared once the demo is done.', requestId(), false, { probabilityLevel: 'Required' })
+        // Empty is only where an Opportunity from before the levels starts; once set, a level stays set.
+        if (!probabilityLevel) {
+          throw new CrmApiError('VALIDATION_ERROR', 'probabilityLevel cannot be cleared once it is set.', requestId(), false, { probabilityLevel: 'Required' })
+        }
+        if (opportunityProbabilityLevelRank(probabilityLevel) < opportunityProbabilityLevelRank(previous.probabilityLevel) && !String(requestedReason ?? '').trim()) {
+          throw new CrmApiError('VALIDATION_ERROR', 'A reason is required to lower the probability level.', requestId(), false, { probabilityReason: 'Required' })
+        }
+        if (lowered) {
+          requireOpportunityVersion(opportunity, expectedModified)
+          plan = recoveryPlan(requestedPlan, 'probabilityActionPlan')
         }
       }
       if ((next.accountId !== previous.accountId || next.saleType !== previous.saleType) && liveOpportunityBooking(opportunity.id)) {
@@ -3038,13 +3435,73 @@ export function createMockApi(options: {
           contact.id === link.contactId && contact.accountId === next.accountId,
         ))
       Object.assign(opportunity, next, { account: account.name, site: site.name, stakeholders })
+      if (opportunity.toolType) localEquipmentTypes.add(opportunity.toolType)
       touchOpportunity(opportunity)
       for (const [field, value] of changes.reverse()) {
         opportunity.history.unshift({ at: historyAt, actor: userId, field, from: String(previous[field as keyof StrategyOpportunityDto] ?? ''), to: String(value ?? '') })
       }
-      if (probabilityLevelChanged) opportunity.probabilityHistory.unshift(probabilityHistoryEntry(previous.probabilityLevel, probabilityLevel))
+      if (probabilityLevelChanged) {
+        const event = probabilityHistoryEntry(previous.probabilityLevel, probabilityLevel, String(requestedReason ?? '').trim())
+        opportunity.probabilityHistory.unshift({ ...event, recovery: plan === null ? null : newRecovery(event.id, plan) })
+      }
       salesRepository.save()
       return opportunityResponse(opportunity)
+    },
+
+    async saveProbabilityRecovery(id, eventId, input, expectedModified) {
+      await wait()
+      assertCapability(capabilities, 'deal:write')
+      const opportunity = assertOpportunity(id)
+      requireOpportunityVersion(opportunity, expectedModified)
+      if (role !== 'Manager' && opportunity.owner !== userId) {
+        throw new CrmApiError('PERMISSION_DENIED', 'Only the Opportunity owner or a Manager can maintain recovery plans.', requestId(), false)
+      }
+      const event = opportunity.probabilityHistory.find(row => row.id === eventId)
+      if (!event) throw new CrmApiError('NOT_FOUND', 'The probability change was not found.', requestId(), false)
+      if (!event.from || opportunityProbabilityLevelRank(event.to) >= opportunityProbabilityLevelRank(event.from)) {
+        throw new CrmApiError('INVALID_TRANSITION', 'Only a downgrade can have a recovery plan.', requestId(), false)
+      }
+      const plan = recoveryPlan(input.plan)
+      if ((event.recovery?.modified ?? null) !== input.recoveryModified) {
+        throw new CrmApiError('VERSION_CONFLICT', 'The recovery plan changed. Reload before editing.', requestId(), false)
+      }
+      const previousRecovery = event.recovery
+      if (!event.recovery) event.recovery = newRecovery(event.id, plan)
+      else if (event.recovery.plan !== plan) {
+        const modified = nextRecoveryVersion(event.recovery.modified)
+        event.recovery = { ...event.recovery, plan, modified, history: [
+          { id: `${event.recovery.id}-${event.recovery.history.length + 1}`, kind: 'PlanUpdated', plan, actor: userId, at: modified },
+          ...event.recovery.history,
+        ] }
+      }
+      try { salesRepository.save() } catch (error) { event.recovery = previousRecovery; throw error }
+      return response(event.recovery)
+    },
+
+    async recordProbabilityRecoveryAction(id, eventId, input, expectedModified) {
+      await wait()
+      assertCapability(capabilities, 'deal:write')
+      const opportunity = assertOpportunity(id)
+      requireOpportunityVersion(opportunity, expectedModified)
+      if (opportunity.owner !== userId) throw new CrmApiError('PERMISSION_DENIED', 'Only the current Opportunity owner can record the action taken.', requestId(), false)
+      const event = opportunity.probabilityHistory.find(row => row.id === eventId)
+      if (!event) throw new CrmApiError('NOT_FOUND', 'The probability change was not found.', requestId(), false)
+      if (!event.from || opportunityProbabilityLevelRank(event.to) >= opportunityProbabilityLevelRank(event.from)) {
+        throw new CrmApiError('INVALID_TRANSITION', 'Only a downgrade can have a recovery plan.', requestId(), false)
+      }
+      const actionTaken = recoveryPlan(input.actionTaken, 'actionTaken')
+      const recovery = event.recovery
+      if (!recovery) throw new CrmApiError('INVALID_TRANSITION', 'Record a recovery plan before recording the action taken.', requestId(), false)
+      if (!input.recoveryModified?.trim()) throw new CrmApiError('VALIDATION_ERROR', 'recoveryModified is required.', requestId(), false)
+      if (recovery.modified !== input.recoveryModified) throw new CrmApiError('VERSION_CONFLICT', 'The recovery changed. Reload before recording an action.', requestId(), false)
+      if (recovery.state === 'handled') throw new CrmApiError('INVALID_TRANSITION', 'An action was already recorded for this downgrade.', requestId(), false)
+      const modified = nextRecoveryVersion(recovery.modified)
+      event.recovery = { ...recovery, modified, state: 'handled', actionTaken, actedBy: userId, actedAt: modified, history: [
+        { id: `${recovery.id}-${recovery.history.length + 1}`, kind: 'ActionRecorded', plan: recovery.plan, actionTaken, actor: userId, at: modified },
+        ...recovery.history,
+      ] }
+      try { salesRepository.save() } catch (error) { event.recovery = recovery; throw error }
+      return response(event.recovery)
     },
 
     async rollbackOpportunityStage(id: string, input: RollbackOpportunityStageInput, expectedModified?: string) {
@@ -3084,9 +3541,11 @@ export function createMockApi(options: {
       }
       if (from === 'quotation_sent') cancelPendingInternalValidation(opportunity, `Opportunity rolled back to ${target}.`)
       if (booking?.status === 'Confirmed') {
-        // Production carries on under the internal validation, but the PO is no longer confirmed.
-        booking.status = 'Pending'
-        booking.modified = `${now}#${requestId()}`
+        // Production carries on under the internal validation, but the PO is no longer confirmed,
+        // so its date goes too; confirming the PO again asks for it.
+        const previousPoDate = booking.actualPoDate ?? ''
+        Object.assign(booking, { status: 'Pending', actualPoDate: '', actualPoDateSource: '', actualPoDateNote: '', modified: `${now}#${requestId()}` })
+        if (previousPoDate) appendOpportunityHistory(opportunity, 'bookingPoDate', previousPoDate, '')
       }
       const rfq = localRfqs.find((item) => item.opportunity.id === opportunity.id)
       if (opportunityStageIndex(target) <= opportunityStageIndex('customer_budget_approved') && rfq?.status === 'Approved') {
@@ -3098,7 +3557,8 @@ export function createMockApi(options: {
       }
       if (opportunityStageIndex(target) < opportunityStageIndex('customer_budget_approved')) opportunity.budgetApprovedOn = ''
       if (reopening) Object.assign(opportunity, { lostReason: '', lostAtStage: '', lostAt: '', lostBy: '' })
-      moveOpportunityStage(opportunity, target, { source: 'rollback', event: reopening ? 'reopened' : 'rollback', reason })
+      const moved = moveOpportunityStage(opportunity, target, { source: 'rollback', event: reopening ? 'reopened' : 'rollback', reason })
+      if (reopening) markLossReviewsReopened(opportunity, moved)
       salesRepository.save()
       return opportunityResponse(opportunity)
     },
@@ -3230,26 +3690,36 @@ export function createMockApi(options: {
         requireOpportunityStage(opportunity, PO_CONFIRMABLE_STAGES, 'PO confirmation')
         requireProbabilityLevel(opportunity)
       }
-      const draft = validateOpportunityBookingDraft(opportunity, input?.booking)
+      // The CNY amount of a foreign-currency order is known once the PO is.
+      const draft = validateOpportunityBookingDraft(opportunity, input?.booking, true)
+      // The date on the customer's PO, as opposed to the Opportunity's expected poDate.
+      const actualPoDate = validateActualPoDate(input?.actualPoDate, true)
       const live = liveOpportunityBooking(opportunity.id)
       if (live && (opportunity.stage !== 'internal_validation' || live.status !== 'Pending')) {
         throw new CrmApiError('CONFLICT', 'The Opportunity already has a live Booking.', requestId(), false)
       }
       if (live) {
-        // As on the server, the PO details replace the Pending Booking's: the viewer must see its current details,
-        // and the Booking must still be the version the form was prefilled from. The server requires that version;
-        // the demo seed carries none, so here it is checked whenever the form sends one.
+        // The form is prefilled from this Pending Booking, so both scope and its own optimistic-lock token apply.
         if (!canAccessBooking(live)) throw new CrmApiError('SCOPE_DENIED', 'The Pending Booking is outside the current user scope.', requestId(), false)
         if (input?.expectedBookingModified && live.modified && input.expectedBookingModified !== live.modified) {
           throw new CrmApiError('VERSION_CONFLICT', 'The Pending Booking was changed by another request.', requestId(), false)
         }
       }
       if (opportunity.stage === 'quotation_sent') cancelPendingInternalValidation(opportunity, 'PO received before the internal validation was decided.')
+      const replaced = replacing ? localBookings.filter((item) => item.sourceOpportunityId === opportunity.id && item.status === 'Cancelled').sort((a, b) => String(a.modified ?? '').localeCompare(String(b.modified ?? ''))).at(-1) : undefined
       const booking = live
-        ? Object.assign(applyOpportunityBookingDraft(live, draft), { status: 'Confirmed' as const })
-        : createOpportunityBooking(opportunity, draft, 'Confirmed')
+        ? Object.assign(applyOpportunityBookingDraft(live, draft), {
+          status: 'Confirmed' as const, actualPoDate, actualPoDateSource: 'po_confirmation' as const, actualPoDateNote: '',
+        })
+        : createOpportunityBooking(opportunity, draft, 'Confirmed', actualPoDate)
       if (replacing) {
         touchOpportunity(opportunity)
+        // Mirrors confirm_po: a replacement keeps the trail of the cancelled order's CNY amount and PO date.
+        if (replaced) {
+          const cnyOf = (item: BookingDto) => item.currency === 'CNY' ? item.amount : item.amountCny ?? ''
+          if (cnyOf(replaced) !== cnyOf(booking)) appendOpportunityHistory(opportunity, 'bookingAmountCny', cnyOf(replaced), cnyOf(booking))
+          if ((replaced.actualPoDate ?? '') !== actualPoDate) appendOpportunityHistory(opportunity, 'bookingPoDate', replaced.actualPoDate ?? '', actualPoDate)
+        }
         appendOpportunityHistory(opportunity, 'bookingReplaced', '', booking.id)
       } else {
         moveOpportunityStage(opportunity, 'po_received', { source: 'manual', event: 'po_confirmed', referenceDoctype: 'CRM Booking', referenceName: booking.id })
@@ -3275,7 +3745,7 @@ export function createMockApi(options: {
         lostAt: new Date(now).toISOString(),
         lostBy: userId,
       })
-      moveOpportunityStage(opportunity, 'lost', { source: 'lost', event: 'marked_lost', reason: lostReason })
+      createLossReview(opportunity, moveOpportunityStage(opportunity, 'lost', { source: 'lost', event: 'marked_lost', reason: lostReason }))
       salesRepository.save()
       return opportunityResponse(opportunity)
     },
@@ -3308,6 +3778,10 @@ export function createMockApi(options: {
       return response({ id: stakeholderId })
     },
 
+    ...createMockStatusApi(salesRepository, userId, (opportunityId, write) => {
+      assertCapability(capabilities, write ? 'deal:write' : 'deal:view')
+      assertOpportunity(opportunityId)
+    }),
     createOpportunityAction: saveOpportunityActionInternal,
     updateOpportunityAction: (opportunityId: string, actionId: string, input: UpdateOpportunityActionInput) => saveOpportunityActionInternal(opportunityId, input, actionId),
 

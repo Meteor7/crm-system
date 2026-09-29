@@ -5,7 +5,13 @@ from frappe.tests.utils import FrappeTestCase
 
 from rayher_crm.api.v1.errors import CrmApiException
 from rayher_crm.services.accounts import create_account
-from rayher_crm.services.bookings import create_booking, get_booking, update_booking
+from rayher_crm.services.bookings import (
+    create_booking,
+    get_booking,
+    list_bookings,
+    set_booking_actual_po_date,
+    update_booking,
+)
 from rayher_crm.services.contacts import create_contact
 from rayher_crm.services.opportunities import (
     confirm_po,
@@ -30,6 +36,7 @@ class TestOpportunityPoConfirmation(FrappeTestCase):
         self.manager = self._user("crm-po-manager@example.invalid", "CRM Manager")
         self.reviewer = self._user("crm-po-reviewer@example.invalid", "CRM Manager")
         self.other_sales = self._user("crm-po-other-sales@example.invalid", "CRM Sales")
+        self.po_date = str(frappe.utils.add_days(frappe.utils.today(), -3))
 
     def tearDown(self):
         frappe.set_user(self.original_user)
@@ -59,10 +66,11 @@ class TestOpportunityPoConfirmation(FrappeTestCase):
             "owner": self.sales, "status": "Active",
         })
         opportunity = create_strategy_opportunity({
+            "probabilityLevel": "pipeline",
             "accountId": account["id"], "siteId": site["id"], "title": f"{suffix} Opportunity",
             "owner": self.sales, "amount": "880000.00", "intentScore": 70, "poDate": "2026-12-31",
             "toolType": "Inspection", "saleType": "New Equipment", "subRegion": "华东", "currency": "CNY",
-            "originalAmount": "880000.00", "qualificationConfirmed": True,
+            "originalAmount": "880000.00", "amountCny": "880000.00", "qualificationConfirmed": True,
         })
         return account, contact, advance_opportunity_fixture(opportunity, "quotation_sent")
 
@@ -74,6 +82,9 @@ class TestOpportunityPoConfirmation(FrappeTestCase):
         }
         draft.update(overrides)
         return draft
+
+    def _po(self, contact: dict, **overrides) -> dict:
+        return {"booking": self._booking(contact, **overrides), "actualPoDate": self.po_date}
 
     def _approved_validation(self, opportunity: dict, contact: dict) -> dict:
         frappe.set_user(self.sales)
@@ -91,28 +102,28 @@ class TestOpportunityPoConfirmation(FrappeTestCase):
     def test_po_from_quotation_sent_creates_a_confirmed_booking(self):
         account, contact, quoted = self._quoted("PoDirect")
         with self.assertRaises(CrmApiException) as stale:
-            confirm_po(quoted["id"], {"booking": self._booking(contact)}, "2000-01-01T00:00:00Z")
+            confirm_po(quoted["id"], self._po(contact), "2000-01-01T00:00:00Z")
         self.assertEqual(stale.exception.code, "VERSION_CONFLICT")
-        for payload in ({"booking": self._booking(contact, quantity=0)}, {}):
+        for payload in (self._po(contact, quantity=0), {}):
             with self.subTest(payload=payload), self.assertRaises(CrmApiException) as invalid:
                 confirm_po(quoted["id"], payload, quoted["modified"])
             self.assertEqual(invalid.exception.code, "VALIDATION_ERROR")
         frappe.set_user(self.manager)
         with self.assertRaises(CrmApiException) as manager_owner:
-            confirm_po(quoted["id"], {"booking": self._booking(contact, owner="")}, quoted["modified"])
+            confirm_po(quoted["id"], self._po(contact, owner=""), quoted["modified"])
         self.assertEqual(manager_owner.exception.code, "VALIDATION_ERROR")
 
         frappe.set_user(self.sales)
         frappe.db.set_value("CRM Opportunity", quoted["id"], "probability_level", "", update_modified=False)
         with self.assertRaises(CrmApiException) as no_level:
-            confirm_po(quoted["id"], {"booking": self._booking(contact)}, quoted["modified"])
+            confirm_po(quoted["id"], self._po(contact), quoted["modified"])
         self.assertEqual(no_level.exception.field_errors, {"probabilityLevel": "Required"})
         frappe.db.set_value("CRM Opportunity", quoted["id"], "probability_level", "committed", update_modified=False)
         self.assertEqual(
             (get_strategy_opportunity(quoted["id"])["stage"], self._booking_count(quoted["id"])), ("quotation_sent", 0),
         )
 
-        received = confirm_po(quoted["id"], {"booking": self._booking(contact)}, quoted["modified"])
+        received = confirm_po(quoted["id"], self._po(contact), quoted["modified"])
         booking_id = received["liveBooking"]["id"]
         self.assertEqual(received["stage"], "po_received")
         self.assertEqual(
@@ -132,7 +143,7 @@ class TestOpportunityPoConfirmation(FrappeTestCase):
         )
 
         with self.assertRaises(CrmApiException) as twice:
-            confirm_po(quoted["id"], {"booking": self._booking(contact)}, received["modified"])
+            confirm_po(quoted["id"], self._po(contact), received["modified"])
         self.assertEqual(twice.exception.code, "CONFLICT")
         with self.assertRaises(CrmApiException) as lost_after_po:
             mark_opportunity_lost(quoted["id"], {"lostReason": "Too late"}, received["modified"])
@@ -177,7 +188,7 @@ class TestOpportunityPoConfirmation(FrappeTestCase):
         after_cancel = get_strategy_opportunity(quoted["id"])
         self.assertIsNone(after_cancel["liveBooking"])
         replaced = confirm_po(
-            quoted["id"], {"booking": self._booking(contact, amount="860000.00")}, after_cancel["modified"],
+            quoted["id"], self._po(contact, amount="860000.00"), after_cancel["modified"],
         )
         self.assertEqual((replaced["stage"], replaced["stageHistory"]), ("po_received", after_cancel["stageHistory"]))
         self.assertNotEqual(replaced["liveBooking"]["id"], booking_id)
@@ -197,6 +208,7 @@ class TestOpportunityPoConfirmation(FrappeTestCase):
         received = confirm_po(quoted["id"], {
             "booking": self._booking(contact, amount="900000.00", note="PO arrived"),
             "expectedBookingModified": approved["liveBooking"]["modified"],
+            "actualPoDate": self.po_date,
         }, approved["modified"])
         self.assertEqual(
             (received["stage"], received["liveBooking"]["id"], received["liveBooking"]["status"], received["liveBooking"]["amount"]),
@@ -225,7 +237,7 @@ class TestOpportunityPoConfirmation(FrappeTestCase):
         self.assertEqual((quoted_again["stage"], quoted_again["liveBooking"]), ("quotation_sent", None))
 
         frappe.set_user(self.sales)
-        direct = confirm_po(quoted["id"], {"booking": self._booking(contact)}, quoted_again["modified"])
+        direct = confirm_po(quoted["id"], self._po(contact), quoted_again["modified"])
         self.assertNotEqual(direct["liveBooking"]["id"], pending_id)
         frappe.set_user(self.manager)
         with self.assertRaises(CrmApiException) as not_from_validation:
@@ -267,7 +279,10 @@ class TestOpportunityPoConfirmation(FrappeTestCase):
 
         # The confirmation carries the Booking version the form was prefilled from, so an edit made in the
         # meantime (another tab, another user) is not written over.
-        for payload in ({"booking": prefilled}, {"booking": prefilled, "expectedBookingModified": " "}):
+        for payload in (
+            {"booking": prefilled, "actualPoDate": self.po_date},
+            {"booking": prefilled, "expectedBookingModified": " ", "actualPoDate": self.po_date},
+        ):
             with self.subTest(payload=payload), self.assertRaises(CrmApiException) as missing:
                 confirm_po(quoted["id"], payload, current["modified"])
             self.assertEqual(missing.exception.code, "VALIDATION_ERROR")
@@ -275,6 +290,7 @@ class TestOpportunityPoConfirmation(FrappeTestCase):
         with self.assertRaises(CrmApiException) as stale:
             confirm_po(quoted["id"], {
                 "booking": prefilled, "expectedBookingModified": current["liveBooking"]["modified"],
+                "actualPoDate": self.po_date,
             }, current["modified"])
         self.assertEqual(stale.exception.code, "VERSION_CONFLICT")
         self.assertEqual(get_booking(pending_id)["note"], "Ship to the new fab, dock 3")
@@ -283,6 +299,7 @@ class TestOpportunityPoConfirmation(FrappeTestCase):
         prefilled["note"] = current["liveBooking"]["note"]
         received = confirm_po(quoted["id"], {
             "booking": prefilled, "expectedBookingModified": current["liveBooking"]["modified"],
+            "actualPoDate": self.po_date,
         }, current["modified"])
         booking = get_booking(pending_id)
         self.assertEqual(
@@ -305,6 +322,7 @@ class TestOpportunityPoConfirmation(FrappeTestCase):
         with self.assertRaises(CrmApiException) as denied:
             confirm_po(quoted["id"], {
                 "booking": self._booking(contact), "expectedBookingModified": reassigned["modified"],
+                "actualPoDate": self.po_date,
             }, hidden["modified"])
         self.assertEqual(denied.exception.code, "SCOPE_DENIED")
         self.assertEqual(
@@ -315,6 +333,7 @@ class TestOpportunityPoConfirmation(FrappeTestCase):
         frappe.set_user(self.manager)
         received = confirm_po(quoted["id"], {
             "booking": self._booking(contact, owner=self.other_sales), "expectedBookingModified": reassigned["modified"],
+            "actualPoDate": self.po_date,
         }, hidden["modified"])
         self.assertEqual(
             (received["stage"], received["liveBooking"]["status"], received["liveBooking"]["owner"]),
@@ -370,6 +389,7 @@ class TestOpportunityPoConfirmation(FrappeTestCase):
         frappe.set_user(self.sales)
         received = confirm_po(quoted["id"], {
             "booking": self._booking(contact), "expectedBookingModified": approved["liveBooking"]["modified"],
+            "actualPoDate": self.po_date,
         }, approved["modified"])
         booking_id = received["liveBooking"]["id"]
         update_booking(booking_id, {"status": "Cancelled"}, get_booking(booking_id)["modified"])
@@ -391,7 +411,7 @@ class TestOpportunityPoConfirmation(FrappeTestCase):
         _, contact, quoted = self._quoted("PoVersion")
         approved = self._approved_validation(quoted, contact)
         pending_id = approved["liveBooking"]["id"]
-        stale_form = {"booking": self._booking(contact)}
+        stale_form = self._po(contact)
 
         frappe.set_user(self.sales)
         edited = update_booking(pending_id, {"note": "Dock 3"}, get_booking(pending_id)["modified"])
@@ -432,6 +452,7 @@ class TestOpportunityPoConfirmation(FrappeTestCase):
         old_input = {
             "booking": self._booking(contact),
             "expectedBookingModified": approved["liveBooking"]["modified"],
+            "actualPoDate": self.po_date,
         }
         update_booking(pending_id, {"status": "Cancelled"}, get_booking(pending_id)["modified"])
 
@@ -441,7 +462,7 @@ class TestOpportunityPoConfirmation(FrappeTestCase):
         # refused whether or not it carries the Pending Booking's version.
         self.assertNotEqual(current["modified"], approved["modified"])
         self.assertIsNone(current["liveBooking"])
-        for payload in (old_input, {"booking": self._booking(contact)}):
+        for payload in (old_input, self._po(contact)):
             with self.subTest(payload=payload), self.assertRaises(CrmApiException) as cancelled:
                 confirm_po(quoted["id"], payload, approved["modified"])
             self.assertEqual(cancelled.exception.code, "VERSION_CONFLICT")
@@ -452,7 +473,7 @@ class TestOpportunityPoConfirmation(FrappeTestCase):
         self.assertEqual(get_booking(pending_id)["status"], "Cancelled")
 
         # A refreshed form has no Pending Booking version and may explicitly create a replacement.
-        received = confirm_po(quoted["id"], {"booking": self._booking(contact)}, unchanged["modified"])
+        received = confirm_po(quoted["id"], self._po(contact), unchanged["modified"])
         self.assertEqual(received["stage"], "po_received")
         self.assertEqual((received["liveBooking"]["status"], self._booking_count(quoted["id"])), ("Confirmed", 2))
         self.assertNotEqual(received["liveBooking"]["id"], pending_id)
@@ -464,3 +485,154 @@ class TestOpportunityPoConfirmation(FrappeTestCase):
             with self.subTest(target=target), self.assertRaises(CrmApiException) as completed:
                 rollback_opportunity_stage(quoted["id"], target, "Already installed", received["modified"])
             self.assertEqual(completed.exception.code, "CONFLICT")
+
+    def test_po_confirmation_records_the_actual_po_date_on_the_booking(self):
+        _, contact, quoted = self._quoted("PoActualDate")
+        tomorrow = str(frappe.utils.add_days(frappe.utils.today(), 1))
+        for actual_po_date, error in ((None, "Required"), (tomorrow, "Cannot be in the future")):
+            payload = {"booking": self._booking(contact)}
+            if actual_po_date:
+                payload["actualPoDate"] = actual_po_date
+            with self.subTest(actual_po_date=actual_po_date), self.assertRaises(CrmApiException) as invalid:
+                confirm_po(quoted["id"], payload, quoted["modified"])
+            self.assertEqual(invalid.exception.field_errors, {"actualPoDate": error})
+        self.assertEqual(self._booking_count(quoted["id"]), 0)
+
+        received = confirm_po(quoted["id"], self._po(contact), quoted["modified"])
+        self.assertEqual(received["liveBooking"]["actualPoDate"], self.po_date)
+        # The stage history keeps the system time; the date on the PO lives on the Booking.
+        self.assertEqual(
+            (received["stageHistory"][0]["event"], received["stageHistory"][0]["reachedAtBasis"]),
+            ("po_confirmed", "recorded"),
+        )
+        booking = get_booking(received["liveBooking"]["id"])
+        self.assertEqual(
+            (booking["actualPoDate"], booking["actualPoDateSource"], booking["actualPoDateNote"], booking["bookingDate"]),
+            (self.po_date, "po_confirmation", "", frappe.utils.today()),
+        )
+
+        noted = update_booking(booking["id"], {"note": "PO rev B"}, booking["modified"])
+        self.assertEqual(noted["actualPoDate"], self.po_date)
+        with self.assertRaises(CrmApiException) as changed:
+            update_booking(booking["id"], {"actualPoDate": "2026-01-02"}, noted["modified"])
+        self.assertEqual(changed.exception.field_errors, {"actualPoDate": "Manager correction only"})
+        cancelled = update_booking(booking["id"], {"status": "Cancelled"}, noted["modified"])
+        self.assertEqual((cancelled["status"], cancelled["actualPoDate"]), ("Cancelled", self.po_date))
+
+        after_cancel = get_strategy_opportunity(quoted["id"])
+        with self.assertRaises(CrmApiException) as undated_replacement:
+            confirm_po(quoted["id"], {"booking": self._booking(contact)}, after_cancel["modified"])
+        self.assertEqual(undated_replacement.exception.field_errors, {"actualPoDate": "Required"})
+        replaced = confirm_po(quoted["id"], self._po(contact), after_cancel["modified"])
+        replacement = get_booking(replaced["liveBooking"]["id"])
+        self.assertEqual((replacement["actualPoDate"], replacement["actualPoDateSource"]), (self.po_date, "po_confirmation"))
+
+    def test_internal_validation_booking_gets_its_po_date_only_when_the_po_is_confirmed(self):
+        _, contact, quoted = self._quoted("PoDateValidated")
+        approved = self._approved_validation(quoted, contact)
+        pending_id = approved["liveBooking"]["id"]
+        self.assertEqual(get_booking(pending_id)["actualPoDate"], "")
+
+        frappe.set_user(self.sales)
+        pending = get_booking(pending_id)
+        payload = self._po(contact)
+        payload["expectedBookingModified"] = pending["modified"]
+        received = confirm_po(quoted["id"], payload, approved["modified"])
+        self.assertEqual(
+            (received["liveBooking"]["id"], get_booking(pending_id)["actualPoDateSource"]), (pending_id, "po_confirmation"),
+        )
+
+        frappe.set_user(self.manager)
+        back = rollback_opportunity_stage(
+            quoted["id"], "internal_validation", "Customer withdrew the PO", received["modified"],
+        )
+        pending = get_booking(pending_id)
+        self.assertEqual((pending["status"], pending["actualPoDate"], pending["actualPoDateSource"]), ("Pending", "", ""))
+        self.assertEqual(
+            [(row["from"], row["to"]) for row in back["history"] if row["field"] == "bookingPoDate"],
+            [(self.po_date, "")],
+        )
+        frappe.set_user(self.sales)
+        with self.assertRaises(CrmApiException) as undated:
+            confirm_po(quoted["id"], {"booking": self._booking(contact)}, back["modified"])
+        self.assertEqual(undated.exception.field_errors, {"actualPoDate": "Required"})
+
+    def test_only_a_manager_fills_in_or_corrects_the_actual_po_date(self):
+        account, contact, quoted = self._quoted("PoBackfill")
+        received = confirm_po(quoted["id"], self._po(contact), quoted["modified"])
+        booking_id = received["liveBooking"]["id"]
+        # An order confirmed before the actual PO date existed.
+        frappe.db.set_value(
+            "CRM Booking", booking_id, {"actual_po_date": None, "actual_po_date_source": None}, update_modified=False,
+        )
+        booking = get_booking(booking_id)
+        missing = list_bookings({"actualPoDateMissing": "1", "pageSize": 100})[0]
+        self.assertIn(booking_id, {row["id"] for row in missing})
+        with self.assertRaises(CrmApiException) as sales_denied:
+            set_booking_actual_po_date(booking_id, {"actualPoDate": "2025-12-30"}, booking["modified"])
+        self.assertEqual(sales_denied.exception.code, "PERMISSION_DENIED")
+
+        frappe.set_user(self.manager)
+        with self.assertRaises(CrmApiException) as stale:
+            set_booking_actual_po_date(booking_id, {"actualPoDate": "2025-12-30"}, "2000-01-01T00:00:00Z")
+        self.assertEqual(stale.exception.code, "VERSION_CONFLICT")
+        filled = set_booking_actual_po_date(booking_id, {"actualPoDate": "2025-12-30"}, booking["modified"])
+        self.assertEqual(
+            (filled["actualPoDate"], filled["actualPoDateSource"], filled["actualPoDateNote"], filled["bookingDate"]),
+            ("2025-12-30", "backfill", "", booking["bookingDate"]),
+        )
+        for payload, field_errors in (
+            ({"actualPoDate": "2025-12-30", "reason": "Same date"}, {"actualPoDate": "Unchanged"}),
+            ({"actualPoDate": "2026-01-02"}, {"reason": "Required"}),
+            ({"actualPoDate": "", "reason": "Clear it"}, {"actualPoDate": "Required"}),
+        ):
+            with self.subTest(payload=payload), self.assertRaises(CrmApiException) as invalid:
+                set_booking_actual_po_date(booking_id, payload, filled["modified"])
+            self.assertEqual(invalid.exception.field_errors, field_errors)
+        corrected = set_booking_actual_po_date(
+            booking_id, {"actualPoDate": "2026-01-02", "reason": "The PO scan is dated 2 January"}, filled["modified"],
+        )
+        self.assertEqual(
+            (corrected["actualPoDate"], corrected["actualPoDateNote"]), ("2026-01-02", "The PO scan is dated 2 January"),
+        )
+        self.assertEqual(
+            [(row["from"], row["to"]) for row in get_strategy_opportunity(quoted["id"])["history"] if row["field"] == "bookingPoDate"],
+            [("2025-12-30", "2026-01-02"), ("", "2025-12-30")],
+        )
+
+        # A converted order stays open to the correction; a Pending one has no PO yet.
+        frappe.db.set_value("CRM Booking", booking_id, "status", "Completed", update_modified=False)
+        completed = set_booking_actual_po_date(
+            booking_id, {"actualPoDate": "2026-01-03", "reason": "The customer reissued the PO"}, corrected["modified"],
+        )
+        self.assertEqual((completed["status"], completed["actualPoDate"]), ("Completed", "2026-01-03"))
+        pending_upsell = create_booking({
+            "accountId": account["id"], "primaryContactId": contact["id"], "equipment": "Spare parts",
+            "quantity": 1, "ddl": "2027-03-31", "amount": "1000.00", "currency": "CNY", "status": "Pending",
+            "owner": self.sales, "source": "Upsell",
+        })
+        with self.assertRaises(CrmApiException) as pending:
+            set_booking_actual_po_date(pending_upsell["id"], {"actualPoDate": "2026-01-03"}, pending_upsell["modified"])
+        self.assertEqual(pending.exception.code, "INVALID_TRANSITION")
+
+    def test_upsell_booking_takes_its_first_actual_po_date_on_entry(self):
+        account, contact, _ = self._quoted("PoUpsell")
+        base = {
+            "accountId": account["id"], "primaryContactId": contact["id"], "equipment": "Spare parts",
+            "quantity": 1, "ddl": "2027-03-31", "amount": "1000.00", "currency": "CNY", "status": "Confirmed",
+            "owner": self.sales, "source": "Upsell",
+        }
+        with self.assertRaises(CrmApiException) as future:
+            create_booking({**base, "actualPoDate": str(frappe.utils.add_days(frappe.utils.today(), 1))})
+        self.assertEqual(future.exception.field_errors, {"actualPoDate": "Cannot be in the future"})
+        dated = create_booking({**base, "actualPoDate": self.po_date})
+        self.assertEqual((dated["actualPoDate"], dated["actualPoDateSource"]), (self.po_date, "booking_entry"))
+
+        undated = create_booking(base)
+        self.assertEqual((undated["actualPoDate"], undated["actualPoDateSource"]), ("", ""))
+        filled = update_booking(undated["id"], {"actualPoDate": self.po_date}, undated["modified"])
+        self.assertEqual((filled["actualPoDate"], filled["actualPoDateSource"]), (self.po_date, "booking_entry"))
+        for value in ("2026-01-02", ""):
+            with self.subTest(value=value), self.assertRaises(CrmApiException) as locked:
+                update_booking(filled["id"], {"actualPoDate": value}, filled["modified"])
+            self.assertEqual(locked.exception.field_errors, {"actualPoDate": "Manager correction only"})

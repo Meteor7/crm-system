@@ -2,7 +2,7 @@
 import { notificationCopy } from '@/i18n/notification-copy'
 import { requestErrorMessage } from '@/api/request-state'
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
+import { START_LOCATION, useRoute, useRouter } from 'vue-router'
 import { Bell, Globe2, KeyRound, Menu, PanelLeftClose, PanelLeftOpen, Settings, X } from '@lucide/vue'
 import { navigation } from './navigation'
 import { useAppStore } from '@/stores/app'
@@ -39,9 +39,11 @@ const isEmbedded = computed(() => props.embedded ?? (Boolean((window as FrappeWi
 const brandLogoUrl = `${import.meta.env.BASE_URL}brand/planck-logo-standard.png`
 const DEMO_TYPOGRAPHY_EXCLUDED_PATHS = new Set(['/demo-workflow', '/demo-requests', '/evaluations'])
 const usesStandardTypography = computed(() => !DEMO_TYPOGRAPHY_EXCLUDED_PATHS.has(route.path))
-const activeNavigationPath = computed(() =>
-  typeof route.meta.navigationPath === 'string' ? route.meta.navigationPath : route.path,
-)
+const activeNavigationPath = computed(() => {
+  // The board is a cockpit tab like Plan; people without the cockpit open it from Opportunities.
+  if (route.name === 'opportunity-board' && !store.can('cockpit:view')) return '/opportunities'
+  return typeof route.meta.navigationPath === 'string' ? route.meta.navigationPath : route.path
+})
 
 const user = computed(() => store.bootstrap?.user ?? {
   name: '演示员工24',
@@ -67,14 +69,16 @@ const visibleNavigation = computed(() => {
   const role = store.bootstrap?.user.role
   return navigation
     .filter((group) => !role || !group.hiddenRoles?.includes(role))
-    .map((group) => ({ ...group, items: group.items.filter((item) => store.bootstrap && item.capabilities.some((capability) => hasCapability(store.bootstrap, capability))) }))
+    .map((group) => ({ ...group, items: group.items.filter((item) => store.bootstrap && (!role || !item.hiddenRoles?.includes(role)) && item.capabilities.some((capability) => hasCapability(store.bootstrap, capability))) }))
     .filter((group) => group.items.length)
 })
 
 watch(
-  () => [store.identityRevision, route.path] as const,
+  () => [store.identityRevision, store.bootstrap?.user.role, route.path] as const,
   () => {
-    if (!store.bootstrap) return
+    // Wait for the first navigation to resolve; an unknown URL still falls back to the first allowed page.
+    if (!store.bootstrap || router.currentRoute.value === START_LOCATION) return
+    if (route.name === 'opportunity-board' && store.can('deal:view')) return
     const allowedPaths = visibleNavigation.value.flatMap((group) => group.items.map((item) => item.path))
     if (!allowedPaths.includes(activeNavigationPath.value) && allowedPaths[0]) void router.replace(allowedPaths[0])
   },

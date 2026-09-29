@@ -10,6 +10,9 @@ QUOTATION_VERSION_INDEX = "uq_crm_quotation_version_number"
 PROBABILITY_HISTORY_INDEX = "idx_crm_opportunity_probability_history"
 STAGE_HISTORY_INDEX = "idx_crm_opportunity_stage_history"
 STAGE_REACHED_INDEX = "idx_crm_opportunity_stage_reached"
+LOSS_REVIEW_INDEX = "idx_crm_opportunity_loss_review"
+LOSS_REVIEW_REVISION_INDEX = "idx_crm_opportunity_loss_review_revision"
+WARNING_HANDLING_REVISION_INDEX = "idx_crm_warning_handling_revision"
 
 
 def install_stage5f_indexes() -> None:
@@ -51,4 +54,16 @@ def install_stage5f_indexes() -> None:
         # The cockpit counts arrivals at a stage within a period.
         frappe.db.add_index(
             "CRM Opportunity Stage History", ["to_stage", "reached_at"], STAGE_REACHED_INDEX,
+        )
+    # Opportunity detail and list pages read post-mortems per Opportunity.
+    if frappe.db.table_exists("CRM Opportunity Loss Review"):
+        frappe.db.add_index("CRM Opportunity Loss Review", ["opportunity", "lost_at"], LOSS_REVIEW_INDEX)
+    if frappe.db.table_exists("CRM Opportunity Loss Review Revision"):
+        frappe.db.add_index(
+            "CRM Opportunity Loss Review Revision", ["opportunity", "recorded_at"], LOSS_REVIEW_REVISION_INDEX,
+        )
+    # Review and Warnings read every handling's revisions; the Opportunity delete removes them per handling.
+    if frappe.db.table_exists("CRM Warning Handling Revision"):
+        frappe.db.add_index(
+            "CRM Warning Handling Revision", ["handling", "recorded_at"], WARNING_HANDLING_REVISION_INDEX,
         )

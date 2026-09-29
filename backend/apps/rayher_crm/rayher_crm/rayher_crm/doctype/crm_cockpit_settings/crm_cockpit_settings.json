@@ -1,0 +1,51 @@
+{
+  "doctype": "DocType",
+  "name": "CRM Cockpit Settings",
+  "module": "Rayher CRM",
+  "engine": "InnoDB",
+  "issingle": 1,
+  "track_changes": 1,
+  "owner": "Administrator",
+  "modified_by": "Administrator",
+  "creation": "2026-09-24 00:00:00.000000",
+  "modified": "2026-09-28 20:00:00.000000",
+  "field_order": [
+    "quote_expiry_days",
+    "stage6_no_po_days",
+    "configured"
+  ],
+  "fields": [
+    {
+      "fieldname": "quote_expiry_days",
+      "fieldtype": "Int",
+      "label": "Quotation Expiry Warning Days",
+      "description": "Empty: site config crm_cockpit_quote_expiry_days, else 14."
+    },
+    {
+      "fieldname": "stage6_no_po_days",
+      "fieldtype": "Int",
+      "label": "Stage 6 Without PO Days",
+      "description": "Empty: site config crm_cockpit_stage6_no_po_days, else 30."
+    },
+    {
+      "fieldname": "configured",
+      "fieldtype": "Check",
+      "label": "Saved by a Manager",
+      "default": "0",
+      "hidden": 1,
+      "read_only": 1,
+      "description": "Set by the Warnings settings save. A row that install or migrate may leave has every Int at 0; without this flag it would read as saved."
+    }
+  ],
+  "permissions": [
+    {
+      "role": "CRM Manager",
+      "read": 1
+    }
+  ],
+  "sort_field": "modified",
+  "sort_order": "DESC",
+  "actions": [],
+  "states": [],
+  "index_web_pages_for_search": 0
+}

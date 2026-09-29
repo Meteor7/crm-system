@@ -129,7 +129,7 @@ try {
     $opportunity = Invoke-CrmPost $sessions.Sales 'rayher_crm.api.v1.opportunities.create_strategy_opportunity' @{input=@{probabilityLevel='pipeline';
         accountId=$created.Account;siteId=$created.Site;title="Stage 5E Opportunity $stamp";owner=$created.Sales
         stage=$qualifiedStage;qualificationConfirmed=$true;forecast='Pipeline';amount='300000.00';probability=50;intentScore=85;poDate='2026-12-31'
-        toolType='Inspection';saleType='New Equipment';subRegion='East China';currency='CNY';originalAmount='300000.00'
+        toolType='Inspection';saleType='New Equipment';subRegion='East China';currency='CNY';originalAmount='300000.00';amountCny='300000.00'
     }}
     $created.Opportunity = $opportunity.data.id
 

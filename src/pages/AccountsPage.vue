@@ -15,6 +15,7 @@ import RequiredMark from '@/design-system/RequiredMark.vue'
 import PersonnelSelect from '@/design-system/PersonnelSelect.vue'
 import PaginationControls from '@/features/shared/PaginationControls.vue'
 import AccountSegmentSelect from '@/features/accounts/AccountSegmentSelect.vue'
+import { REGION_PRESETS, regionLabel } from '@/domain/regions'
 import { personnelDisplayName, preferredPersonnelId } from '@/demo/personnel'
 import { mapRequestError, readRequestMeta, type RequestMetaState } from '@/api/request-state'
 import { formatDisplayDate } from '@/domain/time'
@@ -31,16 +32,18 @@ const page = ref(typeof route.query.page === 'string' && Number(route.query.page
 const pageSize = ref(typeof route.query.pageSize === 'string' && [10, 25, 50].includes(Number(route.query.pageSize)) ? Number(route.query.pageSize) : 10)
 const segment = ref(typeof route.query.segment === 'string' ? route.query.segment : 'All'), city = ref(typeof route.query.city === 'string' ? route.query.city : 'All')
 const segments = ref<string[]>(['Frontend', 'Advanced Packaging'])
+const regions = ref<string[]>([...REGION_PRESETS])
 const cities = ref<string[]>([])
 const accountModal = ref(false), busy = ref(false), modalError = useLocaleMessage()
 const canWrite = computed(() => app.can('account:write'))
 const canDelete = computed(() => app.bootstrap?.user.role === 'Manager')
-const accountForm = ref<CreateAccountInput>({ name: '', shortName: '', segment: 'Frontend', tier: 'A', city: '上海', region: '华东', owner: preferredPersonnelId('Sales', app.bootstrap?.user.id), visibility: 'Private' })
+const accountForm = ref<CreateAccountInput>({ name: '', shortName: '', segment: 'Frontend', tier: 'A', city: '上海', region: 'East China', owner: preferredPersonnelId('Sales', app.bootstrap?.user.id), visibility: 'Private' })
 type NewSiteDraft = Omit<SiteDto, 'id'> & { clientId: string }
 const newSiteDrafts = ref<NewSiteDraft[]>([])
 const createdAccountId = ref('')
 const persistedSiteCount = ref(0)
 let loadSequence = 0
+const regionOptionLabel = (value: string) => regionLabel(value, locale.value)
 const riskTone = (risk: AccountSummaryDto['risk']): Tone => risk === '高风险' ? 'danger' : risk === '关注' ? 'warning' : 'positive'
 
 async function load() {
@@ -64,6 +67,13 @@ async function loadSegments() {
     segments.value = ['Frontend', 'Advanced Packaging']
   }
 }
+async function loadRegions() {
+  try {
+    regions.value = (await props.apiClient.listAccountRegions()).data
+  } catch {
+    regions.value = [...REGION_PRESETS]
+  }
+}
 async function loadCities() {
   try {
     const result = await props.apiClient.listAccountCities()
@@ -76,6 +86,9 @@ function includeSegment(value: string) {
   const normalized = value.trim()
   if (normalized && !segments.value.includes(normalized)) segments.value = [...segments.value, normalized]
 }
+function includeRegion(value: string) {
+  if (value && !regions.value.includes(value)) regions.value = [...regions.value, value]
+}
 function includeCity(value: string) {
   const normalized = value.trim()
   if (normalized && !cities.value.includes(normalized)) cities.value = [...cities.value, normalized].sort((left, right) => left.localeCompare(right, 'zh-CN'))
@@ -87,7 +100,7 @@ function changeFilters() { if (restoringRoute) return; page.value = 1; syncUrl()
 function goPage(target: number) { page.value = target; syncUrl(); void load() }
 function changePageSize(value: number) { pageSize.value = value; page.value = 1; syncUrl(); void load() }
 function openAccountModal() {
-  accountForm.value = { name: '', shortName: '', segment: 'Frontend', tier: 'A', city: '上海', region: '华东', owner: preferredPersonnelId('Sales', app.bootstrap?.user.id), visibility: 'Private' }
+  accountForm.value = { name: '', shortName: '', segment: 'Frontend', tier: 'A', city: '上海', region: 'East China', owner: preferredPersonnelId('Sales', app.bootstrap?.user.id), visibility: 'Private' }
   newSiteDrafts.value = []
   createdAccountId.value = ''
   persistedSiteCount.value = 0
@@ -117,6 +130,7 @@ async function createAccount() {
         const result = await props.apiClient.createAccount(accountForm.value)
         accountId = result.data.id
         includeSegment(result.data.segment)
+        includeRegion(result.data.region)
         includeCity(result.data.city)
         createdAccountId.value = accountId
       }
@@ -155,7 +169,7 @@ watch(() => [route.query.page, route.query.pageSize, route.query.segment, route.
   if (restoredPage === page.value && restoredSize === pageSize.value && restoredSegment === segment.value && restoredCity === city.value) return
   restoringRoute = true; page.value = restoredPage; pageSize.value = restoredSize; segment.value = restoredSegment; city.value = restoredCity; restoringRoute = false; void load()
 })
-onMounted(() => { void load(); void loadSegments(); void loadCities() })
+onMounted(() => { void load(); void loadSegments(); void loadRegions(); void loadCities() })
 function openDetail(account: AccountSummaryDto) { void router.push({ name: 'account-detail', params: { accountId: account.id } }) }
 async function deleteAccount(account: AccountSummaryDto) {
   if (deletingId.value || !window.confirm(`${t('accounts.delete')} ${t('accounts.account').toLowerCase()} ${account.name}?`)) return
@@ -197,7 +211,7 @@ async function deleteAccount(account: AccountSummaryDto) {
           <tbody>
             <tr v-for="account in rows" :key="account.id" :data-account-id="account.id">
               <td><button class="account-link record-name-link" type="button" :data-open-account-detail="account.id" @click="openDetail(account)"><span><Building2 :size="14" /></span><div><strong>{{ account.shortName }}</strong><small>{{ account.name }}</small></div></button></td>
-              <td><strong>{{ account.segment }}</strong><small>{{ account.city }} · {{ account.region }}</small></td>
+              <td><strong>{{ account.segment }}</strong><small>{{ account.city }} · {{ regionLabel(account.region, locale) }}</small></td>
               <td>{{ personnelDisplayName(account.owner) }}</td><td><strong>{{ t('accounts.contactsCount', { count: account.stakeholderCount }) }}</strong><small>{{ t('accounts.sitesCount', { count: account.siteCount }) }}</small></td><td><strong>¥{{ account.pipelineAmount.toLocaleString(locale) }}</strong><small>{{ locale === 'en-US' ? 'Intent score' : '意愿评分' }} {{ account.intentScore }}</small></td><td><strong>{{ account.nextAction || t('accounts.none') }}</strong><small>{{ account.nextActionDue ? formatDisplayDate(account.nextActionDue) : t('accounts.unscheduled') }}</small></td>
               <td><StatusBadge :label="account.risk === '高风险' ? t('accounts.riskHigh') : account.risk === '关注' ? t('accounts.riskWatch') : t('accounts.riskStable')" :tone="riskTone(account.risk)" /></td><td>{{ account.completeness }}%</td><td>{{ formatDisplayDate(account.updatedAt) }}</td>
               <td v-if="canDelete"><button type="button" class="site-remove" :data-delete-account="account.id" :disabled="Boolean(deletingId)" @click="deleteAccount(account)">{{ t('accounts.delete') }}</button></td>
@@ -214,8 +228,8 @@ async function deleteAccount(account: AccountSummaryDto) {
         <label><span>{{ locale === 'en-US' ? 'Short name' : '客户简称' }}<RequiredMark /></span><input v-model="accountForm.shortName" :aria-label="locale === 'en-US' ? 'Short name' : '客户简称'" required /></label>
         <label><span>{{ locale === 'en-US' ? 'Business area' : '业务领域' }}<RequiredMark /></span><AccountSegmentSelect v-model="accountForm.segment" :segments="segments" :label="locale === 'en-US' ? 'Account business area' : '客户业务领域'" required /></label>
         <label><span>{{ locale === 'en-US' ? 'Account tier' : '客户等级' }}<RequiredMark /></span><select v-model="accountForm.tier" :aria-label="locale === 'en-US' ? 'Account tier' : '客户等级'" required><option>S</option><option>A</option><option>B</option></select></label>
+        <label><span>{{ locale === 'en-US' ? 'Region' : '区域' }}<RequiredMark /></span><AccountSegmentSelect v-model="accountForm.region" :segments="regions" :label="locale === 'en-US' ? 'Region' : '客户区域'" :option-label="regionOptionLabel" :custom-option-label="t('region.customOption')" :custom-placeholder="t('region.customPlaceholder')" :empty-placeholder="t('region.choose')" :custom-on-empty="false" required /></label>
         <label><span>{{ locale === 'en-US' ? 'City' : '城市' }}<RequiredMark /></span><input v-model="accountForm.city" :aria-label="locale === 'en-US' ? 'City' : '客户城市'" required /></label>
-        <label><span>{{ locale === 'en-US' ? 'Region' : '区域' }}<RequiredMark /></span><input v-model="accountForm.region" :aria-label="locale === 'en-US' ? 'Region' : '客户区域'" required /></label>
         <label class="wide"><span>{{ locale === 'en-US' ? 'Owner' : '负责人' }}<RequiredMark /></span><PersonnelSelect v-model="accountForm.owner" :roles="['Sales']" :ariaLabel="locale === 'en-US' ? 'Account owner' : '客户负责人'" required /></label>
         <label class="wide"><span>{{ locale === 'en-US' ? 'Visibility' : '访问权限' }}<RequiredMark /></span><select v-model="accountForm.visibility" :aria-label="locale === 'en-US' ? 'Account visibility' : '客户访问权限'" required><option value="Private">{{ locale === 'en-US' ? 'Private: owner and Manager only' : '私有：仅负责人和 Manager 可见' }}</option><option value="Public">{{ locale === 'en-US' ? 'Public: all Sales can view; other Sales read-only' : '公开：所有 Sales 可见，其他 Sales 只读' }}</option></select></label>
       </div>

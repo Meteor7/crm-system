@@ -2,8 +2,8 @@
 import { computed, onMounted, ref, watch } from 'vue'
 import { FlaskConical } from '@lucide/vue'
 import { useRoute, useRouter } from 'vue-router'
-import { api as defaultApi, type CrmApi } from '@/api'
-import type { CreateTestRunInput, EvaluationDto, EvaluationPreparationBranch, EvaluationStatus, EvaluationStatusCommand } from '@/types/crm'
+import { api as defaultApi, CrmApiError, type CrmApi } from '@/api'
+import type { CreateTestRunInput, EvaluationDto, EvaluationPreparationBranch, EvaluationStatus, EvaluationStatusCommand, TestRunDto } from '@/types/crm'
 import { mapRequestError, readRequestMeta, type RequestMetaState } from '@/api/request-state'
 import { evaluationGroup } from '@/domain/evaluations'
 import { useAppStore } from '@/stores/app'
@@ -15,10 +15,12 @@ import EvaluationWorkspace from '@/features/evaluations/EvaluationWorkspace.vue'
 import PaginationControls from '@/features/shared/PaginationControls.vue'
 import TestDeadlineModal from '@/features/evaluations/TestDeadlineModal.vue'
 import TestRunModal from '@/features/evaluations/TestRunModal.vue'
+import TestRunActionModal from '@/features/evaluations/TestRunActionModal.vue'
+import { canManageTestRun, type TestRunAction } from '@/features/evaluations/test-run-actions'
 import TestReportUploadModal from '@/features/evaluations/TestReportUploadModal.vue'
 import CustomerReportUploadModal from '@/features/evaluations/CustomerReportUploadModal.vue'
 import CustomerCommentModal from '@/features/evaluations/CustomerCommentModal.vue'
-import { useI18n, useLocaleMessage } from '@/i18n'
+import { useI18n, useLocaleMessage, localeMessage } from '@/i18n'
 
 const props = withDefaults(defineProps<{ apiClient?: CrmApi }>(), {
   apiClient: () => defaultApi,
@@ -43,6 +45,11 @@ const warnings = ref<string[]>([])
 const view = ref<EvaluationView>('overview')
 const selectedId = ref('')
 const runTarget = ref<EvaluationDto | null>(null)
+const runActionTarget = ref<{ evaluation: EvaluationDto; run: TestRunDto; action: TestRunAction } | null>(null)
+const runActionError = useLocaleMessage()
+const runActionRequestId = ref('')
+const runActionConflict = ref(false)
+const runActionKey = ref(0)
 const deadlineTarget = ref<EvaluationDto | null>(null)
 const reportTarget = ref<EvaluationDto | null>(null)
 const customerReportTarget = ref<EvaluationDto | null>(null)
@@ -125,6 +132,7 @@ function handleWriteError(reason: unknown) {
     denied.value = true
     rows.value = []
     runTarget.value = null
+    runActionTarget.value = null
     deadlineTarget.value = null
     reportTarget.value = null
     customerReportTarget.value = null
@@ -225,6 +233,101 @@ async function addRun(input: CreateTestRunInput) {
   }
 }
 
+function openRunAction(evaluation: EvaluationDto, run: TestRunDto, action: TestRunAction) {
+  if (!canWrite.value || processing.value || !canManageTestRun(evaluation, run)) return
+  clearActionError()
+  runActionError.value = ''
+  runActionRequestId.value = ''
+  runActionConflict.value = false
+  runActionKey.value++
+  runActionTarget.value = { evaluation, run, action }
+}
+
+function closeRunAction() {
+  if (processing.value) return
+  runActionTarget.value = null
+}
+
+function reportRunActionError(reason: unknown) {
+  const mapped = mapRequestError(reason)
+  if (mapped.denied) {
+    handleWriteError(reason)
+    return
+  }
+  runActionError.value = mapped.localizedMessage ?? mapped.message
+  runActionRequestId.value = mapped.requestId
+  runActionConflict.value = reason instanceof CrmApiError && reason.code === 'VERSION_CONFLICT'
+}
+
+async function mutateRun(input: CreateTestRunInput | { reason: string }) {
+  const target = runActionTarget.value
+  if (!target || !canWrite.value || processing.value || runActionConflict.value) return
+  if (!canManageTestRun(target.evaluation, target.run)) return
+  if (!target.evaluation.modified) {
+    runActionError.value = localeMessage('Reload the latest record before saving.', '请先重新载入最新记录再保存。')
+    runActionConflict.value = true
+    return
+  }
+  const identity = app.identityRevision
+  processing.value = target.evaluation.id
+  runActionError.value = ''
+  runActionRequestId.value = ''
+  try {
+    const expectedModified = target.evaluation.modified
+    const result = 'reason' in input
+      ? await props.apiClient.cancelEvaluationRun(target.evaluation.id, target.run.id, { ...input, expectedModified })
+      : await props.apiClient.updateEvaluationRun(target.evaluation.id, target.run.id, { ...input, expectedModified })
+    if (identity !== app.identityRevision || target !== runActionTarget.value) return
+    runActionTarget.value = null
+    rows.value = rows.value.map(row => row.id === result.data.id ? result.data : row)
+    selectedId.value = result.data.id
+    await load()
+  } catch (reason) {
+    if (identity === app.identityRevision && target === runActionTarget.value) reportRunActionError(reason)
+  } finally {
+    if (identity === app.identityRevision) processing.value = ''
+  }
+}
+
+async function reloadRunAction() {
+  const target = runActionTarget.value
+  if (!target || processing.value || !canWrite.value) return
+  const identity = app.identityRevision
+  processing.value = target.evaluation.id
+  try {
+    const { data } = await props.apiClient.getEvaluation(target.evaluation.id)
+    if (identity !== app.identityRevision || target !== runActionTarget.value) return
+    rows.value = rows.value.map(row => row.id === data.id ? data : row)
+    const run = data.runs.find(row => row.id === target.run.id)
+    if (!run || !canManageTestRun(data, run)) {
+      runActionTarget.value = null
+      actionError.value = localeMessage('This test run can no longer be changed. The latest record is shown.', '该测试已不能修改，页面已显示最新记录。')
+      return
+    }
+    runActionError.value = ''
+    runActionRequestId.value = ''
+    runActionConflict.value = false
+    runActionKey.value++
+    runActionTarget.value = { ...target, evaluation: data, run }
+  } catch (reason) {
+    if (identity === app.identityRevision && target === runActionTarget.value) {
+      reportRunActionError(reason)
+      // A failed reload must not allow the stale version to be resubmitted.
+      runActionConflict.value = true
+    }
+  } finally {
+    if (identity === app.identityRevision) processing.value = ''
+  }
+}
+
+watch(() => [app.identityRevision, canWrite.value], () => {
+  if (runActionTarget.value) {
+    runActionTarget.value = null
+    runActionError.value = ''
+    processing.value = ''
+  }
+})
+
 async function setDeadline(input: { testRunDeadline: string }) {
   if (!deadlineTarget.value) return
   processing.value = deadlineTarget.value.id
@@ -307,6 +410,7 @@ onMounted(async () => {
       @prepare="completePreparation"
       @deadline="deadlineTarget = $event"
       @run="runTarget = $event"
+      @manage-run="openRunAction"
       @report="reportTarget = $event"
       @customer-report="customerReportTarget = $event"
       @retest="openRetest"
@@ -334,6 +438,20 @@ onMounted(async () => {
       :api-client="apiClient"
       @close="reportTarget = null"
       @uploaded="reportUploaded"
+    />
+    <TestRunActionModal
+      v-if="runActionTarget"
+      :key="runActionKey"
+      :run="runActionTarget.run"
+      :action="runActionTarget.action"
+      :busy="Boolean(processing)"
+      :submit-error="runActionError"
+      :request-id="runActionRequestId"
+      :conflict="runActionConflict"
+      @close="closeRunAction"
+      @save="mutateRun"
+      @cancel-run="reason => mutateRun({ reason })"
+      @reload="reloadRunAction"
     />
     <CustomerReportUploadModal
       v-if="customerReportTarget"

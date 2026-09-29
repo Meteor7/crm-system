@@ -5,6 +5,7 @@ import { installedTools as installedToolSeeds, opportunities, opportunityInterna
 import { leads } from '@/demo/leads-data'
 import { migrateLegacyOpportunityContacts, migrateLegacyPrimaryContacts } from '@/domain/contacts'
 import { normalizeMoney } from '@/domain/money'
+import { normalizeStoredRegion } from '@/domain/regions'
 import { isOpportunityProbabilityLevelValue } from '@/domain/opportunity-probability'
 import { isOpenOpportunityStage, isOpportunityStage, type OpportunityStage } from '@/domain/opportunity-stages'
 import { migrateLegacyUserId, migrateOptionalLegacyUserId } from './identity-migration'
@@ -52,8 +53,8 @@ type SevenStageOpportunityFields = 'stageChangedAt' | 'budgetApprovedOn' | 'lost
  * Opportunity rows cached before the seven milestone stages. They may still carry a legacy stage,
  * the retired percentage probability and forecast, and no stage history.
  */
-export type CachedLegacyStrategyOpportunityDto = Omit<StrategyOpportunityDto, 'stage' | 'probabilityLevel' | 'probabilityHistory' | SevenStageOpportunityFields>
-  & Partial<Pick<StrategyOpportunityDto, 'probabilityLevel' | 'probabilityHistory' | SevenStageOpportunityFields>>
+export type CachedLegacyStrategyOpportunityDto = Omit<StrategyOpportunityDto, 'stage' | 'probabilityLevel' | 'probabilityHistory' | 'amountCny' | SevenStageOpportunityFields>
+  & Partial<Pick<StrategyOpportunityDto, 'probabilityLevel' | 'probabilityHistory' | 'amountCny' | SevenStageOpportunityFields>>
   & { stage: string; probability?: number; forecast?: string }
 
 export interface SalesSnapshotV1 {
@@ -165,6 +166,15 @@ function normalizeBooking(booking: LegacyBookingDto | BookingDto): BookingDto {
     primaryContactId: booking.primaryContactId ?? '',
     source: booking.source ?? (booking.sourceOpportunityId ? 'Opportunity' : 'Upsell'),
     bookingType: booking.bookingType === 'Service' ? 'Service' : 'Equipment',
+    // Cached before Bookings carried the date on the customer's PO.
+    actualPoDate: booking.actualPoDate ?? '',
+    actualPoDateSource: booking.actualPoDateSource ?? '',
+    actualPoDateNote: booking.actualPoDateNote ?? '',
+    // A CNY order's amount already is its CNY amount; another currency keeps what was entered, or ''.
+    amountCny: (booking.currency || 'CNY') === 'CNY'
+      ? normalizeMoney(String(booking.amount))
+      : booking.amountCny ? normalizeMoney(String(booking.amountCny)) : '',
+    amountCnyNote: booking.amountCnyNote ?? '',
   }
 }
 
@@ -198,6 +208,8 @@ function normalizeOpportunity(opportunity: CachedLegacyStrategyOpportunityDto | 
     ...current,
     stage,
     stageChangedAt: current.stageChangedAt ?? '',
+    // Old mock snapshots need a stable optimistic-lock token, not a new value on each read.
+    modified: current.modified?.trim() || '1970-01-01T00:00:00.000Z',
     budgetApprovedOn: current.budgetApprovedOn ?? '',
     // A cached loss has no record of the stage it was lost at; reopening then stops at quotation sent.
     lostAtStage: lost && isOpenOpportunityStage(current.lostAtStage) ? current.lostAtStage : '',
@@ -206,12 +218,24 @@ function normalizeOpportunity(opportunity: CachedLegacyStrategyOpportunityDto | 
     stageHistory: Array.isArray(current.stageHistory) ? current.stageHistory : [],
     internalValidation: current.internalValidation ?? null,
     liveBooking: current.liveBooking ?? null,
+    // Regions cached before the shared options may still be spelled in Chinese.
+    subRegion: normalizeStoredRegion(current.subRegion ?? ''),
     probabilityLevel: isOpportunityProbabilityLevelValue(current.probabilityLevel) ? current.probabilityLevel : '',
-    probabilityHistory: Array.isArray(current.probabilityHistory) ? current.probabilityHistory : [],
+    // Snapshots cached before downgrade reasons carry history rows without one.
+    probabilityHistory: Array.isArray(current.probabilityHistory)
+      ? current.probabilityHistory.map((entry) => ({ ...entry, reason: typeof entry.reason === 'string' ? entry.reason : '' }))
+      : [],
     history: current.history.filter((entry) => !RETIRED_OPPORTUNITY_HISTORY_FIELDS.has(String(entry.field).toLowerCase())),
     amount: normalizeMoney(String(current.amount)),
     originalAmount: normalizeMoney(String(current.originalAmount)),
+    amountCny: current.amountCny === undefined ? legacyAmountCny(current) : current.amountCny && normalizeMoney(String(current.amountCny)),
   }
+}
+
+// Cached or seeded before the CNY amount: like the backend migration, an Opportunity priced in CNY
+// takes its amount and any other currency waits for Sales to enter it.
+function legacyAmountCny(opportunity: { currency: string; amount: string | number }): StrategyOpportunityDto['amountCny'] {
+  return opportunity.currency === 'CNY' ? normalizeMoney(String(opportunity.amount)) : ''
 }
 
 function seededInstalledTools(): InstalledToolDto[] {
@@ -254,6 +278,7 @@ function seededOpportunities(): StrategyOpportunityDto[] {
     ...opportunity,
     amount: normalizeMoney(String(opportunity.amount)),
     originalAmount: normalizeMoney(String(opportunity.originalAmount)),
+    amountCny: legacyAmountCny(opportunity),
     stakeholders: opportunity.stakeholders.map((stakeholder, index) => ({
       ...stakeholder,
       id: stakeholder.id ?? `STK-${opportunity.id}-${index + 1}`,
@@ -317,6 +342,7 @@ function removeRetiredLocalContacts(snapshot: SalesSnapshot): SalesSnapshot {
   const normalizedBookings = snapshot.bookings.map(normalizeBooking)
   const normalizedSnapshot = {
     ...snapshot,
+    accounts: snapshot.accounts.map((account) => ({ ...account, region: normalizeStoredRegion(account.region ?? '') })),
     bookings: normalizedBookings,
     opportunities: snapshot.opportunities.map(normalizeOpportunity),
   }
@@ -385,7 +411,7 @@ function restoreConvertedAccounts(snapshot: SalesSnapshot): SalesSnapshot {
       segment: 'Frontend',
       tier: 'B',
       city: '待补全',
-      region: opportunity?.subRegion || 'China',
+      region: normalizeStoredRegion(opportunity?.subRegion ?? ''),
       owner: lead.owner,
       pipelineAmount: 0,
       intentScore: opportunity?.score ?? 50,

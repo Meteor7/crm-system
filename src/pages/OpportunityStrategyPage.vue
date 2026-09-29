@@ -19,6 +19,7 @@ import { formatMoney, moneyByCurrency } from '@/domain/money'
 import { formatDisplayDate } from '@/domain/time'
 import { opportunityProbabilityLevelLabel, opportunityProbabilityLevelTone } from '@/domain/opportunity-probability'
 import { opportunityStageLabel } from '@/domain/opportunity-stages'
+import { regionLabel } from '@/domain/regions'
 import { useI18n } from '@/i18n'
 
 const props = withDefaults(defineProps<{ apiClient?: CrmApi; embedded?: boolean }>(), { apiClient: () => defaultApi, embedded: false })
@@ -278,7 +279,7 @@ onMounted(async () => {
         <section class="workspace-panel commercial-panel">
           <header><h2>Commercial Forecast</h2><span>Commercial master data · dates · payment · competition</span></header>
           <div class="workspace-panel-body commercial-grid">
-            <div><small>Tool / Sale Type</small><strong>{{ selected.toolType }} · {{ selected.saleType }}</strong><span>{{ selected.subRegion }}</span></div>
+            <div><small>Tool / Sale Type</small><strong>{{ selected.toolType }} · {{ selected.saleType }}</strong><span>{{ regionLabel(selected.subRegion, locale) }}</span></div>
             <div><small>Currency / Original Amount</small><strong>{{ formatMoney(selected.originalAmount, selected.currency) }}</strong><span>CRM amount {{ formatMoney(selected.amount, selected.currency) }}</span></div>
             <div><small>PO / Shipment / FAT</small><strong>{{ formatDisplayDate(selected.poDate) }}</strong><span>{{ formatDisplayDate(selected.shipmentDate) }} · {{ formatDisplayDate(selected.fatDate) }}</span></div>
             <div><small>Payment Milestones</small><strong>{{ selected.paymentMilestones.join(' · ') }}</strong><span>{{ selected.competition }}</span></div>

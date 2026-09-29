@@ -2,9 +2,14 @@
 from __future__ import annotations
 
 import hashlib
+import mimetypes
+from collections.abc import Iterable
+from contextlib import suppress
 from pathlib import Path
 
 import frappe
+from frappe.core.doctype.file.utils import get_content_hash
+from frappe.utils.image import strip_exif_data
 
 
 def _session_id():
@@ -58,6 +63,52 @@ def _lock_content(content_hash: str, *, required: bool = True) -> bool:
     frappe.db.after_commit.add(release)
     frappe.db.after_rollback.add(release)
     return True
+
+
+def _stored_content_hash(file_name: str, content: bytes) -> str:
+    """The `content_hash` that `File.save_file` will give this upload.
+
+    It is not always the upload's own: with the System Setting on (its default),
+    Frappe first strips a JPEG's EXIF data by re-encoding it. The re-encoding is
+    deterministic, so doing it here yields the stored bytes' hash. This mirrors
+    Frappe 15's `File.save_file`; the Status lock-order test pins it.
+    """
+    if (
+        mimetypes.guess_type(file_name)[0] == "image/jpeg"
+        and frappe.get_system_settings("strip_exif_metadata_from_uploaded_images")
+    ):
+        content = strip_exif_data(content, "image/jpeg")
+    return get_content_hash(content)
+
+
+def lock_upload_contents(uploads: Iterable[tuple[str, bytes]]) -> None:
+    """Take the content lock of every `(file_name, content)` upload up front.
+
+    `protect_private_upload` otherwise takes them one File insert at a time, with
+    the save's row locks already held. A `GET_LOCK` wait is invisible to InnoDB's
+    deadlock detection, so a cycle through one of those rows -- for a ledger named
+    from a `format:` series, Frappe's naming-series row that every such name
+    shares -- would only end at the 5-second timeout. Callers take them before any
+    row lock; in hash order, a save waiting here holds only content locks that sort
+    earlier, which no other save taking them the same way can be waiting for. The
+    per-insert calls then find their lock already held -- as long as it is the
+    stored bytes' hash.
+
+    The price: a second save of the same bytes on the same Opportunity now waits
+    here, for at most those 5 seconds, rather than queueing on the Opportunity
+    row; and when a request fails, these locks are released before a rolled-back
+    File's own cleanup runs, which re-takes the lock best-effort and may leave the
+    unreferenced bytes behind.
+
+    And a rule for all other code: never take a content lock -- through a File
+    insert, delete or rollback cleanup -- while holding a row a Status save waits
+    for: its Opportunity or Customer, the Status record or its attachment rows. A
+    Status save may hold that content lock while it waits for those rows, and the
+    cycle would only end at the timeout. (Its hash-named ledger takes no
+    naming-series row, which other flows do hold while they save files.)
+    """
+    for content_hash in sorted({_stored_content_hash(name, content) for name, content in uploads}):
+        _lock_content(content_hash)
 
 
 def _blob_matches_path(path: str, content_hash: str) -> bool:
@@ -177,9 +228,10 @@ def discard_rolled_back_blob(path: str | None, file_url: str | None, content_has
     if not file_url or not content_hash:
         # Without both we cannot prove the bytes at this path are the ones this
         # upload wrote, and an unconditional unlink is exactly the bug being fixed.
-        frappe.logger("rayher_crm").warning(
-            "Leaving a rolled back upload blob in place: no file_url or content hash to check it against"
-        )
+        with suppress(Exception):
+            frappe.logger("rayher_crm").warning(
+                "Leaving a rolled back upload blob in place: no file_url or content hash to check it against"
+            )
         return
     try:
         # Blocks a concurrent insert of the same content from resolving to this path
@@ -194,7 +246,9 @@ def discard_rolled_back_blob(path: str | None, file_url: str | None, content_has
             return
         _unlink_private_file(path)
     except Exception:
-        frappe.logger("rayher_crm").exception("Could not remove a rolled back upload blob")
+        # Not even a failing logger may break the promise above.
+        with suppress(Exception):
+            frappe.logger("rayher_crm").exception("Could not remove a rolled back upload blob")
 
 
 def protect_private_upload(doc, method=None) -> None:

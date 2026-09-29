@@ -10,6 +10,8 @@ from collections.abc import Iterable, Mapping
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from typing import Any
 
+from rayher_crm.api.v1.errors import CrmApiException
+
 
 CENT = Decimal("0.01")
 MAX_DECIMAL_20_2 = Decimal("999999999999999999.99")
@@ -38,6 +40,28 @@ def as_decimal(value: Any) -> Decimal:
 
 def decimal_string(value: Any) -> str:
     return format(as_decimal(value), ".2f")
+
+
+def required_positive_money(value: Any, fieldname: str) -> Decimal:
+    """A money input someone must fill in: positive, with at most two decimal places."""
+
+    if value is None or str(value).strip() == "":
+        raise CrmApiException("VALIDATION_ERROR", f"{fieldname} is required.", field_errors={fieldname: "Required"})
+    message = f"{fieldname} must be positive with at most two decimal places."
+    try:
+        parsed = as_decimal(value)
+    except MoneyValidationError as exc:
+        raise CrmApiException("VALIDATION_ERROR", message, field_errors={fieldname: "Invalid amount"}) from exc
+    if not parsed:
+        raise CrmApiException("VALIDATION_ERROR", message, field_errors={fieldname: "Invalid amount"})
+    return parsed
+
+
+def optional_money_text(value: Any) -> str:
+    """Zero is an amount nobody has entered yet, so it goes out as an empty string."""
+
+    amount = as_decimal(value or 0)
+    return decimal_string(amount) if amount else ""
 
 
 def weighted_decimal_string(value: Any, probability: Any) -> str:

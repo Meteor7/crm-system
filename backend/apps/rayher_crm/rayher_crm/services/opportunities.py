@@ -22,16 +22,26 @@ from rayher_crm.services.common import (
     to_iso_timestamp,
     validate_choice,
 )
+from rayher_crm.services.bookings import validate_actual_po_date
 from rayher_crm.services.concurrency import lock_document
 from rayher_crm.services.sites import _require_site, can_read_site_data
 from rayher_crm.services.contacts import _contact_account
-from rayher_crm.services.money import MoneyValidationError, as_decimal, decimal_string
+from rayher_crm.services.equipment import normalize_equipment, register_equipment
+from rayher_crm.services.money import (
+    MoneyValidationError,
+    as_decimal,
+    decimal_string,
+    optional_money_text,
+    required_positive_money,
+)
 from rayher_crm.services.notifications import active_crm_users, create_notification
 from rayher_crm.services.opportunity_bookings import (
     booking_amount,
+    booking_amount_cny,
     confirm_pending_booking,
     create_opportunity_booking,
     live_booking,
+    replaced_booking,
     validate_booking_draft,
 )
 from rayher_crm.services.opportunity_stages import (
@@ -49,18 +59,30 @@ from rayher_crm.services.opportunity_stages import (
     PROBABILITY_LEVEL_CHOICES,
     QUALIFIED_OPPORTUNITY,
     QUOTATION_SENT,
+    probability_level_rank,
     stage_index,
 )
+from rayher_crm.services.regions import resolve_region
+from rayher_crm.services.probability_recovery import create_recovery, notify_downgrade, plan_text, plans_for_opportunity, plans_for_opportunities
+from rayher_crm.services.loss_review import create_loss_review, mark_reopened, reviews_for_opportunities, reviews_for_opportunity
 
 
 SALE_TYPES = {"New Equipment", "Repeat Order", "Service"}
 LIST_FIELDS = ("payment_milestones", "strengths", "red_flags", "information_needed")
+# Compared as decimals, so an amount saved again unchanged is not recorded as an edit.
+MONEY_FIELDS = ("amount", "original_amount", "amount_cny")
 
 
 def delete_strategy_opportunity(name: str) -> dict[str, str]:
     savepoint = f"crm_opportunity_delete_{frappe.generate_hash(length=8)}"
     frappe.db.savepoint(savepoint)
     try:
+        # Lock the Opportunity first, the order the Opportunity's own writers take it in (stage moves,
+        # stakeholders, actions, post-mortems, recovery plans, overdue and S6 warning handling): a write
+        # racing this delete lands before it and is removed with the rest, or finds the Opportunity gone.
+        # Rows written under a Quotation or a Booking (quotation warnings, booking history) lock that record
+        # instead; while it links to the Opportunity, frappe.delete_doc below refuses the delete anyway.
+        frappe.db.get_value("CRM Opportunity", name, "name", for_update=True)
         # History and internal validation rows link to the Opportunity; remove them first or
         # the link check in frappe.delete_doc reports the Opportunity as still referenced.
         # The field history, stakeholders and actions belong to this Opportunity alone (the
@@ -72,6 +94,13 @@ def delete_strategy_opportunity(name: str) -> dict[str, str]:
             "CRM Opportunity Action",
         ):
             frappe.db.delete(doctype, {"opportunity": name})
+        # Warnings handling names the Opportunity in a Data field, so it never blocks the delete; it goes too.
+        # A locking read: the current rows, not this request's snapshot.
+        handlings = [row[0] for row in frappe.db.sql(
+            "SELECT `name` FROM `tabCRM Warning Handling` WHERE `opportunity` = %s FOR UPDATE", (name,))]
+        if handlings:
+            frappe.db.delete("CRM Warning Handling Revision", {"handling": ["in", handlings]})
+            frappe.db.delete("CRM Warning Handling", {"name": ["in", handlings]})
         return delete_manager_scoped_document("CRM Opportunity", name, "deal:write", "OPPORTUNITY_NOT_FOUND")
     except Exception:
         frappe.db.rollback(save_point=savepoint)
@@ -129,7 +158,15 @@ def _decode_list(value: Any) -> list[str]:
     return parsed if isinstance(parsed, list) else []
 
 
-def _validate_opportunity(payload: dict[str, Any]) -> dict[str, Any]:
+def _tool_type(payload: dict[str, Any], current: str | None) -> str:
+    submitted = payload.get("toolType")
+    # Saving without touching the type keeps its stored spelling, including one from before the catalog.
+    if current and isinstance(submitted, str) and submitted.strip() == current.strip():
+        return current
+    return normalize_equipment(submitted, "toolType")
+
+
+def _validate_opportunity(payload: dict[str, Any], current_tool_type: str | None = None) -> dict[str, Any]:
     account_id = required_text(payload, "accountId")
     site_id = required_text(payload, "siteId")
     _require_account(account_id)
@@ -144,6 +181,7 @@ def _validate_opportunity(payload: dict[str, Any]) -> dict[str, Any]:
 
     amount = _positive_money(payload.get("amount"), "amount")
     original_amount = _positive_money(payload.get("originalAmount", amount), "originalAmount")
+    amount_cny = required_positive_money(payload.get("amountCny"), "amountCny")
     stage = validate_choice(payload.get("stage"), "stage", OPPORTUNITY_STAGES)
     score = _percentage(payload.get("intentScore", 20), "intentScore")
     return {
@@ -158,11 +196,12 @@ def _validate_opportunity(payload: dict[str, Any]) -> dict[str, Any]:
         "amount": amount,
         "score": score,
         "po_date": po_date,
-        "tool_type": required_text(payload, "toolType"),
+        "tool_type": _tool_type(payload, current_tool_type),
         "sale_type": validate_choice(payload.get("saleType"), "saleType", SALE_TYPES),
-        "sub_region": required_text(payload, "subRegion"),
+        "sub_region": resolve_region(payload.get("subRegion"), "subRegion"),
         "currency": currency,
         "original_amount": original_amount,
+        "amount_cny": amount_cny,
         "shipment_date": optional_date(payload.get("shipmentDate"), "shipmentDate"),
         "fat_date": optional_date(payload.get("fatDate"), "fatDate"),
         "payment_milestones": _string_list(payload.get("paymentMilestones"), "paymentMilestones"),
@@ -194,11 +233,13 @@ def _history_for_opportunity(opportunity_id: str) -> list[dict[str, Any]]:
     ]
 
 
-def _probability_history_for_opportunity(opportunity_id: str) -> list[dict[str, Any]]:
+def _probability_history_for_opportunity(opportunity_id: str, recoveries=None) -> list[dict[str, Any]]:
+    if recoveries is None:
+        recoveries = plans_for_opportunity(opportunity_id)
     rows = frappe.get_all(
         "CRM Opportunity Probability History",
         filters={"opportunity": opportunity_id},
-        fields=["name", "actor", "changed_at", "from_level", "to_level"],
+        fields=["name", "actor", "changed_at", "from_level", "to_level", "reason"],
         order_by="changed_at desc, creation desc",
     )
     return [
@@ -206,8 +247,10 @@ def _probability_history_for_opportunity(opportunity_id: str) -> list[dict[str, 
             "id": row.name,
             "from": row.from_level or "",
             "to": row.to_level or "",
+            "reason": row.reason or "",
             "actor": row.actor,
             "at": to_iso_timestamp(row.changed_at),
+            "recovery": recoveries.get(row.name),
         }
         for row in rows
     ]
@@ -295,6 +338,8 @@ def _live_booking_summary(opportunity_id: str) -> dict[str, Any] | None:
             "owner": booking.booking_owner,
             "note": booking.note or "",
             "modified": to_iso_timestamp(booking.modified),
+            "amountCny": booking_amount_cny(booking.name),
+            "actualPoDate": str(booking.actual_po_date or ""),
         })
     return summary
 
@@ -343,11 +388,12 @@ def _actions_for_opportunity(opportunity_id: str) -> list[dict[str, Any]]:
     } for row in rows]
 
 
-def serialize_opportunity(doc) -> dict[str, Any]:
+def serialize_opportunity(doc, recoveries=None, loss_reviews=None) -> dict[str, Any]:
     role = resolve_crm_role()
     can_read_site = can_read_site_data(doc.account)
     exact_amounts = frappe.db.sql(
-        "SELECT CAST(`amount` AS CHAR) AS `amount`, CAST(`original_amount` AS CHAR) AS `original_amount` "
+        "SELECT CAST(`amount` AS CHAR) AS `amount`, CAST(`original_amount` AS CHAR) AS `original_amount`, "
+        "CAST(`amount_cny` AS CHAR) AS `amount_cny` "
         "FROM `tabCRM Opportunity` WHERE `name` = %s",
         (doc.name,), as_dict=True,
     )
@@ -378,14 +424,16 @@ def serialize_opportunity(doc) -> dict[str, Any]:
         "subRegion": doc.sub_region,
         "currency": doc.currency,
         "originalAmount": decimal_string(exact.original_amount if exact else doc.original_amount or 0),
+        "amountCny": optional_money_text(exact.amount_cny if exact else "0"),
         "shipmentDate": str(doc.shipment_date or ""),
         "fatDate": str(doc.fat_date or ""),
         "paymentMilestones": _decode_list(doc.payment_milestones),
         "competition": doc.competition or "",
         "winReason": doc.win_reason or "",
         "lostReason": doc.lost_reason or "",
+        "lossReviews": reviews_for_opportunity(doc.name) if loss_reviews is None else loss_reviews.get(doc.name, []),
         "history": _history_for_opportunity(doc.name),
-        "probabilityHistory": _probability_history_for_opportunity(doc.name),
+        "probabilityHistory": _probability_history_for_opportunity(doc.name, recoveries),
         "stageHistory": _stage_history_for_opportunity(doc.name),
         "internalValidation": _latest_internal_validation(doc.name),
         "liveBooking": _live_booking_summary(doc.name),
@@ -401,8 +449,13 @@ def serialize_opportunity(doc) -> dict[str, Any]:
     return result
 
 
-def _require_opportunity(name: str):
-    if not frappe.db.exists("CRM Opportunity", name):
+def _require_opportunity(name: str, for_update: bool = False):
+    # A writer of rows the Opportunity delete removes (stakeholders, actions, history, post-mortems) locks
+    # the Opportunity first, the order the delete takes it in, and checks it under the lock: a write racing
+    # the delete lands before it and is removed with the rest, or finds the Opportunity gone.
+    exists = (frappe.db.get_value("CRM Opportunity", name, "name", for_update=True) if for_update
+              else frappe.db.exists("CRM Opportunity", name))
+    if not exists:
         raise CrmApiException("OPPORTUNITY_NOT_FOUND", "Opportunity was not found.")
     doc = frappe.get_doc("CRM Opportunity", name)
     if not has_crm_permission(doc, user=frappe.session.user, permission_type="read"):
@@ -420,7 +473,9 @@ def list_strategy_opportunities(query: dict[str, Any] | None = None):
             f"SELECT `name` FROM `tabCRM Opportunity` WHERE {where} ORDER BY `modified` DESC, `name` DESC",
             as_dict=True,
         )
-        return [serialize_opportunity(frappe.get_doc("CRM Opportunity", row.name)) for row in rows]
+        recoveries = plans_for_opportunities([row.name for row in rows])
+        reviews = reviews_for_opportunities([row.name for row in rows])
+        return [serialize_opportunity(frappe.get_doc("CRM Opportunity", row.name), recoveries, reviews) for row in rows]
     page, page_size, offset = normalize_pagination(query.get("page"), query.get("pageSize"))
     search = str(query.get("search") or "").strip()
     if search:
@@ -462,7 +517,9 @@ def list_strategy_opportunities(query: dict[str, Any] | None = None):
         f"SELECT `name` FROM `tabCRM Opportunity` WHERE {where} ORDER BY `modified` DESC, `name` DESC LIMIT %s OFFSET %s",
         tuple([*values, page_size, offset]), as_dict=True,
     )
-    return [serialize_opportunity(frappe.get_doc("CRM Opportunity", row.name)) for row in rows], total, page, page_size
+    recoveries = plans_for_opportunities([row.name for row in rows])
+    reviews = reviews_for_opportunities([row.name for row in rows])
+    return [serialize_opportunity(frappe.get_doc("CRM Opportunity", row.name), recoveries, reviews) for row in rows], total, page, page_size
 
 
 def get_strategy_opportunity(name: str) -> dict[str, Any]:
@@ -482,16 +539,13 @@ def create_strategy_opportunity(payload: dict[str, Any]) -> dict[str, Any]:
     values = _validate_opportunity({**payload, "stage": payload.get("stage") or QUALIFIED_OPPORTUNITY})
     if values["stage"] != QUALIFIED_OPPORTUNITY:
         raise CrmApiException("INVALID_TRANSITION", f"New Opportunity must start at {QUALIFIED_OPPORTUNITY}.")
-    if values["probability_level"]:
-        _assert_probability_level_owner(values["opportunity_owner"])
+    assert_initial_probability_level(values["probability_level"])
     for fieldname in LIST_FIELDS:
         values[fieldname] = json.dumps(values[fieldname], ensure_ascii=False)
     savepoint = f"crm_opportunity_create_{frappe.generate_hash(length=8)}"
     frappe.db.savepoint(savepoint)
     try:
         doc = insert_qualified_opportunity(values, event="created")
-        if doc.probability_level:
-            _append_probability_history(doc.name, "", doc.probability_level)
     except Exception:
         frappe.db.rollback(save_point=savepoint)
         raise
@@ -500,7 +554,7 @@ def create_strategy_opportunity(payload: dict[str, Any]) -> dict[str, Any]:
 
 def _current_input(doc) -> dict[str, Any]:
     exact_amount = frappe.db.sql(
-        "SELECT CAST(`amount` AS CHAR), CAST(`original_amount` AS CHAR) "
+        "SELECT CAST(`amount` AS CHAR), CAST(`original_amount` AS CHAR), CAST(`amount_cny` AS CHAR) "
         "FROM `tabCRM Opportunity` WHERE `name` = %s",
         (doc.name,),
     )[0]
@@ -519,6 +573,8 @@ def _current_input(doc) -> dict[str, Any]:
         "subRegion": doc.sub_region,
         "currency": doc.currency,
         "originalAmount": exact_amount[1],
+        # Empty until Sales enters it, so any edit of such an Opportunity asks for it first.
+        "amountCny": optional_money_text(exact_amount[2]),
         "shipmentDate": str(doc.shipment_date or ""),
         "fatDate": str(doc.fat_date or ""),
         "paymentMilestones": _decode_list(doc.payment_milestones),
@@ -544,9 +600,13 @@ def update_strategy_opportunity(name: str, payload: dict[str, Any], expected_mod
     if not has_crm_permission(doc, user=frappe.session.user, permission_type="read"):
         raise CrmApiException("SCOPE_DENIED", "The Opportunity is outside the current user scope.")
 
-    merged = _current_input(doc)
-    merged.update(payload)
-    values = _validate_opportunity(merged)
+    current_input = _current_input(doc)
+    stored_money = {
+        "amount": as_decimal(current_input["amount"]),
+        "original_amount": as_decimal(current_input["originalAmount"]),
+        "amount_cny": as_decimal(current_input["amountCny"] or 0),
+    }
+    values = _validate_opportunity({**current_input, **payload}, current_tool_type=doc.tool_type)
     if values["stage"] != doc.stage:
         raise CrmApiException(
             "INVALID_TRANSITION", "Opportunity stages change only through their workflow actions.",
@@ -558,6 +618,8 @@ def update_strategy_opportunity(name: str, payload: dict[str, Any], expected_mod
         )
 
     previous_level = doc.probability_level or ""
+    recovery_plan = None
+    probability_reason = str(payload.get("probabilityReason") or "").strip()
     if values["probability_level"] != previous_level:
         _assert_probability_level_owner(doc.opportunity_owner)
         if doc.stage in CLOSED_STAGES:
@@ -565,11 +627,21 @@ def update_strategy_opportunity(name: str, payload: dict[str, Any], expected_mod
                 "INVALID_TRANSITION",
                 "The probability level is frozen once the PO is received or the Opportunity is lost.",
             )
-        if not values["probability_level"] and stage_index(doc.stage) >= stage_index(DEMO_DONE):
+        # Empty is only where an Opportunity from before the levels starts; once set, a level stays set.
+        if not values["probability_level"]:
             raise CrmApiException(
-                "VALIDATION_ERROR", "probabilityLevel cannot be cleared once the demo is done.",
+                "VALIDATION_ERROR", "probabilityLevel cannot be cleared once it is set.",
                 field_errors={"probabilityLevel": "Required"},
             )
+        # Managers act on a downgrade, so the owner has to say why in the same save.
+        lowered = probability_level_rank(values["probability_level"]) < probability_level_rank(previous_level)
+        if lowered and not probability_reason:
+            raise CrmApiException(
+                "VALIDATION_ERROR", "A reason is required to lower the probability level.",
+                field_errors={"probabilityReason": "Required"},
+            )
+        if lowered:
+            recovery_plan = plan_text(payload.get("probabilityActionPlan"), "probabilityActionPlan")
     if values["account"] != doc.account or values["sale_type"] != doc.sale_type:
         if live_booking(doc.name):
             raise CrmApiException(
@@ -586,8 +658,17 @@ def update_strategy_opportunity(name: str, payload: dict[str, Any], expected_mod
     savepoint = f"crm_opportunity_update_{frappe.generate_hash(length=8)}"
     frappe.db.savepoint(savepoint)
     try:
+        if values["tool_type"] != doc.tool_type:
+            values["tool_type"] = register_equipment(values["tool_type"])
         changes: list[tuple[str, Any, Any]] = []
         for fieldname, value in values.items():
+            if fieldname in MONEY_FIELDS:
+                if stored_money[fieldname] != value:
+                    setattr(doc, fieldname, value)
+                    # A first CNY amount is recorded as filled in from empty, not changed from 0.
+                    before = optional_money_text(stored_money[fieldname]) if fieldname == "amount_cny" else decimal_string(stored_money[fieldname])
+                    changes.append((fieldname, before, decimal_string(value)))
+                continue
             current = _decode_list(getattr(doc, fieldname)) if fieldname in LIST_FIELDS else getattr(doc, fieldname)
             stored = json.dumps(value, ensure_ascii=False) if fieldname in LIST_FIELDS else value
             changed = current != value if fieldname in LIST_FIELDS else str(current or "") != str(value or "")
@@ -601,7 +682,12 @@ def update_strategy_opportunity(name: str, payload: dict[str, Any], expected_mod
         for fieldname, before, after in changes:
             _append_history(doc.name, fieldname, before, after)
         if values["probability_level"] != previous_level:
-            _append_probability_history(doc.name, previous_level, values["probability_level"])
+            event = _append_probability_history(
+                doc.name, previous_level, values["probability_level"], probability_reason,
+            )
+            if recovery_plan is not None:
+                create_recovery(event, recovery_plan)
+                notify_downgrade(doc, event)
     except Exception:
         frappe.db.rollback(save_point=savepoint)
         raise
@@ -621,12 +707,13 @@ def _append_history(opportunity_id: str, fieldname: str, before: Any, after: Any
     }).insert(ignore_permissions=True)
 
 
-def _append_probability_history(opportunity_id: str, before: str, after: str) -> None:
-    frappe.get_doc({
+def _append_probability_history(opportunity_id: str, before: str, after: str, reason: str = ""):
+    return frappe.get_doc({
         "doctype": "CRM Opportunity Probability History",
         "opportunity": opportunity_id,
         "from_level": before,
         "to_level": after,
+        "reason": reason,
         "actor": frappe.session.user,
         "changed_at": frappe.utils.now_datetime(),
     }).insert(ignore_permissions=True)
@@ -636,6 +723,19 @@ def _assert_probability_level_owner(owner: str) -> None:
     if owner != frappe.session.user:
         raise CrmApiException(
             "PERMISSION_DENIED", "Only the Opportunity owner can set the probability level.",
+        )
+
+
+def assert_initial_probability_level(level: str, fieldname: str = "probabilityLevel") -> None:
+    """Every new Opportunity starts with a level.
+
+    Whoever opens it sets the first one, which covers a Manager opening an Opportunity for a
+    salesperson. Every change after that belongs to the owner.
+    """
+
+    if not level:
+        raise CrmApiException(
+            "VALIDATION_ERROR", f"{fieldname} is required.", field_errors={fieldname: "Required"},
         )
 
 
@@ -660,6 +760,8 @@ def insert_qualified_opportunity(
     """Insert an Opportunity at its first milestone and record how it got there."""
 
     now = frappe.utils.now_datetime()
+    # Inside the caller's savepoint, so a failed insert does not leave a new custom type behind.
+    values = {**values, "tool_type": register_equipment(values["tool_type"])}
     doc = frappe.get_doc({
         "doctype": "CRM Opportunity", **values, "stage": QUALIFIED_OPPORTUNITY, "stage_changed_at": now,
     }).insert(ignore_permissions=True)
@@ -667,6 +769,8 @@ def insert_qualified_opportunity(
         doc.name, "", QUALIFIED_OPPORTUNITY, source="creation", event=event, at=now,
         reference_doctype=reference_doctype, reference_name=reference_name,
     )
+    if doc.probability_level:
+        _append_probability_history(doc.name, "", doc.probability_level)
     return doc
 
 
@@ -683,8 +787,8 @@ def append_stage_history(
     reason: str = "",
     reached_at: Any = None,
     reached_at_basis: str = "recorded",
-) -> None:
-    frappe.get_doc({
+):
+    return frappe.get_doc({
         "doctype": "CRM Opportunity Stage History",
         "opportunity": opportunity_id,
         "from_stage": from_stage,
@@ -713,8 +817,8 @@ def _move_stage(
     reason: str = "",
     reached_at: Any = None,
     reached_at_basis: str = "recorded",
-) -> None:
-    """Change the stage and append its history row in the same transaction."""
+):
+    """Change the stage and append its history row in the same transaction; returns the history row."""
 
     recorded_at = at or frappe.utils.now_datetime()
     from_stage = doc.stage
@@ -722,7 +826,7 @@ def _move_stage(
     # Follows the business time of the arrival, e.g. the budget approval date Sales declared.
     doc.stage_changed_at = recorded_at if reached_at is None else reached_at
     doc.save(ignore_permissions=True)
-    append_stage_history(
+    return append_stage_history(
         doc.name, from_stage, to_stage, source=source, event=event, at=recorded_at,
         reference_doctype=reference_doctype, reference_name=reference_name, reason=reason,
         reached_at=reached_at, reached_at_basis=reached_at_basis,
@@ -955,7 +1059,10 @@ def confirm_po(name: str, payload: dict[str, Any], expected_modified: Any) -> di
     if not replacing:
         _require_stage(doc, PO_CONFIRMABLE_STAGES, "PO confirmation")
         _require_probability_level(doc)
-    booking_values = validate_booking_draft(doc, payload.get("booking"))
+    # The CNY amount of a foreign-currency order is known once the PO is.
+    booking_values = validate_booking_draft(doc, payload.get("booking"), require_amount_cny=True)
+    # The date on the customer's PO, as opposed to the expected `po_date` on the Opportunity.
+    actual_po_date = validate_actual_po_date(payload.get("actualPoDate"), required=True)
     _lock_internal_validations(doc.name)
     booking = live_booking(doc.name, for_update=True)
     if booking and (doc.stage != INTERNAL_VALIDATION or booking.status != "Pending"):
@@ -980,6 +1087,7 @@ def confirm_po(name: str, payload: dict[str, Any], expected_modified: Any) -> di
             )
         if to_iso_timestamp(booking.modified) != normalize_expected_modified(expected_booking_modified):
             raise CrmApiException("VERSION_CONFLICT", "The Pending Booking was changed by another request.")
+    replaced = replaced_booking(doc.name) if replacing else None
 
     savepoint = f"crm_opportunity_po_{frappe.generate_hash(length=8)}"
     frappe.db.savepoint(savepoint)
@@ -987,11 +1095,19 @@ def confirm_po(name: str, payload: dict[str, Any], expected_modified: Any) -> di
         if doc.stage == QUOTATION_SENT:
             _cancel_pending_internal_validation(doc.name, "PO received before the internal validation was decided.")
         if booking:
-            confirm_pending_booking(booking, booking_values)
+            confirm_pending_booking(booking, booking_values, actual_po_date=actual_po_date)
         else:
-            booking = create_opportunity_booking(doc, booking_values, "Confirmed")
+            booking = create_opportunity_booking(doc, booking_values, "Confirmed", actual_po_date=actual_po_date)
         if replacing:
             doc.save(ignore_permissions=True)
+            # A replacement may carry another amount or PO date than the cancelled order; keep the trail.
+            if replaced:
+                for fieldname, before, after in (
+                    ("bookingAmountCny", booking_amount_cny(replaced.name), booking_amount_cny(booking.name)),
+                    ("bookingPoDate", str(replaced.actual_po_date or ""), str(booking.actual_po_date or "")),
+                ):
+                    if before != after:
+                        _append_history(doc.name, fieldname, before, after)
             _append_history(doc.name, "bookingReplaced", "", booking.name)
         else:
             _move_stage(
@@ -1024,7 +1140,9 @@ def mark_opportunity_lost(name: str, payload: dict[str, Any], expected_modified:
         doc.lost_at_stage = doc.stage
         doc.lost_at = now
         doc.lost_by = frappe.session.user
-        _move_stage(doc, LOST, source="lost", event="marked_lost", at=now, reason=lost_reason)
+        event = _move_stage(doc, LOST, source="lost", event="marked_lost", at=now, reason=lost_reason)
+        # The post-mortem lives on the immutable event, so reopening the deal cannot erase it.
+        create_loss_review(doc, event)
     except Exception:
         frappe.db.rollback(save_point=savepoint)
         raise
@@ -1102,9 +1220,16 @@ def rollback_opportunity_stage(
         if doc.stage == QUOTATION_SENT:
             _cancel_pending_internal_validation(doc.name, f"Opportunity rolled back to {target}.")
         if booking and booking.status == "Confirmed":
-            # Production carries on under the internal validation, but the PO is no longer confirmed.
+            # Production carries on under the internal validation, but the PO is no longer confirmed,
+            # so its date goes too; confirming the PO again asks for it.
+            previous_po_date = str(booking.actual_po_date or "")
             booking.status = "Pending"
+            booking.actual_po_date = None
+            booking.actual_po_date_source = None
+            booking.actual_po_date_note = None
             booking.save(ignore_permissions=True)
+            if previous_po_date:
+                _append_history(doc.name, "bookingPoDate", previous_po_date, "")
         if stage_index(target) <= stage_index(CUSTOMER_BUDGET_APPROVED) and rfq and rfq[0].status == "Approved":
             from rayher_crm.services.rfqs import reopen_approved_rfq_for_stage_rollback
 
@@ -1116,9 +1241,11 @@ def rollback_opportunity_stage(
             doc.lost_at_stage = None
             doc.lost_at = None
             doc.lost_by = None
-        _move_stage(
+        event = _move_stage(
             doc, target, source="rollback", event="reopened" if reopening else "rollback", reason=rollback_reason,
         )
+        if reopening:
+            mark_reopened(doc.name, event.recorded_at)
     except Exception:
         frappe.db.rollback(save_point=savepoint)
         raise
@@ -1209,7 +1336,7 @@ def _serialize_stakeholder(doc) -> dict[str, Any]:
 def create_opportunity_stakeholder(opportunity_id: str, payload: dict[str, Any]) -> dict[str, Any]:
     assert_capability("stakeholder:write")
     ensure_server_generated_id(payload)
-    opportunity = _require_opportunity(opportunity_id)
+    opportunity = _require_opportunity(opportunity_id, for_update=True)
     values = _validate_stakeholder(opportunity, payload)
     doc = frappe.get_doc({
         "doctype": "CRM Opportunity Stakeholder", "opportunity": opportunity_id, **values,
@@ -1220,7 +1347,7 @@ def create_opportunity_stakeholder(opportunity_id: str, payload: dict[str, Any])
 
 def update_opportunity_stakeholder(opportunity_id: str, stakeholder_id: str, payload: dict[str, Any]) -> dict[str, Any]:
     assert_capability("stakeholder:write")
-    opportunity = _require_opportunity(opportunity_id)
+    opportunity = _require_opportunity(opportunity_id, for_update=True)
     doc = _lock_relation("CRM Opportunity Stakeholder", stakeholder_id, opportunity_id, "STAKEHOLDER_NOT_FOUND")
     values = _validate_stakeholder(opportunity, payload, stakeholder_id)
     for fieldname, value in values.items():
@@ -1232,7 +1359,7 @@ def update_opportunity_stakeholder(opportunity_id: str, stakeholder_id: str, pay
 
 def delete_opportunity_stakeholder(opportunity_id: str, stakeholder_id: str) -> dict[str, str]:
     assert_capability("stakeholder:write")
-    _require_opportunity(opportunity_id)
+    _require_opportunity(opportunity_id, for_update=True)
     doc = _lock_relation("CRM Opportunity Stakeholder", stakeholder_id, opportunity_id, "STAKEHOLDER_NOT_FOUND")
     doc.archived = 1
     doc.save(ignore_permissions=True)
@@ -1276,7 +1403,7 @@ def _serialize_action(doc) -> dict[str, Any]:
 def create_opportunity_action(opportunity_id: str, payload: dict[str, Any]) -> dict[str, Any]:
     assert_capability("deal:write")
     ensure_server_generated_id(payload)
-    opportunity = _require_opportunity(opportunity_id)
+    opportunity = _require_opportunity(opportunity_id, for_update=True)
     savepoint = f"crm_opportunity_action_{frappe.generate_hash(length=8)}"
     frappe.db.savepoint(savepoint)
     try:
@@ -1302,7 +1429,7 @@ def create_opportunity_action(opportunity_id: str, payload: dict[str, Any]) -> d
 
 def update_opportunity_action(opportunity_id: str, action_id: str, payload: dict[str, Any]) -> dict[str, Any]:
     assert_capability("deal:write")
-    opportunity = _require_opportunity(opportunity_id)
+    opportunity = _require_opportunity(opportunity_id, for_update=True)
     doc = _lock_relation("CRM Opportunity Action", action_id, opportunity_id, "ACTION_NOT_FOUND")
     before = _serialize_action(doc)
     payload = {"remark": doc.remark or "", **payload}
@@ -1330,7 +1457,7 @@ def update_opportunity_action(opportunity_id: str, action_id: str, payload: dict
 
 def delete_opportunity_action(opportunity_id: str, action_id: str) -> dict[str, str]:
     assert_capability("deal:write")
-    _require_opportunity(opportunity_id)
+    _require_opportunity(opportunity_id, for_update=True)
     doc = _lock_relation("CRM Opportunity Action", action_id, opportunity_id, "ACTION_NOT_FOUND")
     doc.archived = 1
     doc.save(ignore_permissions=True)

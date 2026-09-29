@@ -10,10 +10,13 @@ from rayher_crm.permissions.roles import capabilities_for_role, resolve_crm_role
 
 SCOPED_DOCTYPES = (
     "Customer", "Contact", "Lead", "CRM Opportunity", "CRM Opportunity Probability History",
+    "CRM Probability Recovery", "CRM Probability Recovery Revision",
+    "CRM Opportunity Loss Review", "CRM Opportunity Loss Review Revision",
     "CRM Opportunity Stage History", "CRM Opportunity Internal Validation",
+    "CRM Opportunity Action", "CRM Opportunity History",
     "CRM Booking", "CRM Installed Tool",
     "CRM Demo Request", "CRM Evaluation", "CRM Evaluation Customer Review", "CRM Visit",
-    "CRM Visit Meeting Record", "CRM Contact File", "CRM Demo Artifact", "CRM Notification Event",
+    "CRM Visit Meeting Record", "CRM Contact File", "CRM Status Attachment", "CRM Demo Artifact", "CRM Notification Event",
     "CRM Quotation", "CRM Quotation Version", "CRM Quotation Approval",
     "CRM RFQ", "CRM RFQ Version",
 )
@@ -47,16 +50,27 @@ EVALUATION_DOCPERMS = {
     "CRM Engineer": {"read", "report", "export", "print"},
 }
 # History, artifacts, customer review rows and contact files are record keeping: the
-# services append them and nobody edits them afterwards.
+# services append them and nobody edits them afterwards. Opportunity actions change only
+# through the Opportunity service, so they get the same read-only set.
 AUDIT_DOCPERMS = {
     "CRM Manager": {"read", "report", "export"},
     "CRM Sales": {"read", "report", "export"},
     "CRM Engineer": {"read", "report", "export"},
 }
+# Removed together with their Opportunity by delete_strategy_opportunity.
 OPPORTUNITY_CHILD_DOCTYPES = (
+    "CRM Probability Recovery Revision", "CRM Probability Recovery",
+    "CRM Opportunity Loss Review Revision", "CRM Opportunity Loss Review",
     "CRM Opportunity Probability History",
     "CRM Opportunity Stage History",
     "CRM Opportunity Internal Validation",
+)
+# Visible exactly when their Opportunity is. Keep read scope independent of the
+# generic deletion tuple; the Opportunity service explicitly handles its Action
+# and History rows in delete_strategy_opportunity.
+OPPORTUNITY_SCOPED_CHILD_DOCTYPES = OPPORTUNITY_CHILD_DOCTYPES + (
+    "CRM Opportunity Action",
+    "CRM Opportunity History",
 )
 # Visits are changed only through the visit service, which writes with
 # ignore_permissions. A Sales user also reads a colleague's visit as its action
@@ -74,6 +88,22 @@ VISIT_DOCPERMS = {
 MEETING_RECORD_DOCPERMS = {
     "CRM Manager": {"read", "report", "export"},
     "CRM Sales": {"read", "report", "export"},
+    "CRM Engineer": set(),
+}
+# No DocPerm at all, on purpose. `File.has_permission` delegates to the document
+# a file is attached to, so any read permission here would also make the bytes
+# reachable through Frappe's native file route -- which does not write a
+# `CRM File Access Audit` row. Status attachments are served only by
+# `opportunity_status.download_file`, which audits every hit; the service reads
+# the rows with raw SQL and writes them with ignore_permissions.
+#
+# Administrator is the one exception: `File.has_permission` returns True for it
+# before it looks at ownership or the attached document, so a site administrator
+# can still fetch the bytes through the native route without an audit row. That
+# is Frappe's superuser, not a role this scope can constrain.
+STATUS_ATTACHMENT_DOCPERMS = {
+    "CRM Manager": set(),
+    "CRM Sales": set(),
     "CRM Engineer": set(),
 }
 NOTIFICATION_DOCPERMS = {
@@ -96,12 +126,19 @@ DOCPERMS_BY_DOCTYPE = {
     "CRM Evaluation": EVALUATION_DOCPERMS,
     "CRM Evaluation Customer Review": AUDIT_DOCPERMS,
     "CRM Opportunity Probability History": AUDIT_DOCPERMS,
+    "CRM Probability Recovery": AUDIT_DOCPERMS,
+    "CRM Probability Recovery Revision": AUDIT_DOCPERMS,
+    "CRM Opportunity Loss Review": AUDIT_DOCPERMS,
+    "CRM Opportunity Loss Review Revision": AUDIT_DOCPERMS,
     "CRM Opportunity Stage History": AUDIT_DOCPERMS,
     "CRM Opportunity Internal Validation": AUDIT_DOCPERMS,
+    "CRM Opportunity Action": AUDIT_DOCPERMS,
+    "CRM Opportunity History": AUDIT_DOCPERMS,
     "CRM Visit": VISIT_DOCPERMS,
-    "CRM Visit Meeting Record": MEETING_RECORD_DOCPERMS,
     "CRM Contact File": AUDIT_DOCPERMS,
     "CRM Demo Artifact": AUDIT_DOCPERMS,
+    "CRM Status Attachment": STATUS_ATTACHMENT_DOCPERMS,
+    "CRM Visit Meeting Record": MEETING_RECORD_DOCPERMS,
     "CRM Notification Event": NOTIFICATION_DOCPERMS,
     "CRM Quotation": QUOTATION_DOCPERMS,
     "CRM Quotation Version": QUOTATION_DOCPERMS,
@@ -114,12 +151,16 @@ ROLE_TO_SERVER_ROLE = {"Manager": "CRM Manager", "Sales": "CRM Sales", "Engineer
 DOCTYPES_TO_VIEW_CAPABILITY = {
     "Customer": "account:view", "Contact": "contact:view", "Lead": "requirement:view",
     "CRM Opportunity": "deal:view", "CRM Opportunity Probability History": "deal:view",
+    "CRM Probability Recovery": "deal:view", "CRM Probability Recovery Revision": "deal:view",
+    "CRM Opportunity Loss Review": "deal:view", "CRM Opportunity Loss Review Revision": "deal:view",
     "CRM Opportunity Stage History": "deal:view", "CRM Opportunity Internal Validation": "deal:view",
+    "CRM Opportunity Action": "deal:view", "CRM Opportunity History": "deal:view",
     "CRM Booking": "deal:view", "CRM Installed Tool": "service:view",
     "CRM Demo Request": "demo_request:view", "CRM Evaluation": "evaluation:view",
     "CRM Evaluation Customer Review": "evaluation:view", "CRM Visit": "visit:view",
+    "CRM Contact File": "stakeholder:view", "CRM Status Attachment": "deal:view",
+    "CRM Demo Artifact": "demo_request:view",
     "CRM Visit Meeting Record": "visit:view",
-    "CRM Contact File": "stakeholder:view", "CRM Demo Artifact": "demo_request:view",
     "CRM Notification Event": "dashboard:view", "CRM Quotation": "quotation:view",
     "CRM Quotation Version": "quotation:view", "CRM Quotation Approval": "quotation:view",
     "CRM RFQ": "rfq:view", "CRM RFQ Version": "rfq:view",
@@ -301,8 +342,8 @@ def conditions_for_doctype(doctype: str, user: str | None = None) -> str:
         return "1=0"
     if doctype == "CRM Notification Event":
         return f"`tabCRM Notification Event`.`recipient_user` = {frappe.db.escape(resolved_user)}"
-    if doctype in OPPORTUNITY_CHILD_DOCTYPES:
-        # History and validation rows are visible exactly when their Opportunity is. The
+    if doctype in OPPORTUNITY_SCOPED_CHILD_DOCTYPES:
+        # Action, history and validation rows are visible exactly when their Opportunity is. The
         # parent condition references `tabCRM Opportunity` unaliased, so nesting it inside
         # a correlated EXISTS on the same table keeps it bound to the parent row.
         opportunity_scope = conditions_for_doctype("CRM Opportunity", resolved_user)
@@ -497,6 +538,17 @@ def conditions_for_doctype(doctype: str, user: str | None = None) -> str:
                 escaped_user,
             )
         return "1=0"
+    if doctype == "CRM Status Attachment":
+        # Visible exactly when its Opportunity is, and only while it is live. The
+        # Opportunity condition references `tabCRM Opportunity` unaliased, so a
+        # correlated EXISTS on that table keeps it bound to the parent row.
+        opportunity_scope = conditions_for_doctype("CRM Opportunity", resolved_user)
+        return (
+            "EXISTS (SELECT 1 FROM `tabCRM Opportunity` "
+            "WHERE `tabCRM Status Attachment`.`deleted` = 0 "
+            "AND `tabCRM Opportunity`.`name` = `tabCRM Status Attachment`.`opportunity` "
+            f"AND ({opportunity_scope}))"
+        )
     if doctype == "CRM Contact File":
         table = f"`tab{doctype}`"
         customer_scope = (
@@ -559,6 +611,22 @@ def opportunity_probability_history_query(user: str | None = None) -> str:
     return conditions_for_doctype("CRM Opportunity Probability History", user)
 
 
+def probability_recovery_query(user: str | None = None) -> str:
+    return conditions_for_doctype("CRM Probability Recovery", user)
+
+
+def probability_recovery_revision_query(user: str | None = None) -> str:
+    return conditions_for_doctype("CRM Probability Recovery Revision", user)
+
+
+def opportunity_loss_review_query(user: str | None = None) -> str:
+    return conditions_for_doctype("CRM Opportunity Loss Review", user)
+
+
+def opportunity_loss_review_revision_query(user: str | None = None) -> str:
+    return conditions_for_doctype("CRM Opportunity Loss Review Revision", user)
+
+
 def opportunity_stage_history_query(user: str | None = None) -> str:
     return conditions_for_doctype("CRM Opportunity Stage History", user)
 
@@ -567,12 +635,43 @@ def opportunity_internal_validation_query(user: str | None = None) -> str:
     return conditions_for_doctype("CRM Opportunity Internal Validation", user)
 
 
+def opportunity_action_query(user: str | None = None) -> str:
+    return conditions_for_doctype("CRM Opportunity Action", user)
+
+
+def opportunity_history_query(user: str | None = None) -> str:
+    return conditions_for_doctype("CRM Opportunity History", user)
+
+
 def evaluation_customer_review_query(user: str | None = None) -> str:
     return conditions_for_doctype("CRM Evaluation Customer Review", user)
 
 
 def contact_file_query(user: str | None = None) -> str:
     return conditions_for_doctype("CRM Contact File", user)
+
+
+def status_attachment_query(user: str | None = None) -> str:
+    """Scope for `CRM Status Attachment`, inert while the doctype has no DocPerm.
+
+    `db_query` refuses the doctype on the read check before it ever applies this
+    condition, so nothing reaches it today. It exists so that a future decision to
+    grant read starts from the right rows -- the owner's, and only the live ones --
+    instead of from everything.
+    """
+    return conditions_for_doctype("CRM Status Attachment", user)
+
+
+def has_status_attachment_permission(doc, user: str | None = None, permission_type: str | None = None) -> bool:
+    """Deny everyone. A controller hook can only deny, never grant.
+
+    The empty DocPerm map is what actually closes native access to the bytes, and
+    `has_crm_permission` would answer "yes" for an in-scope Sales user the moment
+    somebody added `read` to it. Denying here means that grant alone cannot open
+    the unaudited `/private/files/...` route; the service reads these rows with raw
+    SQL and writes them with ignore_permissions, so it is unaffected.
+    """
+    return False
 
 
 def demo_artifact_query(user: str | None = None) -> str:
