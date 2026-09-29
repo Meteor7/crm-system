@@ -44,4 +44,13 @@ describe('ModalShell', () => {
 
     expect(wrapper.get('[data-modal-submit]').attributes('type')).toBe('submit')
   })
+
+  it('pins the overlay to the viewport so the dialog opens centred however far the page is scrolled', () => {
+    const wrapper = mount(ModalShell, { props: { title: 'Test' }, attachTo: document.body })
+
+    const host = getComputedStyle(wrapper.get('.modal-host').element)
+    expect(host.position).toBe('fixed')
+    expect(host.placeItems).toBe('center')
+    wrapper.unmount()
+  })
 })

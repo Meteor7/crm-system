@@ -126,7 +126,7 @@ watch([() => props.modelValue, () => props.accountId], ([open]) => {
 </template>
 
 <style scoped>
-.account-drawer-host :deep(.el-overlay) { position: absolute; inset: 0; z-index: 2000; overflow: hidden; background: rgba(7,29,37,.42); }
+.account-drawer-host :deep(.el-overlay) { position: fixed; inset: 0; z-index: 2000; overflow: hidden; background: rgba(7,29,37,.42); }
 .account-drawer-host :deep(.el-overlay-dialog) { position: absolute; inset: 0; overflow: hidden; }
 .account-drawer-host :deep(.el-drawer) { position: absolute; top: 0; right: 0; display: flex; height: 100%; flex-direction: column; overflow: hidden; background: #fff; box-shadow: -18px 0 48px rgba(8,32,40,.18); }
 .account-drawer-host :deep(.el-drawer__body) { min-width: 0; flex: 1; overflow: auto; padding: 20px; }

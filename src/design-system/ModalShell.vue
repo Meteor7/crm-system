@@ -20,7 +20,7 @@ defineEmits<{ close: []; submit: [] }>()
 </template>
 
 <style scoped>
-.modal-host{position:absolute;inset:0;z-index:2200;display:grid;min-height:100%;place-items:center;padding:24px;background:rgba(7,29,37,.5)}
+.modal-host{position:fixed;inset:0;z-index:2200;display:grid;overflow-y:auto;overscroll-behavior:contain;place-items:center;padding:24px;background:rgba(7,29,37,.5)}
 .modal-card{width:min(680px,100%);max-height:min(760px,90dvh);overflow:hidden;background:#fff;border:1px solid var(--crm-line);border-radius:16px;box-shadow:0 26px 70px rgba(8,32,40,.25)}
 .modal-card.wide{width:min(1120px,100%)}
 .modal-card>header{display:flex;align-items:center;justify-content:space-between;padding:20px 22px;color:#fff;background:var(--crm-navy)}

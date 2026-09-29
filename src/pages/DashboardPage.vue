@@ -827,7 +827,6 @@ onMounted(async () => {
 .subscription-option > small { color: var(--crm-text-muted); font-size: 9px; line-height: 1.45; }
 .subscription-option > b { position: absolute; top: 12px; right: 12px; padding: 3px 6px; color: var(--crm-text-muted); background: var(--crm-surface-muted); border-radius: 5px; font-size: 8px; }
 .subscription-option.selected > b { color: var(--crm-positive-ink); background: var(--crm-positive-soft); }
-.dashboard-page :deep(.dashboard-subscription-modal) { position: fixed; }
 .more-analysis-shell { margin-bottom: 14px; }
 .more-analysis-toggle { display: flex; width: 100%; align-items: center; justify-content: space-between; gap: 18px; padding: 14px 18px; color: var(--crm-navy); background: var(--crm-surface-raised); border: 1px solid var(--crm-line); border-radius: var(--crm-radius-md); box-shadow: 0 1px 1px rgba(31,35,41,.02); cursor: pointer; font: inherit; text-align: left; }
 .more-analysis-toggle:hover { border-color: #a9c9c5; background: #fbfdfc; }

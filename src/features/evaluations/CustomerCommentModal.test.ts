@@ -32,4 +32,12 @@ describe('CustomerCommentModal', () => {
     const wrapper = mount(CustomerCommentModal, { props: { evaluation } })
     expect(wrapper.text()).toContain('第 2 轮')
   })
+
+  it('pins the overlay to the viewport so the dialog opens centred however far the page is scrolled', () => {
+    const wrapper = mount(CustomerCommentModal, { props: { evaluation } })
+    document.body.append(wrapper.element)
+
+    expect(getComputedStyle(wrapper.get('.host').element).position).toBe('fixed')
+    wrapper.unmount()
+  })
 })

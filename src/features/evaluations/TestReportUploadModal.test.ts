@@ -124,4 +124,12 @@ describe('TestReportUploadModal', () => {
     expect(wrapper.get('[data-upload-test-report]').attributes('disabled')).toBeUndefined()
     expect(wrapper.emitted('uploaded')).toBeUndefined()
   })
+
+  it('pins the overlay to the viewport so the dialog opens centred however far the page is scrolled', () => {
+    const wrapper = setup().wrapper
+    document.body.append(wrapper.element)
+
+    expect(getComputedStyle(wrapper.get('.host').element).position).toBe('fixed')
+    wrapper.unmount()
+  })
 })

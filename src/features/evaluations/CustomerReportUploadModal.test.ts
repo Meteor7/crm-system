@@ -53,4 +53,12 @@ describe('CustomerReportUploadModal', () => {
     expect(wrapper.get('[role="alert"]').text()).toContain('req-round-42')
     expect(wrapper.get('[data-upload-customer-report]').attributes('disabled')).toBeUndefined()
   })
+
+  it('pins the overlay to the viewport so the dialog opens centred however far the page is scrolled', () => {
+    const wrapper = setup(2).wrapper
+    document.body.append(wrapper.element)
+
+    expect(getComputedStyle(wrapper.get('.host').element).position).toBe('fixed')
+    wrapper.unmount()
+  })
 })
