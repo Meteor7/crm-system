@@ -142,6 +142,7 @@ const dateText = (value: string | null | undefined) => value ? new Date(value).t
 // Warnings gets this page's period and filters; the anchor always goes along, because without one
 // Warnings shows the current week while this page shows the last completed one. Until the period is known
 // (an anchor asked for, or the data) there is nothing to hand over, so the tab is not a link yet.
+// After a failed load the tab is a link without an anchor: Warnings then opens on its own default (the current week).
 const warningsRoute = computed(() => ({ path: '/warnings', query: Object.fromEntries(Object.entries({ ...query, anchor: query.anchor || data.value?.period.start }).filter(([, value]) => value)) as Record<string, string> }))
 // Post-mortem state of a loss row; empty for rows from a backend without loss reviews.
 function lossStatus(row: ReviewRow): { text: string; tone: string } | null {
@@ -245,7 +246,7 @@ async function saveTarget() {
       <div class="heading-order"><span>{{ copy('Individual annual orders · CNY', '个人年度订单 · CNY') }}</span><strong>{{ chartSource && chartSales ? fmt(chartSource.orders.actual, true) : '—' }} / {{ chartSource && chartSales ? fmt(chartSource.orders.target, true) : '—' }}</strong><small>{{ chartSales ? ownerName(chartSales) : copy('No sales rep selected', '未筛选销售') }}</small><small class="order-summary" :title="orderSummary">{{ orderSummary }}</small></div>
     </header>
     <nav class="review-controls" :aria-label="copy('Review filters', '看板筛选')">
-      <strong class="review-tab">Review</strong><RouterLink class="plan-tab" to="/plan">Plan</RouterLink><RouterLink v-if="data || query.anchor" class="plan-tab" :to="warningsRoute">Warnings</RouterLink><span v-else class="plan-tab is-disabled" role="link" aria-disabled="true">Warnings</span><RouterLink class="plan-tab" to="/opportunity-board">Opportunities</RouterLink>
+      <strong class="review-tab">Review</strong><RouterLink class="plan-tab" to="/plan">Plan</RouterLink><RouterLink v-if="data || query.anchor || error" class="plan-tab" :to="warningsRoute">Warnings</RouterLink><span v-else class="plan-tab is-disabled" role="link" aria-disabled="true">Warnings</span><RouterLink class="plan-tab" to="/opportunity-board">Opportunities</RouterLink>
       <label><span class="filter-name">{{ copy('Region', '区域') }}</span><select v-model="query.region" :disabled="loading || !filterOptions.regionReady" aria-label="Region"><option value="">{{ filterOptions.regionReady ? copy('All regions', '全部区域') : copy('Region migration pending', '区域待迁移') }}</option><option v-for="region in filterOptions.regions" :key="region" :value="region">{{ regionLabel(region, locale) }}</option></select></label>
       <label><span class="filter-name">{{ copy('Sales', '销售') }}</span><select v-model="query.sales" :disabled="loading" aria-label="Sales"><option value="">{{ copy('All sales', '全部销售') }}</option><option v-for="person in filterOptions.sales" :key="person.id" :value="person.id">{{ person.name }}</option></select></label>
       <label><span class="filter-name">{{ copy('Market', '市场') }}</span><select v-model="query.market" :disabled="loading" aria-label="Market"><option value="">{{ copy('All markets', '全部市场') }}</option><option v-for="market in filterOptions.markets" :key="market" :value="market">{{ market }}</option></select></label>

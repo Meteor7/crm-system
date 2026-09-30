@@ -213,6 +213,20 @@ describe('Manager Review', () => {
     expect(wrapper.find('[data-testid="review-page"]').exists()).toBe(false)
     wrapper.unmount()
   })
+
+  it('keeps the Warnings tab reachable after the first load fails', async () => {
+    const api = createMockApi({ role: 'Manager', latency: 0 })
+    api.getReview = vi.fn().mockRejectedValue(new Error('network down'))
+    const router = createAppRouter()
+    await router.push('/dashboard'); await router.isReady()
+    const wrapper = mount(ReviewPage, { props: { apiClient: api }, global: { plugins: [createPinia(), router] } })
+    await flushPromises()
+    expect(wrapper.find('.review-state.error').exists()).toBe(true)
+    // No anchor: Warnings opens on its own default period (the current week).
+    expect(wrapper.get('a[href^="/warnings"]').attributes('href')).toBe('/warnings?period=week')
+    expect(wrapper.find('span.is-disabled').exists()).toBe(false)
+    wrapper.unmount()
+  })
 })
 
 describe('Approved Review integration', () => {
