@@ -138,11 +138,11 @@ function rowAmount(row: ReviewRow) {
 function changePeriod(period: PeriodKind) { query.period = period }
 
 const dateText = (value: string | null | undefined) => value ? new Date(value).toLocaleDateString(locale.value, { timeZone: 'Asia/Shanghai' }) : '—'
-// Warnings opens on the same period and filters, so its counts match this banner.
-// Warnings gets this page's period and filters; the anchor always goes along, because without one
-// Warnings shows the current week while this page shows the last completed one. Until the period is known
-// (an anchor asked for, or the data) there is nothing to hand over, so the tab is not a link yet.
-// After a failed load the tab is a link without an anchor: Warnings then opens on its own default (the current week).
+// Warnings gets this page's period and filters, so its counts match this banner. The anchor goes along
+// whenever it is known (an anchor asked for, or the data), because without one Warnings shows the current
+// week while this page shows the last completed one. Until then there is nothing to hand over, so the tab
+// is not a link yet; after a failed load it links without an anchor, and Warnings opens the same kind of
+// period on its own default date (for a week, the current one).
 const warningsRoute = computed(() => ({ path: '/warnings', query: Object.fromEntries(Object.entries({ ...query, anchor: query.anchor || data.value?.period.start }).filter(([, value]) => value)) as Record<string, string> }))
 // Post-mortem state of a loss row; empty for rows from a backend without loss reviews.
 function lossStatus(row: ReviewRow): { text: string; tone: string } | null {

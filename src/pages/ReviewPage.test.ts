@@ -222,9 +222,29 @@ describe('Manager Review', () => {
     const wrapper = mount(ReviewPage, { props: { apiClient: api }, global: { plugins: [createPinia(), router] } })
     await flushPromises()
     expect(wrapper.find('.review-state.error').exists()).toBe(true)
-    // No anchor: Warnings opens on its own default period (the current week).
+    // No anchor: Warnings opens the week on its own default date, the current week.
     expect(wrapper.get('a[href^="/warnings"]').attributes('href')).toBe('/warnings?period=week')
     expect(wrapper.find('span.is-disabled').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('disables the Warnings tab again while a retry loads, then hands over the loaded period', async () => {
+    const api = createMockApi({ role: 'Manager', latency: 0 })
+    let release = () => {}
+    api.getReview = vi.fn()
+      .mockRejectedValueOnce(new Error('network down'))
+      .mockImplementationOnce(() => new Promise<Awaited<ReturnType<typeof api.getReview>>>(resolve => { release = () => resolve({ data: reviewFixture(), warnings: [], meta: { requestId: 'retry', generatedAt: '' } }) }))
+    const router = createAppRouter()
+    await router.push('/dashboard'); await router.isReady()
+    const wrapper = mount(ReviewPage, { props: { apiClient: api }, global: { plugins: [createPinia(), router] } })
+    await flushPromises()
+    expect(wrapper.get('a[href^="/warnings"]').attributes('href')).toBe('/warnings?period=week')
+    await wrapper.get('.review-state.error button').trigger('click'); await flushPromises()
+    expect(api.getReview).toHaveBeenCalledTimes(2)
+    expect(wrapper.find('a[href^="/warnings"]').exists()).toBe(false)
+    expect(wrapper.find('span.is-disabled').exists()).toBe(true)
+    release(); await flushPromises()
+    expect(wrapper.get('a[href^="/warnings"]').attributes('href')).toBe('/warnings?period=week&anchor=2026-09-07')
     wrapper.unmount()
   })
 })
