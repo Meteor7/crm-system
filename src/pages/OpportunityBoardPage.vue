@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { useRoute } from 'vue-router'
 import { Download, Plus, RefreshCw, Save, SlidersHorizontal, X } from '@lucide/vue'
 import { api as defaultApi, type CrmApi } from '@/api'
 import { CrmApiError } from '@/api/contracts'
@@ -12,6 +13,7 @@ import BoardConditionRow from '@/features/opportunity-board/BoardConditionRow.vu
 import { allColumns, cellText, condition, defaultDefinition, fieldLabel, fieldOptions, groupFields, groupKey, money, optionLabel, presets, text, toQuery, validateDefinition } from '@/features/opportunity-board/model'
 import { boardWorkbook, readBoardExport } from '@/features/opportunity-board/export'
 import { downloadCustomerReport } from '@/features/accounts/xlsx-writer'
+import { cockpitRoute, fromBoardScope, readCockpitQuery, toBoardScope } from '@/features/cockpit/scope'
 import type { BoardColumn, BoardDefinition, BoardFilters, BoardResult, SavedBoardQuery } from '@/features/opportunity-board/types'
 
 const props = withDefaults(defineProps<{ apiClient?: CrmApi }>(), { apiClient: () => defaultApi })
@@ -21,7 +23,21 @@ const copy = (english: string, chinese: string) => locale.value === 'en-US' ? en
 const brandIconUrl = `${import.meta.env.BASE_URL}brand/planck-icon.png`
 const canView = computed(() => app.can('deal:view'))
 const manager = computed(() => app.bootstrap?.user.role === 'Manager')
-const definition = ref<BoardDefinition>(defaultDefinition())
+const route = useRoute()
+// Opened from another cockpit tab with its single-value scope and Review period (see cockpit/scope.ts).
+// The identity watch below resets the definition on mount and again once the account loads: every reset starts
+// from the incoming scope, so the first query already carries it. Saved queries and exports are untouched.
+function initialDefinition(): BoardDefinition {
+  return { ...defaultDefinition(), scope: toBoardScope(readCockpitQuery(route.query).scope) }
+}
+const definition = ref<BoardDefinition>(initialDefinition())
+// This board has no period of its own: the Review period it was opened with goes along to the other tabs.
+const periodContext = computed(() => { const incoming = readCockpitQuery(route.query); return { period: incoming.period ?? 'week', reviewAnchor: incoming.reviewAnchor } })
+// A dimension with several values selected cannot be shown on the single-value tabs: navigation waits for one value or all.
+const outgoing = computed(() => fromBoardScope(definition.value.scope))
+const tabRoute = (page: 'review' | 'plan' | 'warnings') => cockpitRoute(page, { ...outgoing.value.scope, ...periodContext.value })
+const tabNames = { review: 'Review', plan: 'Plan', warnings: 'Warnings' } as const
+const blockedScope = computed(() => outgoing.value.blocked.map(key => fieldLabel(key, locale.value)).join(copy(', ', '、')))
 const filters = ref<BoardFilters | null>(null), data = ref<BoardResult | null>(null)
 const saved = ref<SavedBoardQuery[]>([]), selectedId = ref('')
 const page = ref(1), pageSize = ref(25), total = ref(0)
@@ -93,7 +109,7 @@ async function initialize() {
 watch(() => [app.bootstrap?.user.id, app.identityRevision, canView.value], () => {
   identity++; revision++; clearTimeout(timer)
   filters.value = null; data.value = null; saved.value = []; selectedId.value = ''; total.value = 0
-  definition.value = defaultDefinition(); error.value = ''; savedError.value = ''; exportError.value = ''; fieldErrors.value = {}
+  definition.value = initialDefinition(); error.value = ''; savedError.value = ''; exportError.value = ''; fieldErrors.value = {}
   loading.value = false; initializing.value = false; busy.value = false; exporting.value = false
   saveDialog.value?.close(); deleteDialog.value?.close()
   if (canView.value) void initialize()
@@ -190,7 +206,8 @@ async function exportRows() {
         <RouterLink v-if="app.bootstrap.user.role !== 'Engineer'" class="board-list-link" to="/opportunities">{{ copy('Open opportunity list', '打开商机列表') }} ↗</RouterLink>
       </header>
       <div class="board-controls">
-      <nav class="board-navigation" :aria-label="copy('Cockpit pages', '看板页面')"><RouterLink v-if="manager" to="/dashboard">Review</RouterLink><RouterLink v-if="manager" to="/plan">Plan</RouterLink><RouterLink v-if="manager" to="/warnings">Warnings</RouterLink><strong aria-current="page">Opportunities</strong></nav>
+      <nav class="board-navigation" :aria-label="copy('Cockpit pages', '看板页面')"><template v-if="manager"><template v-for="tab in (['review', 'plan', 'warnings'] as const)" :key="tab"><RouterLink v-if="!outgoing.blocked.length" :to="tabRoute(tab)">{{ tabNames[tab] }}</RouterLink><span v-else class="is-disabled" role="link" aria-disabled="true" aria-describedby="board-scope-blocked">{{ tabNames[tab] }}</span></template></template><strong aria-current="page">Opportunities</strong></nav>
+      <p v-if="manager && outgoing.blocked.length" id="board-scope-blocked" class="board-scope-blocked" role="status" data-scope-blocked>{{ copy(`Review, Plan and Warnings show one value or all per filter. Select one value or All for ${blockedScope} to open them with this scope.`, `Review、Plan 和 Warnings 每项筛选只支持单个值或全部。请将${blockedScope}改为单个值或全部后再切换。`) }}</p>
       <div v-if="filters" class="board-scope">
         <div v-for="control in scopeControls" :key="control.key" class="scope-item"><span>{{ fieldLabel(control.field, locale) }}</span><BoardMultiSelect v-model="definition.scope[control.key]" :label="fieldLabel(control.field, locale)" :options="fieldOptions(control.field, filters, locale)" :disabled="control.key === 'regions' && !filters.regionReady" :placeholder="control.key === 'regions' && !filters.regionReady ? copy('Not ready', '尚未就绪') : copy('All', '全部')" /></div>
       </div>

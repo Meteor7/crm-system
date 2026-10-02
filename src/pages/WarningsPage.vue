@@ -7,6 +7,7 @@ import { requestErrorMessage } from '@/api/request-state'
 import { useAppStore } from '@/stores/app'
 import { localeMessage, useI18n, useLocaleMessage } from '@/i18n'
 import { detailRoute, labels, metricText } from '@/features/cockpit/presentation'
+import { cockpitRoute, pickScope, shanghaiDate, type CockpitContext } from '@/features/cockpit/scope'
 import WarningNextStep from '@/features/cockpit/WarningNextStep.vue'
 import { regionLabel } from '@/domain/regions'
 import type { CockpitSettings, CockpitSettingsInput, Metric, PeriodKind, ReviewQuery, ReviewRow, WarningHandling, WarningsDto } from '@/features/cockpit/types'
@@ -36,8 +37,15 @@ const manager = computed(() => app.bootstrap?.user.role === 'Manager')
 // Back to Review with the period and filters Review handed to this page. The anchor always goes along:
 // without one Review shows the last completed week while this page shows the current one. Until the period
 // is known (an anchor asked for, or the data) there is nothing to hand over, so the tab is not a link yet.
+// The anchor asked for wins over a loaded (possibly stale) response.
+const shownAnchor = computed(() => query.anchor || data.value?.period.start || '')
+const context = computed<CockpitContext>(() => ({ ...pickScope(query), period: query.period ?? 'week', reviewAnchor: shownAnchor.value }))
 // After a failed load it is a link without an anchor, so Review opens on its own default period.
-const reviewRoute = computed(() => ({ path: '/dashboard', query: Object.fromEntries(Object.entries({ ...query, anchor: query.anchor || data.value?.period.start }).filter(([, value]) => value)) as Record<string, string> }))
+const reviewRoute = computed(() => cockpitRoute('review', context.value))
+// Plan opens on the period after this one; Opportunities keeps this period for the way back. Without an anchor
+// this page shows the period containing today on the Shanghai calendar (the backend default).
+const planRoute = computed(() => cockpitRoute('plan', { ...context.value, reviewAnchor: shownAnchor.value || shanghaiDate() }))
+const boardRoute = computed(() => cockpitRoute('board', { ...context.value, reviewAnchor: shownAnchor.value || shanghaiDate() }))
 let revision = 0
 
 const ownerName = (owner: string | null | undefined) => (owner && data.value?.names?.[owner]) || filterOptions.value.sales.find(r => r.id === owner)?.name || owner || copy('Owner unavailable', '归属数据不足')
@@ -458,7 +466,7 @@ onBeforeUnmount(() => { revision++ })
         </div>
       </header>
       <nav class="review-controls" :aria-label="copy('Warnings filters', '预警筛选')">
-        <RouterLink v-if="data || query.anchor || error" class="plan-tab" :to="reviewRoute">Review</RouterLink><span v-else class="plan-tab is-disabled" role="link" aria-disabled="true" :title="copy('Available once the page has loaded', '页面加载完成后可用')">Review</span><RouterLink class="plan-tab" to="/plan">Plan</RouterLink><strong class="review-tab" aria-current="page">Warnings</strong><RouterLink class="plan-tab" to="/opportunity-board">Opportunities</RouterLink>
+        <RouterLink v-if="data || query.anchor || error" class="plan-tab" :to="reviewRoute">Review</RouterLink><span v-else class="plan-tab is-disabled" role="link" aria-disabled="true" :title="copy('Available once the page has loaded', '页面加载完成后可用')">Review</span><RouterLink class="plan-tab" :to="planRoute">Plan</RouterLink><strong class="review-tab" aria-current="page">Warnings</strong><RouterLink class="plan-tab" :to="boardRoute">Opportunities</RouterLink>
         <label><span class="filter-name">{{ copy('Region', '区域') }}</span><select v-model="query.region" :disabled="loading || busy || !filterOptions.regionReady" aria-label="Region"><option value="">{{ filterOptions.regionReady ? copy('All regions', '全部区域') : copy('Region migration pending', '区域待迁移') }}</option><option v-for="region in filterOptions.regions" :key="region" :value="region">{{ regionLabel(region, locale) }}</option></select></label>
         <label><span class="filter-name">{{ copy('Sales', '销售') }}</span><select v-model="query.sales" :disabled="loading || busy" aria-label="Sales"><option value="">{{ copy('All sales', '全部销售') }}</option><option v-for="person in filterOptions.sales" :key="person.id" :value="person.id">{{ person.name }}</option></select></label>
         <label><span class="filter-name">{{ copy('Market', '市场') }}</span><select v-model="query.market" :disabled="loading || busy" aria-label="Market"><option value="">{{ copy('All markets', '全部市场') }}</option><option v-for="market in filterOptions.markets" :key="market" :value="market">{{ market }}</option></select></label>

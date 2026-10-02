@@ -75,7 +75,8 @@ describe('Warnings page', () => {
     expect(other.findAll('li').map(li => li.attributes('data-alert'))).toEqual(['quotation_expiry', 'stage6_no_po'])
     expect(wrapper.get('.review-controls').text()).toContain('Warnings')
     // Review gets the same scope back that it hands to this page, anchor included: its default week differs.
-    expect(wrapper.findAll('.review-controls a').map(link => link.attributes('href'))).toEqual(['/dashboard?period=week&anchor=2026-09-07', '/plan', '/opportunity-board'])
+    // Plan opens on the next week and keeps this one for the way back; Opportunities carries this week along.
+    expect(wrapper.findAll('.review-controls a').map(link => link.attributes('href'))).toEqual(['/dashboard?period=week&anchor=2026-09-07', '/plan?period=week&anchor=2026-09-14&reviewAnchor=2026-09-07', '/opportunity-board?period=week&reviewAnchor=2026-09-07'])
     setLocale('en-US'); await flushPromises()
     expect(lost.get('[data-lost-row="opp-lost-3"]').text()).toContain('Post-mortem overdue')
     wrapper.unmount()
@@ -115,6 +116,30 @@ describe('Warnings page', () => {
     expect(api.getWarnings).toHaveBeenLastCalledWith({ period: 'week', sales: '', market: '', region: '', equipment: '' })
     expect(blank.get('.review-controls a[href^="/dashboard"]').attributes('href')).toBe('/dashboard?period=week&anchor=2026-09-07')
     blank.unmount()
+  })
+
+  it('hands Plan the next period and Opportunities this period with the same scope, on the Shanghai calendar', async () => {
+    const api = createMockApi({ role: 'Manager', latency: 0 })
+    api.getWarnings = vi.fn(async () => ({ data: warningsFixture(), warnings: [], meta }))
+    const router = createAppRouter()
+    await router.push('/warnings?period=month&anchor=2026-12-10&sales=alice&region=East+China'); await router.isReady()
+    const scoped = mount(WarningsPage, { props: { apiClient: api }, global: { plugins: [createPinia(), router] } })
+    await flushPromises()
+    expect(api.getWarnings).toHaveBeenNthCalledWith(1, { period: 'month', anchor: '2026-12-10', sales: 'alice', market: '', region: 'East China', equipment: '' })
+    expect(scoped.get('.review-controls a[href^="/plan"]').attributes('href')).toBe('/plan?period=month&anchor=2027-01-01&reviewAnchor=2026-12-10&sales=alice&region=East+China')
+    expect(scoped.get('.review-controls a[href^="/opportunity-board"]').attributes('href')).toBe('/opportunity-board?period=month&reviewAnchor=2026-12-10&sales=alice&region=East+China')
+    scoped.unmount()
+    // Without an anchor and before (or without) data, this page shows today's Shanghai period: 16:30 UTC on Sep 30 is Oct 1 there.
+    vi.useFakeTimers({ toFake: ['Date'] }); vi.setSystemTime(new Date('2026-09-30T16:30:00Z'))
+    try {
+      api.getWarnings = vi.fn().mockRejectedValue(new Error('network down'))
+      await router.push('/warnings?period=quarter')
+      const failed = mount(WarningsPage, { props: { apiClient: api }, global: { plugins: [createPinia(), router] } })
+      await flushPromises()
+      expect(failed.get('.review-controls a[href^="/plan"]').attributes('href')).toBe('/plan?period=quarter&anchor=2027-01-01&reviewAnchor=2026-10-01')
+      expect(failed.get('.review-controls a[href^="/opportunity-board"]').attributes('href')).toBe('/opportunity-board?period=quarter&reviewAnchor=2026-10-01')
+      failed.unmount()
+    } finally { vi.useRealTimers() }
   })
 
   it('keeps the Review tab reachable after the first load fails, even with an empty error message', async () => {

@@ -6,10 +6,12 @@ import { CrmApiError } from '@/api/contracts'
 import { createAppRouter } from '@/app/router'
 import { useAppStore } from '@/stores/app'
 import { reviewFixture } from '@/features/cockpit/review.fixture'
+import { planDetailsFixture, planFixture } from '@/features/cockpit/plan.fixture'
 import { monotoneCurvePath } from '@/features/cockpit/presentation'
 import { setLocale } from '@/i18n'
 import type { UserRole } from '@/types/crm'
 import ReviewPage from './ReviewPage.vue'
+import PlanPage from './PlanPage.vue'
 
 beforeEach(() => {
   setLocale('zh-CN')
@@ -67,6 +69,63 @@ describe('Manager Review', () => {
     expect(api.getReview).toHaveBeenLastCalledWith({ period: 'week', sales: '', market: '', region: '', equipment: '' })
     expect(blank.get('a[href^="/warnings"]').attributes('href')).toBe('/warnings?period=week&anchor=2026-09-07')
     blank.unmount()
+  })
+
+  it('round-trips Review Q3 to Plan Q4 and back to Q3 with the same scope, from the first request of each page', async () => {
+    const api = createMockApi({ role: 'Manager', latency: 0 })
+    // The loaded week (2026-09-07) is stale next to the quarter asked for: the selected anchor wins.
+    api.getReview = vi.fn(async () => ({ data: reviewFixture(), warnings: [], meta: { requestId: 'review-test', generatedAt: '' } }))
+    api.getPlan = vi.fn(async () => ({ data: planFixture(), warnings: [], meta: { requestId: 'plan-test', generatedAt: '' } }))
+    api.getPlanDetails = vi.fn(async () => ({ data: planDetailsFixture(), warnings: [], meta: { requestId: 'plan-test', generatedAt: '' } }))
+    const router = createAppRouter()
+    await router.push('/dashboard?period=quarter&anchor=2026-07-01&sales=alice&market=Frontend&region=East+China&equipment=Kibo'); await router.isReady()
+    const scope = { sales: 'alice', market: 'Frontend', region: 'East China', equipment: 'Kibo' }
+    const review = mount(ReviewPage, { props: { apiClient: api }, global: { plugins: [createPinia(), router] } })
+    await flushPromises()
+    expect(api.getReview).toHaveBeenNthCalledWith(1, { period: 'quarter', anchor: '2026-07-01', ...scope })
+    const planHref = review.get('a[href^="/plan"]').attributes('href')!
+    expect(planHref).toBe('/plan?period=quarter&anchor=2026-10-01&reviewAnchor=2026-07-01&sales=alice&market=Frontend&region=East+China&equipment=Kibo')
+    expect(review.get('a[href^="/opportunity-board"]').attributes('href')).toBe('/opportunity-board?period=quarter&reviewAnchor=2026-07-01&sales=alice&market=Frontend&region=East+China&equipment=Kibo')
+    review.unmount()
+
+    await router.push(planHref)
+    const plan = mount(PlanPage, { props: { apiClient: api }, global: { plugins: [createPinia(), router] } })
+    await flushPromises()
+    expect(api.getPlan).toHaveBeenNthCalledWith(1, { period: 'quarter', anchor: '2026-10-01', ...scope })
+    const backHref = plan.get('.view-tabs a[href^="/dashboard"]').attributes('href')!
+    expect(backHref).toBe('/dashboard?period=quarter&anchor=2026-07-01&sales=alice&market=Frontend&region=East+China&equipment=Kibo')
+    expect(plan.get('.view-tabs a[href^="/warnings"]').attributes('href')).toBe(backHref.replace('/dashboard', '/warnings'))
+    plan.unmount()
+
+    await router.push(backHref)
+    const again = mount(ReviewPage, { props: { apiClient: api }, global: { plugins: [createPinia(), router] } })
+    await flushPromises()
+    expect(api.getReview).toHaveBeenNthCalledWith(2, { period: 'quarter', anchor: '2026-07-01', ...scope })
+    again.unmount()
+  })
+
+  it('links Plan and Opportunities to the Shanghai default period after the first load fails without filters', async () => {
+    // Sunday 16:30 UTC is Monday 2026-10-05 in Shanghai: Review's default is the week of 2026-09-28, not 2026-09-21.
+    vi.useFakeTimers({ toFake: ['Date'] }); vi.setSystemTime(new Date('2026-10-04T16:30:00Z'))
+    try {
+      const api = createMockApi({ role: 'Manager', latency: 0 })
+      api.getReview = vi.fn().mockRejectedValue(new Error('network down'))
+      const router = createAppRouter()
+      await router.push('/dashboard'); await router.isReady()
+      const wrapper = mount(ReviewPage, { props: { apiClient: api }, global: { plugins: [createPinia(), router] } })
+      await flushPromises()
+      expect(wrapper.find('.review-state.error').exists()).toBe(true)
+      expect(wrapper.get('a[href^="/plan"]').attributes('href')).toBe('/plan?period=week&anchor=2026-10-05&reviewAnchor=2026-09-28')
+      expect(wrapper.get('a[href^="/opportunity-board"]').attributes('href')).toBe('/opportunity-board?period=week&reviewAnchor=2026-09-28')
+      // Task 5: Warnings stays reachable and opens on its own default.
+      expect(wrapper.get('a[href^="/warnings"]').attributes('href')).toBe('/warnings?period=week')
+      // An ISO week that spans the new year leads to the first Plan week of the next year.
+      await router.push('/dashboard?anchor=2026-12-28&region=East+China')
+      const boundary = mount(ReviewPage, { props: { apiClient: api }, global: { plugins: [createPinia(), router] } })
+      await flushPromises()
+      expect(boundary.get('a[href^="/plan"]').attributes('href')).toBe('/plan?period=week&anchor=2027-01-04&reviewAnchor=2026-12-28&region=East+China')
+      boundary.unmount(); wrapper.unmount()
+    } finally { vi.useRealTimers() }
   })
 
   it('marks each 12-month loss with its post-mortem state and counts reviewed and pending losses', async () => {

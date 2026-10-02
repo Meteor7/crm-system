@@ -10,7 +10,11 @@ import { boardFiltersFixture, boardResultFixture, savedQueryFixture } from '@/fe
 import { defaultDefinition } from '@/features/opportunity-board/model'
 import type { UserRole } from '@/types/crm'
 import type { BoardResult } from '@/features/opportunity-board/types'
+import { reviewFixture } from '@/features/cockpit/review.fixture'
+import { planDetailsFixture, planFixture } from '@/features/cockpit/plan.fixture'
 import OpportunityBoardPage from './OpportunityBoardPage.vue'
+import ReviewPage from './ReviewPage.vue'
+import PlanPage from './PlanPage.vue'
 const response = <T,>(data: T) => ({ data, warnings: [], meta: { requestId: 'board-test' } })
 const mounted: VueWrapper[] = []
 beforeEach(() => {
@@ -19,7 +23,7 @@ beforeEach(() => {
   HTMLDialogElement.prototype.close = function () { this.removeAttribute('open') }
 })
 afterEach(() => { mounted.splice(0).forEach(w => w.unmount()); vi.useRealTimers() })
-async function setup(role: UserRole = 'Manager', configure?: (api: ReturnType<typeof createMockApi>) => void) {
+async function setup(role: UserRole = 'Manager', configure?: (api: ReturnType<typeof createMockApi>) => void, path = '/opportunity-board') {
   const api = createMockApi({ role, latency: 0 })
   api.getOpportunityFilters = vi.fn(async () => response(boardFiltersFixture()))
   api.queryOpportunities = vi.fn(async () => boardResultFixture())
@@ -28,7 +32,7 @@ async function setup(role: UserRole = 'Manager', configure?: (api: ReturnType<ty
   api.deleteOpportunityQuery = vi.fn(async id => response({ id, status: 'Deleted' as const }))
   configure?.(api)
   const pinia = createPinia(), router = createAppRouter()
-  await router.push('/opportunity-board'); await router.isReady()
+  await router.push(path); await router.isReady()
   const wrapper = mount(OpportunityBoardPage, { props: { apiClient: api }, global: { plugins: [pinia, router] } })
   mounted.push(wrapper); await flushPromises()
   return { wrapper, api, app: useAppStore(pinia), router }
@@ -41,7 +45,7 @@ describe('Opportunities board', () => {
     expect(wrapper.findAll('[data-opportunity]')).toHaveLength(result.data.items.length)
     expect(wrapper.get('.board-total').text()).toContain(String(result.data.summary.count))
     expect(api.queryOpportunities).toHaveBeenCalledWith(expect.objectContaining({ page: 1, pageSize: 25, conditions: [] }))
-    expect(wrapper.find('a[href="/dashboard"]').exists()).toBe(role === 'Manager')
+    expect(wrapper.find('a[href^="/dashboard"]').exists()).toBe(role === 'Manager')
   })
   it('keeps missing amounts and backend stage flags distinct from zero / raw days', async () => {
     const { wrapper } = await setup('Manager', api => {
@@ -138,6 +142,81 @@ describe('Opportunities board', () => {
     expect(api.queryOpportunities).toHaveBeenCalledTimes(before)
     await wrapper.get('[data-group-by]').setValue('sales'); await settle()
     expect(api.queryOpportunities).toHaveBeenLastCalledWith(expect.objectContaining({ groupBy: 'sales', page: 1 }))
+  })
+
+  it('sends the incoming single-value scope with the first query and keeps it through an identity reset', async () => {
+    const { wrapper, api, app } = await setup('Manager', undefined, '/opportunity-board?period=quarter&reviewAnchor=2026-07-01&sales=alice&market=Frontend&region=East+China&equipment=Aconca')
+    const scope = { sales: ['alice'], regions: ['East China'], markets: ['Frontend'], equipment: ['Aconca'] }
+    expect(api.queryOpportunities).toHaveBeenCalledTimes(1)
+    expect(api.queryOpportunities).toHaveBeenNthCalledWith(1, expect.objectContaining({ scope, conditions: [] }))
+    // The Review period is navigation context only: the board query itself has no period.
+    expect(vi.mocked(api.queryOpportunities).mock.calls[0][0]).not.toHaveProperty('period')
+    expect(vi.mocked(api.queryOpportunities).mock.calls[0][0]).not.toHaveProperty('reviewAnchor')
+    const tail = 'sales=alice&market=Frontend&region=East+China&equipment=Aconca'
+    expect(wrapper.get('a[href^="/dashboard"]').attributes('href')).toBe(`/dashboard?period=quarter&anchor=2026-07-01&${tail}`)
+    expect(wrapper.get('a[href^="/plan"]').attributes('href')).toBe(`/plan?period=quarter&anchor=2026-10-01&reviewAnchor=2026-07-01&${tail}`)
+    expect(wrapper.get('a[href^="/warnings"]').attributes('href')).toBe(`/warnings?period=quarter&anchor=2026-07-01&${tail}`)
+    app.identityRevision += 1; await flushPromises()
+    expect(api.queryOpportunities).toHaveBeenLastCalledWith(expect.objectContaining({ scope }))
+  })
+
+  it('withholds the other tabs while a dimension holds two values, and resumes once one value or all is chosen', async () => {
+    const { wrapper, api } = await setup('Manager', undefined, '/opportunity-board?period=month&reviewAnchor=2026-09-01&region=East+China')
+    const region = () => wrapper.findAll('.scope-item')[0]
+    const order = ['East China', 'South China', 'West China', 'North China', 'Central China']
+    const regionBox = (value: string) => region().findAll('.board-options input[type="checkbox"]')[order.indexOf(value)]
+    await regionBox('South China').setValue(true); await settle()
+    expect(api.queryOpportunities).toHaveBeenLastCalledWith(expect.objectContaining({ scope: expect.objectContaining({ regions: ['East China', 'South China'] }) }))
+    // Not an unfiltered link: the tabs are unavailable and the page says why.
+    expect(wrapper.find('.board-navigation a').exists()).toBe(false)
+    expect(wrapper.findAll('.board-navigation [aria-disabled="true"]').map(tab => tab.text())).toEqual(['Review', 'Plan', 'Warnings'])
+    expect(wrapper.get('[data-scope-blocked]').text()).toContain('区域')
+    setLocale('en-US'); await flushPromises()
+    expect(wrapper.get('[data-scope-blocked]').text()).toContain('Select one value or All for Region')
+    await regionBox('East China').setValue(false); await settle()
+    expect(wrapper.find('[data-scope-blocked]').exists()).toBe(false)
+    expect(wrapper.get('a[href^="/dashboard"]').attributes('href')).toBe('/dashboard?period=month&anchor=2026-09-01&region=South+China')
+    expect(wrapper.get('a[href^="/plan"]').attributes('href')).toBe('/plan?period=month&anchor=2026-10-01&reviewAnchor=2026-09-01&region=South+China')
+    await regionBox('North China').setValue(true); await settle()
+    expect(wrapper.find('.board-navigation a').exists()).toBe(false)
+    await region().get('.board-options button').trigger('click'); await settle()
+    expect(wrapper.get('a[href^="/dashboard"]').attributes('href')).toBe('/dashboard?period=month&anchor=2026-09-01')
+  })
+
+  it('keeps the navigation context when the board fails to load', async () => {
+    const { wrapper } = await setup('Manager', api => { api.getOpportunityFilters = vi.fn().mockRejectedValue(new Error('network down')) }, '/opportunity-board?period=year&reviewAnchor=2026-01-01&market=Frontend')
+    expect(wrapper.get('[role="alert"]').text()).toContain('network down')
+    expect(wrapper.get('a[href^="/plan"]').attributes('href')).toBe('/plan?period=year&anchor=2027-01-01&reviewAnchor=2026-01-01&market=Frontend')
+  })
+
+  it('round-trips Review Q3 through Opportunities to Plan Q4 and back to Review Q3', async () => {
+    const meta = { requestId: 'cockpit-test', generatedAt: '' }
+    const api = createMockApi({ role: 'Manager', latency: 0 })
+    api.getReview = vi.fn(async () => ({ data: reviewFixture(), warnings: [], meta }))
+    api.getPlan = vi.fn(async () => ({ data: planFixture(), warnings: [], meta }))
+    api.getPlanDetails = vi.fn(async () => ({ data: planDetailsFixture(), warnings: [], meta }))
+    api.getOpportunityFilters = vi.fn(async () => response(boardFiltersFixture()))
+    api.queryOpportunities = vi.fn(async () => boardResultFixture())
+    api.listOpportunityQueries = vi.fn(async () => response({ items: [] }))
+    const router = createAppRouter()
+    const visit = async (component: typeof ReviewPage | typeof PlanPage | typeof OpportunityBoardPage, path: string) => {
+      await router.push(path); await router.isReady()
+      const wrapper = mount(component, { props: { apiClient: api }, global: { plugins: [createPinia(), router] } })
+      mounted.push(wrapper); await flushPromises()
+      return wrapper
+    }
+    const scope = { sales: 'alice', market: 'Frontend', region: 'East China', equipment: 'Aconca' }
+    const start = '/dashboard?period=quarter&anchor=2026-07-01&sales=alice&market=Frontend&region=East+China&equipment=Aconca'
+    const review = await visit(ReviewPage, start)
+    expect(api.getReview).toHaveBeenNthCalledWith(1, { period: 'quarter', anchor: '2026-07-01', ...scope })
+    const board = await visit(OpportunityBoardPage, review.get('a[href^="/opportunity-board"]').attributes('href')!)
+    expect(api.queryOpportunities).toHaveBeenNthCalledWith(1, expect.objectContaining({ scope: { sales: ['alice'], regions: ['East China'], markets: ['Frontend'], equipment: ['Aconca'] } }))
+    const plan = await visit(PlanPage, board.get('a[href^="/plan"]').attributes('href')!)
+    expect(api.getPlan).toHaveBeenNthCalledWith(1, { period: 'quarter', anchor: '2026-10-01', ...scope })
+    const back = plan.get('.view-tabs a[href^="/dashboard"]').attributes('href')!
+    expect(back).toBe(start)
+    await visit(ReviewPage, back)
+    expect(api.getReview).toHaveBeenNthCalledWith(2, { period: 'quarter', anchor: '2026-07-01', ...scope })
   })
 })
 

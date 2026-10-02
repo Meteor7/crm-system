@@ -7,6 +7,7 @@ import { requestErrorMessage } from '@/api/request-state'
 import { useAppStore } from '@/stores/app'
 import { useI18n, useLocaleMessage } from '@/i18n'
 import { detailRoute, labels, metricText, monotoneCurvePath, nextMonday, targetStart } from '@/features/cockpit/presentation'
+import { cockpitRoute, defaultReviewAnchor, pickScope, type CockpitContext } from '@/features/cockpit/scope'
 import ReviewConversionPanel from '@/features/cockpit/ReviewConversionPanel.vue'
 import { regionLabel } from '@/domain/regions'
 import type { ActivityKey, Metric, PeriodKind, ReviewDetails, ReviewDto, ReviewQuery, TargetInput, ReviewRow } from '@/features/cockpit/types'
@@ -138,12 +139,20 @@ function rowAmount(row: ReviewRow) {
 function changePeriod(period: PeriodKind) { query.period = period }
 
 const dateText = (value: string | null | undefined) => value ? new Date(value).toLocaleDateString(locale.value, { timeZone: 'Asia/Shanghai' }) : '—'
+// The period on show: the anchor asked for wins over a loaded (possibly stale) response.
+const shownAnchor = computed(() => query.anchor || data.value?.period.start || '')
+const context = computed<CockpitContext>(() => ({ ...pickScope(query), period: query.period ?? 'week',
+  // Before the data (or after a failure) this page shows the backend default, the week before this Shanghai week.
+  reviewAnchor: shownAnchor.value || defaultReviewAnchor() }))
 // Warnings gets this page's period and filters, so its counts match this banner. The anchor goes along
 // whenever it is known (an anchor asked for, or the data), because without one Warnings shows the current
 // week while this page shows the last completed one. Until then there is nothing to hand over, so the tab
 // is not a link yet; after a failed load it links without an anchor, and Warnings opens the same kind of
 // period on its own default date (for a week, the current one).
-const warningsRoute = computed(() => ({ path: '/warnings', query: Object.fromEntries(Object.entries({ ...query, anchor: query.anchor || data.value?.period.start }).filter(([, value]) => value)) as Record<string, string> }))
+const warningsRoute = computed(() => cockpitRoute('warnings', { ...context.value, reviewAnchor: shownAnchor.value }))
+// Plan opens on the next period of the same granularity; Opportunities keeps this period for the way back.
+const planRoute = computed(() => cockpitRoute('plan', context.value))
+const boardRoute = computed(() => cockpitRoute('board', context.value))
 // Post-mortem state of a loss row; empty for rows from a backend without loss reviews.
 function lossStatus(row: ReviewRow): { text: string; tone: string } | null {
   if (row.reopenedAt) return { text: copy('Reopened', '已重开'), tone: 'muted' }
@@ -246,7 +255,7 @@ async function saveTarget() {
       <div class="heading-order"><span>{{ copy('Individual annual orders · CNY', '个人年度订单 · CNY') }}</span><strong>{{ chartSource && chartSales ? fmt(chartSource.orders.actual, true) : '—' }} / {{ chartSource && chartSales ? fmt(chartSource.orders.target, true) : '—' }}</strong><small>{{ chartSales ? ownerName(chartSales) : copy('No sales rep selected', '未筛选销售') }}</small><small class="order-summary" :title="orderSummary">{{ orderSummary }}</small></div>
     </header>
     <nav class="review-controls" :aria-label="copy('Review filters', '看板筛选')">
-      <strong class="review-tab">Review</strong><RouterLink class="plan-tab" to="/plan">Plan</RouterLink><RouterLink v-if="data || query.anchor || error" class="plan-tab" :to="warningsRoute">Warnings</RouterLink><span v-else class="plan-tab is-disabled" role="link" aria-disabled="true" :title="copy('Available once the page has loaded', '页面加载完成后可用')">Warnings</span><RouterLink class="plan-tab" to="/opportunity-board">Opportunities</RouterLink>
+      <strong class="review-tab">Review</strong><RouterLink class="plan-tab" :to="planRoute">Plan</RouterLink><RouterLink v-if="data || query.anchor || error" class="plan-tab" :to="warningsRoute">Warnings</RouterLink><span v-else class="plan-tab is-disabled" role="link" aria-disabled="true" :title="copy('Available once the page has loaded', '页面加载完成后可用')">Warnings</span><RouterLink class="plan-tab" :to="boardRoute">Opportunities</RouterLink>
       <label><span class="filter-name">{{ copy('Region', '区域') }}</span><select v-model="query.region" :disabled="loading || !filterOptions.regionReady" aria-label="Region"><option value="">{{ filterOptions.regionReady ? copy('All regions', '全部区域') : copy('Region migration pending', '区域待迁移') }}</option><option v-for="region in filterOptions.regions" :key="region" :value="region">{{ regionLabel(region, locale) }}</option></select></label>
       <label><span class="filter-name">{{ copy('Sales', '销售') }}</span><select v-model="query.sales" :disabled="loading" aria-label="Sales"><option value="">{{ copy('All sales', '全部销售') }}</option><option v-for="person in filterOptions.sales" :key="person.id" :value="person.id">{{ person.name }}</option></select></label>
       <label><span class="filter-name">{{ copy('Market', '市场') }}</span><select v-model="query.market" :disabled="loading" aria-label="Market"><option value="">{{ copy('All markets', '全部市场') }}</option><option v-for="market in filterOptions.markets" :key="market" :value="market">{{ market }}</option></select></label>

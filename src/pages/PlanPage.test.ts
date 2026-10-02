@@ -240,4 +240,73 @@ describe('Plan business interface', () => {
     expect(reset.attributes('disabled')).toBeDefined()
     wrapper.unmount()
   })
+
+  async function open(path: string, configure?: (api: ReturnType<typeof createMockApi>) => void) {
+    const api = createMockApi({ role: 'Manager', latency: 0 })
+    api.getPlan = vi.fn(async () => response(planFixture()))
+    api.getPlanDetails = vi.fn(async () => response(planDetailsFixture()))
+    configure?.(api)
+    const router = createAppRouter()
+    await router.push(path); await router.isReady()
+    const wrapper = mount(PlanPage, { props: { apiClient: api }, global: { plugins: [createPinia(), router] } })
+    await flushPromises()
+    const href = (path: string) => wrapper.get(`.view-tabs a[href^="${path}"]`).attributes('href')
+    return { api, wrapper, href }
+  }
+
+  it('keeps a direct Plan Q4 link on Q4 and returns to the preceding Review quarter with the same scope', async () => {
+    const { api, wrapper, href } = await open('/plan?region=East+China&sales=alice&market=Frontend&equipment=Aconca&period=quarter&anchor=2026-10-01')
+    expect(api.getPlan).toHaveBeenNthCalledWith(1, { period: 'quarter', anchor: '2026-10-01', sales: 'alice', region: 'East China', market: 'Frontend', equipment: 'Aconca' })
+    expect(href('/dashboard')).toBe('/dashboard?period=quarter&anchor=2026-07-01&sales=alice&market=Frontend&region=East+China&equipment=Aconca')
+    expect(href('/warnings')).toBe('/warnings?period=quarter&anchor=2026-07-01&sales=alice&market=Frontend&region=East+China&equipment=Aconca')
+    expect(href('/opportunity-board')).toBe('/opportunity-board?period=quarter&reviewAnchor=2026-07-01&sales=alice&market=Frontend&region=East+China&equipment=Aconca')
+    // Changing a filter here goes along on the way back.
+    await wrapper.get('select[aria-label="Market"]').setValue(''); await flushPromises()
+    expect(href('/dashboard')).toBe('/dashboard?period=quarter&anchor=2026-07-01&sales=alice&region=East+China&equipment=Aconca')
+    wrapper.unmount()
+  })
+
+  it('advances a Review anchor exactly once across the year and restores it on the way back', async () => {
+    // After the periods involved, so Review's "not started yet" limit does not apply to them.
+    vi.useFakeTimers({ toFake: ['Date'] }); vi.setSystemTime(new Date('2027-03-01T10:00:00+08:00'))
+    try {
+      const { api, wrapper, href } = await open('/plan?period=month&reviewAnchor=2026-12-15&sales=alice')
+      expect(api.getPlan).toHaveBeenNthCalledWith(1, { period: 'month', anchor: '2027-01-01', sales: 'alice', region: '', market: '', equipment: '' })
+      expect(href('/dashboard')).toBe('/dashboard?period=month&anchor=2026-12-15&sales=alice')
+      // Paging Plan on moves the Review period with it.
+      await wrapper.get('input[aria-label="周期日期"]').setValue('2027-02-01'); await flushPromises()
+      expect(api.getPlan).toHaveBeenLastCalledWith(expect.objectContaining({ period: 'month', anchor: '2027-02-01' }))
+      expect(href('/dashboard')).toBe('/dashboard?period=month&anchor=2027-01-01&sales=alice')
+      wrapper.unmount()
+    } finally { vi.useRealTimers() }
+  })
+
+  it('never links Review, Warnings or Opportunities to a period that has not started when Plan is paged ahead', async () => {
+    // Wednesday 2026-09-30: Plan opens on the week of 2026-10-05; Review and Warnings refuse a future period.
+    vi.useFakeTimers({ toFake: ['Date'] }); vi.setSystemTime(new Date('2026-09-30T10:00:00+08:00'))
+    try {
+      const { api, wrapper, href } = await open('/plan?sales=alice')
+      expect(api.getPlan).toHaveBeenNthCalledWith(1, { period: 'week', anchor: '2026-10-05', sales: 'alice', region: '', market: '', equipment: '' })
+      expect(href('/dashboard')).toBe('/dashboard?period=week&anchor=2026-09-28&sales=alice')
+      await wrapper.get('input[aria-label="周期日期"]').setValue('2026-10-12'); await flushPromises()
+      expect(api.getPlan).toHaveBeenLastCalledWith(expect.objectContaining({ period: 'week', anchor: '2026-10-12' }))
+      expect(href('/dashboard')).toBe('/dashboard?period=week&anchor=2026-09-28&sales=alice')
+      expect(href('/warnings')).toBe('/warnings?period=week&anchor=2026-09-28&sales=alice')
+      expect(href('/opportunity-board')).toBe('/opportunity-board?period=week&reviewAnchor=2026-09-28&sales=alice')
+      wrapper.unmount()
+    } finally { vi.useRealTimers() }
+  })
+
+  it('opens without context on the next Shanghai week and links back to the current one, even when Plan fails to load', async () => {
+    // Sunday 16:30 UTC is already Monday 2026-10-05 in Shanghai.
+    vi.useFakeTimers({ toFake: ['Date'] }); vi.setSystemTime(new Date('2026-10-04T16:30:00Z'))
+    try {
+      const { api, wrapper, href } = await open('/plan', api => { api.getPlan = vi.fn().mockRejectedValue(new Error('Plan API unavailable')) })
+      expect(api.getPlan).toHaveBeenNthCalledWith(1, { period: 'week', anchor: '2026-10-12', sales: '', region: '', market: '', equipment: '' })
+      expect(wrapper.get('[role="alert"]').text()).toContain('Plan API unavailable')
+      expect(href('/dashboard')).toBe('/dashboard?period=week&anchor=2026-10-05')
+      expect(href('/opportunity-board')).toBe('/opportunity-board?period=week&reviewAnchor=2026-10-05')
+      wrapper.unmount()
+    } finally { vi.useRealTimers() }
+  })
 })

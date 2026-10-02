@@ -1,12 +1,13 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { ChevronLeft, ChevronRight, RefreshCw } from '@lucide/vue'
 import { api as defaultApi, type CrmApi } from '@/api'
 import { requestErrorMessage } from '@/api/request-state'
 import { useAppStore } from '@/stores/app'
 import { useI18n, useLocaleMessage } from '@/i18n'
-import { labels, metricText, nextMonday, nextPeriodStart } from '@/features/cockpit/presentation'
+import { labels, metricText, nextPeriodStart } from '@/features/cockpit/presentation'
+import { cockpitRoute, pickScope, planStart, readCockpitQuery, reviewAnchorForPlan, type CockpitContext } from '@/features/cockpit/scope'
 import type { Metric, PeriodKind, ReviewDto } from '@/features/cockpit/types'
 import type { PlanDto, PlanDetails, PlanItem, PlanKind, PlanMetric, PlanMoney, PlanQuery } from '@/features/cockpit/plan-types'
 
@@ -19,7 +20,17 @@ const label = (key: string) => labels[key]?.[locale.value === 'en-US' ? 1 : 0] ?
 const kindLabel = (kind: Exclude<PlanMetric, 'overdue'>) => ({ all: copy('All plans', '全部计划'), visits: copy('Customer visits planned', '计划拜访'), tests: copy('Demo tests in Plan', '计划测试'), actions: copy('Actions due', '到期行动'), po: copy('Expected PO this period', '本期预计 PO') })[kind]
 const kinds: PlanKind[] = ['visits', 'tests', 'actions', 'po']
 const periods: PeriodKind[] = ['week', 'month', 'quarter', 'year']
-const query = reactive<PlanQuery>({ period: 'week', anchor: nextMonday(), sales: '', region: '', market: '', equipment: '' })
+const route = useRoute()
+// Opened from Review, Warnings or Opportunities with their scope and Review period (see cockpit/scope.ts):
+// an explicit anchor already names the Plan period; a Review anchor alone is advanced once to the next period.
+const incoming = readCockpitQuery(route.query)
+const query = reactive<PlanQuery>({ ...planStart(incoming), ...incoming.scope })
+// The way back restores the originating Review period while Plan still shows the period right after it.
+const context = computed<CockpitContext>(() => ({ ...pickScope(query), period: query.period,
+  reviewAnchor: reviewAnchorForPlan(query.period, query.anchor, incoming.reviewAnchor) }))
+const reviewRoute = computed(() => cockpitRoute('review', context.value))
+const warningsRoute = computed(() => cockpitRoute('warnings', context.value))
+const boardRoute = computed(() => cockpitRoute('board', context.value))
 const manager = computed(() => app.bootstrap?.user.role === 'Manager')
 const data = ref<PlanDto | null>(null), items = ref<PlanDetails | null>(null)
 const filters = ref<ReviewDto['filters']>({ sales: [], markets: [], regions: [], regionReady: false, equipment: [] })
@@ -134,7 +145,7 @@ onBeforeUnmount(() => { revision++; detailRevision++; cardObserver?.disconnect()
       <p class="heading-note">{{ copy('Period activities and active Demo tests', '所选周期活动与当前计划测试') }}<small>{{ copy('Tests follow the current stage; other activity follows the selected period', '测试按当前阶段统计；其他活动按所选周期') }}</small></p>
     </header>
     <nav class="plan-controls" :aria-label="copy('Plan filters', '计划筛选')">
-      <div class="view-tabs"><RouterLink to="/dashboard">Review</RouterLink><strong aria-current="page">Plan</strong><RouterLink to="/warnings">Warnings</RouterLink><RouterLink to="/opportunity-board">Opportunities</RouterLink></div>
+      <div class="view-tabs"><RouterLink :to="reviewRoute">Review</RouterLink><strong aria-current="page">Plan</strong><RouterLink :to="warningsRoute">Warnings</RouterLink><RouterLink :to="boardRoute">Opportunities</RouterLink></div>
       <label><span class="filter-name">{{ copy('Region', '区域') }}</span><select v-model="query.region" aria-label="Region" :disabled="!filters.regionReady"><option value="">{{ copy('All regions', '全部区域') }}</option><option v-for="region in filters.regions" :key="region" :value="region">{{ label(region) }}</option></select></label>
       <label><span class="filter-name">{{ copy('Sales', '销售') }}</span><select v-model="query.sales" aria-label="Sales"><option value="">{{ copy('All sales reps', '全部销售') }}</option><option v-for="person in filters.sales" :key="person.id" :value="person.id">{{ person.name }}</option></select></label>
       <label><span class="filter-name">{{ copy('Market', '市场') }}</span><select v-model="query.market" aria-label="Market"><option value="">{{ copy('All markets', '全部市场') }}</option><option v-for="market in filters.markets" :key="market" :value="market">{{ market }}</option></select></label>
