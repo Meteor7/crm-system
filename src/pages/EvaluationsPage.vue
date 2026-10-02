@@ -5,7 +5,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { api as defaultApi, CrmApiError, type CrmApi } from '@/api'
 import type { CreateTestRunInput, EvaluationDto, EvaluationPreparationBranch, EvaluationStatus, EvaluationStatusCommand, TestRunDto } from '@/types/crm'
 import { mapRequestError, readRequestMeta, type RequestMetaState } from '@/api/request-state'
-import { evaluationGroup } from '@/domain/evaluations'
+import { canTerminateEvaluation, evaluationGroup } from '@/domain/evaluations'
 import { useAppStore } from '@/stores/app'
 import PageHeader from '@/design-system/PageHeader.vue'
 import DataState from '@/design-system/DataState.vue'
@@ -20,6 +20,7 @@ import { canManageTestRun, type TestRunAction } from '@/features/evaluations/tes
 import TestReportUploadModal from '@/features/evaluations/TestReportUploadModal.vue'
 import CustomerReportUploadModal from '@/features/evaluations/CustomerReportUploadModal.vue'
 import CustomerCommentModal from '@/features/evaluations/CustomerCommentModal.vue'
+import TerminateEvaluationModal from '@/features/evaluations/TerminateEvaluationModal.vue'
 import { useI18n, useLocaleMessage, localeMessage } from '@/i18n'
 
 const props = withDefaults(defineProps<{ apiClient?: CrmApi }>(), {
@@ -39,6 +40,9 @@ const error = useLocaleMessage()
 const requestId = ref('')
 const actionError = useLocaleMessage()
 const actionRequestId = ref('')
+// The Terminate dialog's own refusal, so another action's failure never lands inside it.
+const terminateError = useLocaleMessage()
+const terminateRequestId = ref('')
 const meta = ref<RequestMetaState | null>(null)
 const processing = ref('')
 const warnings = ref<string[]>([])
@@ -51,6 +55,7 @@ const runActionRequestId = ref('')
 const runActionConflict = ref(false)
 const runActionKey = ref(0)
 const deadlineTarget = ref<EvaluationDto | null>(null)
+const terminateTarget = ref<EvaluationDto | null>(null)
 const reportTarget = ref<EvaluationDto | null>(null)
 const customerReportTarget = ref<EvaluationDto | null>(null)
 const commentTarget = ref<EvaluationDto | null>(null)
@@ -123,7 +128,7 @@ function changePageSize(value: number) { pageSize.value = value; page.value = 1;
 
 watch(focusedEvaluationId, () => { void load() })
 
-function handleWriteError(reason: unknown) {
+function handleWriteError(reason: unknown, into: 'page' | 'terminate-dialog' = 'page') {
   warnings.value = []
   const mapped = mapRequestError(reason)
   if (mapped.denied) {
@@ -134,11 +139,18 @@ function handleWriteError(reason: unknown) {
     runTarget.value = null
     runActionTarget.value = null
     deadlineTarget.value = null
+    terminateTarget.value = null
     reportTarget.value = null
     customerReportTarget.value = null
     commentTarget.value = null
     actionError.value = ''
     actionRequestId.value = ''
+    clearTerminateError()
+    return
+  }
+  if (into === 'terminate-dialog') {
+    terminateError.value = mapped.localizedMessage ?? mapped.message
+    terminateRequestId.value = mapped.requestId
     return
   }
   actionError.value = mapped.localizedMessage ?? mapped.message
@@ -148,6 +160,11 @@ function handleWriteError(reason: unknown) {
 function clearActionError() {
   actionError.value = ''
   actionRequestId.value = ''
+}
+
+function clearTerminateError() {
+  terminateError.value = ''
+  terminateRequestId.value = ''
 }
 
 async function persistStatus(id: string, command: EvaluationStatusCommand) {
@@ -346,6 +363,73 @@ async function setDeadline(input: { testRunDeadline: string }) {
   }
 }
 
+function openTerminate(evaluation: EvaluationDto) {
+  clearActionError()
+  clearTerminateError()
+  terminateTarget.value = evaluation
+}
+
+function closeTerminate() {
+  // The dialog stays until its own request answers, so that answer cannot land on another Demo's dialog.
+  if (terminateTarget.value && processing.value === terminateTarget.value.id) return
+  terminateTarget.value = null
+  clearTerminateError()
+}
+
+async function terminate(input: { reason: string }) {
+  const target = terminateTarget.value
+  if (!target) return
+  processing.value = target.id
+  warnings.value = []
+  clearActionError()
+  clearTerminateError()
+  try {
+    selectedId.value = target.id
+    // The terminated Demo leaves the in-progress list on reload; its record stays in the Demo archive.
+    await props.apiClient.terminateEvaluation(target.id, input.reason, target.modified ?? '')
+    terminateTarget.value = null
+    await load()
+  } catch (reason) {
+    handleWriteError(reason, 'terminate-dialog')
+    if (reason instanceof CrmApiError && (reason.code === 'VERSION_CONFLICT' || reason.code === 'INVALID_TRANSITION')) {
+      await reloadTerminateTarget(target, reason)
+    }
+  } finally {
+    processing.value = ''
+  }
+}
+
+// Retrying with a refused version can never succeed: reload and point the open dialog, which
+// keeps the typed reason, at the latest record. Close it once the Demo is no longer in progress.
+async function reloadTerminateTarget(target: EvaluationDto, refusal: unknown) {
+  await load()
+  if (terminateTarget.value !== target) return
+  if (denied.value || error.value) {
+    terminateTarget.value = null
+    // The dialog and the typed reason are gone: say that the termination did not go through.
+    if (!denied.value) handleWriteError(refusal)
+    return
+  }
+  // The list is ordered by last change, so the changed Demo may now sit on another page: read it directly.
+  let latest: EvaluationDto
+  try {
+    latest = (await props.apiClient.getEvaluation(target.id)).data
+  } catch (reason) {
+    if (terminateTarget.value !== target) return
+    terminateTarget.value = null
+    handleWriteError(reason)
+    return
+  }
+  if (terminateTarget.value !== target) return
+  rows.value = rows.value.map((row) => row.id === latest.id ? latest : row)
+  if (canTerminateEvaluation(latest.status)) {
+    terminateTarget.value = latest
+    return
+  }
+  terminateTarget.value = null
+  actionError.value = localeMessage('This Demo Test is no longer in progress. The latest record is shown.', '该 Demo Test 已不在进行中，页面已显示最新记录。')
+}
+
 async function reportUploaded() {
   reportTarget.value = null
   await load()
@@ -414,6 +498,7 @@ onMounted(async () => {
       @report="reportTarget = $event"
       @customer-report="customerReportTarget = $event"
       @retest="openRetest"
+      @terminate="openTerminate"
       @customer-change="clearWarnings"
     />
     <PaginationControls v-if="!denied && !error && total > pageSize" :page="page" :page-size="pageSize" :total="total" @change="goPage" @page-size-change="changePageSize" />
@@ -424,6 +509,15 @@ onMounted(async () => {
       :busy="Boolean(processing)"
       @close="deadlineTarget = null"
       @submit="setDeadline"
+    />
+    <TerminateEvaluationModal
+      v-if="terminateTarget"
+      :evaluation="terminateTarget"
+      :busy="Boolean(processing)"
+      :submit-error="terminateError"
+      :request-id="terminateRequestId"
+      @close="closeTerminate"
+      @submit="terminate"
     />
     <TestRunModal
       v-if="runTarget"

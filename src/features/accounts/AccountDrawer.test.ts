@@ -4,6 +4,7 @@ import { flushPromises, mount } from '@vue/test-utils'
 import { describe, expect, it, vi } from 'vitest'
 import type { ApiResponse, Account360Dto } from '@/types/crm'
 import { createMockApi } from '@/api/mock-adapter'
+import { evaluations } from '@/api/mock-data'
 import { CrmApiError } from '@/api'
 import AccountProfile from './AccountProfile.vue'
 
@@ -152,6 +153,39 @@ describe('AccountProfile request identity', () => {
     expect(contractSection.findAll('article')).toHaveLength(1)
     expect(contractSection.text()).toContain('Q-2026-0006')
   })
+})
+
+it('names a terminated Demo on the customer page without relabelling rejections or quotation decisions', async () => {
+  const apiClient = createMockApi({ latency: 0 })
+  const snapshot = await apiClient.getAccount360('ACC-001')
+  const base = evaluations[2]
+  snapshot.data.demoRequests = []
+  snapshot.data.evaluations = [
+    { ...base, id: 'EVAL-TERMINATED', title: 'Terminated Demo', status: 'Rejected', terminationReason: '客户暂停项目' },
+    { ...base, id: 'EVAL-REJECTED', title: 'Historical Demo', status: 'Rejected', terminationReason: '' },
+    { ...base, id: 'EVAL-ACCEPTED', title: 'Accepted Demo', status: 'Accepted' },
+  ]
+  snapshot.data.quotations = [{
+    id: 'CRM-QTN-00001', refNo: 'Q-2026-0001', quotationType: 'Device',
+    opportunityId: 'OPP-001', opportunityTitle: '南京缺陷检测设备 2 台',
+    accountId: 'ACC-001', accountName: '示例企业014有限公司', owner: 'person002@crm.example.invalid',
+    status: 'Rejected', approvalStatus: 'Approved', latestVersion: 1,
+    currentVersionId: 'CRM-QTNV-00001', currentPublishedVersionId: 'CRM-QTNV-00001', modified: '2026-08-25T10:00:00+08:00',
+  }]
+  vi.spyOn(apiClient, 'getAccount360').mockResolvedValue(snapshot)
+  const wrapper = mount(AccountProfile, { props: { accountId: 'ACC-001', apiClient }, global: { plugins: [createPinia()] } })
+  await flushPromises()
+  const row = (title: string) => wrapper.findAll('.project-section article').find((item) => item.text().includes(title))!
+  const badge = (title: string) => row(title).get('.status-badge').text()
+
+  expect([badge('Terminated Demo'), badge('Historical Demo'), badge('Accepted Demo'), badge('Q-2026-0001')])
+    .toEqual(['已终止', '已拒绝', '已接受', '已拒绝'])
+  expect(row('Terminated Demo').text()).toContain('客户暂停项目')
+  setLocale('en-US')
+  await flushPromises()
+  expect([badge('Terminated Demo'), badge('Historical Demo'), badge('Accepted Demo'), badge('Q-2026-0001')])
+    .toEqual(['Terminated', 'Rejected', 'Accepted', 'Rejected'])
+  wrapper.unmount()
 })
 
 it('translates loaded Account 360 stages without modifying its snapshot or refetching', async () => {

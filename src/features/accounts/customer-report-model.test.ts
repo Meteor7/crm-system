@@ -78,6 +78,36 @@ it('uses English report labels and generated risk copy while preserving business
 })
 
 
+it('exports a terminated Demo as Terminated with its reason and keeps historical Rejected and Accepted rows unchanged', async () => {
+  const detail = (await createMockApi({ latency: 0 }).getAccount360('ACC-001')).data
+  const seed = detail.evaluations[0]!
+  detail.evaluations = [
+    { ...seed, id: 'EVAL-TERMINATED', status: 'Rejected', acceptance: 'Pending', terminationReason: 'Customer paused the project' },
+    { ...seed, id: 'EVAL-HISTORICAL', status: 'Rejected', acceptance: 'Pending', terminationReason: '' },
+    { ...seed, id: 'EVAL-ACCEPTED', status: 'Accepted', acceptance: 'Accepted', terminationReason: undefined },
+  ]
+  const formalDemo = (locale: 'zh-CN' | 'en-US') => {
+    const sheet = buildCustomerReportModel(detail, '2026-09-30', locale).sheets[4]!
+    const header = sheet.rows.find((row) => row[0]?.v === 'Demo ID')!
+    const status = header.findIndex((cell) => cell.v === (locale === 'zh-CN' ? '状态 / Status' : 'Status'))
+    const acceptance = header.findIndex((cell) => cell.v === (locale === 'zh-CN' ? '验收 / Acceptance' : 'Acceptance'))
+    return (id: string) => {
+      const row = sheet.rows.find((cells) => cells[0]?.v === id)!
+      return [row[status]?.v, row[acceptance]?.v]
+    }
+  }
+
+  const zh = formalDemo('zh-CN')
+  expect(zh('EVAL-TERMINATED')).toEqual(['已终止 / Terminated · 原因 / Reason: Customer paused the project', '未评审 / Not reviewed'])
+  expect(zh('EVAL-HISTORICAL')).toEqual(['Rejected', 'Pending'])
+  expect(zh('EVAL-ACCEPTED')).toEqual(['Accepted', 'Accepted'])
+  const en = formalDemo('en-US')
+  expect(en('EVAL-TERMINATED')).toEqual(['Terminated · Reason: Customer paused the project', 'Not reviewed'])
+  expect(en('EVAL-HISTORICAL')).toEqual(['Rejected', 'Pending'])
+  expect(en('EVAL-ACCEPTED')).toEqual(['Accepted', 'Accepted'])
+})
+
+
 it('uses English generated booking titles in reports without modifying the booking', async () => {
   const detail = (await createMockApi({ latency: 0 }).getAccount360('ACC-001')).data
   detail.bookings = [{ id: 'B-1', accountId: 'ACC-001', accountName: 'Acme', primaryContactId: 'CON-001', customerContact: 'Customer', amount: '1000.00', currency: 'CNY', bookingDate: '2026-09-07', owner: 'Sales', source: 'Upsell', sourceOpportunityId: '', note: '', ddl: '2026-10-01', equipment: 'Tool X', quantity: 2, bookingType: 'Equipment', title: 'Tool X · 2 台', status: 'Confirmed' }]

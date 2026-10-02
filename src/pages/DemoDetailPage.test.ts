@@ -56,6 +56,41 @@ describe('Demo detail page', () => {
     expect(wrapper.get('[data-demo-detail]').text()).toContain('第 201 条真实 Demo 项目')
   })
 
+  it.each([
+    ['a terminated Demo', 'Rejected', 'Customer paused the project', 'Pending', '已终止'],
+    ['a historical rejection', 'Rejected', '', 'Rejected', '已拒绝'],
+    ['an accepted Demo', 'Accepted', '', 'Accepted', '已接受'],
+  ])('shows %s from the reopened archive projection', async (_label, status, terminationReason, acceptance, chip) => {
+    const seedApi = createMockApi({ latency: 0, role: 'Manager' })
+    const project = (await seedApi.listDemoWorkflows({ page: 1, pageSize: 1 })).data.items[0]
+    const ended = {
+      ...project, id: 'DR-110', status, terminationReason, archiveCategory: 'Completed' as const,
+      evaluation: project.evaluation && { ...project.evaluation, status },
+      conclusion: { ...project.conclusion, status: acceptance as 'Pending' | 'Accepted' | 'Rejected' },
+    }
+    const apiClient = Object.assign(createMockApi({ latency: 0, role: 'Manager' }), {
+      getDemoWorkflow: vi.fn().mockResolvedValue({ data: ended, warnings: [] }),
+    })
+    // Every open reads the persisted projection again; nothing is carried over from the session.
+    for (let open = 0; open < 2; open++) {
+      const router = createAppRouter()
+      await router.push('/demo-workflow/DR-110')
+      await router.isReady()
+      const wrapper = mount(DemoDetailPage, { props: { apiClient }, global: { plugins: [createPinia(), router] } })
+      await flushPromises()
+      expect(wrapper.get('.status-chip').text()).toBe(chip)
+      const conclusion = wrapper.get('.conclusion-panel')
+      if (terminationReason) {
+        expect(conclusion.get('[data-termination-reason]').text()).toContain(terminationReason)
+        expect(conclusion.get('[data-customer-review-status]').text()).toContain('未评审')
+      } else {
+        expect(conclusion.find('[data-termination-reason]').exists()).toBe(false)
+        expect(wrapper.text()).not.toContain('已终止')
+      }
+      wrapper.unmount()
+    }
+  })
+
   it('keeps the Demo detail visible and shows Request ID when an artifact download fails', async () => {
     const router = createAppRouter()
     await router.push('/demo-workflow/DR-FAIL')

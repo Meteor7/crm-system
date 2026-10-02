@@ -7,6 +7,7 @@ import { CalendarDays, ChevronLeft, ChevronRight, Clock3, MapPin, UserRound, Use
 import { api as defaultApi, type CrmApi } from '@/api'
 import { useAppStore } from '@/stores/app'
 import { formatDisplayDate } from '@/domain/time'
+import { isTerminatedDemo, terminatedDemoRequestMatcher } from '@/domain/evaluations'
 import type { ApiResponse, BookingDto, DemoRequestDto, EvaluationDto, PageData, VisitDto } from '@/types/crm'
 import { useI18n, useLocaleMessage } from '@/i18n'
 
@@ -28,8 +29,8 @@ const router = useRouter()
 const { locale, t, message } = useI18n()
 const loading = ref(true)
 const error = useLocaleMessage()
-const sources = ref<{ visits: VisitDto[]; requests: DemoRequestDto[]; evaluations: EvaluationDto[]; bookings: BookingDto[] }>({
-  visits: [], requests: [], evaluations: [], bookings: [],
+const sources = ref<{ visits: VisitDto[]; requests: DemoRequestDto[]; evaluations: EvaluationDto[]; linkedEvaluations: EvaluationDto[]; bookings: BookingDto[] }>({
+  visits: [], requests: [], evaluations: [], linkedEvaluations: [], bookings: [],
 })
 const view = ref<'month' | 'week'>('month')
 const cursor = ref(new Date())
@@ -84,17 +85,19 @@ function startOfWeek(date: Date) {
 function isMine(event: CalendarEvent) {
   return event.owner === currentUser.value
 }
+// A terminated Demo no longer has a Test DDL or a customer expected date to chase.
+const isTerminatedRequest = computed(() => terminatedDemoRequestMatcher([...sources.value.evaluations, ...sources.value.linkedEvaluations]))
 const events = computed(() => [
   ...sources.value.visits.map((item): CalendarEvent => ({
     id: `visit-${item.id}`, sourceId: item.id, type: 'visit', date: item.date, title: item.subject,
     account: item.accountName, owner: item.owner, detail: `${item.type} · ${item.objective}`,
   })),
-  ...sources.value.requests.filter((item) => item.status !== 'Cancelled').map((item): CalendarEvent => ({
+  ...sources.value.requests.filter((item) => item.status !== 'Cancelled' && !isTerminatedRequest.value(item)).map((item): CalendarEvent => ({
     id: `request-${item.id}`, sourceId: item.id, type: 'demo-request', date: item.customerExpectedDate || item.targetDate,
     title: `${item.id} ${t('calendar.customerExpected')}`, account: item.accountName, owner: isEngineer.value ? item.engineerOwner : item.salesOwner,
     detail: `${item.title} · ${item.requestedEquipment}`,
   })),
-  ...sources.value.evaluations.filter((item) => item.testRunDeadline).map((item): CalendarEvent => ({
+  ...sources.value.evaluations.filter((item) => item.testRunDeadline && !isTerminatedDemo(item)).map((item): CalendarEvent => ({
     id: `test-${item.id}`, sourceId: item.id, type: 'demo-test', date: item.testRunDeadline,
     title: `${item.id} ${t('calendar.testRunDdl')}`, account: item.accountName, owner: item.owner,
     detail: item.title,
@@ -199,8 +202,18 @@ async function load() {
       readAll((page) => props.apiClient.listEvaluations({ page, pageSize: 200, dateFrom, dateTo })),
       props.apiClient.listPipeline({ dateFrom, dateTo }),
     ])
+    // The Evaluation list only holds Test DDLs in this range. A shown request can link to an
+    // Evaluation outside it (e.g. terminated before any DDL was set), so read those by id.
+    const loadedEvaluationIds = new Set(evaluations.map((item) => item.id))
+    const missingEvaluationIds = [...new Set(requests
+      .filter((item) => item.status !== 'Cancelled' && item.evaluationId && !loadedEvaluationIds.has(item.evaluationId))
+      .map((item) => item.evaluationId!))]
+    const linkedEvaluations = (await Promise.all(missingEvaluationIds.map((id) =>
+      // An unreadable link keeps its request event, as before.
+      props.apiClient.getEvaluation(id).then((result) => result.data, () => null))))
+      .filter((item): item is EvaluationDto => item !== null)
     if (revision !== loadRevision) return
-    sources.value = { visits, requests, evaluations, bookings: pipeline.data.bookings }
+    sources.value = { visits, requests, evaluations, linkedEvaluations, bookings: pipeline.data.bookings }
     if (!visibleEvents.value.some((item) => item.id === selectedId.value)) selectedId.value = visibleEvents.value[0]?.id ?? ''
   } catch (reason) {
     if (revision === loadRevision) error.value = requestErrorMessage(reason, message('calendar.loadFailed'))

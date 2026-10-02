@@ -3,6 +3,7 @@ import { salesEnumLabel } from '@/features/shared/sales-i18n'
 import type { DemoArchiveGroup } from '@/domain/demo-archive'
 import type { DemoWorkflowDto } from '@/types/workspaces'
 import { personnelDisplayName } from '@/demo/personnel'
+import { isTerminatedDemo } from '@/domain/evaluations'
 import { useI18n } from '@/i18n'
 
 defineProps<{
@@ -11,7 +12,7 @@ defineProps<{
   groupBy: 'customer' | 'equipment'
 }>()
 defineEmits<{ open: [item: DemoWorkflowDto] }>()
-const { locale } = useI18n()
+const { locale, t } = useI18n()
 const copy = (english: string, chinese: string) => locale.value === 'en-US' ? english : chinese
 const groupLabel = (value: string) => value === '未指定设备' ? copy('Unspecified equipment', value) : value
 </script>
@@ -33,9 +34,10 @@ const groupLabel = (value: string) => value === '未指定设备' ? copy('Unspec
     >
       <span class="archive-card-head">
         <strong>{{ item.id }}</strong>
-        <i :class="item.status.toLowerCase()">{{ salesEnumLabel(item.status, locale) }}</i>
+        <i :class="item.status.toLowerCase()">{{ isTerminatedDemo(item) ? t('evaluations.terminated') : salesEnumLabel(item.status, locale) }}</i>
       </span>
       <b>{{ item.title }}</b>
+      <small v-if="isTerminatedDemo(item)" data-termination-reason>{{ t('evaluations.terminateReason') }} · {{ item.terminationReason }}</small>
       <small>{{ groupBy === 'customer' ? item.equipment : item.account }}</small>
       <small>{{ copy('Sales', '销售') }} {{ personnelDisplayName(item.salesOwner) }} · {{ copy('Engineer', '工程师') }} {{ personnelDisplayName(item.engineerOwner) }}</small>
     </button>

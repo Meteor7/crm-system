@@ -18,6 +18,7 @@ import { formatDisplayDate } from '@/domain/time'
 import { useI18n, useLocaleMessage } from '@/i18n'
 import { salesEnumLabel, recordTypeLabel } from '@/features/shared/sales-i18n'
 import { regionLabel } from '@/domain/regions'
+import { isTerminatedDemo } from '@/domain/evaluations'
 import { isOpportunityStage, opportunityStageLabel, opportunityStageTone } from '@/domain/opportunity-stages'
 
 const props = defineProps<{ accountId: string; apiClient: CrmApi }>()
@@ -40,6 +41,8 @@ interface ProjectRow {
   meta: string
   status: string
   tone: Tone
+  /** Overrides the shared status label, e.g. for a terminated Demo that keeps the Rejected status. */
+  label?: string
 }
 const selectedProjectType = ref<ProjectTypeFilter>('all')
 const selectedProject = ref('all')
@@ -158,10 +161,15 @@ const demoRows = computed<ProjectRow[]>(() => [
     id: item.id, title: item.title, meta: `${item.id} · ${item.requestedEquipment} · ${item.targetDate}`,
     status: item.status, tone: item.status === 'Converted' ? 'positive' as const : 'info' as const,
   })),
-  ...filteredEvaluations.value.map((item) => ({
-    id: item.id, title: item.title, meta: `${item.id} · ${item.wafers} ${locale.value === 'en-US' ? 'wafers' : '片晶圆'} · ${personnelDisplayName(item.owner)}`,
-    status: item.status, tone: 'info' as const,
-  })),
+  ...filteredEvaluations.value.map((item) => {
+    const terminated = isTerminatedDemo(item)
+    return {
+      id: item.id, title: item.title,
+      meta: `${item.id} · ${item.wafers} ${locale.value === 'en-US' ? 'wafers' : '片晶圆'} · ${personnelDisplayName(item.owner)}${terminated ? ` · ${t('evaluations.terminateReason')} · ${item.terminationReason}` : ''}`,
+      status: item.status, tone: terminated ? 'danger' as const : 'info' as const,
+      label: terminated ? t('evaluations.terminated') : undefined,
+    }
+  }),
 ])
 function pagedRows(rows: ProjectRow[], section: ProjectSection) {
   const start = (sectionPages[section] - 1) * PROJECT_PAGE_SIZE
@@ -266,7 +274,7 @@ watch(selectedProject, resetSectionPages)
               </section>
               <section class="project-section">
                 <header><FlaskConical :size="16" /><strong>{{ locale === 'en-US' ? 'Demo / wafer test' : 'Demo / 晶圆测试' }}</strong><span>{{ demoRows.length }}</span></header>
-                <article v-for="item in pagedRows(demoRows, 'demos')" :key="item.id"><div><strong>{{ item.title }}</strong><small>{{ item.meta }}</small></div><StatusBadge :label="salesEnumLabel(item.status, locale)" :tone="item.tone" /></article>
+                <article v-for="item in pagedRows(demoRows, 'demos')" :key="item.id"><div><strong>{{ item.title }}</strong><small>{{ item.meta }}</small></div><StatusBadge :label="item.label ?? salesEnumLabel(item.status, locale)" :tone="item.tone" /></article>
                 <div v-if="!demoRows.length" class="mini-empty">{{ locale === 'en-US' ? 'No Demo or Test records for this project' : '该项目暂无 Demo 或 Test' }}</div>
                 <PaginationControls v-if="demoRows.length > PROJECT_PAGE_SIZE" :page="sectionPages.demos" :page-size="PROJECT_PAGE_SIZE" :total="demoRows.length" @change="sectionPages.demos = $event" />
               </section>

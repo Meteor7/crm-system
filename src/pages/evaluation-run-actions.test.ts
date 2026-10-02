@@ -14,7 +14,7 @@ import EvaluationsPage from './EvaluationsPage.vue'
 const mounted: VueWrapper[] = []
 afterEach(() => { mounted.splice(0).forEach(wrapper => wrapper.unmount()); vi.restoreAllMocks() })
 
-async function context(options: { role?: UserRole; prepare?: (evaluation: EvaluationDto) => void; omitFocusedFromList?: boolean } = {}) {
+async function context(options: { role?: UserRole; prepare?: (evaluation: EvaluationDto) => void; omitFocusedFromList?: boolean; unfocused?: boolean } = {}) {
   const repository = createDemoRepository(createMemoryDemoStorage(), seedDemoSnapshot)
   if (options.prepare) await repository.transact(snapshot => options.prepare!(snapshot.evaluations.find(row => row.id === 'EVAL-103')!))
   const api = createMockApi({ repository, salesRepository: createMemorySalesRepository(), latency: 0, role: options.role ?? 'Manager', today: '2026-07-17', ...(options.role === 'Sales' ? { userName: 'Demo Staff 02' } : {}) })
@@ -30,7 +30,7 @@ async function context(options: { role?: UserRole; prepare?: (evaluation: Evalua
   const app = useAppStore(pinia)
   app.bootstrap = (await api.getBootstrap()).data
   const router = createRouter({ history: createMemoryHistory(), routes: [{ path: '/evaluations', component: EvaluationsPage }, { path: '/demo/:demoId', name: 'demo-detail', component: { template: '<div />' } }] })
-  await router.push('/evaluations?focus=EVAL-103')
+  await router.push(options.unfocused ? '/evaluations' : '/evaluations?focus=EVAL-103')
   await router.isReady()
   const wrapper = mount(EvaluationsPage, { props: { apiClient: api }, global: { plugins: [pinia, router] } })
   mounted.push(wrapper)
@@ -420,5 +420,300 @@ describe('Evaluation page planned test-run actions', () => {
     await flushPromises()
     expect(wrapper.get('[role="dialog"]').attributes('aria-label')).toBe('取消测试')
     expect(wrapper.get('[role="alert"]').text()).toContain('请填写取消原因')
+  })
+})
+
+// The mock adapter only stubs terminateEvaluation; each test supplies the server's answer.
+describe('Terminate Demo Test', () => {
+  const inProgress = (wrapper: VueWrapper) => Number(/\d+/.exec(wrapper.get('.header-chip').text())![0])
+
+  async function terminatedCopy(page: PageContext) {
+    return preparedEvaluation(page.current, (evaluation) => {
+      evaluation.status = 'Rejected'
+      evaluation.terminationReason = 'Customer paused the project'
+    })
+  }
+
+  it('opens a reason dialog on Terminate and calls terminateEvaluation with the reason and loaded version', async () => {
+    const page = await context({ prepare: (evaluation) => { evaluation.status = 'Testing' } })
+    const { wrapper, api, current } = page
+    const original = await current()
+    const before = inProgress(wrapper)
+    const returned = await terminatedCopy(page)
+    const spy = vi.spyOn(api, 'terminateEvaluation').mockImplementation(async () => persistPreparedEvaluation(page, returned))
+    const list = vi.spyOn(api, 'listEvaluations')
+
+    await wrapper.get('[data-testid="terminate-evaluation-EVAL-103"]').trigger('click')
+    expect(wrapper.get('[role="dialog"]').attributes('aria-label')).toBe('终止 Demo')
+    await submit(wrapper)
+    expect(spy).not.toHaveBeenCalled()
+    expect(wrapper.get('[role="dialog"] [role="alert"]').text()).toBe('请填写终止原因')
+    await wrapper.get('[aria-label="终止原因"]').setValue('  Customer paused the project  ')
+    await submit(wrapper)
+
+    expect(spy).toHaveBeenCalledOnce()
+    expect(spy).toHaveBeenCalledWith('EVAL-103', 'Customer paused the project', original.modified)
+    expect(list).toHaveBeenCalled()
+    expect(wrapper.find('[role="dialog"]').exists()).toBe(false)
+    const evaluation = await current()
+    expect(evaluation.status).toBe('Rejected')
+    expect(evaluation.terminationReason).toBe('Customer paused the project')
+    // The terminated Demo leaves the in-progress workspace and count after the reload.
+    expect(wrapper.find('[data-evaluation="EVAL-103"]').exists()).toBe(false)
+    expect(inProgress(wrapper)).toBe(before - 1)
+  })
+
+  it('keeps the dialog and the reason after a refused write and lets the user retry', async () => {
+    const page = await context()
+    const { wrapper, api } = page
+    const returned = await terminatedCopy(page)
+    const spy = vi.spyOn(api, 'terminateEvaluation')
+      .mockRejectedValueOnce(new CrmApiError('NETWORK_ERROR', 'Connection interrupted', 'req-terminate-network'))
+      .mockImplementation(async () => persistPreparedEvaluation(page, returned))
+
+    await wrapper.get('[data-testid="terminate-evaluation-EVAL-103"]').trigger('click')
+    await wrapper.get('[aria-label="终止原因"]').setValue('Customer paused the project')
+    await submit(wrapper)
+
+    // The dialog carries the refusal; the page banner does not repeat it behind the dialog.
+    expect(wrapper.get('[role="dialog"]').text()).toContain('req-terminate-network')
+    expect(wrapper.find('[data-api-error]').exists()).toBe(false)
+    expect(wrapper.findAll('[role="alert"]').filter((alert) => alert.text().includes('req-terminate-network'))).toHaveLength(1)
+    expect(wrapper.get<HTMLTextAreaElement>('[aria-label="终止原因"]').element.value).toBe('Customer paused the project')
+    expect(wrapper.get('[data-modal-submit]').attributes('disabled')).toBeUndefined()
+    await submit(wrapper)
+    expect(spy).toHaveBeenCalledTimes(2)
+    expect(spy.mock.calls[1]).toEqual(spy.mock.calls[0])
+    expect(wrapper.find('[role="dialog"]').exists()).toBe(false)
+    expect(wrapper.find('[data-api-error]').exists()).toBe(false)
+  })
+
+  it('reloads after a version conflict and resubmits the same reason with the latest version', async () => {
+    const page = await context({ prepare: (evaluation) => { evaluation.status = 'Testing' } })
+    const { wrapper, api, current } = page
+    const original = await current()
+    // Another user changes the Demo Test while this dialog is open.
+    const latest = await preparedEvaluation(current, (evaluation) => { evaluation.testRunDeadline = '2026-08-20' }, '2026-07-17T12:00:02.000000Z')
+    const returned = structuredClone(latest)
+    returned.status = 'Rejected'
+    returned.terminationReason = 'Customer paused the project'
+    returned.modified = '2026-07-17T12:00:03.000000Z'
+    const spy = vi.spyOn(api, 'terminateEvaluation')
+      .mockRejectedValueOnce(new CrmApiError('VERSION_CONFLICT', 'Changed elsewhere', 'req-terminate-conflict'))
+      .mockImplementation(async () => persistPreparedEvaluation(page, returned))
+    const list = vi.spyOn(api, 'listEvaluations')
+
+    await wrapper.get('[data-testid="terminate-evaluation-EVAL-103"]').trigger('click')
+    await wrapper.get('[aria-label="终止原因"]').setValue('Customer paused the project')
+    await persistPreparedEvaluation(page, latest)
+    await submit(wrapper)
+
+    expect(spy).toHaveBeenCalledOnce()
+    expect(spy).toHaveBeenLastCalledWith('EVAL-103', 'Customer paused the project', original.modified)
+    expect(original.modified).not.toBe(latest.modified)
+    expect(list).toHaveBeenCalled()
+    expect(wrapper.get('[role="dialog"]').text()).toContain('req-terminate-conflict')
+    expect(wrapper.get<HTMLTextAreaElement>('[aria-label="终止原因"]').element.value).toBe('Customer paused the project')
+    expect(wrapper.get('[data-modal-submit]').attributes('disabled')).toBeUndefined()
+
+    await submit(wrapper)
+    expect(spy).toHaveBeenCalledTimes(2)
+    expect(spy).toHaveBeenLastCalledWith('EVAL-103', 'Customer paused the project', latest.modified)
+    expect(wrapper.find('[role="dialog"]').exists()).toBe(false)
+    expect(wrapper.find('[data-api-error]').exists()).toBe(false)
+    expect((await current()).terminationReason).toBe('Customer paused the project')
+    expect(wrapper.find('[data-evaluation="EVAL-103"]').exists()).toBe(false)
+  })
+
+  it('closes the dialog when the reload shows the Demo Test was already ended elsewhere', async () => {
+    const page = await context()
+    const { wrapper, api } = page
+    const endedElsewhere = await terminatedCopy(page)
+    const spy = vi.spyOn(api, 'terminateEvaluation')
+      .mockRejectedValue(new CrmApiError('INVALID_TRANSITION', 'Evaluation is already Rejected.', 'req-terminate-ended'))
+
+    await wrapper.get('[data-testid="terminate-evaluation-EVAL-103"]').trigger('click')
+    await wrapper.get('[aria-label="终止原因"]').setValue('Customer paused the project')
+    await persistPreparedEvaluation(page, endedElsewhere)
+    await submit(wrapper)
+
+    expect(spy).toHaveBeenCalledOnce()
+    expect(wrapper.find('[role="dialog"]').exists()).toBe(false)
+    expect(wrapper.get('[data-api-error]').text()).toContain('该 Demo Test 已不在进行中')
+    expect(wrapper.find('[data-evaluation="EVAL-103"]').exists()).toBe(false)
+  })
+
+  it('keeps the dialog on a conflict when the changed Demo Test has moved off the loaded list page', async () => {
+    const page = await context({ unfocused: true, prepare: (evaluation) => { evaluation.status = 'Testing' } })
+    const { wrapper, api, current } = page
+    const original = await current()
+    // Another user's change moves the Demo Test to the top of the list, off this page.
+    const latest = await preparedEvaluation(current, (evaluation) => { evaluation.testRunDeadline = '2026-08-20' }, '2026-07-17T12:00:02.000000Z')
+    const returned = structuredClone(latest)
+    returned.status = 'Rejected'
+    returned.terminationReason = 'Customer paused the project'
+    returned.modified = '2026-07-17T12:00:03.000000Z'
+    const spy = vi.spyOn(api, 'terminateEvaluation')
+      .mockRejectedValueOnce(new CrmApiError('VERSION_CONFLICT', 'Changed elsewhere', 'req-terminate-conflict'))
+      .mockImplementation(async () => persistPreparedEvaluation(page, returned))
+    const list = api.listEvaluations.bind(api)
+    let movedOffPage = false
+    vi.spyOn(api, 'listEvaluations').mockImplementation(async (query) => {
+      const response = await list(query)
+      if (!movedOffPage) return response
+      return { ...response, data: { ...response.data, items: response.data.items.filter((row) => row.id !== 'EVAL-103') } }
+    })
+    const read = vi.spyOn(api, 'getEvaluation')
+
+    await wrapper.get('[data-evaluation="EVAL-103"]').trigger('click')
+    await wrapper.get('[data-testid="terminate-evaluation-EVAL-103"]').trigger('click')
+    await wrapper.get('[aria-label="终止原因"]').setValue('Customer paused the project')
+    await persistPreparedEvaluation(page, latest)
+    movedOffPage = true
+    await submit(wrapper)
+
+    expect(spy).toHaveBeenLastCalledWith('EVAL-103', 'Customer paused the project', original.modified)
+    expect(read).toHaveBeenCalledWith('EVAL-103')
+    expect(wrapper.find('[data-evaluation="EVAL-103"]').exists()).toBe(false)
+    expect(wrapper.get('[role="dialog"]').text()).toContain('req-terminate-conflict')
+    expect(wrapper.text()).not.toContain('该 Demo Test 已不在进行中')
+    expect(wrapper.get<HTMLTextAreaElement>('[aria-label="终止原因"]').element.value).toBe('Customer paused the project')
+
+    await submit(wrapper)
+    expect(spy).toHaveBeenCalledTimes(2)
+    expect(spy).toHaveBeenLastCalledWith('EVAL-103', 'Customer paused the project', latest.modified)
+    expect(wrapper.find('[role="dialog"]').exists()).toBe(false)
+    expect(wrapper.find('[data-api-error]').exists()).toBe(false)
+    expect((await current()).terminationReason).toBe('Customer paused the project')
+  })
+
+  it('closes the dialog with the read error when the conflict reload cannot read the Demo Test', async () => {
+    const { wrapper, api } = await context({ unfocused: true })
+    vi.spyOn(api, 'terminateEvaluation')
+      .mockRejectedValue(new CrmApiError('VERSION_CONFLICT', 'Changed elsewhere', 'req-terminate-conflict'))
+    vi.spyOn(api, 'getEvaluation')
+      .mockRejectedValueOnce(new CrmApiError('NETWORK_ERROR', 'Connection failed', 'req-terminate-reload'))
+
+    await wrapper.get('[data-evaluation="EVAL-103"]').trigger('click')
+    await wrapper.get('[data-testid="terminate-evaluation-EVAL-103"]').trigger('click')
+    await wrapper.get('[aria-label="终止原因"]').setValue('Customer paused the project')
+    await submit(wrapper)
+
+    expect(wrapper.find('[role="dialog"]').exists()).toBe(false)
+    expect(wrapper.get('[data-api-error]').text()).toContain('req-terminate-reload')
+  })
+
+  it('stays open while its request runs, so the answer cannot reach another dialog', async () => {
+    const page = await context()
+    const { wrapper, api } = page
+    const returned = await terminatedCopy(page)
+    const pending = deferred<Awaited<ReturnType<CrmApi['terminateEvaluation']>>>()
+    const spy = vi.spyOn(api, 'terminateEvaluation').mockReturnValue(pending.promise)
+
+    await wrapper.get('[data-testid="terminate-evaluation-EVAL-103"]').trigger('click')
+    await wrapper.get('[aria-label="终止原因"]').setValue('Customer paused the project')
+    await submit(wrapper)
+    expect(wrapper.get('[data-modal-submit]').attributes('disabled')).toBeDefined()
+    await wrapper.get('.modal-card header button').trigger('click')
+    await wrapper.get('.modal-card footer .secondary-button').trigger('click')
+    await wrapper.get('.modal-host').trigger('mousedown')
+    expect(wrapper.get('[role="dialog"]').text()).toContain('EVAL-103')
+    expect(spy).toHaveBeenCalledOnce()
+
+    pending.resolve(await persistPreparedEvaluation(page, returned))
+    await flushPromises()
+    expect(wrapper.find('[role="dialog"]').exists()).toBe(false)
+  })
+
+  it('leaves no refusal on the page once the dialog is dismissed', async () => {
+    const { wrapper, api } = await context()
+    vi.spyOn(api, 'terminateEvaluation')
+      .mockRejectedValue(new CrmApiError('NETWORK_ERROR', 'Connection interrupted', 'req-terminate-network'))
+
+    await wrapper.get('[data-testid="terminate-evaluation-EVAL-103"]').trigger('click')
+    await wrapper.get('[aria-label="终止原因"]').setValue('Customer paused the project')
+    await submit(wrapper)
+    expect(wrapper.get('[role="dialog"]').text()).toContain('req-terminate-network')
+    expect(wrapper.find('[data-api-error]').exists()).toBe(false)
+
+    // Dismissing leaves no refusal behind for the page to show once the dialog is gone,
+    // and a dialog opened again does not bring the old one back.
+    await wrapper.get('.modal-card footer .secondary-button').trigger('click')
+    expect(wrapper.find('[role="dialog"]').exists()).toBe(false)
+    expect(wrapper.find('[data-api-error]').exists()).toBe(false)
+    await wrapper.get('[data-testid="terminate-evaluation-EVAL-103"]').trigger('click')
+    expect(wrapper.get('[role="dialog"]').text()).not.toContain('req-terminate-network')
+  })
+
+  it('keeps the refusal of another write out of the open dialog and shows it on the page', async () => {
+    const page = await context({ prepare: (evaluation) => {
+      evaluation.status = 'Scope Confirmed'
+      evaluation.waferPreparationStatus = 'Pending'
+      evaluation.testPreparationStatus = 'Pending'
+    } })
+    const { wrapper, api } = page
+    vi.spyOn(api, 'completeEvaluationPreparation')
+      .mockRejectedValue(new CrmApiError('NETWORK_ERROR', 'Connection interrupted', 'req-prepare-failed'))
+
+    await wrapper.get('[data-testid="terminate-evaluation-EVAL-103"]').trigger('click')
+    // A write started behind the open dialog fails: the dialog is about the termination, not about that write.
+    await wrapper.get('[data-complete-preparation="test"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.get('[role="dialog"]').text()).not.toContain('req-prepare-failed')
+    expect(wrapper.get('[data-api-error]').text()).toContain('req-prepare-failed')
+  })
+
+  it('keeps the page banner of another write when the dialog is closed', async () => {
+    const page = await context({ prepare: (evaluation) => {
+      evaluation.status = 'Scope Confirmed'
+      evaluation.waferPreparationStatus = 'Pending'
+      evaluation.testPreparationStatus = 'Pending'
+    } })
+    const { wrapper, api } = page
+    vi.spyOn(api, 'completeEvaluationPreparation')
+      .mockRejectedValue(new CrmApiError('NETWORK_ERROR', 'Connection interrupted', 'req-prepare-failed'))
+
+    await wrapper.get('[data-testid="terminate-evaluation-EVAL-103"]').trigger('click')
+    await wrapper.get('[data-complete-preparation="test"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.get('[data-api-error]').text()).toContain('req-prepare-failed')
+    // Closing the dialog only drops the dialog's own state, not that failure.
+    await wrapper.get('.modal-card footer .secondary-button').trigger('click')
+    expect(wrapper.find('[role="dialog"]').exists()).toBe(false)
+    expect(wrapper.get('[data-api-error]').text()).toContain('req-prepare-failed')
+  })
+
+  it('tells the user the termination did not go through when the list cannot be reloaded after a conflict', async () => {
+    const page = await context({ unfocused: true, prepare: (evaluation) => { evaluation.status = 'Testing' } })
+    const { wrapper, api } = page
+    vi.spyOn(api, 'terminateEvaluation')
+      .mockRejectedValue(new CrmApiError('VERSION_CONFLICT', 'Changed elsewhere', 'req-terminate-conflict'))
+    vi.spyOn(api, 'listEvaluations')
+      .mockRejectedValueOnce(new CrmApiError('NETWORK_ERROR', 'List failed', 'req-list-failed'))
+
+    await wrapper.get('[data-evaluation="EVAL-103"]').trigger('click')
+    await wrapper.get('[data-testid="terminate-evaluation-EVAL-103"]').trigger('click')
+    await wrapper.get('[aria-label="终止原因"]').setValue('Customer paused the project')
+    await submit(wrapper)
+
+    expect(wrapper.find('[role="dialog"]').exists()).toBe(false)
+    expect(wrapper.get('[data-api-error]').text()).toContain('req-terminate-conflict')
+  })
+
+  it.each(['PERMISSION_DENIED', 'SCOPE_DENIED'])('clears the dialog and all visible records on %s', async (code) => {
+    const { wrapper, api } = await context()
+    vi.spyOn(api, 'terminateEvaluation').mockRejectedValue(new CrmApiError(code, 'Access revoked', 'req-terminate-denied'))
+    await wrapper.get('[data-testid="terminate-evaluation-EVAL-103"]').trigger('click')
+    await wrapper.get('[aria-label="终止原因"]').setValue('Customer paused the project')
+    await submit(wrapper)
+    expect(wrapper.find('[role="dialog"]').exists()).toBe(false)
+    expect(wrapper.find('[data-evaluation-table]').exists()).toBe(false)
+    expect(wrapper.text()).toContain('req-terminate-denied')
+  })
+
+  it('does not offer termination to Sales, who cannot write Demo Tests', async () => {
+    const { wrapper } = await context({ role: 'Sales' })
+    expect(wrapper.find('[data-evaluation="EVAL-103"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid^="terminate-evaluation-"]').exists()).toBe(false)
   })
 })

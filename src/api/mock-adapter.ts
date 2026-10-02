@@ -3096,6 +3096,10 @@ export function createMockApi(options: {
     async cancelEvaluationRun() {
       throw new CrmApiError('BACKEND_NOT_CONNECTED', 'Test Run cancellation requires the Frappe API.', requestId(), false)
     },
+
+    async terminateEvaluation() {
+      throw new CrmApiError('BACKEND_NOT_CONNECTED', 'Demo Test termination requires the Frappe API.', requestId(), false)
+    },
     async setEvaluationTestRunDeadline(id: string, input: { testRunDeadline: string; expectedModified?: string }) {
       await wait()
       return repository.transact((snapshot) => {

@@ -7,6 +7,7 @@ import { salesEnumLabel } from '@/features/shared/sales-i18n'
 import { regionLabel } from '@/domain/regions'
 import { opportunityProbabilityLevelLabel } from '@/domain/opportunity-probability'
 import { isOpenOpportunityStage } from '@/domain/opportunity-stages'
+import { isTerminatedDemo } from '@/domain/evaluations'
 
 
 // These labels are authored by this report builder; business cell values never pass through this helper.
@@ -53,6 +54,15 @@ const columns = (values: number[]): CustomerReportColumn[] => values.map((width)
 const confidence = (intent: number) => intent >= 70 ? 'High' : intent >= 50 ? 'Medium' : 'Low'
 const open = (stage: string) => isOpenOpportunityStage(stage)
 const dueState = (due: string, reportDate: string, locale: Locale) => !due ? reportText('待确认 / To Confirm', locale) : due < reportDate ? reportText('已逾期 / Overdue', locale) : due === reportDate ? reportText('今日到期 / Due Today', locale) : reportText('待完成 / Open', locale)
+
+// A terminated Demo keeps the stored Rejected status: its row names the termination and the
+// reason, and a customer acceptance still Pending reads as not reviewed. Other rows are unchanged.
+const evaluationStatusCell = (item: Account360Dto['evaluations'][number], locale: Locale) => isTerminatedDemo(item)
+  ? cell(`${reportText('已终止 / Terminated', locale)} · ${reportText('原因 / Reason', locale)}: ${item.terminationReason?.trim()}`, 14)
+  : cell(reportEnum(item.status, locale))
+const evaluationAcceptanceCell = (item: Account360Dto['evaluations'][number], locale: Locale) => isTerminatedDemo(item) && item.acceptance === 'Pending'
+  ? cell(reportText('未评审 / Not reviewed', locale))
+  : cell(item.acceptance)
 
 interface ReportAction { type: string; source: string; cn: string; en: string; owner: string; due: string; priority: string; status: string }
 
@@ -128,7 +138,7 @@ export function buildCustomerReportModel(detail: Account360Dto, reportDate: stri
   const demoRows: CustomerReportCell[][] = [[cell(reportText('Demo进展与合同状态 / Demo Progress & Contracts', locale), 1)], blank(), [cell(`${account.name}  |  ${reportText('从 Sales 申请、工程评估到正式 Demo 和合同 / From Sales request and engineering review to Demo and contract', locale)}`, 2)], blank(), header(['Request ID', reportText('申请标题 / Request', locale), reportText('申请设备 / Equipment', locale), reportText('样品类型 / Sample', locale), reportText('数量 / Qty', locale), reportText('目标日期 / Target', locale), reportText('优先级 / Priority', locale), reportText('状态 / Status', locale), 'Sales', reportText('工程师 / Engineer', locale), reportText('可行性 / Feasibility', locale), reportText('技术风险 / Technical Risk', locale), reportText('审批意见 / Review Comment', locale), reportText('正式Demo / Demo ID', locale)])]
   detail.demoRequests.forEach((item) => demoRows.push([cell(item.id), cell(item.title, 14), cell(item.requestedEquipment, 14), cell(item.sampleType, 14), cell(item.sampleQuantity), dateCell(item.targetDate), cell(item.priority), cell(reportEnum(item.status, locale)), cell(item.salesOwner), cell(item.engineerOwner || '—'), cell(item.feasibility || '—', 14), cell(item.technicalRisk || '—', 14), cell(item.engineerComment || item.managerComment || '—', 14), cell(item.evaluationId || '—')]))
   demoRows.push(blank()); const formalDemoRow = demoRows.length + 1; demoRows.push([cell(reportText('正式Demo / Formal Demo & Wafer Test', locale), 3)]); demoRows.push(header(['Demo ID', reportText('来源申请 / Source Request', locale), reportText('Demo标题 / Title', locale), reportText('状态 / Status', locale), reportText('应用工程师 / Engineer', locale), 'Wafers', reportText('完成Runs / Completed Runs', locale), reportText('平均Capture / Avg. Capture', locale), reportText('平均FP / Avg. FP', locale), reportText('计划完成日 / Planned End', locale), reportText('验收 / Acceptance', locale), reportText('报告状态 / Report Status', locale)]))
-  detail.evaluations.forEach((item) => { const done = item.runs.filter((run) => run.status === 'Completed'); const average = (key: 'capture' | 'falsePositive') => done.length ? done.reduce((sum, run) => sum + Number(run[key] ?? 0), 0) / done.length / 100 : '—'; demoRows.push([cell(item.id), cell(item.demoRequestId || '—'), cell(item.title, 14), cell(reportEnum(item.status, locale)), cell(item.owner), cell(item.wafers), cell(done.length), cell(average('capture'), 7), cell(average('falsePositive'), 7), dateCell(item.plannedEnd), cell(item.acceptance), cell(item.reportStatus)]) })
+  detail.evaluations.forEach((item) => { const done = item.runs.filter((run) => run.status === 'Completed'); const average = (key: 'capture' | 'falsePositive') => done.length ? done.reduce((sum, run) => sum + Number(run[key] ?? 0), 0) / done.length / 100 : '—'; demoRows.push([cell(item.id), cell(item.demoRequestId || '—'), cell(item.title, 14), evaluationStatusCell(item, locale), cell(item.owner), cell(item.wafers), cell(done.length), cell(average('capture'), 7), cell(average('falsePositive'), 7), dateCell(item.plannedEnd), evaluationAcceptanceCell(item, locale), cell(item.reportStatus)]) })
   demoRows.push(blank()); const contractRow = demoRows.length + 1; demoRows.push([cell(reportText('合同 / Contracts', locale), 3)]); demoRows.push(header([reportText('合同ID / Contract ID', locale), reportText('类型 / Type', locale), reportText('状态 / Status', locale), reportText('已签署 / Signed', locale), reportText('合同金额 / Amount', locale), reportText('开始日期 / Start', locale), reportText('到期日期 / End', locale), reportText('PO付款比例 / % at PO', locale), reportText('发货付款比例 / % at Shipment', locale), reportText('FAT付款比例 / % at FAT', locale), reportText('付款账期 / Payment Term', locale)]))
   detail.contracts.forEach((item) => demoRows.push([cell(item.id), cell(item.type), cell(reportEnum(item.status, locale)), cell(item.signed ? reportText('是 / Yes', locale) : reportText('否 / No', locale)), cell(item.amount, 6), dateCell(item.start), dateCell(item.end), cell('—'), cell('—'), cell('—'), cell('—')]))
   const demo: CustomerWorksheetSpec = { name: reportText('Demo与合同 Demo', locale), columns: columns([18, 38, 32, 24, 18, 16, 18, 22, 18, 22, 24, 40, 46, 18]), rows: demoRows, merges: ['A1:N2', 'A3:N3', `A${formalDemoRow}:N${formalDemoRow}`, `A${contractRow}:N${contractRow}`], freezeRows: 5 }

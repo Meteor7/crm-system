@@ -1,11 +1,11 @@
 <script setup lang="ts">
 import { personnelDisplayName } from '@/demo/personnel'
 import { computed, ref, watch } from 'vue'
-import { CalendarClock, ExternalLink, FileText, FlaskConical, History, Plus, UserRoundCog } from '@lucide/vue'
+import { CalendarClock, ExternalLink, FileText, FlaskConical, History, OctagonX, Plus, UserRoundCog } from '@lucide/vue'
 import type { EvaluationDto, EvaluationPreparationBranch, EvaluationStatus, TestRunDto, Tone } from '@/types/crm'
 import TestRunList from './TestRunList.vue'
 import type { TestRunAction } from './test-run-actions'
-import { canRetestEvaluation, evaluationGroup, evaluationPreparationStatus, evaluationStatusOptions, hasCompletedTestRun, isEvaluationPreparationComplete } from '@/domain/evaluations'
+import { canRetestEvaluation, canTerminateEvaluation, evaluationGroup, evaluationPreparationStatus, evaluationStatusOptions, hasCompletedTestRun, isEvaluationPreparationComplete, isTerminatedDemo } from '@/domain/evaluations'
 import { formatDisplayDate } from '@/domain/time'
 import StatusBadge from '@/design-system/StatusBadge.vue'
 import type { EvaluationView } from './EvaluationWorkspaceNav.vue'
@@ -24,7 +24,7 @@ const props = withDefaults(defineProps<{
   canWrite: false,
   canReport: false,
 })
-const { locale } = useI18n()
+const { locale, t } = useI18n()
 const copy = (english: string, chinese: string) => locale.value === 'en-US' ? english : chinese
 const statusLabel: Record<string, string> = {
   Requested: '已申请', 'Scope Confirmed': '范围已确认', 'Sample Received': '样品已收到', Scheduled: '已排期',
@@ -44,6 +44,7 @@ const emit = defineEmits<{
   report: [evaluation: EvaluationDto]
   'customer-report': [evaluation: EvaluationDto]
   retest: [evaluation: EvaluationDto]
+  terminate: [evaluation: EvaluationDto]
   'customer-change': []
 }>()
 
@@ -107,6 +108,8 @@ const viewLabel = computed(() => (locale.value === 'en-US' ? ({
   overview: '全部 Demo Test', wafer: 'Wafer Preparation', preparation: 'Test Preparation', execution: 'Test Execution', internal: 'Internal Review', customer: 'Customer Review',
 }[props.view])))
 function displayStage(evaluation: EvaluationDto) {
+  // A historical Rejected record without a reason keeps its original label.
+  if (isTerminatedDemo(evaluation)) return t('evaluations.terminated')
   if (props.view === 'wafer') return `${copy('Wafer Preparation', 'Wafer 准备')} · ${copy(evaluationPreparationStatus(evaluation, 'wafer'), preparationLabel[evaluationPreparationStatus(evaluation, 'wafer')] || evaluationPreparationStatus(evaluation, 'wafer'))}`
   if (props.view === 'preparation') return `${copy('Test Preparation', '测试准备')} · ${copy(evaluationPreparationStatus(evaluation, 'test'), preparationLabel[evaluationPreparationStatus(evaluation, 'test')] || evaluationPreparationStatus(evaluation, 'test'))}`
   return copy(evaluation.status, statusLabel[evaluation.status] || evaluation.status)
@@ -197,6 +200,7 @@ watch(accountId, () => emit('customer-change'))
           <div><dt>Engineer</dt><dd>{{ personnelDisplayName(selected.owner) }}</dd></div>
           <div><dt>{{ locale === 'en-US' ? 'Source request' : '来源 Request' }}</dt><dd>{{ selected.demoRequestId || '—' }}</dd></div>
           <div><dt>{{ locale === 'en-US' ? 'Current stage' : '当前阶段' }}</dt><dd>{{ displayStage(selected) }}</dd></div>
+          <div v-if="isTerminatedDemo(selected)" data-termination-reason><dt>{{ t('evaluations.terminateReason') }}</dt><dd>{{ selected.terminationReason }}</dd></div>
         </dl>
 
         <button
@@ -300,6 +304,16 @@ watch(accountId, () => emit('customer-change'))
           @click="emit('retest', selected)"
         >
           <History :size="14" />{{ copy('Retest', '申请 Retest') }}
+        </button>
+        <button
+          v-if="canWrite && canTerminateEvaluation(selected.status)"
+          type="button"
+          class="danger-button"
+          :data-testid="`terminate-evaluation-${selected.id}`"
+          :disabled="processing === selected.id"
+          @click="emit('terminate', selected)"
+        >
+          <OctagonX :size="14" />{{ t('evaluations.terminateTitle') }}
         </button>
         <div class="owner-note">
           <FlaskConical :size="14" />

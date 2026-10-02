@@ -9,6 +9,7 @@ import type {
   DemoWorkflowDto,
 } from '@/types/workspaces'
 import { personnelDisplayName } from '@/demo/personnel'
+import { isTerminatedDemo } from '@/domain/evaluations'
 import { formatDisplayDate } from '@/domain/time'
 import { useI18n } from '@/i18n'
 
@@ -18,10 +19,15 @@ const props = withDefaults(defineProps<{
   hideContext?: boolean
   rowMode?: boolean
   scope?: 'full' | 'request' | 'test'
-  tone?: 'default' | 'request' | 'test' | 'critical' | 'complete'
+  tone?: 'default' | 'request' | 'test' | 'critical' | 'complete' | 'terminated'
 }>(), { scope: 'full', tone: 'default' })
-const { locale } = useI18n()
+const { locale, t } = useI18n()
 const copy = (english: string, chinese: string) => locale.value === 'en-US' ? english : chinese
+// The server keeps a terminated Demo's stop node Current and later nodes Waiting; neither is
+// still going on or to be scheduled, so they read as where it stopped and as never reached.
+const terminated = computed(() => isTerminatedDemo(props.item))
+const stateClass = (state: DemoProjectTimelineStepDto['state']) =>
+  terminated.value && state === 'Current' ? 'stopped' : state.toLocaleLowerCase()
 const stageCopy: Record<string, string> = {
   'Sales Preparation': 'Sales 准备', 'Engineer Review': '工程评估', 'Manager Approval': '经理审批',
   'Wafer Preparation': 'Wafer 准备', 'Test Preparation': '测试准备', 'Test Execution': '测试执行',
@@ -77,10 +83,19 @@ function preparationValue(
   return fallback
 }
 
+function preparationDate(state: DemoProjectTimelineStepDto['state'], steps: DemoProjectTimelineStepDto[]): string {
+  if (terminated.value && state === 'Current') return t('demo.timelineStoppedHere')
+  return preparationValue(steps, 'date', terminated.value
+    ? t('demo.timelineNotReached')
+    : locale.value === 'en-US' ? 'To be scheduled' : '待排期')
+}
+
 function timelineDate(step: DemoProjectTimelineStepDto): string {
+  if (terminated.value && step.state === 'Current') return t('demo.timelineStoppedHere')
   if (step.date) return formatDisplayDate(step.date)
   if (step.state === 'Done') return locale.value === 'en-US' ? 'Completed (date not recorded)' : '已完成（时间未记录）'
   if (step.state === 'Current') return locale.value === 'en-US' ? 'In progress' : '进行中'
+  if (terminated.value) return t('demo.timelineNotReached')
   return locale.value === 'en-US' ? 'To be scheduled' : '待排期'
 }
 </script>
@@ -94,6 +109,7 @@ function timelineDate(step: DemoProjectTimelineStepDto): string {
       'tone-test': tone === 'test',
       'tone-critical': tone === 'critical',
       'tone-complete': tone === 'complete',
+      'tone-terminated': tone === 'terminated',
       'timeline-row': rowMode,
     }"
     :style="{ '--timeline-columns': timelineGroups.length }"
@@ -110,7 +126,7 @@ function timelineDate(step: DemoProjectTimelineStepDto): string {
         <li
           v-for="group in timelineGroups"
           :key="group.key"
-          :class="[group.state.toLocaleLowerCase(), { 'parallel-preparation': group.parallel }]"
+          :class="[stateClass(group.state), { 'parallel-preparation': group.parallel }]"
           :data-parallel-preparation="group.parallel ? '' : undefined"
         >
           <template v-if="group.parallel">
@@ -120,7 +136,7 @@ function timelineDate(step: DemoProjectTimelineStepDto): string {
                 v-for="step in group.steps"
                 :key="step.key"
                 class="parallel-stage"
-                :class="step.state.toLocaleLowerCase()"
+                :class="stateClass(step.state)"
                 data-parallel-lane
                 :data-parallel-stage="step.key"
                 :data-tooltip="copy(step.label, stageCopy[step.label] || step.label)"
@@ -130,7 +146,7 @@ function timelineDate(step: DemoProjectTimelineStepDto): string {
                 <i aria-hidden="true"></i>
               </span>
             </span>
-            <time>{{ preparationValue(group.steps, 'date', locale === 'en-US' ? 'To be scheduled' : '待排期') }}</time>
+            <time>{{ preparationDate(group.state, group.steps) }}</time>
             <small>{{ preparationValue(group.steps, 'actor', locale === 'en-US' ? 'To be confirmed' : '待确认') }}</small>
           </template>
           <template v-else>
@@ -150,4 +166,6 @@ function timelineDate(step: DemoProjectTimelineStepDto): string {
 .tone-request .timeline-context>span{color:#247747;background:#e8f6ed}.tone-request .timeline-track li.done::before,.tone-request .timeline-track li.done::after,.tone-request .timeline-track li.current::before{background:#35a466}.tone-request .timeline-track li.done i{background:#35a466;border-color:#35a466}.tone-request .timeline-track li.current i{border-color:#35a466;box-shadow:0 0 0 4px #e8f6ed}.tone-request .timeline-track li.done .timeline-label,.tone-request .timeline-track li.current .timeline-label,.tone-request .timeline-track li.done time,.tone-request .timeline-track li.current time{color:#27794a}.tone-complete .timeline-context>span{color:#666c72;background:#eef0f1}.tone-complete .timeline-track li.done::before,.tone-complete .timeline-track li.done::after{background:#8c9197}.tone-complete .timeline-track li.done i{background:#8c9197;border-color:#8c9197}.tone-complete .timeline-track li.done .timeline-label,.tone-complete .timeline-track li.done time{color:#666c72}
 .project-timeline{--timeline-accent:#ef7217;--timeline-halo:#fff0e4;--timeline-tooltip:#2d3238}.tone-request{--timeline-accent:#35a466;--timeline-halo:#e8f6ed}.tone-critical{--timeline-accent:#d6373d;--timeline-halo:#ffe8e9}.tone-complete{--timeline-accent:#8c9197;--timeline-halo:#eef0f1}.parallel-branch{position:relative;display:block;width:44px;height:28px;justify-self:center;margin-top:-5px}.parallel-branch::before{position:absolute;top:3px;bottom:3px;left:50%;width:2px;background:#ddd9d2;content:"";transform:translateX(-50%)}.parallel-preparation.done .parallel-branch::before,.parallel-preparation.current .parallel-branch::before{background:var(--timeline-accent)}.parallel-stage{position:absolute;left:50%;z-index:2;width:15px;height:15px;transform:translateX(-50%)}.parallel-stage:first-child{top:0}.parallel-stage:last-child{bottom:0}.parallel-stage i{display:block;width:15px;height:15px;background:#fff;border:3px solid #c8c5bf;border-radius:50%}.parallel-preparation .parallel-stage.waiting i{background:#fff;border-color:#c8c5bf;box-shadow:none}.parallel-preparation .parallel-stage.done i{background:var(--timeline-accent);border-color:var(--timeline-accent);box-shadow:none}.parallel-preparation .parallel-stage.current i{background:#fff;border-color:var(--timeline-accent);box-shadow:0 0 0 4px var(--timeline-halo)}.parallel-stage::after{position:absolute;bottom:calc(100% + 7px);left:50%;z-index:8;padding:5px 7px;color:#fff;background:var(--timeline-tooltip);border-radius:4px;box-shadow:0 4px 12px rgba(28,32,36,.18);content:attr(data-tooltip);font-size:9px;font-style:normal;font-weight:750;line-height:1;opacity:0;pointer-events:none;transform:translate(-50%,3px);transition:opacity .16s ease,transform .16s ease;white-space:nowrap}.parallel-stage::before{position:absolute;bottom:calc(100% + 3px);left:50%;z-index:8;width:0;height:0;border-top:4px solid var(--timeline-tooltip);border-right:4px solid transparent;border-left:4px solid transparent;content:"";opacity:0;pointer-events:none;transform:translateX(-50%);transition:opacity .16s ease}.parallel-stage:hover::after,.parallel-stage:hover::before{opacity:1}.parallel-stage:hover::after{transform:translate(-50%,0)}.timeline-row .parallel-branch{margin-top:-7px}.timeline-row .parallel-preparation time{margin-top:0}
 .timeline-track li::before,.timeline-track li::after{top:44px}.single-node{display:grid;width:76px;height:40px;place-items:center}.single-node i{display:block}.parallel-preparation::before,.parallel-preparation::after{width:calc(50% - 38px)!important}.parallel-branch{width:76px;height:40px;margin-top:0}.parallel-branch::before,.parallel-branch::after{position:absolute;top:7px;bottom:7px;width:2px;background:#ddd9d2;content:"";transform:none}.parallel-branch::before{left:0}.parallel-branch::after{right:0}.parallel-preparation.current .parallel-branch::before,.parallel-preparation.done .parallel-branch::before,.parallel-preparation.done .parallel-branch::after{background:var(--timeline-accent)}.parallel-stage{right:0;left:0;width:100%;height:15px;transform:none}.parallel-stage:first-child{top:0}.parallel-stage:last-child{bottom:0}.parallel-wire{position:absolute;top:50%;right:0;left:0;height:2px;background:#ddd9d2;transform:translateY(-50%)}.parallel-stage.done .parallel-wire{background:var(--timeline-accent)}.parallel-stage.current .parallel-wire{background:linear-gradient(to right,var(--timeline-accent) 0 50%,#ddd9d2 50% 100%)}.parallel-stage i{position:absolute;top:50%;left:50%;z-index:2;transform:translate(-50%,-50%)}.parallel-stage:last-child::after{bottom:calc(100% + 32px)}.parallel-stage:last-child::before{bottom:calc(100% + 28px)}.timeline-row .parallel-branch{margin-top:0}.timeline-row .timeline-track li::before,.timeline-row .timeline-track li::after{top:20px}.timeline-row .parallel-preparation time{margin-top:0}
+.tone-terminated{--timeline-accent:#b86b6f;--timeline-halo:#f7eaea}.tone-terminated .timeline-track li.done::before,.tone-terminated .timeline-track li.done::after,.tone-terminated .timeline-track li.current::before{background:#b86b6f}.tone-terminated .timeline-track li.done i{background:#b86b6f;border-color:#b86b6f}.tone-terminated .timeline-track li.current i{border-color:#b86b6f;box-shadow:0 0 0 4px #f7eaea}.tone-terminated .timeline-track li.done .timeline-label,.tone-terminated .timeline-track li.done time,.tone-terminated .timeline-track li.current .timeline-label,.tone-terminated .timeline-track li.current time{color:#9a4a4e}
+.timeline-track li.stopped::before,.parallel-preparation.stopped .parallel-branch::before{background:var(--timeline-accent)}.timeline-track li.stopped i,.parallel-preparation .parallel-stage.stopped i{border-color:var(--timeline-accent);box-shadow:none}.parallel-stage.stopped .parallel-wire{background:linear-gradient(to right,var(--timeline-accent) 0 50%,#ddd9d2 50% 100%)}
 </style>

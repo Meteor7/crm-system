@@ -15,7 +15,7 @@ from rayher_crm.permissions.scope import conditions_for_doctype
 from rayher_crm.services.common import normalize_pagination, optional_date, required_text, to_iso_timestamp
 from rayher_crm.services.concurrency import lock_document
 from rayher_crm.services.opportunities import advance_opportunity_for_event
-from rayher_crm.services.notifications import active_crm_users, create_notification
+from rayher_crm.services.notifications import active_crm_users, notify_if_reachable
 
 
 STATUS_NEXT = {
@@ -31,6 +31,9 @@ STATUS_NEXT = {
 TERMINAL_STATUSES = {"Accepted", "Rejected"}
 RUN_STATUSES = {"Scheduled", "Testing"}
 PREPARATION_STATUSES = {"Requested", "Scope Confirmed", "Sample Received", "Scheduled"}
+TERMINATION_REASON_MAX_LENGTH = 1000
+# create_notification refuses a longer message; a termination reason alone may reach 1000.
+NOTIFICATION_MESSAGE_LIMIT = 1000
 
 
 def _json_value(value: Any, default: Any) -> Any:
@@ -158,6 +161,9 @@ def serialize_evaluation(doc) -> dict[str, Any]:
         "demoRequestId": doc.demo_request,
         "segment": frappe.db.get_value("Customer", doc.account, "custom_crm_segment") or "",
         "title": doc.title, "status": doc.status, "owner": doc.evaluation_owner,
+        # Set only by terminate_evaluation: Rejected with a reason is a termination,
+        # Rejected without one is a record archived under the old flow.
+        "terminationReason": getattr(doc, "termination_reason", None) or "",
         "plannedEnd": str(doc.planned_end or ""), "testRunDeadline": str(doc.test_run_deadline or ""),
         "wafers": sum(run["wafers"] for run in runs if run["status"] != "Cancelled"), "acceptance": doc.acceptance,
         "reportStatus": doc.report_status,
@@ -253,11 +259,21 @@ def _notify_status_change(doc, request, previous_status: str) -> None:
         recipients.update(active_crm_users("Manager"))
     if doc.status in TERMINAL_STATUSES:
         recipients.add(doc.evaluation_owner)
+    if doc.status == "Rejected" and doc.get("termination_reason"):
+        # A termination ends the process; it is not a customer rejection.
+        title = "Demo Test terminated"
+        message = f"{doc.title}: terminated in {previous_status}. Reason: {doc.termination_reason}"
+        if len(message) > NOTIFICATION_MESSAGE_LIMIT:
+            message = message[:NOTIFICATION_MESSAGE_LIMIT - 1] + "…"
+    else:
+        title = f"Demo Test moved to {doc.status}"
+        message = f"{doc.title}: {previous_status} -> {doc.status}"
+    # The notice follows a status change that has already been written: someone who has left (or whose CRM role
+    # is missing or ambiguous) is skipped instead of failing it, while any other write failure still rolls it back.
     for recipient in sorted(recipients - {frappe.session.user, None, ""}):
-        create_notification(
+        notify_if_reachable(
             recipient=recipient, category="Evaluation",
-            title=f"Demo Test moved to {doc.status}",
-            message=f"{doc.title}: {previous_status} -> {doc.status}",
+            title=title, message=message,
             route=f"/demo-workflow/{request.name}?tab=information",
             source_doctype="CRM Evaluation", source_name=doc.name,
         )
@@ -290,8 +306,8 @@ def update_evaluation_status(name: str, command: dict[str, Any], expected_modifi
         if doc.status in STATUS_NEXT:
             allowed.add(STATUS_NEXT[doc.status])
         # Customer Review records a comment and then either archives or reopens testing.
-        # Rejected is no longer reachable; it survives only for records archived before
-        # Customer Review became an outcome-free step.
+        # Rejected is not a status step: only terminate_evaluation reaches it, and records
+        # archived before Customer Review became an outcome-free step still carry it.
         if doc.status == "Customer Review":
             allowed.add("Testing")
     if next_status not in allowed:
@@ -371,6 +387,52 @@ def update_evaluation_status(name: str, command: dict[str, Any], expected_modifi
                 reference_doctype="CRM Evaluation", reference_name=doc.name,
             )
         _update_request_tracking(doc, history_summary)
+        _notify_status_change(doc, request, previous_status)
+    except Exception:
+        frappe.db.rollback(save_point=savepoint)
+        raise
+    doc.reload()
+    return serialize_evaluation(doc)
+
+
+def terminate_evaluation(name: str, payload: Mapping[str, Any], expected_modified: Any) -> dict[str, Any]:
+    """End a Demo Test mid-flight, from any stage before it is archived (#73).
+
+    It ends as Rejected with the reason on the Evaluation. The customer's acceptance
+    is kept as it was, runs and reports stay as they are, and the Opportunity is
+    neither advanced nor rolled back.
+    """
+    assert_capability("evaluation:write")
+    _require_evaluation(name)
+    reason = str((payload or {}).get("reason") or "").strip()
+    if not reason:
+        raise CrmApiException(
+            "VALIDATION_ERROR", "A reason is required to terminate a Demo Test.", field_errors={"reason": "Required"},
+        )
+    if len(reason) > TERMINATION_REASON_MAX_LENGTH:
+        raise CrmApiException(
+            "VALIDATION_ERROR",
+            f"reason must be at most {TERMINATION_REASON_MAX_LENGTH} characters.",
+            field_errors={"reason": "Too long"},
+        )
+    doc = lock_document("CRM Evaluation", name, expected_modified, "NOT_FOUND")
+    if not frappe.has_permission("CRM Evaluation", "read", doc=doc, user=frappe.session.user):
+        raise CrmApiException("SCOPE_DENIED", "The Evaluation is outside the current user scope.")
+    if doc.status in TERMINAL_STATUSES:
+        raise CrmApiException("INVALID_TRANSITION", f"Evaluation is already {doc.status}.")
+
+    savepoint = f"crm_evaluation_terminate_{frappe.generate_hash(length=8)}"
+    frappe.db.savepoint(savepoint)
+    try:
+        previous_status = doc.status
+        doc.status = "Rejected"
+        doc.termination_reason = reason
+        # Terminating the process is not a customer verdict: doc.acceptance is left as it is.
+        doc.save(ignore_permissions=True)
+        summary = f"Demo Test terminated: {reason}"
+        append_evaluation_history(doc, "Status", summary, previous_status, doc.status)
+        request = frappe.get_doc("CRM Demo Request", doc.demo_request)
+        _update_request_tracking(doc, summary)
         _notify_status_change(doc, request, previous_status)
     except Exception:
         frappe.db.rollback(save_point=savepoint)
@@ -587,6 +649,12 @@ def set_evaluation_test_run_deadline(name: str, payload: dict[str, Any]) -> dict
     doc = lock_document("CRM Evaluation", name, expected_modified, "NOT_FOUND")
     if not frappe.has_permission("CRM Evaluation", "read", doc=doc, user=frappe.session.user):
         raise CrmApiException("SCOPE_DENIED", "The Evaluation is outside the current user scope.")
+    if doc.status in TERMINAL_STATUSES:
+        # An archived or terminated Demo Test has ended: a new deadline would add history,
+        # overwrite the request's closing note and notify people about a finished test.
+        raise CrmApiException(
+            "INVALID_TRANSITION", f"A Test Run deadline cannot be set on an Evaluation that is already {doc.status}.",
+        )
     savepoint = f"crm_evaluation_deadline_{frappe.generate_hash(length=8)}"
     frappe.db.savepoint(savepoint)
     try:
@@ -599,7 +667,7 @@ def set_evaluation_test_run_deadline(name: str, payload: dict[str, Any]) -> dict
         _update_request_tracking(doc, f"Updated Test Run deadline to {deadline}")
         if doc.evaluation_owner != frappe.session.user:
             request = frappe.get_doc("CRM Demo Request", doc.demo_request)
-            create_notification(
+            notify_if_reachable(
                 recipient=doc.evaluation_owner, category="Evaluation",
                 title="Demo Test deadline updated",
                 message=f"{doc.title}: Test Run deadline is {deadline}.",
@@ -631,13 +699,29 @@ def _workflow_stage(request_status: str, evaluation_status: str | None) -> str |
     return None
 
 
+def _termination_stage(evaluation: dict[str, Any]) -> str:
+    """The workflow stage a terminated Demo Test stopped in, read from its termination row."""
+    stop = next(
+        (row for row in evaluation["history"] if row["eventType"] == "Status" and row["to"] == "Rejected"),
+        None,
+    )
+    # Without that row nothing past the approved request can be claimed as reached.
+    return _workflow_stage("Converted", stop["from"] if stop else None) or "Test Preparation"
+
+
 def _workflow_timeline(
     request,
     evaluation: dict[str, Any] | None,
     stage: str | None,
     history: list[Any],
 ) -> list[dict[str, Any]]:
-    completed = bool(evaluation and evaluation["status"] in TERMINAL_STATUSES)
+    # Accepted and historical Rejected records went all the way through. A terminated
+    # one (Rejected with a reason) shows the steps before its stop as done, the stop as
+    # where it stood, and nothing after it as reached or dated.
+    terminated = bool(evaluation and evaluation["status"] == "Rejected" and evaluation.get("terminationReason"))
+    completed = bool(evaluation and evaluation["status"] in TERMINAL_STATUSES) and not terminated
+    if terminated:
+        stage = _termination_stage(evaluation)
     current_index = {
         "Engineer Review": 1,
         "Manager Approval": 2,
@@ -646,6 +730,11 @@ def _workflow_timeline(
         "Internal Review": 6,
         "Customer Review": 7,
     }.get(stage or "", 0)
+    # Both preparation branches belong to the Test Preparation stop.
+    last_reached = 4 if stage == "Test Preparation" else current_index
+
+    def reached_date(index: int, value: str) -> str:
+        return "" if terminated and index > last_reached else value
 
     def state(index: int, key: str) -> str:
         if completed:
@@ -698,16 +787,19 @@ def _workflow_timeline(
         {
             "key": "test-execution", "label": "Test Execution", "state": state(5, "test-execution"),
             "actor": (evaluation or {}).get("owner") or request.engineer_owner,
-            "date": run_date,
+            "date": reached_date(5, run_date),
         },
         {
             "key": "internal-review", "label": "Internal Review", "state": state(6, "internal-review"),
             "actor": (evaluation or {}).get("owner") or request.engineer_owner,
-            "date": run_date,
+            "date": reached_date(6, run_date),
         },
         {
             "key": "customer-review", "label": "Customer Review", "state": state(7, "customer-review"),
-            "date": str((evaluation or {}).get("modified") or "") if completed else str(request.customer_expected_date or ""),
+            "date": reached_date(7, (
+                str((evaluation or {}).get("modified") or "") if completed or terminated
+                else str(request.customer_expected_date or "")
+            )),
         },
     ]
 
@@ -768,6 +860,8 @@ def list_demo_workflows(query: dict[str, Any] | None = None):
             "salesOwner": request.sales_owner, "engineerOwner": request.engineer_owner,
             "equipment": request.requested_equipment, "owner": request.engineer_owner,
             "status": evaluation["status"] if evaluation else request.status,
+            # conclusion.status stays the customer's acceptance; a termination is told apart by its reason.
+            "terminationReason": evaluation.get("terminationReason", "") if evaluation else "",
             "archiveCategory": "Completed" if request.status in {"Converted", "Cancelled"} and evaluation and evaluation["status"] in TERMINAL_STATUSES else "In Progress",
             "tracking": _json_value(request.tracking, {}),
             "customerExpectedDate": str(request.customer_expected_date or ""),

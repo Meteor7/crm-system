@@ -21,6 +21,27 @@ it('localizes archive status while emitting the original project', async () => {
   wrapper.unmount()
 })
 
+it('names a terminated archive card and its reason while historical outcomes keep their labels', async () => {
+  const api = createMockApi({ latency: 0, role: 'Manager' })
+  const seed = (await api.listDemoWorkflows({ page: 1, pageSize: 1 })).data.items[0]
+  const items = [
+    { ...seed, id: 'DR-TERMINATED', status: 'Rejected', terminationReason: '客户暂停项目' },
+    { ...seed, id: 'DR-REJECTED', status: 'Rejected', terminationReason: '' },
+    { ...seed, id: 'DR-ACCEPTED', status: 'Accepted' },
+  ]
+  const wrapper = mount(DemoArchiveGroup, { props: { group: { label: seed.account, count: 3, items }, groupBy: 'customer', selectedId: '' } })
+  const card = (id: string) => wrapper.get(`[data-demo-id="${id}"]`)
+  const label = (id: string) => card(id).get('.archive-card-head i').text()
+
+  expect([label('DR-TERMINATED'), label('DR-REJECTED'), label('DR-ACCEPTED')]).toEqual(['已终止', '已拒绝', '已接受'])
+  expect(card('DR-TERMINATED').get('[data-termination-reason]').text()).toContain('客户暂停项目')
+  expect(card('DR-REJECTED').find('[data-termination-reason]').exists()).toBe(false)
+  setLocale('en-US')
+  await flushPromises()
+  expect([label('DR-TERMINATED'), label('DR-REJECTED'), label('DR-ACCEPTED')]).toEqual(['Terminated', 'Rejected', 'Accepted'])
+  wrapper.unmount()
+})
+
 it.each([
   ['Engineer', '工程师', 'Engineer'],
   ['Sales 提交', '销售提交', 'Sales submission'],

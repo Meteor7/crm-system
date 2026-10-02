@@ -3,11 +3,14 @@ import {
   evaluationGroup,
   evaluationPreparationStatus,
   canRetestEvaluation,
+  canTerminateEvaluation,
   canTransitionEvaluation,
   evaluationStatusOptions,
   hasCompletedTestRun,
   isEvaluationPreparationComplete,
   isIsoDate,
+  isTerminatedDemo,
+  terminatedDemoRequestMatcher,
 } from './evaluations'
 
 describe('Evaluation workflow', () => {
@@ -35,6 +38,39 @@ describe('Evaluation workflow', () => {
       expect(evaluationStatusOptions(status), status).not.toContain('Rejected')
       expect(canTransitionEvaluation(status, 'Rejected'), status).toBe(false)
     }
+  })
+
+  it('lets every Demo Test that has not ended be terminated, including early and legacy stages', () => {
+    const open = ['Requested', 'Scope Confirmed', 'Sample Received', 'Scheduled', 'Testing', 'Analysis', 'Internal Review', 'Customer Review'] as const
+    for (const status of open) expect(canTerminateEvaluation(status), status).toBe(true)
+    expect(canTerminateEvaluation('Accepted')).toBe(false)
+    expect(canTerminateEvaluation('Rejected')).toBe(false)
+  })
+
+  it('treats only a Rejected record with a recorded reason as terminated', () => {
+    expect(isTerminatedDemo({ status: 'Rejected', terminationReason: 'Customer paused the project' })).toBe(true)
+    // Historical rejections predate termination and keep their original meaning.
+    expect(isTerminatedDemo({ status: 'Rejected' })).toBe(false)
+    expect(isTerminatedDemo({ status: 'Rejected', terminationReason: '   ' })).toBe(false)
+    expect(isTerminatedDemo({ status: 'Rejected', terminationReason: null })).toBe(false)
+    expect(isTerminatedDemo({ status: 'Accepted', terminationReason: 'stale' })).toBe(false)
+    expect(isTerminatedDemo({ status: 'Testing', terminationReason: 'stale' })).toBe(false)
+  })
+
+  it('matches only the Demo Requests whose linked Demo Test was terminated', () => {
+    const isTerminatedRequest = terminatedDemoRequestMatcher([
+      { id: 'EVAL-TERMINATED', demoRequestId: 'DR-TERMINATED', status: 'Rejected', terminationReason: 'Customer paused the project' },
+      { id: 'EVAL-BACK-LINK', demoRequestId: 'DR-BACK-LINK', status: 'Rejected', terminationReason: 'Budget frozen' },
+      { id: 'EVAL-RUNNING', demoRequestId: 'DR-RUNNING', status: 'Testing' },
+      { id: 'EVAL-HISTORICAL', demoRequestId: 'DR-HISTORICAL', status: 'Rejected' },
+    ])
+    expect(isTerminatedRequest({ id: 'DR-TERMINATED', evaluationId: 'EVAL-TERMINATED' })).toBe(true)
+    expect(isTerminatedRequest({ id: 'DR-BACK-LINK' })).toBe(true)
+    expect(isTerminatedRequest({ id: 'DR-RUNNING', evaluationId: 'EVAL-RUNNING' })).toBe(false)
+    expect(isTerminatedRequest({ id: 'DR-HISTORICAL', evaluationId: 'EVAL-HISTORICAL' })).toBe(false)
+    expect(isTerminatedRequest({ id: 'DR-NO-EVALUATION' })).toBe(false)
+    // The request's own link wins over a stale back-reference from another Evaluation.
+    expect(isTerminatedRequest({ id: 'DR-TERMINATED', evaluationId: 'EVAL-RUNNING' })).toBe(false)
   })
 
   it('allows retest only from Customer Review', () => {

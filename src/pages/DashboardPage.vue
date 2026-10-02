@@ -31,6 +31,7 @@ import {
   buildCountBreakdownOption,
   buildValueDistributionOption,
 } from '@/charts/options'
+import { isTerminatedDemo, terminatedDemoRequestMatcher } from '@/domain/evaluations'
 import { formatMoney } from '@/domain/money'
 import { formatDisplayDate } from '@/domain/time'
 import { regionLabel } from '@/domain/regions'
@@ -100,7 +101,8 @@ const PROCESS_DIMENSION_LABELS: Record<ProcessDimension, Record<string, [string,
   evaluation: {
     Requested: ['已申请', 'Requested'], 'Scope Confirmed': ['范围已确认', 'Scope confirmed'], 'Sample Received': ['已收到样品', 'Sample received'],
     Scheduled: ['已排期', 'Scheduled'], Testing: ['测试中', 'Testing'], Analysis: ['分析中', 'Analysis'], 'Internal Review': ['内部审核', 'Internal review'],
-    'Customer Review': ['客户审核', 'Customer review'], Accepted: ['已接受', 'Accepted'], Rejected: ['已拒绝', 'Rejected'],
+    // This count cannot tell a mid-flight termination from a historical rejection, which share the Rejected status.
+    'Customer Review': ['客户审核', 'Customer review'], Accepted: ['已接受', 'Accepted'], Rejected: ['已终止 / 已拒绝', 'Terminated / rejected'],
   },
   'run-results': { Planned: ['计划中', 'Planned'], Completed: ['已完成', 'Completed'], Cancelled: ['已取消', 'Cancelled'] },
   visits: {
@@ -429,17 +431,20 @@ async function loadReminders() {
       readAllPages((page, pageSize) => props.apiClient.listEvaluations({ page, pageSize })),
       props.apiClient.listPipeline({}),
     ])
+    // A terminated Demo no longer has a customer expected date to chase either.
+    const isTerminatedRequest = terminatedDemoRequestMatcher(evaluations)
     const rows: DeadlineReminder[] = [
       ...visits.map((item) => ({
         id: `visit-${item.id}`, type: '拜访' as const, date: item.date, title: item.subject,
         account: item.accountName, owner: item.owner, detail: item.objective, path: '/visits',
       })),
-      ...requests.filter((item) => item.status !== 'Cancelled').map((item) => ({
+      ...requests.filter((item) => item.status !== 'Cancelled' && !isTerminatedRequest(item)).map((item) => ({
         id: `request-${item.id}`, type: '客户预期' as const, date: item.customerExpectedDate || item.targetDate,
         title: `${item.id} · ${item.title}`, account: item.accountName, owner: item.salesOwner,
         detail: item.requestedEquipment, path: '/demo-requests', demoRequestId: item.id,
       })),
-      ...evaluations.filter((item) => item.testRunDeadline).map((item) => {
+      // A terminated Demo no longer has a Test DDL to chase.
+      ...evaluations.filter((item) => item.testRunDeadline && !isTerminatedDemo(item)).map((item) => {
         const linkedRequest = requests.find((request) =>
           request.id === item.demoRequestId ||
           Boolean(item.requirementId && request.requirementId === item.requirementId))

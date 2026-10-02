@@ -515,4 +515,75 @@ describe('P1 business workspace', () => {
     await wrapper.findAll('.day-agenda-list > button').find((item) => item.text().includes('集中安排 2'))!.trigger('click')
     expect(wrapper.get('.day-agenda-detail').text()).toContain('集中安排 2')
   })
+
+  it('drops the Test DDL and customer expected events of terminated Demos only', async () => {
+    const pinia = createPinia()
+    const apiClient = createMockApi({ latency: 0, role: 'Manager' })
+    useAppStore(pinia).bootstrap = (await apiClient.getBootstrap()).data
+    const router = createAppRouter()
+    await router.push('/calendar')
+    await router.isReady()
+
+    const date = new Date()
+    const dateKey = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
+    const visits = await apiClient.listVisits({ page: 1, pageSize: 200 })
+    const requests = await apiClient.listDemoRequests({ page: 1, pageSize: 200 })
+    const evaluations = await apiClient.listEvaluations({ page: 1, pageSize: 200 })
+    const pipeline = await apiClient.listPipeline({})
+    const request = requests.data.items[0]!
+    const evaluation = evaluations.data.items[0]!
+    const reason = 'Customer paused the project'
+    const withDeadline = (id: string, demoRequestId: string, changes: Partial<typeof evaluation>) => ({
+      ...evaluation, id, demoRequestId, testRunDeadline: dateKey, terminationReason: '', ...changes,
+    })
+    const linkedRequest = (id: string, evaluationId?: string) => ({
+      ...request, id, status: evaluationId ? 'Converted' as const : 'Engineer Review' as const, evaluationId,
+      customerExpectedDate: dateKey, targetDate: dateKey,
+    })
+    // Terminated before any Test DDL was set, so the ranged Evaluation list cannot return it.
+    const early = { ...evaluation, id: 'EVAL-EARLY', demoRequestId: 'DR-EARLY', status: 'Rejected' as const, terminationReason: reason, testRunDeadline: '' }
+
+    vi.spyOn(apiClient, 'listVisits').mockResolvedValue({ ...visits, data: { items: [] }, meta: { ...visits.meta!, total: 0 } })
+    vi.spyOn(apiClient, 'listPipeline').mockResolvedValue({ ...pipeline, data: { ...pipeline.data, bookings: [] } })
+    vi.spyOn(apiClient, 'listEvaluations').mockResolvedValue({
+      ...evaluations,
+      meta: { ...evaluations.meta!, total: 4 },
+      data: { items: [
+        withDeadline('EVAL-RUNNING', 'DR-RUNNING', { status: 'Testing' }),
+        withDeadline('EVAL-TERMINATED', 'DR-TERMINATED', { status: 'Rejected', terminationReason: reason }),
+        withDeadline('EVAL-HISTORICAL', 'DR-HISTORICAL', { status: 'Rejected' }),
+        withDeadline('EVAL-ACCEPTED', 'DR-ACCEPTED', { status: 'Accepted' }),
+      ] },
+    })
+    vi.spyOn(apiClient, 'listDemoRequests').mockResolvedValue({
+      ...requests,
+      meta: { ...requests.meta!, total: 6 },
+      data: { items: [
+        linkedRequest('DR-RUNNING', 'EVAL-RUNNING'),
+        linkedRequest('DR-TERMINATED', 'EVAL-TERMINATED'),
+        linkedRequest('DR-HISTORICAL', 'EVAL-HISTORICAL'),
+        linkedRequest('DR-ACCEPTED', 'EVAL-ACCEPTED'),
+        linkedRequest('DR-EARLY', 'EVAL-EARLY'),
+        linkedRequest('DR-OPEN'),
+      ] },
+    })
+    const getEvaluation = vi.spyOn(apiClient, 'getEvaluation').mockImplementation(async (id) => {
+      if (id !== early.id) throw new Error(`Unexpected Evaluation read ${id}`)
+      return { ...evaluations, data: early }
+    })
+
+    const wrapper = mount(ServiceCalendarPage, { props: { apiClient }, global: { plugins: [pinia, router] } })
+    await flushPromises()
+    await wrapper.get('.view-switch button:first-child').trigger('click')
+    await flushPromises()
+
+    const titles = wrapper.findAll('.week-event strong').map((item) => item.text())
+    const shown = (id: string) => titles.some((title) => title.startsWith(`${id} `))
+    expect(getEvaluation).toHaveBeenCalledWith('EVAL-EARLY')
+    expect(getEvaluation.mock.calls.every(([id]) => id === 'EVAL-EARLY')).toBe(true)
+    for (const id of ['EVAL-RUNNING', 'EVAL-HISTORICAL', 'EVAL-ACCEPTED', 'DR-RUNNING', 'DR-HISTORICAL', 'DR-ACCEPTED', 'DR-OPEN']) {
+      expect(shown(id), id).toBe(true)
+    }
+    for (const id of ['EVAL-TERMINATED', 'DR-TERMINATED', 'DR-EARLY']) expect(shown(id), id).toBe(false)
+  })
 })

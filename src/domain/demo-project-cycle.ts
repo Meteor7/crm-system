@@ -3,8 +3,9 @@ import type {
   DemoProjectTimelineStepDto,
   DemoWorkflowDto,
 } from '@/types/workspaces'
+import { isTerminatedDemo } from '@/domain/evaluations'
 
-export type DemoProjectCycleGroup = 'request' | 'test' | 'completed'
+export type DemoProjectCycleGroup = 'request' | 'test' | 'completed' | 'terminated'
 
 const timelineMilestones = [
   { key: 'sales-preparation', label: 'Sales Preparation' },
@@ -27,6 +28,8 @@ const currentStepByStage = {
 } as const
 
 export function demoProjectCycleGroup(item: DemoWorkflowDto): DemoProjectCycleGroup {
+  // Termination also archives the Demo, but it ended early rather than completing.
+  if (isTerminatedDemo(item)) return 'terminated'
   if (item.archiveCategory === 'Completed') return 'completed'
   if (item.stage === 'Engineer Review' || item.stage === 'Manager Approval') return 'request'
   return 'test'
@@ -60,16 +63,26 @@ function completedDateOrdinal(item: DemoWorkflowDto): number | null {
   return completedAt ? dateOrdinal(completedAt) : null
 }
 
+function terminatedDateOrdinal(item: DemoWorkflowDto): number | null {
+  // Terminating stamps the request's latest progress, which therefore dates the termination.
+  const terminatedAt = item.tracking?.lastProgressAt
+    || item.projectTimeline?.filter((step) => step.state === 'Done' && step.date).at(-1)?.date
+  return terminatedAt ? dateOrdinal(terminatedAt) : null
+}
+
+function isWithinRecentWindow(day: number | null, today: string): boolean {
+  const todayDay = dateOrdinal(today)
+  if (day === null || todayDay === null) return false
+  const age = todayDay - day
+  return age >= 0 && age <= 100
+}
+
 export function isRecentCompletedProject(
   item: DemoWorkflowDto,
   today = shanghaiToday(),
 ): boolean {
-  if (item.archiveCategory !== 'Completed') return false
-  const completedDay = completedDateOrdinal(item)
-  const todayDay = dateOrdinal(today)
-  if (completedDay === null || todayDay === null) return false
-  const age = todayDay - completedDay
-  return age >= 0 && age <= 100
+  if (demoProjectCycleGroup(item) !== 'completed') return false
+  return isWithinRecentWindow(completedDateOrdinal(item), today)
 }
 
 export function recentCompletedProjects(
@@ -81,6 +94,17 @@ export function recentCompletedProjects(
     .sort((left, right) => (completedDateOrdinal(right) ?? 0) - (completedDateOrdinal(left) ?? 0))
 }
 
+/** Demos terminated in the same 100-day window; they are shown, but never counted as completed. */
+export function recentTerminatedProjects(
+  items: DemoWorkflowDto[],
+  today = shanghaiToday(),
+): DemoWorkflowDto[] {
+  return items
+    .filter((item) => item.archiveCategory === 'Completed' && isTerminatedDemo(item)
+      && isWithinRecentWindow(terminatedDateOrdinal(item), today))
+    .sort((left, right) => (terminatedDateOrdinal(right) ?? 0) - (terminatedDateOrdinal(left) ?? 0))
+}
+
 export function preparationGateState(
   steps: DemoProjectTimelineStepDto[],
 ): DemoProjectTimelineState {
@@ -89,7 +113,18 @@ export function preparationGateState(
   return 'Waiting'
 }
 
+// A terminated Demo stopped part-way. Without the server timeline only what it demonstrably
+// reached is Done: the approved request and each finished preparation branch. Nothing after
+// that is claimed, and nothing is left in progress.
+function terminatedTimelineState(item: DemoWorkflowDto, key: string, index: number): DemoProjectTimelineState {
+  if (index < currentStepByStage['Test Preparation']) return 'Done'
+  if (key === 'wafer-preparation') return item.evaluation?.waferPreparationStatus === 'Completed' ? 'Done' : 'Waiting'
+  if (key === 'test-preparation') return item.evaluation?.testPreparationStatus === 'Completed' ? 'Done' : 'Waiting'
+  return 'Waiting'
+}
+
 function timelineState(item: DemoWorkflowDto, key: string, index: number): DemoProjectTimelineState {
+  if (isTerminatedDemo(item)) return terminatedTimelineState(item, key, index)
   if (item.archiveCategory === 'Completed') return 'Done'
   if (item.stage === 'Test Preparation') {
     if (key === 'wafer-preparation') return item.evaluation?.waferPreparationStatus === 'Completed' ? 'Done' : 'Current'
@@ -166,7 +201,7 @@ export function buildDemoProjectTimeline(item: DemoWorkflowDto): DemoProjectTime
         ? item.evaluation?.testPreparationCompletedAt?.slice(0, 10)
         : index === 5 || index === 6
       ? runDate
-      : index === 7
+      : index === 7 && !isTerminatedDemo(item)
         ? item.customerExpectedDate
         : undefined,
   }))

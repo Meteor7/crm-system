@@ -1,13 +1,15 @@
 <script setup lang="ts">
+import { computed } from 'vue'
 import { salesEnumLabel } from '@/features/shared/sales-i18n'
 import type { DemoWorkflowDto } from '@/types/workspaces'
 import DemoProjectTimeline from './DemoProjectTimeline.vue'
 import DemoArticleCard from './DemoArticleCard.vue'
 import { personnelDisplayName } from '@/demo/personnel'
+import { isTerminatedDemo } from '@/domain/evaluations'
 import { formatDisplayDate } from '@/domain/time'
 import { useI18n } from '@/i18n'
 
-withDefaults(defineProps<{
+const props = withDefaults(defineProps<{
   item: DemoWorkflowDto
   showOverview?: boolean
   showTimeline?: boolean
@@ -19,6 +21,11 @@ defineEmits<{ download: [id: string]; preview: [id: string] }>()
 const { locale, t } = useI18n()
 const copy = (english: string, chinese: string) => locale.value === 'en-US' ? english : chinese
 const statusLabel = (status: string) => copy(status, ({ Requested: '已申请', 'Scope Confirmed': '范围已确认', 'Sample Received': '样品已收到', Scheduled: '已排期', Testing: '测试中', Analysis: '分析中', 'Internal Review': '内部评审', 'Customer Review': '客户评审', Accepted: '已接受', Rejected: '已拒绝', Pending: '待确认' } as Record<string, string>)[status] || status)
+// Termination ends the process, not the customer's review: the conclusion shows the
+// termination and its reason, and the untouched acceptance is labelled on its own.
+const terminated = computed(() => isTerminatedDemo(props.item))
+const processLabel = (status: string) => terminated.value ? t('evaluations.terminated') : statusLabel(status)
+const customerReviewLabel = (status: string) => status === 'Pending' ? t('evaluations.notReviewed') : statusLabel(status)
 </script>
 
 <template>
@@ -26,7 +33,7 @@ const statusLabel = (status: string) => copy(status, ({ Requested: '已申请', 
     <section v-if="showOverview" class="workspace-panel archive-overview">
       <header>
         <div><span class="eyebrow">{{ item.id }}</span><h2>{{ item.title }}</h2></div>
-         <span class="workspace-badge info">{{ statusLabel(item.status) }}</span>
+         <span class="workspace-badge" :class="terminated ? 'danger' : 'info'">{{ processLabel(item.status) }}</span>
       </header>
       <div class="archive-overview-body">
         <span>{{ item.account }}</span>
@@ -74,7 +81,7 @@ const statusLabel = (status: string) => copy(status, ({ Requested: '已申请', 
     </section>
 
     <section v-if="item.evaluation" class="workspace-panel test-summary" data-demo-sensitive="test-runs">
-       <header><h2>{{ copy('Demo Test', 'Demo 测试') }}</h2><span>{{ statusLabel(item.evaluation.status) }}</span></header>
+       <header><h2>{{ copy('Demo Test', 'Demo 测试') }}</h2><span>{{ processLabel(item.evaluation.status) }}</span></header>
       <div class="table-wrap">
         <table class="crm-table demo-table">
            <thead><tr><th>{{ copy('Run', '运行') }}</th><th>{{ copy('Round', '轮次') }}</th><th>{{ copy('Date', '日期') }}</th><th>{{ copy('Lot', '批次') }}</th><th>{{ copy('Wafers', '晶圆数') }}</th><th>{{ copy('Capture', '捕获率') }}</th><th>{{ copy('False Positive', '误报率') }}</th><th>WPH</th><th>{{ copy('Status', '状态') }}</th><th>{{ copy('Summary', '摘要') }}</th></tr></thead>
@@ -105,7 +112,14 @@ const statusLabel = (status: string) => copy(status, ({ Requested: '已申请', 
       </div>
     </section>
 
-    <section class="workspace-panel conclusion-panel">
+    <section v-if="terminated" class="workspace-panel conclusion-panel" data-demo-terminated>
+      <header><h2>{{ copy('Demo Conclusion', 'Demo 结论') }}</h2><span class="workspace-badge danger">{{ t('evaluations.terminated') }}</span></header>
+      <div class="workspace-panel-body conclusion-terminated">
+        <div data-termination-reason><small>{{ t('evaluations.terminateReason') }}</small><strong>{{ item.terminationReason }}</strong></div>
+        <div data-customer-review-status><small>{{ t('evaluations.customerReview') }}</small><span>{{ customerReviewLabel(item.conclusion.status) }}</span></div>
+      </div>
+    </section>
+    <section v-else class="workspace-panel conclusion-panel">
        <header><h2>{{ copy('Demo Conclusion', 'Demo 结论') }}</h2><span class="workspace-badge info">{{ statusLabel(item.conclusion.status) }}</span></header>
       <div class="workspace-panel-body"><strong>{{ item.conclusion.summary || (locale === 'en-US' ? 'No formal conclusion' : '暂无正式结论') }}</strong></div>
     </section>
@@ -114,5 +128,6 @@ const statusLabel = (status: string) => copy(status, ({ Requested: '已申请', 
 
 <style scoped>
 .demo-main{display:grid;gap:14px;min-width:0}.archive-overview h2{margin-top:4px;font-size:20px}.archive-overview-body{display:flex;flex-wrap:wrap;gap:10px 22px;padding:14px 16px;color:var(--crm-text-muted);font-size:12px}.archive-overview-body strong{color:var(--crm-navy)}.detail-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:1px;background:var(--crm-line)}.detail-grid>div{display:grid;gap:6px;padding:14px;background:#fff}.detail-grid small{color:var(--crm-text-muted);font-size:10px}.detail-grid strong{color:var(--crm-navy);font-size:11px;line-height:1.5}.request-wafers{display:grid;gap:7px;padding:14px 16px;border-top:1px solid var(--crm-line);font-size:11px}.request-wafers span{color:var(--crm-text-muted)}.archive-list{display:grid;gap:1px;background:var(--crm-line)}.archive-list button,.archive-list p{display:grid;gap:5px;margin:0;padding:13px 16px;border:0;background:#fff;text-align:left}.archive-list button{grid-template-columns:auto 1fr auto;align-items:center;color:var(--crm-teal);cursor:pointer}.archive-list button strong{color:var(--crm-navy);font-size:11px}.archive-list button span{color:var(--crm-text-muted);font-size:10px}.table-wrap{overflow:auto}.demo-table{min-width:650px}@media(max-width:720px){.detail-grid{grid-template-columns:1fr}.archive-list button{grid-template-columns:auto 1fr}.archive-list button span{grid-column:2}}
+.conclusion-terminated{display:grid;gap:10px}.conclusion-terminated>div{display:grid;gap:4px}.conclusion-terminated small{color:var(--crm-text-muted);font-size:10px}.conclusion-terminated strong{color:var(--crm-navy);font-size:12px;line-height:1.5;overflow-wrap:anywhere}.conclusion-terminated span{color:var(--crm-navy);font-size:11px}
 .customer-comment-panel .comment-log{display:grid;gap:10px;margin:0;padding:0;list-style:none}.customer-comment-panel .comment-log li{display:grid;gap:4px;padding:10px 11px;background:var(--crm-surface);border:1px solid var(--crm-line);border-radius:9px}.customer-comment-panel .round-chip{width:max-content;padding:2px 6px;color:var(--crm-teal);background:var(--crm-teal-soft);border-radius:4px;font-size:8px;font-weight:800}.customer-comment-panel .comment-log p{margin:0;line-height:1.6}.customer-comment-panel .comment-log small{color:var(--crm-text-muted);font-size:9px}
 </style>

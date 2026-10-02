@@ -112,6 +112,7 @@ describe('Frappe method contract', () => {
       getEvaluation: 'evaluations.get_evaluation',
       completeEvaluationPreparation: 'evaluations.complete_evaluation_preparation',
       updateEvaluationStatus: 'evaluations.update_evaluation_status',
+      terminateEvaluation: 'evaluations.terminate_evaluation',
       addEvaluationRun: 'evaluations.add_evaluation_run',
       updateEvaluationRun: 'evaluations.update_evaluation_run',
       cancelEvaluationRun: 'evaluations.cancel_evaluation_run',

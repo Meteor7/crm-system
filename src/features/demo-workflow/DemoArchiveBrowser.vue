@@ -21,12 +21,14 @@ const emit = defineEmits<{
   'group-change': [value: DemoArchiveGroupMode]
   open: [item: DemoWorkflowDto]
 }>()
-const { locale } = useI18n()
+const { locale, t } = useI18n()
 const copy = (english: string, chinese: string) => locale.value === 'en-US' ? english : chinese
 
 const archived = computed(() => props.items.filter((item) => item.archiveCategory === 'Completed'))
 const salesOwners = computed(() => [...new Set(archived.value.map((item) => item.salesOwner))].sort())
 const engineerOwners = computed(() => [...new Set(archived.value.map((item) => item.engineerOwner))].sort())
+// Terminated Demos keep the stored Rejected status, so the Rejected filter covers both
+// meanings; each card names its own.
 const filtered = computed(() => {
   return archived.value.filter((item) =>
     (props.result === 'all' || item.status === props.result)
@@ -49,7 +51,7 @@ const groups = computed(() => groupDemoArchives(filtered.value, props.groupBy))
         >
            <option value="all">{{ copy('All', '全部') }}</option>
           <option value="Accepted">{{ copy('Accepted', '已接受') }}</option>
-          <option value="Rejected">{{ copy('Rejected', '已拒绝') }}</option>
+          <option value="Rejected">{{ t('evaluations.terminatedOrRejected') }}</option>
         </select>
       </label>
       <label>

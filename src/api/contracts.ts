@@ -255,6 +255,7 @@ export interface CrmApi {
   getEvaluation(id: string): Promise<ApiResponse<EvaluationDto>>
   completeEvaluationPreparation(id: string, branch: EvaluationPreparationBranch, expectedModified: string): Promise<ApiResponse<EvaluationDto>>
   updateEvaluationStatus(id: string, command: EvaluationStatusCommand, expectedModified?: string): Promise<ApiResponse<EvaluationDto>>
+  terminateEvaluation(id: string, reason: string, expectedModified: string): Promise<ApiResponse<EvaluationDto>>
   addEvaluationRun(id: string, input: AddEvaluationRunInput): Promise<ApiResponse<EvaluationDto>>
   updateEvaluationRun(id: string, runId: string, input: UpdateEvaluationRunInput): Promise<ApiResponse<EvaluationDto>>
   cancelEvaluationRun(id: string, runId: string, input: CancelEvaluationRunInput): Promise<ApiResponse<EvaluationDto>>

@@ -372,6 +372,64 @@ describe('DashboardPage', () => {
     setLocale('zh-CN')
   })
 
+  it('labels the Demo Test Rejected count honestly now that it also holds terminations', async () => {
+    const apiClient = createMockApi({ latency: 0, role: 'Manager', userName: '演示经理01' })
+    const dashboard = await apiClient.getDashboard({ range: 'month' })
+    dashboard.data.process.evaluationByStatus = [
+      { label: 'Testing', count: 2 }, { label: 'Accepted', count: 3 }, { label: 'Rejected', count: 1 },
+    ]
+    vi.spyOn(apiClient, 'getDashboard').mockResolvedValue(dashboard)
+    const router = createAppRouter()
+    await router.push('/dashboard')
+    await router.isReady()
+    const wrapper = mount(DashboardPage, {
+      props: { apiClient },
+      global: { plugins: [createPinia(), router], stubs: { CrmChart: ChartProbe } },
+    })
+    await flushPromises()
+    const statusAxis = () => wrapper.findAllComponents(ChartProbe)
+      .map((chart) => chart.props('option') as EChartsOption)
+      .map((option) => ((Array.isArray(option.yAxis) ? option.yAxis[0] : option.yAxis) as { data?: unknown[] } | undefined)?.data ?? [])
+      .find((data) => data.includes('测试中') || data.includes('Testing'))
+
+    expect(statusAxis()).toEqual(['测试中', '已接受', '已终止 / 已拒绝'])
+    setLocale('en-US')
+    await nextTick()
+    expect(statusAxis()).toEqual(['Testing', 'Accepted', 'Terminated / rejected'])
+    wrapper.unmount()
+  })
+
+  it('stops the Test DDL and customer expected reminders of a terminated Demo Test', async () => {
+    const apiClient = createMockApi({ latency: 0, role: 'Sales' })
+    const evaluations = await apiClient.listEvaluations({ page: 1, pageSize: 200 })
+    const [seed] = evaluations.data.items
+    evaluations.data.items = [
+      { ...seed, id: 'EVAL-ACTIVE', demoRequestId: 'DR-ACTIVE', status: 'Testing', testRunDeadline: '2026-07-19' },
+      { ...seed, id: 'EVAL-TERMINATED', demoRequestId: 'DR-TERMINATED', status: 'Rejected', terminationReason: 'Customer paused the project', testRunDeadline: '2026-07-20' },
+    ]
+    evaluations.meta = { ...evaluations.meta, requestId: 'terminated-reminders', total: 2 }
+    vi.spyOn(apiClient, 'listEvaluations').mockResolvedValue(evaluations)
+    const requests = await apiClient.listDemoRequests({ page: 1, pageSize: 200 })
+    const [request] = requests.data.items
+    requests.data.items = [
+      // Both requests stay Converted; only the linked Evaluation tells them apart.
+      { ...request, id: 'DR-ACTIVE', status: 'Converted', evaluationId: 'EVAL-ACTIVE', customerExpectedDate: '2026-07-21' },
+      { ...request, id: 'DR-TERMINATED', status: 'Converted', evaluationId: 'EVAL-TERMINATED', customerExpectedDate: '2026-07-22' },
+      { ...request, id: 'DR-OPEN', status: 'Engineer Review', evaluationId: undefined, customerExpectedDate: '2026-07-23' },
+    ]
+    requests.meta = { ...requests.meta, requestId: 'terminated-request-reminders', total: 3 }
+    vi.spyOn(apiClient, 'listDemoRequests').mockResolvedValue(requests)
+    const wrapper = mount(DashboardPage, { props: { apiClient }, global: await globals() })
+    await flushPromises()
+
+    expect(wrapper.find('[data-reminder-id="test-EVAL-ACTIVE"]').exists()).toBe(true)
+    expect(wrapper.find('[data-reminder-id="test-EVAL-TERMINATED"]').exists()).toBe(false)
+    expect(wrapper.find('[data-reminder-id="request-DR-ACTIVE"]').exists()).toBe(true)
+    expect(wrapper.find('[data-reminder-id="request-DR-OPEN"]').exists()).toBe(true)
+    expect(wrapper.find('[data-reminder-id="request-DR-TERMINATED"]').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
   it('shows non-management users only the next 15 days reminder center', async () => {
     const wrapper = mount(DashboardPage, {
       props: { apiClient: createMockApi({ latency: 0, role: 'Sales', userName: 'Demo Staff 01' }) },

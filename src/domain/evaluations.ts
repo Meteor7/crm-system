@@ -59,8 +59,8 @@ export function evaluationGroup(status: EvaluationStatus): EvaluationGroup {
 }
 
 export function evaluationStatusOptions(current: EvaluationStatus): EvaluationStatus[] {
-  // Accepted is the single terminal state; Rejected only survives for records archived
-  // before Customer Review became a comment-only, outcome-free step.
+  // Accepted and Rejected both end the Demo Test. Rejected is where a mid-flight termination (#73)
+  // lands, and what records archived before Customer Review became comment-only still carry.
   if (current === 'Accepted' || current === 'Rejected') return [current]
   // Customer Review either archives or sends the demo back for another test round.
   if (current === 'Customer Review') return [current, 'Accepted', 'Testing']
@@ -71,6 +71,36 @@ export function evaluationStatusOptions(current: EvaluationStatus): EvaluationSt
 
 export function canRetestEvaluation(status: EvaluationStatus) {
   return status === 'Customer Review'
+}
+
+/** Any Demo Test that has not ended can be terminated mid-flight (#73). */
+export function canTerminateEvaluation(status: EvaluationStatus) {
+  return status !== 'Accepted' && status !== 'Rejected'
+}
+
+/**
+ * Termination reuses the Rejected status and records why. Historical Rejected records
+ * carry no reason and keep their original meaning, as does the customer acceptance.
+ */
+export function isTerminatedDemo(record: { status: string; terminationReason?: string | null }) {
+  return record.status === 'Rejected' && Boolean(record.terminationReason?.trim())
+}
+
+/**
+ * Recognises the Demo Requests whose Demo Test was terminated. They stay Converted, but
+ * their customer expected date is no longer something to chase. A request is judged by
+ * its own linked Evaluation when it names one, otherwise by the Evaluation pointing at it;
+ * requests without an Evaluation, or whose Evaluation is still running, never match.
+ */
+export function terminatedDemoRequestMatcher(
+  evaluations: ReadonlyArray<{ id: string; demoRequestId?: string; status: string; terminationReason?: string | null }>,
+) {
+  const terminated = evaluations.filter(isTerminatedDemo)
+  const evaluationIds = new Set(terminated.map((item) => item.id))
+  const requestIds = new Set(terminated.map((item) => item.demoRequestId).filter(Boolean))
+  return (request: { id: string; evaluationId?: string }) => request.evaluationId
+    ? evaluationIds.has(request.evaluationId)
+    : requestIds.has(request.id)
 }
 
 export function canTransitionEvaluation(current: EvaluationStatus, next: EvaluationStatus) {

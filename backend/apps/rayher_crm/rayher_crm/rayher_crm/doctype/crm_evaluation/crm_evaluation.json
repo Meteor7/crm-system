@@ -1,6 +1,6 @@
 {
   "actions":[],"autoname":"format:CRM-EVAL-{#####}","creation":"2026-08-04 00:00:00.000000","doctype":"DocType","engine":"InnoDB",
-  "field_order":["account","requirement_id","demo_request","title","status","evaluation_owner","planned_end","test_run_deadline","wafer_preparation_status","wafer_preparation_completed_by","wafer_preparation_completed_at","test_preparation_status","test_preparation_completed_by","test_preparation_completed_at","acceptance","report_status","report_artifact_id","internal_report_artifact_id","external_report_artifact_id","customer_report_artifact_id","report_version","test_round","criteria"],
+  "field_order":["account","requirement_id","demo_request","title","status","evaluation_owner","planned_end","test_run_deadline","wafer_preparation_status","wafer_preparation_completed_by","wafer_preparation_completed_at","test_preparation_status","test_preparation_completed_by","test_preparation_completed_at","acceptance","report_status","report_artifact_id","internal_report_artifact_id","external_report_artifact_id","customer_report_artifact_id","report_version","test_round","criteria","termination_reason"],
   "fields":[
     {"fieldname":"account","fieldtype":"Link","label":"Account","options":"Customer"},
     {"fieldname":"requirement_id","fieldtype":"Data","label":"Requirement ID"},
@@ -24,7 +24,8 @@
     {"fieldname":"customer_report_artifact_id","fieldtype":"Data","label":"Customer Report Artifact ID","read_only":1},
     {"default":"0","fieldname":"report_version","fieldtype":"Int","label":"Report Version","read_only":1},
     {"default":"1","fieldname":"test_round","fieldtype":"Int","label":"Test Round","read_only":1},
-    {"fieldname":"criteria","fieldtype":"Small Text","label":"Criteria"}
+    {"fieldname":"criteria","fieldtype":"Small Text","label":"Criteria"},
+    {"fieldname":"termination_reason","fieldtype":"Small Text","label":"Termination Reason"}
   ],
   "index_web_pages_for_search":0,"modified":"2026-08-04 00:00:00.000000","modified_by":"Administrator","module":"Rayher CRM","name":"CRM Evaluation","naming_rule":"Expression","owner":"Administrator",
   "permissions":[{"read":1,"role":"CRM Manager"},{"read":1,"role":"CRM Sales"},{"read":1,"role":"CRM Engineer"}],"sort_field":"modified","sort_order":"DESC","states":[]

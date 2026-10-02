@@ -1,10 +1,64 @@
-import { mount } from '@vue/test-utils'
+import { flushPromises, mount } from '@vue/test-utils'
 import { describe, expect, it } from 'vitest'
 import { evaluations } from '@/api/mock-data'
+import { setLocale } from '@/i18n'
 import type { EvaluationDto } from '@/types/crm'
 import EvaluationWorkspace from './EvaluationWorkspace.vue'
 
 describe('EvaluationWorkspace', () => {
+  it('emits terminate with the selected evaluation when clicked', async () => {
+    const testingEvaluation = evaluations.find((item) => item.id === 'EVAL-103')!
+    const wrapper = mount(EvaluationWorkspace, {
+      props: { view: 'overview', evaluations: [testingEvaluation], selectedId: testingEvaluation.id, canWrite: true },
+    })
+    const button = wrapper.get(`[data-testid="terminate-evaluation-${testingEvaluation.id}"]`)
+    expect(button.text()).toBe('终止 Demo')
+    await button.trigger('click')
+    expect(wrapper.emitted('terminate')?.[0]).toEqual([testingEvaluation])
+
+    await wrapper.setProps({ processing: testingEvaluation.id })
+    expect(button.attributes('disabled')).toBeDefined()
+    await wrapper.setProps({ processing: '', canWrite: false })
+    expect(wrapper.find('[data-testid^="terminate-evaluation-"]').exists()).toBe(false)
+  })
+
+  it.each(['Requested', 'Scope Confirmed', 'Sample Received', 'Scheduled', 'Analysis', 'Internal Review', 'Customer Review'] as const)(
+    'offers Terminate for a %s evaluation too', (status) => {
+      const open = { ...evaluations.find((item) => item.id === 'EVAL-103')!, status }
+      const wrapper = mount(EvaluationWorkspace, {
+        props: { view: 'overview', evaluations: [open], selectedId: open.id, canWrite: true },
+      })
+      expect(wrapper.find(`[data-testid="terminate-evaluation-${open.id}"]`).exists()).toBe(true)
+    },
+  )
+
+  it.each(['Accepted', 'Rejected'] as const)('does not show Terminate for an already-terminal %s evaluation', (status) => {
+    const ended = { ...evaluations.find((item) => item.id === 'EVAL-103')!, status }
+    const wrapper = mount(EvaluationWorkspace, {
+      props: { view: 'overview', evaluations: [ended], selectedId: ended.id, canWrite: true },
+    })
+    expect(wrapper.find(`[data-testid="terminate-evaluation-${ended.id}"]`).exists()).toBe(false)
+  })
+
+  it('names a terminated Demo Test with its reason while historical outcomes keep their labels', async () => {
+    const base = evaluations.find((item) => item.id === 'EVAL-103')!
+    const terminated: EvaluationDto = { ...base, id: 'EVAL-TERMINATED', status: 'Rejected', terminationReason: '客户暂停项目' }
+    const rejected: EvaluationDto = { ...base, id: 'EVAL-REJECTED', status: 'Rejected', terminationReason: '' }
+    const accepted: EvaluationDto = { ...base, id: 'EVAL-ACCEPTED', status: 'Accepted' }
+    const wrapper = mount(EvaluationWorkspace, {
+      props: { view: 'overview', evaluations: [terminated, rejected, accepted], selectedId: terminated.id },
+    })
+    const stage = (id: string) => wrapper.get(`[data-evaluation="${id}"] .status-badge`).text()
+
+    expect([stage('EVAL-TERMINATED'), stage('EVAL-REJECTED'), stage('EVAL-ACCEPTED')]).toEqual(['已终止', '已拒绝', '已接受'])
+    expect(wrapper.get('[data-termination-reason]').text()).toContain('客户暂停项目')
+    setLocale('en-US')
+    await flushPromises()
+    expect([stage('EVAL-TERMINATED'), stage('EVAL-REJECTED'), stage('EVAL-ACCEPTED')]).toEqual(['Terminated', 'Rejected', 'Accepted'])
+    await wrapper.setProps({ selectedId: rejected.id })
+    expect(wrapper.find('[data-termination-reason]').exists()).toBe(false)
+  })
+
   it('presents Demo Tests as a contacts-style summary table with a separate action area', async () => {
     const activeEvaluations = evaluations
       .filter((item) => !['Accepted', 'Rejected'].includes(item.status))

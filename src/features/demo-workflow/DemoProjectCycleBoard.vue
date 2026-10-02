@@ -7,6 +7,7 @@ import {
   demoProjectCycleGroup,
   isCustomerExpectedRisk,
   recentCompletedProjects,
+  recentTerminatedProjects,
 } from '@/domain/demo-project-cycle'
 import type { DemoHealthLevel } from '@/types/crm'
 import type { DemoWorkflowDto } from '@/types/workspaces'
@@ -28,7 +29,7 @@ const emit = defineEmits<{
   'update:engineerOwner': [value: string]
   open: [item: DemoWorkflowDto]
 }>()
-const { locale } = useI18n()
+const { locale, t } = useI18n()
 const copy = (english: string, chinese: string) => locale.value === 'en-US' ? english : chinese
 const stageLabel = (value: string) => copy(value, ({
   'Sales Preparation': 'Sales 准备', 'Engineer Review': '工程评估', 'Manager Approval': '经理审批',
@@ -46,9 +47,11 @@ const timelineLabels = [
   'Customer Review',
 ]
 
+// Terminated Demos are archived too: they follow the completed ones, marked and never counted.
 const recentItems = computed(() => [
   ...props.items.filter((item) => item.archiveCategory !== 'Completed'),
   ...recentCompletedProjects(props.items),
+  ...recentTerminatedProjects(props.items),
 ])
 const filtered = computed(() => {
   return recentItems.value.filter((item) =>
@@ -63,7 +66,7 @@ const salesOwners = computed(() => [...new Set(props.items.map((item) => item.sa
 const engineerOwners = computed(() => [...new Set(props.items.map((item) => item.engineerOwner))].sort())
 const activeCount = computed(() => props.items.filter((item) => item.archiveCategory === 'In Progress').length)
 const riskCount = computed(() => props.items.filter(isCustomerExpectedRisk).length)
-const completedCount = computed(() => recentItems.value.filter((item) => item.archiveCategory === 'Completed').length)
+const completedCount = computed(() => recentItems.value.filter((item) => demoProjectCycleGroup(item) === 'completed').length)
 const orderedItems = computed(() => {
   const activeItems = filtered.value.filter((item) => item.archiveCategory !== 'Completed')
   return [
@@ -74,7 +77,11 @@ const orderedItems = computed(() => {
 })
 
 function currentStageOwner(item: DemoWorkflowDto): string {
-  return buildDemoProjectTimeline(item).find((step) => step.state === 'Current')?.actor
+  // A terminated Demo's stop node is not an active stage, so it has no current actor.
+  const current = demoProjectCycleGroup(item) === 'terminated'
+    ? undefined
+    : buildDemoProjectTimeline(item).find((step) => step.state === 'Current')
+  return current?.actor
     || item.engineerOwner
     || (locale.value === 'en-US' ? 'To be confirmed' : '待确认')
 }
@@ -171,7 +178,8 @@ function startsCompletedBlock(item: DemoWorkflowDto, index: number): boolean {
               'is-customer-risk': isCustomerExpectedRisk(item),
               'is-request-project': demoProjectCycleGroup(item) === 'request' && !isCustomerExpectedRisk(item),
               'is-test-project': demoProjectCycleGroup(item) === 'test' && !isCustomerExpectedRisk(item),
-              'is-completed-project': item.archiveCategory === 'Completed',
+              'is-completed-project': demoProjectCycleGroup(item) === 'completed',
+              'is-terminated-project': demoProjectCycleGroup(item) === 'terminated',
               'starts-completed-block': startsCompletedBlock(item, index),
             }"
             :data-project-id="item.id"
@@ -182,6 +190,12 @@ function startsCompletedBlock(item: DemoWorkflowDto, index: number): boolean {
             <span class="project-name-cell">
               <strong>{{ item.title }}</strong>
                <small v-if="isCustomerExpectedRisk(item)">{{ copy('Urgent · ', '加急 · ') }}{{ demoHealthReason(item.health, locale) }}</small>
+              <small
+                v-if="demoProjectCycleGroup(item) === 'terminated'"
+                class="terminated-marker"
+                :title="item.terminationReason"
+                data-terminated-marker
+              >{{ t('evaluations.terminated') }} · {{ item.terminationReason }}</small>
             </span>
             <span class="project-owner-cell" data-current-stage-owner>
               {{ personnelDisplayName(currentStageOwner(item)) }}
@@ -196,7 +210,7 @@ function startsCompletedBlock(item: DemoWorkflowDto, index: number): boolean {
                 hide-context
                 row-mode
                 scope="full"
-                :tone="item.archiveCategory === 'Completed'
+                :tone="demoProjectCycleGroup(item) === 'terminated' ? 'terminated' : item.archiveCategory === 'Completed'
                   ? 'complete'
                   : isCustomerExpectedRisk(item)
                     ? 'critical'
@@ -221,4 +235,5 @@ function startsCompletedBlock(item: DemoWorkflowDto, index: number): boolean {
 .project-cycle-row{min-height:88px}.project-cycle-table :deep(.timeline-row .timeline-track li::before),.project-cycle-table :deep(.timeline-row .timeline-track li::after){top:20px}
 .timeline-column-header>div{grid-template-columns:repeat(7,minmax(102px,1fr))}
 .project-cycle-table :deep(.timeline-row .timeline-track){min-width:714px;grid-template-columns:repeat(7,minmax(102px,1fr))}
+.project-cycle-row.is-terminated-project{color:#7d6f70;background:#fbf7f7}.project-cycle-row.is-terminated-project .project-name-cell::before{background:#b86b6f}.project-name-cell .terminated-marker{max-width:100%;overflow:hidden;color:#9a4a4e;text-overflow:ellipsis;white-space:nowrap}
 </style>

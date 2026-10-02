@@ -619,6 +619,8 @@ export interface EvaluationDto {
   testRound: number
   customerReviews?: EvaluationCustomerReviewDto[]
   criteria?: string
+  /** Set only when a Demo was terminated mid-flight; historical Rejected records leave it blank. */
+  terminationReason?: string
   runs: TestRunDto[]
   history?: EvaluationHistoryDto[]
   waferPreparationStatus?: EvaluationPreparationStatus

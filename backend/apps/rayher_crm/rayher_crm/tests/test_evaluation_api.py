@@ -2,11 +2,17 @@ from __future__ import annotations
 
 import json
 import os
+from unittest.mock import patch
 
 import frappe
 from frappe.tests.utils import FrappeTestCase
+from frappe.utils import add_days, today
 
+from rayher_crm.api.v1 import evaluations as evaluations_api
 from rayher_crm.api.v1.errors import CrmApiException
+from rayher_crm.services.accounts import get_account_360
+from rayher_crm.services.dashboard import get_dashboard
+from rayher_crm.services.ddl_reminders import send_ddl_reminders
 from rayher_crm.services.demo_requests import transition_demo_request
 from rayher_crm.services.demo_reports import release_demo_test_report
 from rayher_crm.services import cockpit
@@ -19,6 +25,7 @@ from rayher_crm.services.evaluations import (
     list_demo_workflows,
     list_evaluations,
     set_evaluation_test_run_deadline,
+    terminate_evaluation,
     update_evaluation_run,
     update_evaluation_status,
 )
@@ -460,13 +467,15 @@ class TestEvaluationApi(FrappeTestCase):
 
         frappe.set_user(self.manager)
         evaluation = get_evaluation(evaluation_id)
+        # The service refuses a date in the past, so the test must not name a fixed one.
+        deadline = add_days(today(), 45)
         with self.assertRaises(CrmApiException) as invalid_date:
             set_evaluation_test_run_deadline(evaluation_id, {"testRunDeadline": "2026-02-30"})
         self.assertEqual(invalid_date.exception.code, "VALIDATION_ERROR")
         evaluation = set_evaluation_test_run_deadline(
-            evaluation_id, {"testRunDeadline": "2026-12-15", "expectedModified": evaluation["modified"]},
+            evaluation_id, {"testRunDeadline": deadline, "expectedModified": evaluation["modified"]},
         )
-        self.assertEqual(evaluation["testRunDeadline"], "2026-12-15")
+        self.assertEqual(evaluation["testRunDeadline"], deadline)
         deadline_notice = frappe.get_all(
             "CRM Notification Event",
             filters={"source_doctype": "CRM Evaluation", "source_name": evaluation_id,
@@ -795,3 +804,479 @@ class TestEvaluationApi(FrappeTestCase):
         self.assertFalse(frappe.db.exists(
             "CRM Opportunity Stage History", {"opportunity": opportunity_id, "event": "demo_customer_review"},
         ))
+
+    # A Demo Test can be terminated mid-flight: it ends as Rejected with its reason (#73).
+
+    OPEN_STATUSES = (
+        "Requested", "Scope Confirmed", "Sample Received", "Scheduled", "Testing",
+        "Analysis", "Internal Review", "Customer Review",
+    )
+
+    def _evaluation_at(self, status: str, label: str = "Stop") -> tuple[dict, dict]:
+        """A fresh Demo Test brought to ``status`` through the real workflow steps."""
+        _account, request = self._approved_source(f"{label} {status}", self.sales, self.engineer)
+        evaluation_id = request["evaluationId"]
+        frappe.set_user(self.engineer)
+        current = get_evaluation(evaluation_id)
+        steps = ("Requested", "Scope Confirmed", "Sample Received", "Scheduled", "Testing", "Internal Review", "Customer Review")
+        # Analysis is a legacy post-testing step the workflow no longer enters.
+        target = "Internal Review" if status == "Analysis" else status
+        for step in steps[1:steps.index(target) + 1]:
+            if step == "Internal Review":
+                add_evaluation_run(evaluation_id, {
+                    "date": "2026-12-11", "lot": "LOT-STOP", "wafers": 1,
+                    "capture": 96, "falsePositive": 1, "wph": 12, "summary": "Passed",
+                    "expectedModified": current["modified"],
+                })
+                release_demo_test_report(
+                    evaluation_id,
+                    {"file_name": "results.csv", "mime_type": "text/csv", "content": b"metric,value\ncapture,96\n"},
+                    {"file_name": "customer-results.csv", "mime_type": "text/csv", "content": b"metric,value\ncapture,96\n"},
+                    scanner=CleanScanner(), expected_round=current["testRound"],
+                )
+                current = get_evaluation(evaluation_id)
+            current = update_evaluation_status(evaluation_id, {"status": step}, current["modified"])
+        if status == "Analysis":
+            frappe.db.set_value("CRM Evaluation", evaluation_id, "status", "Analysis")
+            current = get_evaluation(evaluation_id)
+        self.assertEqual(current["status"], status)
+        return request, current
+
+    def _termination_notices(self, evaluation_id: str) -> list:
+        return frappe.get_all(
+            "CRM Notification Event",
+            filters={"source_doctype": "CRM Evaluation", "source_name": evaluation_id,
+                     "title": ["in", ["Demo Test terminated", "Demo Test moved to Rejected"]]},
+            fields=["recipient_user", "title", "message", "route"], order_by="recipient_user asc",
+        )
+
+    def _undo_when_done(self) -> None:
+        """Undo what this test body writes once it ends, leaving only what setUp created.
+
+        FrappeTestCase rolls back once, after the whole class, so an extra Demo source or an
+        Opportunity moved on by one test is still there for every test that runs after it.
+        The name is unique, so the services' own savepoints inside the body never replace it.
+        """
+        savepoint = f"crm_test_body_{frappe.generate_hash(length=12)}"
+        frappe.db.savepoint(savepoint)
+        self.addCleanup(frappe.db.rollback, save_point=savepoint)
+
+    def test_terminate_evaluation_from_testing_requires_reason_and_does_not_move_opportunity(self):
+        self._undo_when_done()
+        evaluation_id = self.request["evaluationId"]
+        opportunity_id = self.request["opportunityId"]
+        frappe.set_user(self.engineer)
+        evaluation = get_evaluation(evaluation_id)
+        for branch in ("wafer", "test"):
+            evaluation = complete_evaluation_preparation(evaluation_id, branch, evaluation["modified"])
+        evaluation = update_evaluation_status(evaluation_id, {"status": "Testing"}, evaluation["modified"])
+        before = frappe.db.get_value("CRM Opportunity", opportunity_id, ["stage", "probability", "probability_level"])
+
+        with self.assertRaises(CrmApiException) as missing_reason:
+            terminate_evaluation(evaluation["id"], {"reason": ""}, evaluation["modified"])
+        self.assertEqual(missing_reason.exception.code, "VALIDATION_ERROR")
+
+        terminated = terminate_evaluation(evaluation["id"], {"reason": "Customer paused the project"}, evaluation["modified"])
+        self.assertEqual(terminated["status"], "Rejected")
+        self.assertEqual(terminated["terminationReason"], "Customer paused the project")
+        self.assertEqual(terminated["acceptance"], evaluation["acceptance"])
+
+        after = frappe.db.get_value("CRM Opportunity", opportunity_id, ["stage", "probability", "probability_level"])
+        self.assertEqual(after, before)
+
+        with self.assertRaises(CrmApiException) as already_terminal:
+            terminate_evaluation(evaluation["id"], {"reason": "again"}, terminated["modified"])
+        self.assertEqual(already_terminal.exception.code, "INVALID_TRANSITION")
+
+        # The Sales owner is told it was terminated and why, not that the customer rejected it;
+        # the Engineer who terminated it is not told about their own action.
+        self.assertEqual(
+            [(row.recipient_user, row.title, row.message, row.route) for row in self._termination_notices(evaluation_id)],
+            [(
+                self.sales, "Demo Test terminated",
+                f"{evaluation['title']}: terminated in Testing. Reason: Customer paused the project",
+                f"/demo-workflow/{self.request['id']}?tab=information",
+            )],
+        )
+        # The source request stays Converted; only its progress note records the termination.
+        request = frappe.db.get_value("CRM Demo Request", self.request["id"], ["status", "tracking"], as_dict=True)
+        self.assertEqual(
+            (request.status, frappe.parse_json(request.tracking)["lastProgressSummary"]),
+            ("Converted", "Demo Test terminated: Customer paused the project"),
+        )
+
+    def test_a_recipient_who_cannot_be_notified_does_not_block_a_termination(self):
+        self._undo_when_done()
+        evaluation_id = self.request["evaluationId"]
+        # The Sales owner has left. The Manager terminates; the Engineer who owns the Demo is still told.
+        frappe.db.set_value("User", self.sales, "enabled", 0)
+        frappe.set_user(self.manager)
+        evaluation = get_evaluation(evaluation_id)
+        terminated = terminate_evaluation(evaluation_id, {"reason": "Customer paused the project"}, evaluation["modified"])
+        self.assertEqual((terminated["status"], terminated["terminationReason"]), ("Rejected", "Customer paused the project"))
+        self.assertEqual([row.recipient_user for row in self._termination_notices(evaluation_id)], [self.engineer])
+        self.assertEqual(frappe.db.get_value("CRM Evaluation", evaluation_id, "termination_reason"), "Customer paused the project")
+
+    def test_a_recipient_with_two_crm_roles_does_not_block_a_status_change(self):
+        # The cached role set outlives the rollback below, so it is dropped once that has run.
+        self.addCleanup(frappe.clear_cache, user=self.sales)
+        self._undo_when_done()
+        evaluation_id = self.request["evaluationId"]
+        # Two CRM roles make the user's role ambiguous, so no notice can be sent; the change still happens.
+        self._user(self.sales, "CRM Engineer")
+        frappe.set_user(self.engineer)
+        evaluation = get_evaluation(evaluation_id)
+        moved = update_evaluation_status(evaluation_id, {"status": "Scope Confirmed"}, evaluation["modified"])
+        self.assertEqual(moved["status"], "Scope Confirmed")
+        self.assertEqual(frappe.db.count("CRM Notification Event", {
+            "source_doctype": "CRM Evaluation", "source_name": evaluation_id, "recipient_user": self.sales,
+        }), 0)
+
+    def test_a_disabled_evaluation_owner_does_not_block_a_deadline_change(self):
+        self._undo_when_done()
+        evaluation_id = self.request["evaluationId"]
+        frappe.db.set_value("User", self.engineer, "enabled", 0)
+        frappe.set_user(self.manager)
+        evaluation = get_evaluation(evaluation_id)
+        deadline = add_days(today(), 30)
+        updated = set_evaluation_test_run_deadline(
+            evaluation_id, {"testRunDeadline": deadline, "expectedModified": evaluation["modified"]},
+        )
+        self.assertEqual(updated["testRunDeadline"], deadline)
+        # The change is fully recorded; only the notice to the disabled owner is skipped.
+        self.assertTrue(frappe.db.exists("CRM Evaluation History", {
+            "evaluation": evaluation_id, "event_type": "Deadline", "to_value": deadline,
+        }))
+        self.assertEqual(frappe.db.count("CRM Notification Event", {
+            "source_doctype": "CRM Evaluation", "source_name": evaluation_id, "recipient_user": self.engineer,
+            "title": "Demo Test deadline updated",
+        }), 0)
+
+    def test_every_open_stage_can_be_terminated_keeping_its_history_and_the_opportunity(self):
+        self._undo_when_done()
+        fields =["stage", "probability", "probability_level", "modified"]
+        for status in self.OPEN_STATUSES:
+            with self.subTest(status=status):
+                request, current = self._evaluation_at(status)
+                opportunity_id = request["opportunityId"]
+                opportunity = frappe.db.get_value("CRM Opportunity", opportunity_id, fields, as_dict=True)
+                stage_moves = frappe.db.count("CRM Opportunity Stage History", {"opportunity": opportunity_id})
+                reason = f"Customer paused the project in {status}"
+
+                terminated = terminate_evaluation(current["id"], {"reason": f"  {reason}  "}, current["modified"])
+
+                self.assertEqual(
+                    (terminated["status"], terminated["terminationReason"], terminated["acceptance"]),
+                    ("Rejected", reason, current["acceptance"]),
+                )
+                self.assertEqual(
+                    {key: terminated["history"][0][key] for key in ("eventType", "from", "to", "summary", "actor")},
+                    {
+                        "eventType": "Status", "from": status, "to": "Rejected",
+                        "summary": f"Demo Test terminated: {reason}", "actor": self.engineer,
+                    },
+                )
+                # Earlier history, runs and reports stay exactly as they were.
+                self.assertEqual(terminated["history"][1:], current["history"])
+                self.assertEqual(
+                    (terminated["runs"], terminated["reportStatus"]), (current["runs"], current["reportStatus"]),
+                )
+                self.assertEqual(frappe.db.get_value("CRM Opportunity", opportunity_id, fields, as_dict=True), opportunity)
+                self.assertEqual(
+                    frappe.db.count("CRM Opportunity Stage History", {"opportunity": opportunity_id}), stage_moves,
+                )
+
+                frappe.set_user(self.manager)
+                workflow = get_demo_workflow(request["id"])
+                self.assertEqual(
+                    (workflow["status"], workflow["terminationReason"], workflow["archiveCategory"], workflow.get("stage")),
+                    ("Rejected", reason, "Completed", None),
+                )
+                # The conclusion keeps the customer's acceptance; no customer verdict is invented.
+                self.assertEqual(workflow["conclusion"]["status"], current["acceptance"])
+
+    def test_termination_needs_a_reason_scope_and_the_current_version_and_writes_once(self):
+        self._undo_when_done()
+        evaluation_id = self.request["evaluationId"]
+        frappe.set_user(self.engineer)
+        current = get_evaluation(evaluation_id)
+
+        def writes():
+            return (
+                frappe.db.get_value("CRM Evaluation", evaluation_id, ["status", "termination_reason", "modified"]),
+                frappe.db.count("CRM Evaluation History", {"evaluation": evaluation_id}),
+                len(self._termination_notices(evaluation_id)),
+            )
+
+        untouched = writes()
+        for payload in ({}, {"reason": ""}, {"reason": "   "}):
+            with self.subTest(payload=payload), self.assertRaises(CrmApiException) as missing:
+                terminate_evaluation(evaluation_id, payload, current["modified"])
+            self.assertEqual((missing.exception.code, missing.exception.field_errors), ("VALIDATION_ERROR", {"reason": "Required"}))
+        with self.assertRaises(CrmApiException) as too_long:
+            terminate_evaluation(evaluation_id, {"reason": "x" * 1001}, current["modified"])
+        self.assertEqual((too_long.exception.code, too_long.exception.field_errors), ("VALIDATION_ERROR", {"reason": "Too long"}))
+        for version, code in (("2000-01-01T00:00:00Z", "VERSION_CONFLICT"), (None, "VALIDATION_ERROR")):
+            with self.subTest(version=version), self.assertRaises(CrmApiException) as refused:
+                terminate_evaluation(evaluation_id, {"reason": "Customer stopped"}, version)
+            self.assertEqual(refused.exception.code, code)
+        with self.assertRaises(CrmApiException) as missing_demo:
+            terminate_evaluation("CRM-EVAL-99999", {"reason": "Customer stopped"}, current["modified"])
+        self.assertEqual(missing_demo.exception.code, "NOT_FOUND")
+        # evaluation:write and the Evaluation's scope decide who may terminate, as for any other write here.
+        frappe.set_user(self.other_engineer)
+        with self.assertRaises(CrmApiException) as foreign:
+            terminate_evaluation(evaluation_id, {"reason": "Not my Demo"}, current["modified"])
+        self.assertEqual(foreign.exception.code, "SCOPE_DENIED")
+        frappe.set_user(self.sales)
+        with self.assertRaises(frappe.PermissionError):
+            terminate_evaluation(evaluation_id, {"reason": "Sales cannot write a Demo Test"}, current["modified"])
+        self.assertEqual(writes(), untouched)
+
+        # The longest allowed reason is kept whole; a Manager may terminate as well.
+        frappe.set_user(self.manager)
+        reason = "r" * 1000
+        terminated = terminate_evaluation(evaluation_id, {"reason": f" {reason} "}, current["modified"])
+        self.assertEqual((terminated["status"], terminated["terminationReason"]), ("Rejected", reason))
+        self.assertEqual(terminated["history"][0]["summary"], f"Demo Test terminated: {reason}")
+        # The terminal recipients are unchanged (Sales owner and assigned Engineer), and a notice
+        # stays within the notification limit however long the reason is.
+        notices = self._termination_notices(evaluation_id)
+        self.assertEqual(sorted(row.recipient_user for row in notices), sorted([self.sales, self.engineer]))
+        for row in notices:
+            self.assertEqual((row.title, len(row.message), row.message[-1]), ("Demo Test terminated", 1000, "…"))
+
+        # A repeated submit is refused whichever version it carries, and writes nothing a second time.
+        done = writes()
+        for version, code in ((terminated["modified"], "INVALID_TRANSITION"), (current["modified"], "VERSION_CONFLICT")):
+            with self.subTest(repeat=code), self.assertRaises(CrmApiException) as repeated:
+                terminate_evaluation(evaluation_id, {"reason": "Again"}, version)
+            self.assertEqual(repeated.exception.code, code)
+        self.assertEqual(writes(), done)
+
+    def test_a_terminated_demo_leaves_active_counts_plan_and_ddl_reminders(self):
+        self._undo_when_done()
+        evaluation_id = self.request["evaluationId"]
+        deadline = add_days(today(), 7)
+        # A Demo that keeps running is the control for every count below.
+        _request, running = self._evaluation_at("Testing", label="Running")
+        running = set_evaluation_test_run_deadline(
+            running["id"], {"testRunDeadline": deadline, "expectedModified": running["modified"]},
+        )
+        planned = self._planned_run(evaluation_id, deadline)
+        current = set_evaluation_test_run_deadline(
+            evaluation_id, {"testRunDeadline": deadline, "expectedModified": planned["modified"]},
+        )
+        self.assertTrue({evaluation_id, running["id"]} <= set(self._plan_test_ids(deadline)))
+        frappe.set_user(self.sales)
+        active_demos = get_account_360(self.account)["summary"]["activeDemos"]
+        active_evaluations = get_dashboard({"range": "month"})["kpis"]["activeEvaluations"]
+
+        frappe.set_user(self.engineer)
+        terminated = terminate_evaluation(evaluation_id, {"reason": "Customer stopped the evaluation"}, current["modified"])
+        # The planned run stays on record as it was; Plan and the reminders read the Evaluation's
+        # status, and only Completed runs are counted as tests done.
+        self.assertEqual([run["status"] for run in terminated["runs"]], ["Planned"])
+
+        plan_ids = set(self._plan_test_ids(deadline))
+        self.assertNotIn(evaluation_id, plan_ids)
+        self.assertIn(running["id"], plan_ids)
+        frappe.set_user(self.sales)
+        self.assertEqual(get_account_360(self.account)["summary"]["activeDemos"], active_demos - 1)
+        self.assertEqual(get_dashboard({"range": "month"})["kpis"]["activeEvaluations"], active_evaluations - 1)
+
+        frappe.set_user("Administrator")
+        send_ddl_reminders()
+
+        def reminders(name: str) -> int:
+            return frappe.db.count("CRM Notification Event", {
+                "source_doctype": "CRM Evaluation", "source_name": name, "title": ["like", "%DDL%"],
+            })
+
+        # Both Test Run deadlines are 7 days away; only the Demo still running is reminded.
+        self.assertEqual(reminders(evaluation_id), 0)
+        self.assertGreater(reminders(running["id"]), 0)
+
+        # A terminated Demo's runs can no longer change.
+        frappe.set_user(self.engineer)
+        with self.assertRaises(CrmApiException) as locked:
+            cancel_evaluation_run(evaluation_id, terminated["runs"][0]["id"], {
+                "reason": "Too late", "expectedModified": terminated["modified"],
+            })
+        self.assertEqual(locked.exception.code, "INVALID_TRANSITION")
+
+    def test_a_failed_termination_rolls_back_status_reason_and_history_together(self):
+        self._undo_when_done()
+        evaluation_id = self.request["evaluationId"]
+        request_id = self.request["id"]
+        frappe.set_user(self.engineer)
+        planned = self._planned_run(evaluation_id)
+        history = frappe.db.count("CRM Evaluation History", {"evaluation": evaluation_id})
+        request = frappe.db.get_value("CRM Demo Request", request_id, ["modified", "tracking"], as_dict=True)
+
+        # The notice is the last write, so the status, reason, history and request note are already written.
+        with patch("rayher_crm.services.notifications.create_notification", side_effect=RuntimeError("notice failed")):
+            with self.assertRaisesRegex(RuntimeError, "notice failed"):
+                terminate_evaluation(evaluation_id, {"reason": "Customer stopped"}, planned["modified"])
+
+        after = get_evaluation(evaluation_id)
+        self.assertEqual((after["status"], after["terminationReason"], after["modified"]), ("Testing", "", planned["modified"]))
+        self.assertEqual(frappe.db.count("CRM Evaluation History", {"evaluation": evaluation_id}), history)
+        self.assertEqual(
+            frappe.db.get_value("CRM Demo Request", request_id, ["modified", "tracking"], as_dict=True), request,
+        )
+        self.assertEqual(self._termination_notices(evaluation_id), [])
+        # Nothing moved the version, so the same request succeeds once the failure is gone.
+        terminated = terminate_evaluation(evaluation_id, {"reason": "Customer stopped"}, planned["modified"])
+        self.assertEqual((terminated["status"], terminated["terminationReason"]), ("Rejected", "Customer stopped"))
+
+    def test_archived_and_historically_rejected_demos_keep_their_meaning(self):
+        self._undo_when_done()
+        # An archived Demo Test has already ended and cannot be terminated.
+        archived = self._in_customer_review(self.foreign_request, self.other_engineer)
+        archived = update_evaluation_status(
+            archived["id"], {"status": "Accepted", "customerComment": "Customer signed off"}, archived["modified"],
+        )
+        with self.assertRaises(CrmApiException) as ended:
+            terminate_evaluation(archived["id"], {"reason": "Too late"}, archived["modified"])
+        self.assertEqual(ended.exception.code, "INVALID_TRANSITION")
+        after = get_evaluation(archived["id"])
+        self.assertEqual(
+            (after["status"], after["acceptance"], after["terminationReason"], after["modified"]),
+            ("Accepted", "Accepted", "", archived["modified"]),
+        )
+
+        # A Demo rejected under the old flow carries no reason and still reads as a rejection.
+        evaluation_id = self.request["evaluationId"]
+        frappe.set_user("Administrator")
+        frappe.db.set_value("CRM Evaluation", evaluation_id, {"status": "Rejected", "acceptance": "Rejected"})
+        frappe.set_user(self.engineer)
+        historical = get_evaluation(evaluation_id)
+        self.assertEqual(
+            (historical["status"], historical["acceptance"], historical["terminationReason"]), ("Rejected", "Rejected", ""),
+        )
+        with self.assertRaises(CrmApiException) as rejected:
+            terminate_evaluation(evaluation_id, {"reason": "Relabel it"}, historical["modified"])
+        self.assertEqual(rejected.exception.code, "INVALID_TRANSITION")
+        self.assertEqual(get_evaluation(evaluation_id)["modified"], historical["modified"])
+
+        frappe.set_user(self.manager)
+        workflows = {item["id"]: item for item in list_demo_workflows()}
+        self.assertEqual(
+            {key: workflows[self.foreign_request["id"]][key] for key in ("status", "terminationReason")},
+            {"status": "Accepted", "terminationReason": ""},
+        )
+        self.assertEqual(workflows[self.foreign_request["id"]]["conclusion"]["status"], "Accepted")
+        self.assertEqual(
+            {key: workflows[self.request["id"]][key] for key in ("status", "terminationReason")},
+            {"status": "Rejected", "terminationReason": ""},
+        )
+        self.assertEqual(workflows[self.request["id"]]["conclusion"]["status"], "Rejected")
+
+    def test_terminate_endpoint_takes_the_reason_and_the_version(self):
+        self._undo_when_done()
+        evaluation_id = self.request["evaluationId"]
+        frappe.set_user(self.engineer)
+        current = get_evaluation(evaluation_id)
+        refused = evaluations_api.terminate_evaluation(evaluation_id, " ", current["modified"])
+        self.assertEqual(frappe.local.response["http_status_code"], 422)
+        self.assertEqual(
+            (refused["error"]["code"], refused["error"]["fieldErrors"]), ("VALIDATION_ERROR", {"reason": "Required"}),
+        )
+        done = evaluations_api.terminate_evaluation(evaluation_id, "Customer stopped", current["modified"])
+        self.assertEqual(
+            (done["data"]["id"], done["data"]["status"], done["data"]["terminationReason"]),
+            (evaluation_id, "Rejected", "Customer stopped"),
+        )
+
+    def test_a_terminated_demo_takes_no_new_test_run_deadline(self):
+        self._undo_when_done()
+        evaluation_id = self.request["evaluationId"]
+        request_id = self.request["id"]
+        frappe.set_user(self.engineer)
+        current = get_evaluation(evaluation_id)
+        terminated = terminate_evaluation(evaluation_id, {"reason": "Customer stopped the evaluation"}, current["modified"])
+
+        def writes():
+            return (
+                frappe.db.get_value("CRM Evaluation", evaluation_id, ["modified", "test_run_deadline"]),
+                frappe.db.count("CRM Evaluation History", {"evaluation": evaluation_id}),
+                frappe.db.get_value("CRM Demo Request", request_id, ["modified", "tracking"]),
+                frappe.db.count("CRM Notification Event", {"source_doctype": "CRM Evaluation", "source_name": evaluation_id}),
+            )
+
+        ended = writes()
+        # Set by a Manager, a deadline would also notify the assigned Engineer.
+        frappe.set_user(self.manager)
+        with self.assertRaises(CrmApiException) as refused:
+            set_evaluation_test_run_deadline(evaluation_id, {
+                "testRunDeadline": add_days(today(), 7), "expectedModified": terminated["modified"],
+            })
+        self.assertEqual(refused.exception.code, "INVALID_TRANSITION")
+        self.assertEqual(writes(), ended)
+        after = get_evaluation(evaluation_id)
+        self.assertEqual(
+            (after["status"], after["testRunDeadline"], after["modified"], after["history"][0]["summary"]),
+            ("Rejected", "", terminated["modified"], "Demo Test terminated: Customer stopped the evaluation"),
+        )
+        # The source request still ends on the termination note.
+        tracking = frappe.parse_json(frappe.db.get_value("CRM Demo Request", request_id, "tracking"))
+        self.assertEqual(tracking["lastProgressSummary"], "Demo Test terminated: Customer stopped the evaluation")
+
+    TIMELINE_KEYS = (
+        "sales-preparation", "engineer-review", "manager-approval", "wafer-preparation",
+        "test-preparation", "test-execution", "internal-review", "customer-review",
+    )
+
+    def _timeline(self, request_id: str) -> dict:
+        frappe.set_user(self.manager)
+        steps = get_demo_workflow(request_id)["projectTimeline"]
+        # The projection keeps its shape; only states and dates tell a termination apart.
+        self.assertEqual([step["key"] for step in steps], list(self.TIMELINE_KEYS))
+        self.assertTrue(all(set(step) >= {"key", "label", "state", "date"} for step in steps))
+        return {step["key"]: step for step in steps}
+
+    def test_a_terminated_demo_timeline_marks_only_the_steps_it_reached(self):
+        self._undo_when_done()
+        approved = ("Done", "Done", "Done")
+        expected = {
+            # (states in TIMELINE_KEYS order, (test-execution, internal-review, customer-review) dates)
+            "Requested": (approved + ("Current", "Current", "Waiting", "Waiting", "Waiting"), ("", "", "")),
+            "Testing": (approved + ("Done", "Done", "Current", "Waiting", "Waiting"), ("2026-12-11", "", "")),
+            "Customer Review": (("Done",) * 7 + ("Current",), ("2026-12-11", "2026-12-11", None)),
+        }
+        for status, (states, dates) in expected.items():
+            with self.subTest(status=status):
+                request, current = self._evaluation_at(status, label="Timeline")
+                if status == "Testing":
+                    # A run completed before the stop dates Test Execution, not the review after it.
+                    current = add_evaluation_run(current["id"], {
+                        "date": "2026-12-11", "lot": "LOT-STOPPED", "wafers": 1,
+                        "capture": 96, "falsePositive": 1, "wph": 12, "summary": "Passed",
+                        "expectedModified": current["modified"],
+                    })
+                terminated = terminate_evaluation(current["id"], {"reason": f"Stopped in {status}"}, current["modified"])
+                timeline = self._timeline(request["id"])
+                self.assertEqual(tuple(timeline[key]["state"] for key in self.TIMELINE_KEYS), states)
+                # Customer Review is dated only once it was reached, and never with the expected date.
+                self.assertEqual(
+                    tuple(timeline[key]["date"] for key in ("test-execution", "internal-review", "customer-review")),
+                    dates[:2] + (terminated["modified"] if dates[2] is None else dates[2],),
+                )
+
+        # Accepted and historical Rejected records keep today's projection: every step done and
+        # Customer Review dated when the record ended.
+        request, current = self._evaluation_at("Customer Review", label="Timeline Archived")
+        archived = update_evaluation_status(
+            current["id"], {"status": "Accepted", "customerComment": "Customer signed off"}, current["modified"],
+        )
+        frappe.set_user("Administrator")
+        frappe.db.set_value("CRM Evaluation", self.request["evaluationId"], {"status": "Rejected", "acceptance": "Rejected"})
+        frappe.set_user(self.manager)
+        historical = get_evaluation(self.request["evaluationId"])
+        self.assertEqual((historical["status"], historical["terminationReason"]), ("Rejected", ""))
+        for request_id, ended in ((request["id"], archived), (self.request["id"], historical)):
+            with self.subTest(ended=ended["status"]):
+                timeline = self._timeline(request_id)
+                self.assertEqual(tuple(timeline[key]["state"] for key in self.TIMELINE_KEYS), ("Done",) * 8)
+                self.assertEqual(timeline["customer-review"]["date"], ended["modified"])

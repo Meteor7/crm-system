@@ -44,6 +44,12 @@ def update_evaluation_status(id: str, command: Any, expectedModified: str | None
 
 @frappe.whitelist(methods=["POST"])
 @api_endpoint
+def terminate_evaluation(id: str, reason: str, expectedModified: str | None = None) -> dict:
+    return success_response(evaluations.terminate_evaluation(id, {"reason": reason}, expectedModified))
+
+
+@frappe.whitelist(methods=["POST"])
+@api_endpoint
 def add_evaluation_run(id: str, input: Any) -> dict:
     return success_response(evaluations.add_evaluation_run(id, as_payload(input)))
 

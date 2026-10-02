@@ -377,6 +377,8 @@ export interface DemoWorkflowDto {
   /** @deprecated Use engineerOwner for Demo responsibility. */
   owner: string
   status: string
+  /** Why the Demo Test was terminated mid-flight; blank for every other Demo, including historical rejections. */
+  terminationReason?: string
   archiveCategory: 'In Progress' | 'Completed'
   stage?: DemoLifecycleStage
   health?: DemoHealthDto
