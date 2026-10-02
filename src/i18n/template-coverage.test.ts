@@ -9,6 +9,9 @@ import { expect, it } from 'vitest'
 type TemplateRoot = NonNullable<NonNullable<ReturnType<typeof parse>['descriptor']['template']>['ast']>
 type TemplateNode = TemplateRoot | TemplateRoot['children'][number]
 const han = /\p{Script=Han}/u
+// These two checks traverse and parse every reachable application source. Allow
+// contention during parallel runs without changing the other unit-test limits.
+const SOURCE_SCAN_TIMEOUT = 30_000
 const visibleAttributes = new Set([
   'label', 'title', 'placeholder', 'arialabel', 'ariadescription', 'description',
   'emptycopy', 'emptytitle', 'emptymessage', 'submitlabel', 'cancellabel', 'closelabel', 'busylabel', 'alt', 'message', 'eyebrow',
@@ -111,7 +114,7 @@ it('keeps reachable template copy and accessible labels localized in English', (
     inspect(template.ast)
   }
   expect(failures).toEqual([])
-})
+}, SOURCE_SCAN_TIMEOUT)
 
 it('detects raw copy without rejecting a paired Chinese translation', () => {
   expect(untranslatedExpressionStrings("'暂无文档'")).toEqual(['暂无文档'])
@@ -140,4 +143,4 @@ it('resolves literal translation calls and navigation keys in both dictionaries'
     setLocale(locale)
     for (const key of keys) expect(t(key), `${locale}: ${key}`).not.toBe(key)
   }
-})
+}, SOURCE_SCAN_TIMEOUT)

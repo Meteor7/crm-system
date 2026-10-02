@@ -109,14 +109,22 @@ describe('AppShell', () => {
     const wrapper = mount(AppShell, { global: { plugins: [pinia, router], stubs: { CrmChart: { template: '<div />' } } } })
     await flushPromises()
 
+    // DashboardHomePage loads each role's page with defineAsyncComponent. Promise
+    // flushing alone does not wait for those imports, especially on a busy host.
+    await vi.dynamicImportSettled()
+    await flushPromises()
+    expect(wrapper.find('[data-testid="review-page"]').exists()).toBe(true)
+
     await app.switchDemoIdentity('sales-user')
+    await flushPromises()
+    await vi.dynamicImportSettled()
     await flushPromises()
 
     expect(app.bootstrap?.user.role).toBe('Sales')
-    await vi.waitFor(() => expect(wrapper.find('.dashboard-page').exists()).toBe(true), { timeout: 10_000 })
+    expect(wrapper.find('.dashboard-page').exists()).toBe(true)
     expect(router.currentRoute.value.path).toBe('/dashboard')
     expect(wrapper.find('[data-testid="review-page"]').exists()).toBe(false)
-  }, 20_000)
+  }, 60_000)
 
   it('keeps Plan closed to Sales even though the dashboard section is theirs again', async () => {
     const router = createAppRouter()
