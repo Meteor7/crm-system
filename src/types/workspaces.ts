@@ -27,6 +27,8 @@ export const OPPORTUNITY_STAKEHOLDER_INFLUENCES = ['High', 'Medium', 'Low'] as c
 export type OpportunityStakeholderInfluence = typeof OPPORTUNITY_STAKEHOLDER_INFLUENCES[number]
 export const OPPORTUNITY_STAKEHOLDER_STANCES = ['Support', 'Neutral', 'Against'] as const
 export type OpportunityStakeholderStance = typeof OPPORTUNITY_STAKEHOLDER_STANCES[number]
+export const OPPORTUNITY_STAKEHOLDER_RESPONSE_MODES = ['Growth', 'Trouble', 'Even Keel', 'Overconfident'] as const
+export type OpportunityStakeholderResponseMode = typeof OPPORTUNITY_STAKEHOLDER_RESPONSE_MODES[number]
 export const OPPORTUNITY_ACTION_STATUSES = ['Open', 'Done'] as const
 export type OpportunityActionStatus = typeof OPPORTUNITY_ACTION_STATUSES[number]
 
@@ -38,6 +40,8 @@ export interface OpportunityStakeholderDto {
   role: OpportunityStakeholderRole
   influence: OpportunityStakeholderInfluence
   stance: OpportunityStakeholderStance
+  /** Blue Sheet buying-influence response mode; blank when not recorded. */
+  responseMode?: OpportunityStakeholderResponseMode | ''
   coverage: string
   isCoach?: boolean
   winResult?: string
@@ -158,6 +162,7 @@ export interface CreateStrategyOpportunityInput {
   fatDate?: string
   paymentMilestones?: string[]
   competition?: string
+  singleSalesObjective?: string
   winReason?: string
   lostReason?: string
   strengths?: string[]
@@ -326,6 +331,8 @@ export interface StrategyOpportunityDto {
   fatDate: string
   paymentMilestones: string[]
   competition: string
+  /** Blue Sheet objective; adapters and records that predate the field may omit it. */
+  singleSalesObjective?: string
   winReason: string
   lostReason: string
   /** Post-mortems, newest first. Absent from adapters that predate loss reviews. */

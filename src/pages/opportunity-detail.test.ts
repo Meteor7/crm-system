@@ -135,6 +135,45 @@ describe('Opportunity detail', () => {
     ])
   })
 
+  it('shows the Single Sales Objective and each stakeholder response mode, and a placeholder when unset', async () => {
+    const setup = await context('OPP-001')
+    const getStrategyOpportunity = setup.api.getStrategyOpportunity.bind(setup.api)
+    const stored = await getStrategyOpportunity('OPP-001')
+    const withBlueSheet = {
+      ...stored,
+      data: {
+        ...stored.data,
+        singleSalesObjective: 'Win the Q4 wafer line',
+        stakeholders: [
+          { id: 'sh-1', contactId: 'contact-1', name: 'Pat Buyer', title: 'Buyer', role: 'Economic Buyer', influence: 'High', stance: 'Support', coverage: 'Weekly', responseMode: 'Growth' },
+          { id: 'sh-2', contactId: 'contact-2', name: 'Lee Tech', title: 'Engineer', role: 'Technical Buyer', influence: 'Medium', stance: 'Neutral', coverage: 'Monthly' },
+        ],
+      },
+    } as Awaited<ReturnType<typeof getStrategyOpportunity>>
+    setup.api.getStrategyOpportunity = async () => withBlueSheet
+    const wrapper = mountPage(setup)
+    await flushPromises()
+
+    expect(wrapper.get('[data-testid="single-sales-objective"]').text()).toContain('Win the Q4 wafer line')
+    // Its line breaks are shown (pre-wrap) and a long word wraps, so the class carries the display rule.
+    expect(wrapper.get('[data-testid="single-sales-objective"] strong').classes()).toContain('objective-text')
+    expect(wrapper.get('[data-stakeholder-name="Pat Buyer"] small').text().trim()).toBe('经济决策人 · 高 · 反应模式：增长型')
+    // A stakeholder without a recorded mode shows no extra segment: no trailing separator and no placeholder.
+    expect(wrapper.get('[data-stakeholder-name="Lee Tech"] small').text().trim()).toBe('技术决策人 · 中')
+
+    setup.api.getStrategyOpportunity = async () => ({ ...withBlueSheet, data: { ...withBlueSheet.data, singleSalesObjective: '' } }) as typeof withBlueSheet
+    const unset = mountPage(setup)
+    await flushPromises()
+    expect(unset.get('[data-testid="single-sales-objective"]').text()).toContain('未设置')
+    // Both labels follow the language, not only the stored mode.
+    setLocale('en-US'); await flushPromises()
+    expect(unset.get('[data-testid="single-sales-objective"]').text()).toContain('Not set')
+    expect(unset.get('[data-stakeholder-name="Pat Buyer"] small').text().trim()).toBe('Economic buyer · High · Response Mode: Growth')
+    setLocale('zh-CN'); await flushPromises()
+    wrapper.unmount()
+    unset.unmount()
+  })
+
   it('keeps Site-restricted Opportunities readable without exposing invalid main-record actions', async () => {
     const setup = await context('OPP-001', false, 'Sales')
     const getStrategyOpportunity = setup.api.getStrategyOpportunity.bind(setup.api)

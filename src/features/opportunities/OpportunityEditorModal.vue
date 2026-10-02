@@ -57,6 +57,7 @@ const form = ref<CreateStrategyOpportunityInput>({
   fatDate: props.opportunity?.fatDate ?? '',
   paymentMilestones: props.opportunity?.paymentMilestones ?? [],
   competition: props.opportunity?.competition ?? '',
+  singleSalesObjective: props.opportunity?.singleSalesObjective ?? '',
   winReason: props.opportunity?.winReason ?? '',
   lostReason: props.opportunity?.lostReason ?? '',
   strengths: props.opportunity?.strengths ?? [],
@@ -79,6 +80,10 @@ const informationText = ref((form.value.informationNeeded ?? []).join('\n'))
 const currentStage = computed(() => props.opportunity?.stage ?? 'qualified_opportunity')
 const qualificationConfirmed = ref(false)
 const qualificationError = useLocaleMessage()
+// The server's limit on the trimmed objective, counted in characters (not UTF-16 units), so a native maxlength cannot stand in for it.
+const MAX_OBJECTIVE_LENGTH = 2000
+const objectiveError = useLocaleMessage()
+watch(() => form.value.singleSalesObjective, () => { objectiveError.value = '' })
 // Purchase intent stays independent of the level.
 const isLevelOwner = computed(() => Boolean(props.currentUserId) && props.opportunity?.owner === props.currentUserId)
 // The level is frozen once the PO is received or the Opportunity is lost.
@@ -109,6 +114,13 @@ watch(() => form.value.accountId, (accountId) => {
 
 function lines(value: string) { return value.split('\n').map((item) => item.trim()).filter(Boolean) }
 function submit() {
+  // A stored objective that is already longer (Frappe's HTML cleaning can lengthen one) is sent back as it was
+  // without complaint; only a changed one is held to the limit, as the server does.
+  const objective = (form.value.singleSalesObjective ?? '').trim()
+  if (objective !== (props.opportunity?.singleSalesObjective ?? '').trim() && Array.from(objective).length > MAX_OBJECTIVE_LENGTH) {
+    objectiveError.value = message('oppEditor.objectiveTooLong')
+    return
+  }
   if (!props.opportunity && !qualificationConfirmed.value) {
     qualificationError.value = message('oppEditor.qualificationRequired')
     return
@@ -202,6 +214,7 @@ const equipmentChoices = computed(() => props.equipmentTypes ?? EQUIPMENT_PRESET
       <label><span>{{ t('oppEditor.shipmentDate') }}</span><input v-model="form.shipmentDate" :aria-label="t('oppEditor.shipmentDate')" type="date" /></label>
       <label><span>{{ t('oppEditor.fatDate') }}</span><input v-model="form.fatDate" :aria-label="t('oppEditor.fatDate')" type="date" /></label>
       <label class="wide"><span>{{ t('oppEditor.competition') }}</span><input v-model="form.competition" :aria-label="t('oppEditor.competition')" /></label>
+      <label class="wide"><span>{{ t('oppEditor.singleSalesObjective') }}</span><textarea v-model="form.singleSalesObjective" :aria-label="t('oppEditor.singleSalesObjective')" rows="3" /><small v-if="objectiveError" class="field-error" data-field-error="singleSalesObjective">{{ objectiveError }}</small></label>
       <label><span>{{ t('oppEditor.payment') }}</span><textarea v-model="paymentText" :aria-label="t('oppEditor.payment')" rows="3" /></label>
       <label><span>{{ t('oppEditor.strength') }}</span><textarea v-model="strengthsText" :aria-label="t('oppEditor.strength')" rows="3" /></label>
       <label><span>{{ t('oppEditor.redFlag') }}</span><textarea v-model="redFlagsText" :aria-label="t('oppEditor.redFlag')" rows="3" /></label>

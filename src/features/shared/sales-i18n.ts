@@ -101,6 +101,10 @@ const labels: Record<string, LocalizedPair> = {
   Support: { 'zh-CN': '支持', 'en-US': 'Support' },
   Neutral: { 'zh-CN': '中立', 'en-US': 'Neutral' },
   Against: { 'zh-CN': '反对', 'en-US': 'Against' },
+  Growth: { 'zh-CN': '增长型', 'en-US': 'Growth' },
+  Trouble: { 'zh-CN': '困扰型', 'en-US': 'Trouble' },
+  'Even Keel': { 'zh-CN': '平稳型', 'en-US': 'Even Keel' },
+  Overconfident: { 'zh-CN': '过度自信型', 'en-US': 'Overconfident' },
 }
 
 const contactStatusLabels: Record<string, LocalizedPair> = {

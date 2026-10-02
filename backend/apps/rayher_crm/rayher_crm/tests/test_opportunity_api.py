@@ -26,6 +26,7 @@ from rayher_crm.services.opportunities import (
     list_strategy_opportunities,
     mark_opportunity_lost,
     rollback_opportunity_stage,
+    update_opportunity_stakeholder,
     update_strategy_opportunity,
 )
 from rayher_crm.services.sites import create_site
@@ -799,3 +800,175 @@ class TestOpportunityApi(FrappeTestCase):
         self.assertEqual(frappe.db.count("CRM Opportunity Stage History", stage_rows), 0)
         self.assertEqual(frappe.db.count("CRM Opportunity History", stage_rows), 0)
         self.assertEqual(relation_counts(), (0, 0))
+
+    def test_single_sales_objective_has_a_length_limit(self):
+        account, site = self._account_site(self.sales, "ObjectiveLimit")
+        limit = "x" * 2000
+        # The limit counts the trimmed text.
+        accepted = create_strategy_opportunity(self._input(
+            account, site, self.sales, title="At the limit", singleSalesObjective=f"  {limit}  ",
+        ))
+        self.assertEqual(accepted["singleSalesObjective"], limit)
+        too_long = {"singleSalesObjective": limit + "x"}
+        expected = ("VALIDATION_ERROR", {"singleSalesObjective": "Maximum length is 2000"})
+        # The front end maps this exact message to its Chinese copy.
+        message = "singleSalesObjective is too long."
+        with self.assertRaises(CrmApiException) as created:
+            create_strategy_opportunity(self._input(account, site, self.sales, title="Too long", **too_long))
+        self.assertEqual((created.exception.code, created.exception.field_errors), expected)
+        self.assertEqual(created.exception.public_message, message)
+        with self.assertRaises(CrmApiException) as updated:
+            update_strategy_opportunity(accepted["id"], too_long, accepted["modified"])
+        self.assertEqual((updated.exception.code, updated.exception.field_errors), expected)
+        self.assertEqual(get_strategy_opportunity(accepted["id"])["singleSalesObjective"], limit)
+
+        # A value that is already stored stays valid even when it is longer than the limit (Frappe's HTML cleaning
+        # of Small Text can lengthen one): an unrelated edit goes through, a changed value is held to the limit.
+        overlong = "y" * 2001
+        frappe.db.set_value("CRM Opportunity", accepted["id"], "single_sales_objective", overlong, update_modified=False)
+        stored = get_strategy_opportunity(accepted["id"])
+        retitled = update_strategy_opportunity(accepted["id"], {"title": "Retitled"}, stored["modified"])
+        self.assertEqual((retitled["title"], retitled["singleSalesObjective"]), ("Retitled", overlong))
+        with self.assertRaises(CrmApiException) as changed:
+            update_strategy_opportunity(accepted["id"], {"singleSalesObjective": "z" * 2001}, retitled["modified"])
+        self.assertEqual((changed.exception.code, changed.exception.field_errors), expected)
+        # The same holds when the stored value is padded with blanks (the request value is trimmed).
+        frappe.db.set_value(
+            "CRM Opportunity", accepted["id"], "single_sales_objective", " " + overlong + "\n", update_modified=False,
+        )
+        padded = get_strategy_opportunity(accepted["id"])
+        again = update_strategy_opportunity(accepted["id"], {"title": "Retitled again"}, padded["modified"])
+        self.assertEqual(again["title"], "Retitled again")
+        shortened = update_strategy_opportunity(
+            accepted["id"], {"singleSalesObjective": "short"}, again["modified"],
+        )
+        self.assertEqual(shortened["singleSalesObjective"], "short")
+
+    def test_single_sales_objective_and_stakeholder_response_mode(self):
+        account, site = self._account_site(self.sales, "BlueSheet")
+        # Callers that never send the objective still create an Opportunity; it reads back as not set.
+        plain = create_strategy_opportunity(self._input(account, site, self.sales, title="Plain Blue Sheet"))
+        self.assertEqual(plain["singleSalesObjective"], "")
+
+        created = create_strategy_opportunity(self._input(
+            account, site, self.sales, singleSalesObjective="  Win the Q4 wafer inspection line  ",
+        ))
+        self.assertEqual(created["singleSalesObjective"], "Win the Q4 wafer inspection line")
+
+        updated = update_strategy_opportunity(
+            created["id"], {"singleSalesObjective": "Revised objective"}, created["modified"],
+        )
+        self.assertEqual(updated["singleSalesObjective"], "Revised objective")
+        self.assertIn(
+            ("single_sales_objective", "Win the Q4 wafer inspection line", "Revised objective"),
+            [(row["field"], row["from"], row["to"]) for row in updated["history"]],
+        )
+        # A partial edit that does not resend the objective keeps the stored one.
+        retitled = update_strategy_opportunity(created["id"], {"title": "Another edit"}, updated["modified"])
+        self.assertEqual((retitled["title"], retitled["singleSalesObjective"]), ("Another edit", "Revised objective"))
+        self.assertEqual(get_strategy_opportunity(created["id"])["singleSalesObjective"], "Revised objective")
+        listed, _, _, _ = list_strategy_opportunities({"opportunityId": created["id"], "page": 1, "pageSize": 20})
+        self.assertEqual([item["singleSalesObjective"] for item in listed], ["Revised objective"])
+
+        contact = create_contact({
+            "accountId": account["id"], "name": "Pat Buyer", "title": "Buyer",
+            "department": "Procurement", "phone": "13800000002",
+            "email": "bluesheet-buyer@example.invalid", "relationship": "Developing",
+            "owner": self.sales, "status": "Active",
+        })
+        stakeholder_input = {
+            "contactId": contact["id"], "role": "Economic Buyer", "influence": "High", "stance": "Support",
+            "coverage": "Weekly", "responseMode": "Growth",
+        }
+
+        def rejected(function, *args) -> tuple:
+            with self.assertRaises(CrmApiException) as raised:
+                function(*args)
+            return raised.exception.code, raised.exception.field_errors
+
+        invalid = ("VALIDATION_ERROR", {"responseMode": "Invalid value"})
+        self.assertEqual(rejected(
+            create_opportunity_stakeholder, created["id"], {**stakeholder_input, "responseMode": "Panic"},
+        ), invalid)
+        self.assertEqual(get_strategy_opportunity(created["id"])["stakeholders"], [])
+
+        stakeholder = create_opportunity_stakeholder(created["id"], stakeholder_input)
+        self.assertEqual(stakeholder["responseMode"], "Growth")
+
+        def stored_mode(stakeholder_id: str) -> str:
+            reloaded = get_strategy_opportunity(created["id"])
+            return next(item["responseMode"] for item in reloaded["stakeholders"] if item["id"] == stakeholder_id)
+
+        self.assertEqual(stored_mode(stakeholder["id"]), "Growth")
+        for mode in ("Even Keel", "Overconfident", "Trouble"):
+            with self.subTest(mode=mode):
+                changed = update_opportunity_stakeholder(
+                    created["id"], stakeholder["id"], {**stakeholder_input, "responseMode": mode},
+                )
+                self.assertEqual(changed["responseMode"], mode)
+                self.assertEqual(stored_mode(stakeholder["id"]), mode)
+        # Updates take the full payload; the editor resends the stored mode, so an unrelated edit keeps it.
+        restanced = update_opportunity_stakeholder(created["id"], stakeholder["id"], {
+            **stakeholder_input, "stance": "Neutral", "responseMode": stored_mode(stakeholder["id"]),
+        })
+        self.assertEqual((restanced["stance"], restanced["responseMode"]), ("Neutral", "Trouble"))
+        self.assertEqual(stored_mode(stakeholder["id"]), "Trouble")
+
+        for mode in ("Panic", "growth"):
+            with self.subTest(mode=mode):
+                self.assertEqual(rejected(
+                    update_opportunity_stakeholder, created["id"], stakeholder["id"],
+                    {**stakeholder_input, "responseMode": mode},
+                ), invalid)
+        self.assertEqual(stored_mode(stakeholder["id"]), "Trouble")
+        # Non-string falsy values are rejected as well; they must not silently clear the stored mode.
+        for mode in (False, 0, [], {}):
+            with self.subTest(mode=repr(mode)):
+                self.assertEqual(rejected(
+                    update_opportunity_stakeholder, created["id"], stakeholder["id"],
+                    {**stakeholder_input, "responseMode": mode},
+                ), invalid)
+                self.assertEqual(stored_mode(stakeholder["id"]), "Trouble")
+
+        # A page from before the field does not send the mode at all: the update keeps what is stored.
+        # Only null or "" clears it.
+        omitted = {key: value for key, value in stakeholder_input.items() if key != "responseMode"}
+        kept = update_opportunity_stakeholder(created["id"], stakeholder["id"], {**omitted, "coverage": "Quarterly"})
+        self.assertEqual((kept["coverage"], kept["responseMode"]), ("Quarterly", "Trouble"))
+        self.assertEqual(stored_mode(stakeholder["id"]), "Trouble")
+        blanked = update_opportunity_stakeholder(
+            created["id"], stakeholder["id"], {**omitted, "responseMode": None},
+        )
+        self.assertEqual(blanked["responseMode"], "")
+        update_opportunity_stakeholder(
+            created["id"], stakeholder["id"], {**stakeholder_input, "responseMode": "Trouble"},
+        )
+        self.assertEqual(stored_mode(stakeholder["id"]), "Trouble")
+
+        cleared = update_opportunity_stakeholder(
+            created["id"], stakeholder["id"], {**stakeholder_input, "responseMode": ""},
+        )
+        self.assertEqual(cleared["responseMode"], "")
+        self.assertEqual(stored_mode(stakeholder["id"]), "")
+
+        # A stakeholder from before the field has no mode stored; it reads as blank and stays editable.
+        legacy_contact = create_contact({
+            "accountId": account["id"], "name": "Lee Legacy", "title": "Engineer",
+            "department": "Engineering", "phone": "13800000002",
+            "email": "bluesheet-legacy@example.invalid", "relationship": "Developing",
+            "owner": self.sales, "status": "Active",
+        })
+        legacy_input = {**stakeholder_input, "contactId": legacy_contact["id"]}
+        legacy_input.pop("responseMode")
+        legacy = create_opportunity_stakeholder(created["id"], legacy_input)
+        self.assertEqual(legacy["responseMode"], "")
+        frappe.db.set_value("CRM Opportunity Stakeholder", legacy["id"], "response_mode", None, update_modified=False)
+        self.assertEqual(stored_mode(legacy["id"]), "")
+        recovered = update_opportunity_stakeholder(
+            created["id"], legacy["id"], {**legacy_input, "coverage": "Monthly", "responseMode": ""},
+        )
+        self.assertEqual((recovered["coverage"], recovered["responseMode"]), ("Monthly", ""))
+        self.assertEqual(stored_mode(legacy["id"]), "")
+        # A page from before the field edits that stakeholder without sending the mode: still blank, no error.
+        untouched = update_opportunity_stakeholder(created["id"], legacy["id"], {**legacy_input, "coverage": "Quarterly"})
+        self.assertEqual((untouched["coverage"], untouched["responseMode"]), ("Quarterly", ""))

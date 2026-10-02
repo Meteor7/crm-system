@@ -113,6 +113,11 @@ STAKEHOLDER_ROLES = (
 )
 STAKEHOLDER_INFLUENCES = ("High", "Medium", "Low")
 STAKEHOLDER_STANCES = ("Support", "Neutral", "Against")
+# Blank is "not recorded yet", which every stakeholder from before the field starts as.
+STAKEHOLDER_RESPONSE_MODES = ("", "Growth", "Trouble", "Even Keel", "Overconfident")
+# A Small Text column holds far more than anyone writes; the limit keeps an overlong value a field error.
+# Keep it in step with MAX_OBJECTIVE_LENGTH and oppEditor.objectiveTooLong in the front end, and with generated-error-messages.ts.
+MAX_SINGLE_SALES_OBJECTIVE = 2000
 ACTION_STATUSES = ("Open", "Done")
 
 
@@ -185,8 +190,21 @@ def _tool_type(payload: dict[str, Any], current: str | None) -> str:
     return normalize_equipment(submitted, "toolType")
 
 
+def _single_sales_objective(value: Any, stored: str | None = None) -> str:
+    text = str(value or "").strip()
+    # A value that is already stored stays valid: Frappe's HTML cleaning of Small Text can lengthen it past the
+    # limit, and an unrelated edit must not fail because of it. Only a changed value is held to the limit.
+    if len(text) > MAX_SINGLE_SALES_OBJECTIVE and (stored is None or text != stored.strip()):
+        raise CrmApiException(
+            "VALIDATION_ERROR", "singleSalesObjective is too long.",
+            field_errors={"singleSalesObjective": f"Maximum length is {MAX_SINGLE_SALES_OBJECTIVE}"},
+        )
+    return text
+
+
 def _validate_opportunity(
-    payload: dict[str, Any], current_tool_type: str | None = None, *, require_amount: bool = True,
+    payload: dict[str, Any], current_tool_type: str | None = None, stored_objective: str | None = None,
+    *, require_amount: bool = True,
 ) -> dict[str, Any]:
     account_id = required_text(payload, "accountId")
     site_id = required_text(payload, "siteId")
@@ -232,6 +250,7 @@ def _validate_opportunity(
         "fat_date": optional_date(payload.get("fatDate"), "fatDate"),
         "payment_milestones": _string_list(payload.get("paymentMilestones"), "paymentMilestones"),
         "competition": str(payload.get("competition") or "").strip(),
+        "single_sales_objective": _single_sales_objective(payload.get("singleSalesObjective"), stored_objective),
         "win_reason": str(payload.get("winReason") or "").strip(),
         "lost_reason": str(payload.get("lostReason") or "").strip(),
         "strengths": _string_list(payload.get("strengths"), "strengths"),
@@ -374,7 +393,7 @@ def _stakeholders_for_opportunity(opportunity_id: str) -> list[dict[str, Any]]:
     rows = frappe.get_all(
         "CRM Opportunity Stakeholder",
         filters={"opportunity": opportunity_id, "archived": 0},
-        fields=["name", "contact", "role", "influence", "stance", "coverage", "is_coach", "win_result", "opportunity_notes"],
+        fields=["name", "contact", "role", "influence", "stance", "response_mode", "coverage", "is_coach", "win_result", "opportunity_notes"],
         order_by="creation asc",
     )
     result = []
@@ -389,6 +408,7 @@ def _stakeholders_for_opportunity(opportunity_id: str) -> list[dict[str, Any]]:
             "role": row.role,
             "influence": row.influence,
             "stance": row.stance,
+            "responseMode": row.response_mode or "",
             "coverage": row.coverage,
             "isCoach": bool(row.is_coach),
             "winResult": row.win_result or "",
@@ -456,6 +476,7 @@ def serialize_opportunity(doc, recoveries=None, loss_reviews=None) -> dict[str, 
         "fatDate": str(doc.fat_date or ""),
         "paymentMilestones": _decode_list(doc.payment_milestones),
         "competition": doc.competition or "",
+        "singleSalesObjective": doc.single_sales_objective or "",
         "winReason": doc.win_reason or "",
         "lostReason": doc.lost_reason or "",
         "lossReviews": reviews_for_opportunity(doc.name) if loss_reviews is None else loss_reviews.get(doc.name, []),
@@ -609,6 +630,7 @@ def _current_input(doc) -> dict[str, Any]:
         "fatDate": str(doc.fat_date or ""),
         "paymentMilestones": _decode_list(doc.payment_milestones),
         "competition": doc.competition or "",
+        "singleSalesObjective": doc.single_sales_objective or "",
         "winReason": doc.win_reason or "",
         "lostReason": doc.lost_reason or "",
         "strengths": _decode_list(doc.strengths),
@@ -641,6 +663,7 @@ def update_strategy_opportunity(name: str, payload: dict[str, Any], expected_mod
     reached = doc.lost_at_stage if doc.stage == LOST and doc.lost_at_stage else doc.stage
     values = _validate_opportunity(
         {**current_input, **payload}, current_tool_type=doc.tool_type,
+        stored_objective=doc.single_sales_objective or "",
         require_amount=(reached != QUALIFIED_OPPORTUNITY),
     )
     if values["stage"] != doc.stage:
@@ -1340,7 +1363,9 @@ def _lock_relation(doctype: str, name: str, opportunity_id: str, missing_code: s
     return doc
 
 
-def _validate_stakeholder(opportunity, payload: dict[str, Any], stakeholder_id: str | None = None) -> dict[str, Any]:
+def _validate_stakeholder(
+    opportunity, payload: dict[str, Any], stakeholder_id: str | None = None, *, stored_response_mode: str = "",
+) -> dict[str, Any]:
     contact_id = required_text(payload, "contactId")
     if not frappe.db.exists("Contact", contact_id):
         raise CrmApiException("CONTACT_NOT_FOUND", "Contact was not found.")
@@ -1353,11 +1378,17 @@ def _validate_stakeholder(opportunity, payload: dict[str, Any], stakeholder_id: 
     duplicate = frappe.db.get_value("CRM Opportunity Stakeholder", duplicate_filters, "name")
     if duplicate and duplicate != stakeholder_id:
         raise CrmApiException("DUPLICATE_OPPORTUNITY_CONTACT", "The contact is already a live stakeholder.")
+    # A null mode means "not set"; any other non-choice value (false, 0, [], {}) is rejected. An update that
+    # leaves the key out keeps the stored mode, as a page from before the field does not send it.
+    response_mode = payload["responseMode"] if "responseMode" in payload else stored_response_mode
     return {
         "contact": contact_id,
         "role": validate_choice(payload.get("role"), "role", STAKEHOLDER_ROLES),
         "influence": validate_choice(payload.get("influence"), "influence", STAKEHOLDER_INFLUENCES),
         "stance": validate_choice(payload.get("stance"), "stance", STAKEHOLDER_STANCES),
+        "response_mode": validate_choice(
+            "" if response_mode is None else response_mode, "responseMode", STAKEHOLDER_RESPONSE_MODES,
+        ),
         "coverage": required_text(payload, "coverage"),
         "is_coach": 1 if payload.get("isCoach") else 0,
         "win_result": str(payload.get("winResult") or "").strip(),
@@ -1385,7 +1416,9 @@ def update_opportunity_stakeholder(opportunity_id: str, stakeholder_id: str, pay
     assert_capability("stakeholder:write")
     opportunity = _require_opportunity(opportunity_id, for_update=True)
     doc = _lock_relation("CRM Opportunity Stakeholder", stakeholder_id, opportunity_id, "STAKEHOLDER_NOT_FOUND")
-    values = _validate_stakeholder(opportunity, payload, stakeholder_id)
+    values = _validate_stakeholder(
+        opportunity, payload, stakeholder_id, stored_response_mode=doc.response_mode or "",
+    )
     for fieldname, value in values.items():
         setattr(doc, fieldname, value)
     doc.save(ignore_permissions=True)

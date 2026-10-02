@@ -43,6 +43,7 @@ const FIXED_MESSAGES: Partial<Record<string, Record<string, CopyPair>>> = {
     'opportunityAmount must be blank or a non-negative amount with at most two decimal places.': ['The amount can be left blank; otherwise it cannot be negative and can have at most two decimal places.', '金额可以留空；填写时不能为负数，最多两位小数。'],
     'amount must be positive with at most two decimal places.': ['The amount is not valid: enter a positive number with at most two decimal places.', '金额无效：请填写正数，最多两位小数。'],
     'originalAmount must be positive with at most two decimal places.': ['The original amount is not valid: enter a positive number with at most two decimal places.', '原始金额无效：请填写正数，最多两位小数。'],
+    'singleSalesObjective is too long.': ['The single sales objective is too long (2000 characters at most).', '本单目标过长（最多 2000 个字符）。'],
     'opportunityAmountCny is required.': ['Enter the amount in CNY.', '请填写人民币金额。'],
     'opportunityAmountCny must be positive with at most two decimal places.': ['The amount in CNY is not valid: enter a positive number with at most two decimal places.', '人民币金额无效：请填写正数，最多两位小数。'],
     'actualPoDate is required.': ['Enter the actual PO date.', '请填写实际 PO 日期。'],

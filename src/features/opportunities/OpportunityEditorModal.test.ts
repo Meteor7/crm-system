@@ -340,3 +340,98 @@ it.each([
   setLocale('zh-CN')
   wrapper.unmount()
 })
+
+describe('OpportunityEditorModal single sales objective', () => {
+  it('starts empty for a new Opportunity and submits what is typed', async () => {
+    const wrapper = mount(OpportunityEditorModal, { props: { ...props, defaultOwner: 'person002@crm.example.invalid', currentUserId: 'person002@crm.example.invalid' } })
+    const field = wrapper.get('[aria-label="本单目标"]')
+    expect((field.element as HTMLInputElement).value).toBe('')
+    await field.setValue('Win the Q4 wafer line')
+    await wrapper.get('[data-testid="qualification-confirmed"]').setValue(true)
+    await wrapper.get('[aria-label="成功概率"]').setValue('upside')
+    await wrapper.get('form').trigger('submit')
+    expect(wrapper.emitted('submit')?.[0]?.[0]).toMatchObject({ singleSalesObjective: 'Win the Q4 wafer line' })
+    wrapper.unmount()
+  })
+
+  it('edits the objective in a multi-line box and keeps the line breaks typed into it', async () => {
+    const wrapper = mount(OpportunityEditorModal, { props: { ...props, opportunity: legacyOpportunity('New Equipment') } })
+    const field = wrapper.get('[aria-label="本单目标"]')
+    expect(field.element.tagName).toBe('TEXTAREA')
+    // A single-line input drops the line breaks of what is typed; the multi-line box keeps them.
+    await field.setValue('Line one\nLine two\nLine three')
+    await wrapper.get('form').trigger('submit')
+    expect(wrapper.emitted('submit')?.[0]?.[0]).toMatchObject({ singleSalesObjective: 'Line one\nLine two\nLine three' })
+    wrapper.unmount()
+  })
+
+  it('holds the trimmed objective to 2000 characters, counted as characters', async () => {
+    const wrapper = mount(OpportunityEditorModal, { props: { ...props, opportunity: legacyOpportunity('New Equipment') } })
+    const field = wrapper.get('[aria-label="本单目标"]')
+    // No native maxlength: it counts the raw value in UTF-16 units, which would cut off padded or emoji text early.
+    expect(field.attributes('maxlength')).toBeUndefined()
+    await field.setValue('x'.repeat(2001))
+    await wrapper.get('form').trigger('submit')
+    expect(wrapper.emitted('submit')).toBeUndefined()
+    expect(wrapper.get('[data-field-error="singleSalesObjective"]').text()).toBe('本单目标最多 2000 个字符（首尾空白不计）')
+    // Editing it answers the message; blanks around exactly 2000 characters do not count.
+    await field.setValue('  ' + 'x'.repeat(2000) + '  ')
+    expect(wrapper.find('[data-field-error="singleSalesObjective"]').exists()).toBe(false)
+    await wrapper.get('form').trigger('submit')
+    expect(wrapper.emitted('submit')).toHaveLength(1)
+    // An emoji is one character, however many UTF-16 units it takes.
+    await field.setValue('😀'.repeat(2000))
+    await wrapper.get('form').trigger('submit')
+    expect(wrapper.emitted('submit')).toHaveLength(2)
+    await field.setValue('😀'.repeat(2001))
+    await wrapper.get('form').trigger('submit')
+    expect(wrapper.emitted('submit')).toHaveLength(2)
+    wrapper.unmount()
+  })
+
+  it('sends back a stored objective that is over the limit, and holds a changed one to it', async () => {
+    const stored = 'y'.repeat(2001)
+    const opportunity = { ...legacyOpportunity('New Equipment'), singleSalesObjective: stored } as StrategyOpportunityDto
+    const wrapper = mount(OpportunityEditorModal, { props: { ...props, opportunity } })
+    // Only the title changes: the stored objective goes back unchanged and is not held to the limit.
+    await wrapper.get('[aria-label="Opportunity 名称"]').setValue('Retitled')
+    await wrapper.get('form').trigger('submit')
+    expect(wrapper.emitted('submit')?.[0]?.[0]).toMatchObject({ title: 'Retitled', singleSalesObjective: stored })
+    expect(wrapper.find('[data-field-error="singleSalesObjective"]').exists()).toBe(false)
+    // Changing it to another value over the limit is refused.
+    await wrapper.get('[aria-label="本单目标"]').setValue('z'.repeat(2001))
+    await wrapper.get('form').trigger('submit')
+    expect(wrapper.emitted('submit')).toHaveLength(1)
+    expect(wrapper.find('[data-field-error="singleSalesObjective"]').exists()).toBe(true)
+    wrapper.unmount()
+  })
+
+  it('holds the objective of a new Opportunity to the limit, and compares a padded stored one trimmed', async () => {
+    const created = mount(OpportunityEditorModal, { props: { ...props, defaultOwner: 'person002@crm.example.invalid', currentUserId: 'person002@crm.example.invalid' } })
+    await created.get('[aria-label="本单目标"]').setValue('x'.repeat(2001))
+    await created.get('[data-testid="qualification-confirmed"]').setValue(true)
+    await created.get('[aria-label="成功概率"]').setValue('upside')
+    await created.get('form').trigger('submit')
+    expect(created.emitted('submit')).toBeUndefined()
+    expect(created.find('[data-field-error="singleSalesObjective"]').exists()).toBe(true)
+    created.unmount()
+
+    // A stored value padded with blanks is the same objective once trimmed, as on the server.
+    const padded = ' ' + 'y'.repeat(2001) + String.fromCharCode(10)
+    const opportunity = { ...legacyOpportunity('New Equipment'), singleSalesObjective: padded } as StrategyOpportunityDto
+    const edited = mount(OpportunityEditorModal, { props: { ...props, opportunity } })
+    await edited.get('form').trigger('submit')
+    expect(edited.emitted('submit')).toHaveLength(1)
+    expect(edited.find('[data-field-error="singleSalesObjective"]').exists()).toBe(false)
+    edited.unmount()
+  })
+
+  it('loads the stored objective when editing and resends it with an unrelated edit', async () => {
+    const opportunity = { ...legacyOpportunity('New Equipment'), singleSalesObjective: 'Revised objective' } as StrategyOpportunityDto
+    const wrapper = mount(OpportunityEditorModal, { props: { ...props, opportunity } })
+    expect((wrapper.get('[aria-label="本单目标"]').element as HTMLInputElement).value).toBe('Revised objective')
+    await wrapper.get('form').trigger('submit')
+    expect(wrapper.emitted('submit')?.[0]?.[0]).toMatchObject({ singleSalesObjective: 'Revised objective' })
+    wrapper.unmount()
+  })
+})
