@@ -36,6 +36,7 @@ const manager = computed(() => app.bootstrap?.user.role === 'Manager')
 // Back to Review with the period and filters Review handed to this page. The anchor always goes along:
 // without one Review shows the last completed week while this page shows the current one. Until the period
 // is known (an anchor asked for, or the data) there is nothing to hand over, so the tab is not a link yet.
+// After a failed load it is a link without an anchor, so Review opens on its own default period.
 const reviewRoute = computed(() => ({ path: '/dashboard', query: Object.fromEntries(Object.entries({ ...query, anchor: query.anchor || data.value?.period.start }).filter(([, value]) => value)) as Record<string, string> }))
 let revision = 0
 
@@ -457,7 +458,7 @@ onBeforeUnmount(() => { revision++ })
         </div>
       </header>
       <nav class="review-controls" :aria-label="copy('Warnings filters', '预警筛选')">
-        <RouterLink v-if="data || query.anchor" class="plan-tab" :to="reviewRoute">Review</RouterLink><span v-else class="plan-tab is-disabled" role="link" aria-disabled="true">Review</span><RouterLink class="plan-tab" to="/plan">Plan</RouterLink><strong class="review-tab" aria-current="page">Warnings</strong><RouterLink class="plan-tab" to="/opportunity-board">Opportunities</RouterLink>
+        <RouterLink v-if="data || query.anchor || error" class="plan-tab" :to="reviewRoute">Review</RouterLink><span v-else class="plan-tab is-disabled" role="link" aria-disabled="true" :title="copy('Available once the page has loaded', '页面加载完成后可用')">Review</span><RouterLink class="plan-tab" to="/plan">Plan</RouterLink><strong class="review-tab" aria-current="page">Warnings</strong><RouterLink class="plan-tab" to="/opportunity-board">Opportunities</RouterLink>
         <label><span class="filter-name">{{ copy('Region', '区域') }}</span><select v-model="query.region" :disabled="loading || busy || !filterOptions.regionReady" aria-label="Region"><option value="">{{ filterOptions.regionReady ? copy('All regions', '全部区域') : copy('Region migration pending', '区域待迁移') }}</option><option v-for="region in filterOptions.regions" :key="region" :value="region">{{ regionLabel(region, locale) }}</option></select></label>
         <label><span class="filter-name">{{ copy('Sales', '销售') }}</span><select v-model="query.sales" :disabled="loading || busy" aria-label="Sales"><option value="">{{ copy('All sales', '全部销售') }}</option><option v-for="person in filterOptions.sales" :key="person.id" :value="person.id">{{ person.name }}</option></select></label>
         <label><span class="filter-name">{{ copy('Market', '市场') }}</span><select v-model="query.market" :disabled="loading || busy" aria-label="Market"><option value="">{{ copy('All markets', '全部市场') }}</option><option v-for="market in filterOptions.markets" :key="market" :value="market">{{ market }}</option></select></label>

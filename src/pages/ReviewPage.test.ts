@@ -2,6 +2,7 @@ import { flushPromises, mount } from '@vue/test-utils'
 import { createPinia } from 'pinia'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { createMockApi } from '@/api/mock-adapter'
+import { CrmApiError } from '@/api/contracts'
 import { createAppRouter } from '@/app/router'
 import { useAppStore } from '@/stores/app'
 import { reviewFixture } from '@/features/cockpit/review.fixture'
@@ -53,6 +54,7 @@ describe('Manager Review', () => {
     expect(fallback.find('a[href^="/warnings"]').exists()).toBe(false)
     const pending = fallback.get('.review-controls [aria-disabled="true"]')
     expect([pending.text(), pending.attributes('role')]).toEqual(['Warnings', 'link'])
+    expect(pending.attributes('title')).toBe('页面加载完成后可用')
     first(); await flushPromises()
     // Without an anchor of its own, the Warnings link carries the week on show: Warnings would otherwise open on the current one.
     expect(fallback.get('a[href^="/warnings"]').attributes('href')).toBe('/warnings?period=week&anchor=2026-09-07')
@@ -214,14 +216,19 @@ describe('Manager Review', () => {
     wrapper.unmount()
   })
 
-  it('keeps the Warnings tab reachable after the first load fails', async () => {
+  // An error that carries no text still has to leave a message to read, and the tab stays a link either way.
+  it.each([
+    ['a network error', new Error('network down'), 'network down'],
+    ['a service error without any message', new CrmApiError('INTERNAL_ERROR', '', 'req_empty'), '数据请求失败，请稍后重试。'],
+    ['an error whose message is only blanks', new CrmApiError('INTERNAL_ERROR', '  ', 'req_blank'), '数据请求失败，请稍后重试。'],
+  ])('keeps the Warnings tab reachable after the first load fails with %s', async (_name, failure, text) => {
     const api = createMockApi({ role: 'Manager', latency: 0 })
-    api.getReview = vi.fn().mockRejectedValue(new Error('network down'))
+    api.getReview = vi.fn().mockRejectedValue(failure)
     const router = createAppRouter()
     await router.push('/dashboard'); await router.isReady()
     const wrapper = mount(ReviewPage, { props: { apiClient: api }, global: { plugins: [createPinia(), router] } })
     await flushPromises()
-    expect(wrapper.find('.review-state.error').exists()).toBe(true)
+    expect(wrapper.get('.review-state.error').text()).toContain(text)
     // No anchor: Warnings opens the week on its own default date, the current week.
     expect(wrapper.get('a[href^="/warnings"]').attributes('href')).toBe('/warnings?period=week')
     expect(wrapper.find('span.is-disabled').exists()).toBe(false)

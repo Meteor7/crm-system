@@ -10,10 +10,13 @@ export class ClientRequestError extends CrmApiError {
   }
 }
 
+const hasText = (text: string) => text.trim() !== ''
+
 export function requestErrorMessage(error: unknown, fallback: LocaleMessage = localeMessage('Data request failed. Please try again later.', '数据请求失败，请稍后重试。')): LocaleMessage {
   if (error instanceof ClientRequestError) return error.localizedMessage
-  if (error instanceof CrmApiError) return generatedErrorMessage(error.code, error.message) ?? error.message
-  return error instanceof Error ? error.message : fallback
+  // A service that answers with an empty message must still leave the user something to read.
+  if (error instanceof CrmApiError) return generatedErrorMessage(error.code, error.message) ?? (hasText(error.message) ? error.message : fallback)
+  return error instanceof Error && hasText(error.message) ? error.message : fallback
 }
 
 export interface RequestMetaState {
@@ -50,19 +53,23 @@ export function readRequestMeta<T>(result: ApiResponse<T>, now = new Date()): Re
 
 export function mapRequestError(error: unknown): RequestErrorState {
   if (error instanceof CrmApiError) {
+    const denied = ['UNAUTHENTICATED', 'PERMISSION_DENIED', 'SCOPE_DENIED'].includes(error.code)
+    // An error without any text falls back to the default copy here too, so no page shows a blank error. A
+    // denied one keeps its empty message: the denied panel has its own copy, which a retry hint would contradict.
+    const blank = !hasText(error.message) && !denied
     return {
-      message: error.message,
-      localizedMessage: error instanceof ClientRequestError ? error.localizedMessage : generatedErrorMessage(error.code, error.message),
+      message: blank ? resolveLocaleMessage(requestErrorMessage(error)) : denied && !hasText(error.message) ? '' : error.message,
+      localizedMessage: error instanceof ClientRequestError ? error.localizedMessage : generatedErrorMessage(error.code, error.message) ?? (blank ? requestErrorMessage(error) : undefined),
       requestId: error.requestId,
       // denied 家族：角色级权限（PERMISSION_DENIED）与数据范围越权（SCOPE_DENIED）。
       // NOT_PERMITTED / '403' 为 Frappe HTTP 翻译预留；归一层应把它们映射到上述两者。
-      denied: ['UNAUTHENTICATED', 'PERMISSION_DENIED', 'SCOPE_DENIED'].includes(error.code),
+      denied,
       retryable: error.retryable,
     }
   }
   return {
     message: resolveLocaleMessage(requestErrorMessage(error)),
-    localizedMessage: error instanceof Error ? undefined : requestErrorMessage(error),
+    localizedMessage: error instanceof Error && hasText(error.message) ? undefined : requestErrorMessage(error),
     requestId: 'req_unknown',
     denied: false,
     retryable: true,

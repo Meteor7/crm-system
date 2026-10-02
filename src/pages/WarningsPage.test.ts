@@ -100,6 +100,10 @@ describe('Warnings page', () => {
     expect(plain.find('.review-controls a[href^="/dashboard"]').exists()).toBe(false)
     const pending = plain.get('.review-controls [aria-disabled="true"]')
     expect([pending.text(), pending.attributes('role')]).toEqual(['Review', 'link'])
+    expect(pending.attributes('title')).toBe('页面加载完成后可用')
+    setLocale('en-US'); await flushPromises()
+    expect(pending.attributes('title')).toBe('Available once the page has loaded')
+    setLocale('zh-CN'); await flushPromises()
     first(); await flushPromises()
     expect(plain.get('.review-controls a[href^="/dashboard"]').attributes('href')).toBe('/dashboard?period=week&anchor=2026-09-07')
     plain.unmount()
@@ -111,6 +115,20 @@ describe('Warnings page', () => {
     expect(api.getWarnings).toHaveBeenLastCalledWith({ period: 'week', sales: '', market: '', region: '', equipment: '' })
     expect(blank.get('.review-controls a[href^="/dashboard"]').attributes('href')).toBe('/dashboard?period=week&anchor=2026-09-07')
     blank.unmount()
+  })
+
+  it('keeps the Review tab reachable after the first load fails, even with an empty error message', async () => {
+    const api = createMockApi({ role: 'Manager', latency: 0 })
+    api.getWarnings = vi.fn().mockRejectedValue(new CrmApiError('INTERNAL_ERROR', '', 'req_empty'))
+    const router = createAppRouter()
+    await router.push('/warnings'); await router.isReady()
+    const wrapper = mount(WarningsPage, { props: { apiClient: api }, global: { plugins: [createPinia(), router] } })
+    await flushPromises()
+    expect(wrapper.get('.review-state.error').text()).toContain('数据请求失败，请稍后重试。')
+    // No anchor is known: Review opens on its own default period (the last completed week).
+    expect(wrapper.get('.review-controls a[href^="/dashboard"]').attributes('href')).toBe('/dashboard?period=week')
+    expect(wrapper.find('span.is-disabled').exists()).toBe(false)
+    wrapper.unmount()
   })
 
   it('shows rows a Manager cannot act on as such, marks minimum stays and steps between periods', async () => {

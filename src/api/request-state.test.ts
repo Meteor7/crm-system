@@ -1,7 +1,7 @@
 import { createPinia, setActivePinia } from 'pinia'
 import { mount, flushPromises } from '@vue/test-utils'
 import { createFrappeApi } from './frappe-adapter'
-import { setLocale, useLocaleMessage } from '@/i18n'
+import { localeMessage, setLocale, useLocaleMessage } from '@/i18n'
 import { useDashboardStore } from '@/stores/dashboard'
 import { useAppStore } from '@/stores/app'
 import DataNotice from '@/design-system/DataNotice.vue'
@@ -65,6 +65,35 @@ describe('localized client failures', () => {
     }
     setLocale('en-US')
     expect(notice.value).toBe(raw)
+  })
+
+  it('falls back to the default copy when an error carries no message, and keeps one that does', () => {
+    const fallback = localeMessage('Data request failed. Please try again later.', '数据请求失败，请稍后重试。')
+    expect(requestErrorMessage(new CrmApiError('INTERNAL_ERROR', '', 'req_empty'))).toEqual(fallback)
+    expect(requestErrorMessage(new Error(''))).toEqual(fallback)
+    expect(requestErrorMessage(new CrmApiError('INTERNAL_ERROR', '', 'req_empty'), 'Custom copy')).toBe('Custom copy')
+    expect(requestErrorMessage(new Error('network down'))).toBe('network down')
+    // Blanks are no message either.
+    expect(requestErrorMessage(new CrmApiError('INTERNAL_ERROR', '  ', 'req_blank'))).toEqual(fallback)
+    expect(requestErrorMessage(new Error(' '))).toEqual(fallback)
+    expect(requestErrorMessage(new CrmApiError('INTERNAL_ERROR', 'Service said this', 'req_text'))).toBe('Service said this')
+  })
+
+  it('maps an error without text to the default copy, which follows the language', () => {
+    for (const failure of [new CrmApiError('INTERNAL_ERROR', '', 'req_empty'), new CrmApiError('INTERNAL_ERROR', '  ', 'req_blank'), new Error(''), new Error(' ')]) {
+      const mapped = mapRequestError(failure)
+      expect(mapped.message).toBe('数据请求失败，请稍后重试。')
+      expect(mapped.localizedMessage).toEqual(localeMessage('Data request failed. Please try again later.', '数据请求失败，请稍后重试。'))
+    }
+    // A denied error keeps its empty message: the denied panel has its own copy, and a retry hint would contradict it.
+    for (const code of ['PERMISSION_DENIED', 'SCOPE_DENIED', 'UNAUTHENTICATED']) {
+      for (const text of ['', '  ']) {
+        expect(mapRequestError(new CrmApiError(code, text, 'req_denied'))).toMatchObject({ message: '', localizedMessage: undefined, denied: true })
+      }
+    }
+    // A message that is there is kept as it was, with no localized copy of its own.
+    expect(mapRequestError(new CrmApiError('INTERNAL_ERROR', 'Service said this', 'req_text'))).toMatchObject({ message: 'Service said this', localizedMessage: undefined })
+    expect(mapRequestError(new Error('network down'))).toMatchObject({ message: 'network down', localizedMessage: undefined })
   })
 
   it('updates cached bootstrap and dashboard network errors without retrying', async () => {
