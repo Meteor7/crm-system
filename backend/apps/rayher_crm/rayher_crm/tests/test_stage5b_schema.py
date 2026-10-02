@@ -81,7 +81,8 @@ class TestStage5BSchema(FrappeTestCase):
             "site": ("Link", "Address", 1),
             "source_lead": ("Link", "Lead", 0),
             "title": ("Data", None, 1),
-            "amount": ("Currency", "currency", 1),
+            # A qualified (S1) Opportunity may leave its amounts unknown; the service enforces them after S1.
+            "amount": ("Currency", "currency", 0),
             "currency": ("Link", "Currency", 1),
             "po_date": ("Date", None, 1),
             "opportunity_owner": ("Link", "User", 1),
@@ -99,7 +100,7 @@ class TestStage5BSchema(FrappeTestCase):
             "score": ("Int", None, 1),
             "sale_type": ("Select", "New Equipment\nRepeat Order\nService", 1),
             "sub_region": ("Data", None, 1),
-            "original_amount": ("Currency", "currency", 1),
+            "original_amount": ("Currency", "currency", 0),
             "shipment_date": ("Date", None, 0),
             "fat_date": ("Date", None, 0),
             "payment_milestones": ("JSON", None, 0),

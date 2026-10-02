@@ -388,6 +388,9 @@ def _row(opp, owner_names, next_action, today, spellings):
     # A change recorded later today (or a declared day ahead of the clock) is day 0, not negative.
     age = max((today - changed_day).days, 0) if changed_day else None
     stale = opp["stage"] in OPEN_STAGES and age is not None and age > STALE_STAGE_DAYS
+    # 0 is an amount nobody has entered yet (allowed at S1): the original amount goes out as "", as on
+    # the Opportunity, and the CNY amount as None; neither is ever a 0.
+    amount = _money(opp.get("amount"))
     amount_cny = _money(opp.get("amount_cny")) or None
     # A value outside the four levels (legacy data) counts as not set, like an empty one.
     level = opp.get("probability_level") if opp.get("probability_level") in PROBABILITY_LEVELS else None
@@ -411,7 +414,7 @@ def _row(opp, owner_names, next_action, today, spellings):
         "probabilityLevel": level,
         "equipment": equipment,
         "market": _clean(opp.get("market")),
-        "amount": format(_money(opp.get("amount")), "f"),
+        "amount": format(amount, "f") if amount else "",
         "currency": opp.get("currency") or "",
         "amountCny": format(amount_cny, "f") if amount_cny is not None else None,
         "nextAction": next_action,

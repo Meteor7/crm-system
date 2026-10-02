@@ -12,7 +12,7 @@ from rayher_crm.permissions.roles import assert_capability
 from rayher_crm.services.bookings import list_bookings
 from rayher_crm.services.opportunities import list_strategy_opportunities
 from rayher_crm.services.opportunity_stages import OPEN_STAGES
-from rayher_crm.services.money import as_decimal, decimal_string
+from rayher_crm.services.money import as_decimal, decimal_string, optional_money_text
 
 
 PIPELINE_READ_LIMIT = 200
@@ -43,7 +43,8 @@ def project_opportunity(item: dict[str, Any]) -> dict[str, Any]:
         "id": item["id"], "accountId": item["accountId"], "accountName": item["account"],
         "title": item["title"],
         "segment": frappe.db.get_value("Customer", item["accountId"], "custom_crm_segment") or "",
-        "amount": decimal_string(item.get("amount") or 0), "currency": item["currency"], "stage": item["stage"],
+        # "" while nobody has entered the amount (allowed at S1), as on the Opportunity; never 0.
+        "amount": optional_money_text(item.get("amount") or 0), "currency": item["currency"], "stage": item["stage"],
         "probabilityLevel": item.get("probabilityLevel") or "",
         "intentScore": int(item.get("score") or 0), "budgetStatus": "Unknown",
         "owner": item["owner"], "nextAction": next_action["title"] if next_action else "",
@@ -84,8 +85,11 @@ def list_pipeline(query: dict[str, Any]) -> dict[str, Any]:
         and (not date_from or (item.get("ddl") or "") >= date_from)
         and (not date_to or (item.get("ddl") or "") <= date_to)
     )]
-    open_opportunities = [item for item in opportunities if item["stage"] in OPEN_STAGES]
-    currencies = sorted({item["currency"] for item in [*opportunities, *bookings]})
+    # Totals add known amounts only: an unknown amount is neither 0 nor a currency to show a total for.
+    # How many open Opportunities they leave out is reported, so the total is not read as complete.
+    priced = [item for item in opportunities if item["amount"]]
+    open_opportunities = [item for item in priced if item["stage"] in OPEN_STAGES]
+    currencies = sorted({item["currency"] for item in [*priced, *bookings]})
     totals = []
     for currency in currencies:
         open_amount = sum(
@@ -107,6 +111,9 @@ def list_pipeline(query: dict[str, Any]) -> dict[str, Any]:
     return {
         "opportunities": opportunities, "bookings": bookings,
         "totals": totals,
+        "openPipelineMissingAmountCount": sum(
+            1 for item in opportunities if item["stage"] in OPEN_STAGES and not item["amount"]
+        ),
     }
 
 

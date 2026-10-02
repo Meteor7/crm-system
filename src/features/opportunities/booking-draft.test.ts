@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { ContactSummaryDto } from '@/types/crm'
 import type { BookingDraft, OpportunityInternalValidationDto } from '@/types/workspaces'
-import { opportunityBookingDraft } from './booking-draft'
+import { opportunityBookingDraft, validateBookingDraft } from './booking-draft'
 
 const contacts = [
   { id: 'C-OLD', accountId: 'A-1', status: 'Active' },
@@ -48,5 +48,11 @@ describe('opportunityBookingDraft', () => {
       liveBooking: { id: 'BK-1', status: 'Pending', primaryContactId: 'C-GONE', note: '' },
     }, contacts, 'manager')
     expect(draft).toMatchObject({ primaryContactId: 'C-OLD', note: '' })
+  })
+
+  it('leaves the amount empty for Sales to enter when the Opportunity has none yet, never 0', () => {
+    const draft = opportunityBookingDraft({ ...opportunity, internalValidation: null, amount: '', amountCny: '' }, contacts, 'manager')
+    expect(draft).toMatchObject({ amount: '', amountCny: '' })
+    expect(validateBookingDraft(draft).amount).toBeDefined()
   })
 })

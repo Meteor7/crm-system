@@ -44,6 +44,8 @@ const createdAccountId = ref('')
 const persistedSiteCount = ref(0)
 let loadSequence = 0
 const regionOptionLabel = (value: string) => regionLabel(value, locale.value)
+// A total of 0 that leaves out unknown amounts is not a known zero.
+const pipelineText = (account: AccountSummaryDto) => account.pipelineAmount === 0 && account.pipelineMissingAmountCount ? t('dashboard.insufficientData') : `¥${account.pipelineAmount.toLocaleString(locale.value)}`
 const riskTone = (risk: AccountSummaryDto['risk']): Tone => risk === '高风险' ? 'danger' : risk === '关注' ? 'warning' : 'positive'
 
 async function load() {
@@ -212,7 +214,7 @@ async function deleteAccount(account: AccountSummaryDto) {
             <tr v-for="account in rows" :key="account.id" :data-account-id="account.id">
               <td><button class="account-link record-name-link" type="button" :data-open-account-detail="account.id" @click="openDetail(account)"><span><Building2 :size="14" /></span><div><strong>{{ account.shortName }}</strong><small>{{ account.name }}</small></div></button></td>
               <td><strong>{{ account.segment }}</strong><small>{{ account.city }} · {{ regionLabel(account.region, locale) }}</small></td>
-              <td>{{ personnelDisplayName(account.owner) }}</td><td><strong>{{ t('accounts.contactsCount', { count: account.stakeholderCount }) }}</strong><small>{{ t('accounts.sitesCount', { count: account.siteCount }) }}</small></td><td><strong>¥{{ account.pipelineAmount.toLocaleString(locale) }}</strong><small>{{ locale === 'en-US' ? 'Intent score' : '意愿评分' }} {{ account.intentScore }}</small></td><td><strong>{{ account.nextAction || t('accounts.none') }}</strong><small>{{ account.nextActionDue ? formatDisplayDate(account.nextActionDue) : t('accounts.unscheduled') }}</small></td>
+              <td>{{ personnelDisplayName(account.owner) }}</td><td><strong>{{ t('accounts.contactsCount', { count: account.stakeholderCount }) }}</strong><small>{{ t('accounts.sitesCount', { count: account.siteCount }) }}</small></td><td><strong :data-account-pipeline="account.id">{{ pipelineText(account) }}</strong><small v-if="account.pipelineMissingAmountCount" :data-account-pipeline-missing="account.id">{{ t('opportunities.unknownAmountCount', { count: account.pipelineMissingAmountCount }) }}</small><small>{{ locale === 'en-US' ? 'Intent score' : '意愿评分' }} {{ account.intentScore }}</small></td><td><strong>{{ account.nextAction || t('accounts.none') }}</strong><small>{{ account.nextActionDue ? formatDisplayDate(account.nextActionDue) : t('accounts.unscheduled') }}</small></td>
               <td><StatusBadge :label="account.risk === '高风险' ? t('accounts.riskHigh') : account.risk === '关注' ? t('accounts.riskWatch') : t('accounts.riskStable')" :tone="riskTone(account.risk)" /></td><td>{{ account.completeness }}%</td><td>{{ formatDisplayDate(account.updatedAt) }}</td>
               <td v-if="canDelete"><button type="button" class="site-remove" :data-delete-account="account.id" :disabled="Boolean(deletingId)" @click="deleteAccount(account)">{{ t('accounts.delete') }}</button></td>
             </tr>

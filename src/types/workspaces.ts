@@ -128,7 +128,11 @@ export interface CreateStrategyOpportunityInput {
   siteId: string
   title: string
   owner: string
-  amount: DecimalAmount
+  /**
+   * May be '' (not entered yet) while the Opportunity is at qualified_opportunity, where every new Opportunity
+   * starts, together with originalAmount and amountCny. Every edit after it has left that stage requires all three.
+   */
+  amount: DecimalAmount | ''
   intentScore?: number
   /**
    * Required when creating: whoever opens the Opportunity sets its first level, including a Manager
@@ -144,12 +148,12 @@ export interface CreateStrategyOpportunityInput {
   saleType: string
   subRegion: string
   currency: string
-  originalAmount?: DecimalAmount
+  originalAmount?: DecimalAmount | ''
   /**
-   * Entered by Sales in CNY on every Opportunity, whatever its currency. Required when creating, and any
-   * edit of an Opportunity that has none must fill it in.
+   * Entered by Sales in CNY on every Opportunity, whatever its currency. Optional like the amount at
+   * qualified_opportunity; any edit of an Opportunity past that stage that has none must fill it in.
    */
-  amountCny: DecimalAmount
+  amountCny: DecimalAmount | ''
   shipmentDate?: string
   fatDate?: string
   paymentMilestones?: string[]
@@ -295,7 +299,8 @@ export interface StrategyOpportunityDto {
   /** UTC ISO timestamp, or ''. */
   lostAt: string
   lostBy: string
-  amount: DecimalAmount
+  /** '' until someone enters it (allowed at qualified_opportunity), never a believable 0. */
+  amount: DecimalAmount | ''
   probabilityLevel: OpportunityProbabilityLevelValue
   /** Level changes, newest first. */
   probabilityHistory: OpportunityProbabilityHistoryDto[]
@@ -313,7 +318,8 @@ export interface StrategyOpportunityDto {
   saleType: string
   subRegion: string
   currency: string
-  originalAmount: DecimalAmount
+  /** '' while the amount is not entered yet. */
+  originalAmount: DecimalAmount | ''
   /** The amount in CNY entered by Sales; '' until someone enters it, never a CNY 0. */
   amountCny: DecimalAmount | ''
   shipmentDate: string

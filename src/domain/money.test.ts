@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { addMoney, formatMoney, moneyByCurrency } from './money'
+import { addMoney, formatKnownTotals, formatMoney, moneyByCurrency, unknownAmountCount } from './money'
 
 describe('exact money contract', () => {
   it('adds decimal strings without IEEE-754 precision loss', () => {
@@ -23,5 +23,22 @@ describe('exact money contract', () => {
 
   it('formats without converting the integer portion to Number', () => {
     expect(formatMoney('9007199254740992.01', 'CNY')).toBe('CNY 9,007,199,254,740,992.01')
+  })
+
+  it('shows an amount nobody has entered yet as a dash, never as 0 or an error', () => {
+    expect(formatMoney('', 'CNY')).toBe('—')
+  })
+
+  it('leaves unknown amounts out of the totals and counts them instead of adding 0', () => {
+    const rows = [
+      { currency: 'CNY', amount: '100.00' },
+      { currency: 'CNY', amount: '' },
+      { currency: 'USD', amount: '' },
+    ]
+    expect(moneyByCurrency(rows)).toEqual([{ currency: 'CNY', amount: '100.00' }])
+    expect(unknownAmountCount(rows)).toBe(2)
+    expect(formatKnownTotals(rows, (count) => `${count} 条未填金额`)).toBe('CNY 100.00 · 2 条未填金额')
+    expect(formatKnownTotals([{ currency: 'CNY', amount: '' }], (count) => `${count} 条未填金额`)).toBe('1 条未填金额')
+    expect(formatKnownTotals([{ currency: 'CNY', amount: '100.00' }], () => 'never shown')).toBe('CNY 100.00')
   })
 })

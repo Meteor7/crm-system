@@ -141,6 +141,18 @@ class TestRows(unittest.TestCase):
             "amountCny": None, "nextAction": {"id": "a1", "title": "Call", "due": "2026-09-30"},
         })
 
+    def test_an_unknown_amount_is_empty_on_the_row_and_missing_in_the_totals(self):
+        # An S1 Opportunity saved without an amount stores 0 in every amount column: unknown, never 0.
+        board = rows(opportunity("s1", stage="qualified_opportunity", amount="0.00", amount_cny="0.00"), opportunity("s2"))
+        unknown = next(row for row in board if row.dto["id"] == "s1")
+        self.assertEqual((unknown.dto["amount"], unknown.dto["currency"], unknown.dto["amountCny"]), ("", "CNY", None))
+        _ids, summary, groups = run(board, groupBy="stage")
+        self.assertEqual((summary["count"], summary["knownAmountCny"], summary["missingAmountCount"]), (2, "100.00", 1))
+        self.assertEqual(
+            [(group["key"], group["count"], group["knownAmountCny"], group["missingAmountCount"]) for group in groups],
+            [("qualified_opportunity", 1, "0.00", 1), ("demo_done", 1, "100.00", 0)],
+        )
+
     def test_stage_age_uses_shanghai_days_and_21_days_is_not_yet_stale(self):
         board = rows(
             opportunity("day21", stage_changed_at=datetime(2026, 9, 1, 23, 59)),

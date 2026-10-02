@@ -128,6 +128,15 @@ const subscriptionStorageWarning = ref(false)
 const managementView = computed(() => app.bootstrap?.user.role === 'Manager')
 const activeCurrency = computed(() => store.data?.kpis.moneyByCurrency[0]?.currency ?? 'CNY')
 const activeMoney = computed(() => store.data?.kpis.moneyByCurrency.find((item) => item.currency === activeCurrency.value))
+// Money KPIs add known amounts only. An amount not entered yet is never a 0, so a total says how many it leaves
+// out, and one with no known amount at all says there is not enough data instead of showing 0.00.
+function knownMoneyKpi(field: 'openPipeline' | 'cumulativeWon', missing = 0) {
+  const noneKnown = (store.data?.kpis.moneyByCurrency ?? []).every((item) => !Number(item[field]))
+  const value = missing && noneKnown ? t('dashboard.insufficientData') : formatMoney(activeMoney.value?.[field] ?? '0.00', activeCurrency.value)
+  return missing ? `${value} · ${t('opportunities.unknownAmountCount', { count: missing })}` : value
+}
+const openPipelineKpi = computed(() => knownMoneyKpi('openPipeline', store.data?.kpis.openPipelineMissingAmountCount))
+const cumulativeWonKpi = computed(() => knownMoneyKpi('cumulativeWon', store.data?.kpis.cumulativeWonMissingAmountCount))
 const bookingOption = computed(() => buildBookingOption((store.data?.bookingByMonth ?? []).filter((item) => item.currency === activeCurrency.value).map((item) => ({ ...item, amount: Number(item.amount) })), locale.value))
 const evaluationOption = computed(() => buildCountBreakdownOption(processRows(store.data?.process.evaluationByStatus ?? [], 'evaluation'), locale.value))
 const accountOption = computed(() => buildAccountContributionOption((store.data?.topAccounts ?? []).filter((item) => item.currency === activeCurrency.value).slice(0, 6).map((item) => ({ label: item.accountName, pipeline: Number(item.pipeline), booking: Number(item.booking) })), locale.value))
@@ -513,9 +522,9 @@ onMounted(async () => {
       <p v-if="managementView" class="source-note">{{ t('dashboard.sourceNote') }}</p>
 
       <section v-if="managementView" class="kpi-grid" :aria-label="t('dashboard.kpiLabel')">
-        <KpiCard class="kpi-value-pipeline" label="Open Pipeline" :value="formatMoney(activeMoney?.openPipeline ?? '0.00', activeCurrency)" :detail="t('dashboard.openPipelineDetail')" :icon="BriefcaseBusiness" tone="navy" />
+        <KpiCard class="kpi-value-pipeline" label="Open Pipeline" :value="openPipelineKpi" :detail="t('dashboard.openPipelineDetail')" :icon="BriefcaseBusiness" tone="navy" />
         <KpiCard class="kpi-value-booking" label="Confirmed Booking" :value="formatMoney(activeMoney?.confirmedBooking ?? '0.00', activeCurrency)" :detail="t('dashboard.confirmedBookingDetail')" :icon="Banknote" tone="lime" />
-        <KpiCard class="kpi-value-won" :label="t('dashboard.closedWon')" :value="formatMoney(activeMoney?.cumulativeWon ?? '0.00', activeCurrency)" :detail="t('dashboard.closedWonDetail')" :icon="CircleDollarSign" tone="amber" />
+        <KpiCard class="kpi-value-won" :label="t('dashboard.closedWon')" :value="cumulativeWonKpi" :detail="t('dashboard.closedWonDetail')" :icon="CircleDollarSign" tone="amber" />
       </section>
 
       <template v-if="managementView">

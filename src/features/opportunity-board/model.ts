@@ -91,7 +91,8 @@ export function cellText(row: BoardRow, column: BoardColumn, locale: Locale): st
   if (column === 'sales') return row.salesName
   if (column === 'stageChangedAt') return dateText(row.stageChangedAt, locale) + (row.stageAgeDays == null ? '' : ` · ${row.stageAgeDays} ${text(['d', '天'], locale)}`)
   if (column === 'amountCny') return money(row.amountCny, locale)
-  if (column === 'amount') return `${row.currency} ${row.amount}`
+  // A not-entered amount is a dash like a missing CNY amount, never "CNY 0.00".
+  if (column === 'amount') return Number(row.amount) > 0 ? `${row.currency} ${row.amount}` : '—'
   if (column === 'nextAction') return row.nextAction ? [row.nextAction.title, row.nextAction.due].filter(Boolean).join(' · ') : '—'
   return row[column] || '—'
 }

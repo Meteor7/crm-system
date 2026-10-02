@@ -131,6 +131,24 @@ class TestOpportunityBoardApi(FrappeTestCase):
             {"field": "amountCny", "operator": "gte", "value": "0"}])
         self.assertEqual(total, 2)
 
+    def test_an_opportunity_without_an_amount_is_listed_as_missing_never_as_zero(self):
+        frappe.set_user(self.sales)
+        account = create_account({"name": f"Board Unknown {self.token}", "shortName": f"Unknown{self.token}",
+                                  "segment": "Frontend", "tier": "A", "city": "上海", "region": "华东", "owner": self.sales})
+        site = create_site(account["id"], {"name": f"Unknown {self.token} Site", "city": "上海", "type": "Fab",
+                                           "process": "Frontend", "status": "量产"})
+        unknown = create_strategy_opportunity({
+            "accountId": account["id"], "siteId": site["id"], "title": "Board Unknown", "owner": self.sales,
+            "amount": "", "intentScore": 35, "poDate": "2031-12-31", "toolType": "Board Inspection",
+            "saleType": "New Equipment", "subRegion": "华东", "currency": "USD", "originalAmount": "",
+            "amountCny": "", "qualificationConfirmed": True, "probabilityLevel": "pipeline",
+        })["id"]
+        data, total, _page, _size = self._query(self.sales)
+        row = next(item for item in data["items"] if item["id"] == unknown)
+        self.assertEqual((total, row["amount"], row["currency"], row["amountCny"]), (2, "", "USD", None))
+        summary = data["summary"]
+        self.assertEqual((summary["count"], summary["knownAmountCny"], summary["missingAmountCount"]), (2, "100.00", 1))
+
     def test_filters_follow_the_callers_scope(self):
         mine = self._as(self.sales, opportunity_board.get_opportunity_filters)
         self.assertEqual(mine["sales"], [{"value": self.sales, "label": "Board Sales"}])

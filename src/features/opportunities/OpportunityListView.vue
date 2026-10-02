@@ -23,7 +23,7 @@ import OpportunityEditorModal from './OpportunityEditorModal.vue'
 import { useAppStore } from '@/stores/app'
 import type { AccountSummaryDto, SiteDto } from '@/types/crm'
 import type { CreateStrategyOpportunityInput, OpportunityProbabilityLevelFilter, StrategyOpportunityDto } from '@/types/workspaces'
-import { formatMoney, moneyByCurrency } from '@/domain/money'
+import { formatKnownTotals, formatMoney } from '@/domain/money'
 import { EQUIPMENT_PRESETS } from '@/domain/equipment'
 import { loadEquipmentTypes } from '@/features/opportunities/equipment-types'
 import { useI18n, useLocaleMessage } from '@/i18n'
@@ -85,8 +85,12 @@ function normalizeStageFilter(value: unknown): string {
 function stageLabel(value: string) {
   return opportunityStageLabel(value, locale.value)
 }
+// Known amounts only, with how many are not entered yet, so a partial total never reads as complete.
 function stageMoney(items: StrategyOpportunityDto[]) {
-  return moneyByCurrency(items).map((item) => formatMoney(item.amount, item.currency)).join(' · ')
+  return formatKnownTotals(items, (count) => t('opportunities.unknownAmountCount', { count }))
+}
+function amountText(value: StrategyOpportunityDto['amount'], currency: string) {
+  return value ? formatMoney(value, currency) : t('oppEditor.amountPending')
 }
 function resetFilters() {
   page.value = 1
@@ -205,7 +209,7 @@ watch(() => [route.query.page, route.query.pageSize, route.query.status, route.q
               <td><strong>{{ item.account }}</strong><small>{{ item.site }}</small></td>
               <td><strong>{{ stageLabel(item.stage) }}</strong></td>
               <td>{{ formatDisplayDate(item.poDate) }}</td>
-              <td><strong>{{ formatMoney(item.amount, item.currency) }}</strong><small>{{ locale === 'en-US' ? 'Original' : '原始金额' }} {{ formatMoney(item.originalAmount, item.currency) }}</small><small :data-opportunity-amount-cny="item.id">{{ t('oppEditor.amountCny') }} {{ item.amountCny ? formatMoney(item.amountCny, 'CNY') : t('oppEditor.amountCnyPending') }}</small></td>
+              <td><strong :data-opportunity-amount="item.id">{{ amountText(item.amount, item.currency) }}</strong><small>{{ locale === 'en-US' ? 'Original' : '原始金额' }} {{ amountText(item.originalAmount, item.currency) }}</small><small :data-opportunity-amount-cny="item.id">{{ t('oppEditor.amountCny') }} {{ item.amountCny ? formatMoney(item.amountCny, 'CNY') : t('oppEditor.amountCnyPending') }}</small></td>
               <td data-opportunity-probability-level><StatusBadge :label="opportunityProbabilityLevelLabel(item.probabilityLevel, locale)" :tone="opportunityProbabilityLevelTone(item.probabilityLevel)" /></td>
               <td data-opportunity-intent><strong class="purchase-intent">{{ item.score }}/100</strong><small>{{ item.score >= 70 ? t('opportunities.highIntent') : item.score >= 50 ? t('opportunities.mediumIntent') : t('opportunities.lowIntent') }}</small></td>
               <td>{{ personnelDisplayName(item.owner) }}</td>
@@ -227,7 +231,7 @@ watch(() => [route.query.page, route.query.pageSize, route.query.status, route.q
                 <RouterLink class="record-link" :to="{ name: 'opportunity-detail', params: { opportunityId: item.id } }" :data-opportunity-board-link="item.id">{{ item.title }}</RouterLink>
                 <p>{{ item.account }}<small>{{ item.site }}</small></p>
                 <dl>
-                  <div><dt>{{ t('detail.amount') }}</dt><dd>{{ formatMoney(item.amount, item.currency) }}</dd></div>
+                  <div><dt>{{ t('detail.amount') }}</dt><dd>{{ amountText(item.amount, item.currency) }}</dd></div>
                   <div><dt>{{ t('opportunities.purchaseIntent') }}</dt><dd>{{ item.score }}/100</dd></div>
                 </dl>
                 <footer><span>{{ personnelDisplayName(item.owner) }}</span><time>{{ formatDisplayDate(item.poDate) }}</time></footer>

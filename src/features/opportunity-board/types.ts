@@ -14,6 +14,7 @@ export interface BoardRow {
   region: string | null; salesId: string; salesName: string; stage: string
   stageChangedAt: string | null; stageAgeDays: number | null; stageUnchangedOver21Days: boolean
   probabilityLevel: string | null; equipment: string | null; market: string | null
+  /** Not entered yet ('', or a stored 0.00: a known Opportunity amount is always above 0) at qualified_opportunity. */
   amount: string; currency: string; amountCny: string | null
   nextAction: { id: string; title: string; due: string | null } | null
 }

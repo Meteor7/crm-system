@@ -83,7 +83,8 @@ describe('create form required markers', () => {
       {
         create: mount(OpportunityEditorModal, { props: { accounts, sitesByAccount: sites, defaultOwner: 'Demo Staff 01' } }),
         edit: mount(OpportunityEditorModal, { props: { accounts, sitesByAccount: sites, defaultOwner: 'Demo Staff 01', opportunity } }),
-        count: 12,
+        // A new Opportunity starts at stage 1, where the amount and the amount in CNY may stay blank.
+        count: 10,
       },
       {
         create: mount(BookingEditorModal, { props: { accounts, opportunities: [], contacts: [], defaultOwner: 'Demo Staff 01' } }),

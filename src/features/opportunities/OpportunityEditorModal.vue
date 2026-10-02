@@ -64,8 +64,13 @@ const form = ref<CreateStrategyOpportunityInput>({
   informationNeeded: props.opportunity?.informationNeeded ?? [],
 })
 const sites = computed(() => props.sitesByAccount[form.value.accountId] ?? [])
-// Opportunities in another currency from before the CNY amount have none; saving asks for it first.
-const amountCnyMissing = Boolean(props.opportunity) && !props.opportunity?.amountCny
+// No opportunity prop = creating a new one, which always starts at stage 1 (amount optional).
+// An existing opportunity requires the amount once it has left stage 1; a deal lost at stage 1 never did.
+const reachedStage = computed(() => props.opportunity?.stage === 'lost' && props.opportunity.lostAtStage ? props.opportunity.lostAtStage : props.opportunity?.stage)
+const amountRequired = computed(() => !!props.opportunity && reachedStage.value !== 'qualified_opportunity')
+// Past stage 1, an Opportunity without a CNY amount (older ones in another currency, or one that advanced
+// before anyone entered it) must get one before saving.
+const amountCnyMissing = computed(() => amountRequired.value && !props.opportunity?.amountCny)
 const paymentText = ref((form.value.paymentMilestones ?? []).join('\n'))
 const strengthsText = ref((form.value.strengths ?? []).join('\n'))
 const redFlagsText = ref((form.value.redFlags ?? []).join('\n'))
@@ -123,7 +128,8 @@ function submit() {
   const { probabilityLevel, ...fields } = form.value
   const value: CreateStrategyOpportunityInput = {
     ...fields,
-    amount: form.value.amount, intentScore: Number(form.value.intentScore), originalAmount: form.value.originalAmount || form.value.amount,
+    // Without an amount (allowed at stage 1) the original amount goes out blank too, never a stale one beside an unknown amount.
+    amount: form.value.amount, intentScore: Number(form.value.intentScore), originalAmount: form.value.amount ? form.value.originalAmount || form.value.amount : '',
     paymentMilestones: lines(paymentText.value), strengths: lines(strengthsText.value), redFlags: lines(redFlagsText.value), informationNeeded: lines(informationText.value),
   }
   // A non-owner or frozen edit leaves the level untouched.
@@ -186,10 +192,10 @@ const equipmentChoices = computed(() => props.equipmentTypes ?? EQUIPMENT_PRESET
         <textarea v-model="probabilityActionPlan" :aria-label="t('oppEditor.probabilityActionPlan')" rows="3" maxlength="4000" data-testid="opportunity-probability-plan" required />
         <small v-if="planError" class="field-error" data-field-error="probabilityActionPlan">{{ planError }}</small>
       </label>
-      <label><span>{{ t('oppEditor.amount') }}<RequiredMark :show="!opportunity" /></span><input v-model="form.amount" :aria-label="t('oppEditor.amount')" type="text" inputmode="decimal" min="0.01" pattern="\d+(?:\.\d{1,2})?" required /></label>
+      <label><span>{{ t('oppEditor.amount') }}</span><input v-model="form.amount" :aria-label="t('oppEditor.amount')" type="text" inputmode="decimal" min="0.01" pattern="\d+(?:\.\d{1,2})?" :required="amountRequired" /></label>
       <label><span>{{ t('oppEditor.currency') }}<RequiredMark :show="!opportunity" /></span><select v-model="form.currency" :aria-label="t('oppEditor.currency')" required><option>CNY</option><option>USD</option><option>EUR</option></select></label>
       <label><span>{{ t('oppEditor.originalAmount') }}</span><input v-model="form.originalAmount" :aria-label="t('oppEditor.originalAmount')" type="text" inputmode="decimal" pattern="\d+(?:\.\d{1,2})?" /></label>
-      <label class="amount-cny-field"><span>{{ t('oppEditor.amountCny') }}<RequiredMark :show="!opportunity" /></span><input v-model="form.amountCny" :aria-label="t('oppEditor.amountCny')" type="text" inputmode="decimal" pattern="\d+(?:\.\d{1,2})?" required /><small v-if="amountCnyMissing" data-testid="opportunity-amount-cny-missing">{{ t('oppEditor.amountCnyMissing') }}</small></label>
+      <label class="amount-cny-field"><span>{{ t('oppEditor.amountCny') }}</span><input v-model="form.amountCny" :aria-label="t('oppEditor.amountCny')" type="text" inputmode="decimal" pattern="\d+(?:\.\d{1,2})?" :required="amountRequired" /><small v-if="amountCnyMissing" data-testid="opportunity-amount-cny-missing">{{ t('oppEditor.amountCnyMissing') }}</small></label>
       <label><span>{{ t('oppEditor.poDate') }}<RequiredMark :show="!opportunity" /></span><input v-model="form.poDate" :aria-label="t('oppEditor.poDate')" type="date" required /></label>
       <label><span>{{ t('oppEditor.toolType') }}<RequiredMark :show="!opportunity" /></span><AccountSegmentSelect v-model="form.toolType" :segments="equipmentChoices" :label="t('oppEditor.toolType')" :custom-option-label="locale === 'en-US' ? '+ Custom equipment type' : '＋自定义设备类型'" :custom-input-label="t('oppEditor.toolType')" :custom-placeholder="locale === 'en-US' ? 'Enter a custom equipment type' : '请输入自定义设备类型'" :empty-placeholder="locale === 'en-US' ? 'Select equipment type' : '请选择设备类型'" :custom-on-empty="false" required /></label>
       <label><span>{{ t('oppEditor.saleType') }}<RequiredMark :show="!opportunity" /></span><select v-model="form.saleType" :aria-label="t('oppEditor.saleType')" required><option v-for="saleType in SALE_TYPE_OPTIONS" :key="saleType" :value="saleType">{{ salesEnumLabel(saleType, locale) }}</option></select></label>

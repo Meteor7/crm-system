@@ -138,6 +138,21 @@ class TestCockpitMetrics(unittest.TestCase):
                 row = next(r for r in result["_details"]["demo_done"] if r["id"] == "missing")
                 self.assertIsNone(row["amount"])
 
+    def test_amounts_left_blank_at_s1_stay_unknown_after_demo_done_until_entered(self):
+        # Blank S1 amounts are stored as 0.00, and the Customer Review event may still take the deal to S2.
+        # Sales entered both on 2026-09-15, after the week viewed; history records them as filled in from empty.
+        data = fixture()
+        data["opportunities"][0].update(amount="300.00", amount_cny="300.00")
+        data["opportunities"].append({**data["opportunities"][0], "name": "priced", "amount": "200.00", "amount_cny": "200.00"})
+        data["history"] = [history("amount", "2026-09-15", "", "300.00"), history("amount_cny", "2026-09-15", "", "300.00")]
+        past = build_review(data, QUERY, NOW, COVERAGE)
+        self.assertEqual(past["pipeline"][1]["count"]["value"], 2)
+        self.assertEqual((past["pipeline"][1]["amount"]["state"], past["sales"][0]["pipeline"]["state"]),
+                         ("insufficient", "insufficient"))
+        self.assertEqual({r["id"]: r["amount"] for r in past["_details"]["demo_done"]}, {"opp": None, "priced": "200.00"})
+        current = build_review(data, {"period": "month", "anchor": "2026-09-01"}, NOW, COVERAGE)
+        self.assertEqual(current["pipeline"][1]["amount"]["value"], "500.00")
+
     def test_cny_backfill_falls_back_to_the_cny_original_amount_before_filling(self):
         data = fixture()
         data["opportunities"][0]["amount_cny"] = "250.00"

@@ -493,7 +493,7 @@ onMounted(async () => {
               <div><dt>{{ t('detail.accountNameField') }}</dt><dd>{{ selected.account }}</dd></div>
               <div><dt>{{ t('detail.site') }}</dt><dd>{{ siteDisplay }}</dd></div>
               <div><dt>{{ t('detail.closeDate') }}</dt><dd>{{ formatDisplayDate(selected.poDate) }}</dd></div>
-              <div><dt>{{ t('detail.amount') }}</dt><dd>{{ formatMoney(selected.amount, selected.currency) }}</dd></div>
+              <div><dt>{{ t('detail.amount') }}</dt><dd data-testid="opportunity-amount" :class="{ 'pending-value': !selected.amount }">{{ selected.amount ? formatMoney(selected.amount, selected.currency) : t('oppEditor.amountPending') }}</dd></div>
               <div><dt>{{ t('oppEditor.amountCny') }}</dt><dd data-testid="opportunity-amount-cny" :class="{ 'pending-value': !selected.amountCny }">{{ selected.amountCny ? formatMoney(selected.amountCny, 'CNY') : t('oppEditor.amountCnyPending') }}</dd></div>
               <div><dt>{{ t('detail.opportunityOwner') }}</dt><dd>{{ personnelDisplayName(selected.owner) }}</dd></div>
               <div><dt>{{ t('detail.toolSaleType') }}</dt><dd>{{ systemValueLabel(selected.toolType, locale) }} · {{ salesEnumLabel(selected.saleType, locale) }}</dd></div>
@@ -554,7 +554,7 @@ onMounted(async () => {
           <section class="detail-card commercial-card">
             <header><CircleDollarSign :size="16" /><h2>{{ t('detail.commercialForecast') }}</h2></header>
             <div class="commercial-grid">
-              <div><small>{{ t('oppEditor.currency') }} / {{ t('oppEditor.originalAmount') }}</small><strong>{{ formatMoney(selected.originalAmount, selected.currency) }}</strong></div>
+              <div><small>{{ t('oppEditor.currency') }} / {{ t('oppEditor.originalAmount') }}</small><strong data-testid="opportunity-original-amount">{{ selected.originalAmount ? formatMoney(selected.originalAmount, selected.currency) : t('oppEditor.amountPending') }}</strong></div>
               <div><small>{{ t('oppEditor.shipmentDate') }} / {{ t('oppEditor.fatDate') }}</small><strong>{{ formatDisplayDate(selected.shipmentDate) }} · {{ formatDisplayDate(selected.fatDate) }}</strong></div>
               <div><small>{{ t('oppEditor.payment') }}</small><strong>{{ selected.paymentMilestones.join(' · ') }}</strong></div>
               <div><small>{{ t('oppEditor.competition') }}</small><strong>{{ selected.competition }}</strong></div>

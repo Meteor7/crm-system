@@ -94,7 +94,10 @@ export interface AccountSummaryDto {
   region: string
   owner: string
   visibility?: 'Private' | 'Public'
+  /** Known open Opportunity amounts only. */
   pipelineAmount: number
+  /** Open Opportunities whose amount is not entered yet, left out of pipelineAmount. */
+  pipelineMissingAmountCount?: number
   intentScore: number
   stakeholderCount: number
   siteCount: number
@@ -253,9 +256,10 @@ export interface LeadConversionInput {
   newSite?: Omit<SiteDto, 'id'>
   newContact?: Omit<CreateContactInput, 'accountId' | 'siteId' | 'reportsToContactId'>
   opportunityTitle: string
-  opportunityAmount: DecimalAmount
-  /** The new Opportunity's amount in CNY, entered by Sales. */
-  opportunityAmountCny: DecimalAmount
+  /** '' leaves the amount of the new qualified_opportunity not entered yet. */
+  opportunityAmount: DecimalAmount | ''
+  /** The new Opportunity's amount in CNY, entered by Sales; '' leaves it not entered yet. */
+  opportunityAmountCny: DecimalAmount | ''
   opportunityCloseDate: string
   opportunityOwner: string
   toolType: string
@@ -318,7 +322,8 @@ export interface OpportunityDto {
   accountName: string
   title: string
   segment: AccountSummaryDto['segment']
-  amount: DecimalAmount
+  /** '' until someone enters it (allowed at qualified_opportunity), never a believable 0. */
+  amount: DecimalAmount | ''
   currency: string
   stage: OpportunityStage
   probabilityLevel: OpportunityProbabilityLevelValue
@@ -795,6 +800,9 @@ export interface DashboardDto {
       confirmedBooking: DecimalAmount
       cumulativeWon: DecimalAmount
     }>
+    /** Open / won Opportunities whose amount is not entered yet; the money figures above leave them out. */
+    openPipelineMissingAmountCount?: number
+    cumulativeWonMissingAmountCount?: number
     overdueActions: number
     pendingDemoRequests: number
     activeEvaluations: number
@@ -804,12 +812,14 @@ export interface DashboardDto {
     currency: string
     amount: DecimalAmount
     count: number
+    /** How many of `count` have no amount yet: `amount` adds the known ones only. */
+    missingAmountCount?: number
   }>
   bookingByMonth: Array<{ label: string; currency: string; amount: DecimalAmount; count: number }>
-  ownerPerformance: Array<{ owner: string; currency: string; pipeline: DecimalAmount; booking: DecimalAmount }>
-  topAccounts: Array<{ accountId: string; accountName: string; currency: string; pipeline: DecimalAmount; booking: DecimalAmount }>
-  segmentDistribution: Array<{ label: string; currency: string; pipeline: DecimalAmount; booking: DecimalAmount }>
-  regionDistribution: Array<{ label: string; currency: string; pipeline: DecimalAmount; booking: DecimalAmount }>
+  ownerPerformance: Array<{ owner: string; currency: string; pipeline: DecimalAmount; booking: DecimalAmount; pipelineMissingAmountCount?: number }>
+  topAccounts: Array<{ accountId: string; accountName: string; currency: string; pipeline: DecimalAmount; booking: DecimalAmount; pipelineMissingAmountCount?: number }>
+  segmentDistribution: Array<{ label: string; currency: string; pipeline: DecimalAmount; booking: DecimalAmount; pipelineMissingAmountCount?: number }>
+  regionDistribution: Array<{ label: string; currency: string; pipeline: DecimalAmount; booking: DecimalAmount; pipelineMissingAmountCount?: number }>
   tierDistribution: Array<{ label: string; count: number }>
   riskDistribution: Array<{ label: string; count: number }>
   process: {
@@ -875,6 +885,8 @@ export interface PipelineDto {
     openPipeline: DecimalAmount
     confirmedBooking: DecimalAmount
   }>
+  /** Open Opportunities whose amount is not entered yet; `totals` leave them out. */
+  openPipelineMissingAmountCount?: number
 }
 import type { DecimalAmount } from '@/domain/money'
 import type { MultipartFilePart } from '@/api/binary-transport'

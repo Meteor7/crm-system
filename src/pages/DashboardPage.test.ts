@@ -10,6 +10,7 @@ import DashboardPage from './DashboardPage.vue'
 import { createAppRouter } from '@/app/router'
 import { useAppStore } from '@/stores/app'
 import { setLocale } from '@/i18n'
+import type { DashboardDto } from '@/types/crm'
 
 async function globals() {
   const router = createAppRouter()
@@ -499,6 +500,50 @@ describe('DashboardPage', () => {
     expect(listVisits).toHaveBeenNthCalledWith(2, { page: 2, pageSize: 200 })
     expect(listDemoRequests).toHaveBeenNthCalledWith(2, { page: 2, pageSize: 200 })
     expect(listEvaluations).toHaveBeenNthCalledWith(2, { page: 2, pageSize: 200 })
+  })
+
+  it('says how many amounts the money KPIs leave out and never shows an all-unknown total as 0.00', async () => {
+    // Only the management view (Manager role) renders the money KPIs.
+    const base = createMockApi({ latency: 0, role: 'Manager', userName: '演示经理01' })
+    const withKpis = (kpis: Partial<DashboardDto['kpis']>) => {
+      const getDashboard: typeof base.getDashboard = async (query) => {
+        const result = await base.getDashboard(query)
+        return { ...result, data: { ...result.data, kpis: { ...result.data.kpis, ...kpis } } }
+      }
+      return { ...base, getDashboard }
+    }
+
+    const mixed = mount(DashboardPage, {
+      props: { apiClient: withKpis({
+        moneyByCurrency: [{ currency: 'CNY', openPipeline: '100.00', confirmedBooking: '0.00', cumulativeWon: '0.00' }],
+        openPipelineMissingAmountCount: 1,
+        cumulativeWonMissingAmountCount: 0,
+      }) },
+      global: await globals(),
+    })
+    await flushPromises()
+    expect(mixed.get('.kpi-value-pipeline strong').text()).toBe('CNY 100.00 · 1 条未填金额')
+    expect(mixed.get('.kpi-value-won strong').text()).toBe('CNY 0.00')
+    mixed.unmount()
+
+    // Every open Opportunity lacks an amount: the known total is no figure at all, even beside a real Booking.
+    const unknown = mount(DashboardPage, {
+      props: { apiClient: withKpis({
+        moneyByCurrency: [{ currency: 'CNY', openPipeline: '0.00', confirmedBooking: '500.00', cumulativeWon: '0.00' }],
+        openPipelineMissingAmountCount: 2,
+        cumulativeWonMissingAmountCount: 0,
+      }) },
+      global: await globals(),
+    })
+    await flushPromises()
+    expect(unknown.get('.kpi-value-pipeline strong').text()).toBe('数据不足 · 2 条未填金额')
+    expect(unknown.get('.kpi-value-booking strong').text()).toBe('CNY 500.00')
+    setLocale('en-US')
+    await flushPromises()
+    expect(unknown.get('.kpi-value-pipeline strong').text()).toBe('Insufficient data · 2 without an amount')
+    setLocale('zh-CN')
+    await flushPromises()
+    unknown.unmount()
   })
 
   it('shows a request ID and retries after a dashboard failure', async () => {

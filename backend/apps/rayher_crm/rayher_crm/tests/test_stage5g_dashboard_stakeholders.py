@@ -108,6 +108,59 @@ class TestStage5GDashboardStakeholders(FrappeTestCase):
         with self.assertRaises(CrmApiException):
             get_dashboard({"range": "decade"})
 
+    def test_dashboard_money_leaves_unknown_amounts_out_and_counts_them(self):
+        # A segment of its own: the class shares one transaction, so the other tests' Opportunities stay out.
+        account, site, _contact = self._base(self.sales, "Unpriced", segment="Advanced Packaging")
+        self._opportunity(account, site, self.sales, "Dashboard Priced", QUALIFIED_OPPORTUNITY, 1000)
+        for currency in ("CNY", "USD"):
+            create_strategy_opportunity({
+                "probabilityLevel": "pipeline", "accountId": account["id"], "siteId": site["id"],
+                "title": f"Dashboard Unpriced {currency}", "owner": self.sales, "amount": "", "intentScore": 70,
+                "poDate": "2026-12-31", "toolType": "Inspection", "saleType": "New Equipment", "subRegion": "East",
+                "currency": currency, "originalAmount": "", "amountCny": "", "qualificationConfirmed": True,
+            })
+
+        frappe.set_user(self.sales)
+        result = get_dashboard({"range": "month", "segment": "Advanced Packaging"})
+        # Money takes known amounts only and gets no USD 0.00 row; the two unknown ones are counted apart.
+        self.assertEqual(result["kpis"]["moneyByCurrency"], [{
+            "currency": "CNY", "openPipeline": "1000.00", "confirmedBooking": "0.00", "cumulativeWon": "0.00",
+        }])
+        self.assertEqual(
+            (result["kpis"]["openPipelineMissingAmountCount"], result["kpis"]["cumulativeWonMissingAmountCount"]),
+            (2, 0),
+        )
+        # Counts keep every Opportunity: the unknown CNY one still counts in its stage, and the stage keeps a
+        # USD row made of the unknown USD one alone, whose known sum is no value and is flagged as missing.
+        self.assertEqual(
+            [
+                (row["stage"], row["currency"], row["amount"], row["count"], row["missingAmountCount"])
+                for row in result["funnel"]
+            ],
+            [(QUALIFIED_OPPORTUNITY, "CNY", "1000.00", 2, 1), (QUALIFIED_OPPORTUNITY, "USD", "0.00", 1, 1)],
+        )
+        self.assertEqual(
+            [
+                (row["currency"], row["pipeline"], row["booking"], row["pipelineMissingAmountCount"])
+                for row in result["ownerPerformance"] if row["owner"] == self.sales
+            ],
+            [("CNY", "1000.00", "0.00", 1), ("USD", "0.00", "0.00", 1)],
+        )
+        self.assertEqual(
+            [
+                (row["currency"], row["pipeline"], row["booking"], row["pipelineMissingAmountCount"])
+                for row in result["topAccounts"] if row["accountId"] == account["id"]
+            ],
+            [("CNY", "1000.00", "0.00", 1), ("USD", "0.00", "0.00", 1)],
+        )
+        self.assertEqual(
+            [
+                (row["currency"], row["pipeline"], row["booking"], row["pipelineMissingAmountCount"])
+                for row in result["segmentDistribution"] if row["label"] == "Advanced Packaging"
+            ],
+            [("CNY", "1000.00", "0.00", 1), ("USD", "0.00", "0.00", 1)],
+        )
+
     def test_engineer_dashboard_does_not_require_visit_access(self):
         frappe.set_user(self.engineer)
 

@@ -14,6 +14,7 @@ from rayher_crm.services.opportunities import (
 )
 from rayher_crm.services.sites import create_site
 from rayher_crm.setup import opportunity_cny_backfill
+from rayher_crm.tests._opportunity_fixtures import advance_opportunity_fixture
 
 
 class TestOpportunityCnyAmount(FrappeTestCase):
@@ -64,17 +65,20 @@ class TestOpportunityCnyAmount(FrappeTestCase):
         # Test data only: an Opportunity from before the field, or one Sales have not filled in yet.
         frappe.db.set_value("CRM Opportunity", opportunity_id, "amount_cny", 0, update_modified=False)
 
-    def test_create_requires_a_positive_cny_amount_and_returns_it(self):
-        for value, error in ((None, "Required"), ("", "Required"), ("0", "Invalid amount"), ("-5", "Invalid amount"), ("1.234", "Invalid amount")):
+    def test_create_rejects_an_invalid_cny_amount_leaves_a_missing_one_unknown_and_returns_it(self):
+        for value in ("-5", "1.234", "not-money"):
+            with self.assertRaises(CrmApiException) as failure:
+                create_strategy_opportunity(self._input(amountCny=value))
+            self.assertEqual(failure.exception.code, "VALIDATION_ERROR", value)
+            self.assertEqual(failure.exception.field_errors, {"amountCny": "Invalid amount"}, value)
+        # A new Opportunity is qualified (S1), where the CNY amount may still be unknown: "", never 0.
+        for value in (None, "", "0"):
             payload = self._input()
             if value is None:
                 payload.pop("amountCny")
             else:
                 payload["amountCny"] = value
-            with self.assertRaises(CrmApiException) as failure:
-                create_strategy_opportunity(payload)
-            self.assertEqual(failure.exception.code, "VALIDATION_ERROR", value)
-            self.assertEqual(failure.exception.field_errors, {"amountCny": error}, value)
+            self.assertEqual(create_strategy_opportunity(payload)["amountCny"], "", value)
 
         created = create_strategy_opportunity(self._input(currency="USD", amount="30000", originalAmount="30000", amountCny="213000.5"))
 
@@ -82,7 +86,10 @@ class TestOpportunityCnyAmount(FrappeTestCase):
         self.assertEqual(get_strategy_opportunity(created["id"])["amountCny"], "213000.50")
 
     def test_an_empty_cny_amount_blocks_other_edits_until_it_is_filled_in(self):
-        created = create_strategy_opportunity(self._input(currency="USD", amountCny="1"))
+        # Past S1 only: a qualified Opportunity may keep its amounts unknown.
+        created = advance_opportunity_fixture(
+            create_strategy_opportunity(self._input(currency="USD", amountCny="1")), "demo_done",
+        )
         self._clear_cny_amount(created["id"])
         current = get_strategy_opportunity(created["id"])
         self.assertEqual(current["amountCny"], "")
@@ -111,7 +118,7 @@ class TestOpportunityCnyAmount(FrappeTestCase):
         self.assertEqual(changed["amountCny"], "210000.50")
         self.assertEqual(self._history(created["id"], "amount_cny"), [("200000.00", "210000.50", self.sales)])
 
-    def test_lead_conversion_requires_and_stores_the_cny_amount(self):
+    def test_lead_conversion_stores_the_cny_amount(self):
         lead = create_lead({
             "name": "CNY Conversion Lead", "company": self.account["name"], "title": "Process Manager",
             "phone": "13800000004", "email": "cny.conversion@example.invalid", "source": "Trade Show",
@@ -128,10 +135,11 @@ class TestOpportunityCnyAmount(FrappeTestCase):
             "opportunityCloseDate": "2026-12-31", "opportunityOwner": self.sales, "toolType": "Inspection",
             "qualificationConfirmed": True, "opportunityProbabilityLevel": "pipeline",
         }
+        # A conversion may leave the CNY amount unknown (test_lead_api); an invalid one is still refused.
         before = frappe.db.count("CRM Opportunity")
-        with self.assertRaises(CrmApiException) as missing:
-            convert_lead(lead["id"], conversion)
-        self.assertEqual(missing.exception.field_errors, {"opportunityAmountCny": "Required"})
+        with self.assertRaises(CrmApiException) as invalid:
+            convert_lead(lead["id"], {**conversion, "opportunityAmountCny": "-1"})
+        self.assertEqual(invalid.exception.field_errors, {"opportunityAmountCny": "Invalid amount"})
         self.assertEqual(frappe.db.count("CRM Opportunity"), before)
 
         converted = convert_lead(lead["id"], {**conversion, "opportunityAmountCny": "250000.5"})

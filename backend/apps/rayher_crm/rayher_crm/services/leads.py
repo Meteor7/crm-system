@@ -228,15 +228,26 @@ def get_lead(name: str) -> dict[str, Any]:
     return serialize_lead(_require_lead(name))
 
 
-def _opportunity_amount(value: Any) -> Decimal:
+def _optional_opportunity_amount(value: Any) -> Decimal:
+    """A conversion always creates a qualified (S1) Opportunity, whose amount may still be unknown.
+
+    Blank or zero is stored as 0.00, which the Opportunity reads back as "" (not entered yet).
+    """
+    if value is None or str(value).strip() == "":
+        return Decimal("0.00")
+    # One message and field hint for every way the amount can be wrong, so the API names the field.
+    invalid = CrmApiException(
+        "VALIDATION_ERROR", "opportunityAmount must be blank or a non-negative amount with at most two decimal places.",
+        field_errors={"opportunityAmount": "Invalid amount"},
+    )
     if isinstance(value, bool):
-        raise CrmApiException("VALIDATION_ERROR", "opportunityAmount must be a positive amount.")
+        raise invalid
     try:
         amount = Decimal(str(value))
     except (InvalidOperation, ValueError) as exc:
-        raise CrmApiException("VALIDATION_ERROR", "opportunityAmount must be a positive amount.") from exc
-    if not amount.is_finite() or amount <= 0 or amount > MAX_OPPORTUNITY_AMOUNT or amount.as_tuple().exponent < -2:
-        raise CrmApiException("VALIDATION_ERROR", "opportunityAmount must be positive with at most two decimal places.")
+        raise invalid from exc
+    if not amount.is_finite() or amount < 0 or amount > MAX_OPPORTUNITY_AMOUNT or amount.as_tuple().exponent < -2:
+        raise invalid
     return amount
 
 
@@ -263,6 +274,7 @@ def _lock_lead_for_conversion(name: str):
 
 def _validate_conversion(payload: dict[str, Any]) -> dict[str, Any]:
     from rayher_crm.services.opportunities import (
+        _optional_positive_money,
         assert_initial_probability_level,
         assert_qualification_confirmed,
         required_positive_money,
@@ -285,10 +297,13 @@ def _validate_conversion(payload: dict[str, Any]) -> dict[str, Any]:
         payload.get("opportunityProbabilityLevel") or "", "opportunityProbabilityLevel", PROBABILITY_LEVEL_CHOICES,
     )
     assert_initial_probability_level(probability_level, "opportunityProbabilityLevel")
+    # The new Opportunity is always qualified (S1), so both amounts may be left for later.
     return {
         "title": required_text(payload, "opportunityTitle"),
-        "amount": _opportunity_amount(payload.get("opportunityAmount")),
-        "amount_cny": required_positive_money(payload.get("opportunityAmountCny"), "opportunityAmountCny"),
+        "amount": _optional_opportunity_amount(payload.get("opportunityAmount")),
+        "amount_cny": _optional_positive_money(
+            payload.get("opportunityAmountCny"), "opportunityAmountCny", required_positive_money,
+        ),
         "po_date": po_date,
         "currency": currency,
         "owner": resolve_write_owner(payload.get("opportunityOwner")),

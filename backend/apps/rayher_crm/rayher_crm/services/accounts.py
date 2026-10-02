@@ -117,9 +117,12 @@ def _account_activity_metrics(account_id: str) -> dict[str, Any]:
         as_dict=True,
     )
     open_opportunities = [item for item in opportunities if item.stage in OPEN_STAGES]
-    currencies = {str(item.currency or "") for item in open_opportunities}
+    # 0 is an amount nobody has entered yet (allowed at S1): it adds no value and no second currency,
+    # and is counted apart so the total is not read as complete.
+    priced = [item for item in open_opportunities if Decimal(str(item.amount or 0)) > 0]
+    currencies = {str(item.currency or "") for item in priced}
     pipeline_amount = (
-        sum((Decimal(str(item.amount or 0)) for item in open_opportunities), Decimal("0"))
+        sum((Decimal(str(item.amount)) for item in priced), Decimal("0"))
         if len(currencies) <= 1 else Decimal("0")
     )
     intent_score = max((int(item.score or 0) for item in opportunities), default=0)
@@ -135,6 +138,7 @@ def _account_activity_metrics(account_id: str) -> dict[str, Any]:
     overdue = bool(due and due < frappe.utils.today())
     return {
         "pipelineAmount": float(pipeline_amount),
+        "pipelineMissingAmountCount": len(open_opportunities) - len(priced),
         "intentScore": intent_score,
         "risk": "高风险" if overdue else "关注" if open_opportunities and not next_action else "稳健",
         "nextAction": str(next_action.title or "") if next_action else "",
@@ -151,6 +155,7 @@ def serialize_account(doc) -> dict[str, Any]:
     if is_non_owner_sales:
         activity = {
             "pipelineAmount": 0,
+            "pipelineMissingAmountCount": 0,
             "intentScore": 0,
             "risk": "稳健",
             "nextAction": "",
@@ -172,6 +177,7 @@ def serialize_account(doc) -> dict[str, Any]:
         "owner": doc.custom_crm_owner,
         "visibility": doc.custom_crm_visibility or "Private",
         "pipelineAmount": activity["pipelineAmount"],
+        "pipelineMissingAmountCount": activity["pipelineMissingAmountCount"],
         "intentScore": activity["intentScore"],
         "stakeholderCount": stakeholder_count,
         "siteCount": site_count,

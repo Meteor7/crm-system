@@ -134,7 +134,7 @@ function dealStatusLabel(value: string) {
 }
 const dealRows = computed<ProjectRow[]>(() => [
   ...filteredOpportunities.value.map((item) => ({
-    id: item.id, title: item.title, meta: `${item.id} · ${formatMoney(item.amount, item.currency)} · ${item.owner}`,
+    id: item.id, title: item.title, meta: `${item.id} · ${item.amount ? formatMoney(item.amount, item.currency) : t('oppEditor.amountPending')} · ${item.owner}`,
     status: item.stage, tone: opportunityStageTone(item.stage),
   })),
   ...filteredBookings.value.map((item) => ({

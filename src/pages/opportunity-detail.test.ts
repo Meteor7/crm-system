@@ -523,7 +523,7 @@ describe('Opportunity detail', () => {
     expect(wrapper.find('[role="dialog"]').exists()).toBe(false)
   })
 
-  it('shows the amount in CNY, and asks for it before an edit when it is missing', async () => {
+  it('shows the amount in CNY, and asks for it before an edit past stage 1 when it is missing', async () => {
     const filled = mountPage(await context('OPP-001'))
     await flushPromises()
     expect(filled.get('[data-testid="opportunity-amount-cny"]').text()).toBe('CNY 16,800,000.00')
@@ -531,6 +531,8 @@ describe('Opportunity detail', () => {
     const cached = structuredClone(createMemorySalesRepository().snapshot)
     const foreign = cached.opportunities.find((item) => item.id === 'OPP-001')!
     foreign.currency = 'USD'
+    // Stage 1 may stay without amounts; from Demo done on, every edit needs them.
+    foreign.stage = 'demo_done'
     delete (foreign as { amountCny?: string }).amountCny
     const wrapper = mountPage(await context('OPP-001', false, 'Manager', { salesRepository: createMemorySalesRepository(cached) }))
     await flushPromises()
@@ -548,5 +550,34 @@ describe('Opportunity detail', () => {
     await flushPromises()
     expect(wrapper.find('[role="dialog"]').exists()).toBe(false)
     expect(wrapper.get('[data-testid="opportunity-amount-cny"]').text()).toBe('CNY 118,000.00')
+  })
+
+  it('shows a stage-1 Opportunity without amounts as not entered and saves it again without them', async () => {
+    const setup = await context('OPP-001')
+    let record = { ...(await setup.api.getStrategyOpportunity('OPP-001')).data, stage: 'qualified_opportunity' as const, amount: '', originalAmount: '', amountCny: '' }
+    vi.spyOn(setup.api, 'getStrategyOpportunity').mockImplementation(async () => ({ data: record, meta: { requestId: 'req_blank_amount' }, warnings: [] }))
+    const update = vi.spyOn(setup.api, 'updateStrategyOpportunity').mockImplementation(async (_id, input) => {
+      record = { ...record, title: input.title ?? record.title, modified: '2026-09-30 10:00:00' }
+      return { data: record, meta: { requestId: 'req_blank_amount_saved' }, warnings: [] }
+    })
+    const wrapper = mountPage(setup)
+    await flushPromises()
+
+    for (const testId of ['opportunity-amount', 'opportunity-amount-cny', 'opportunity-original-amount']) {
+      expect(wrapper.get(`[data-testid="${testId}"]`).text()).toBe('待补填')
+    }
+    expect(wrapper.get('[data-testid="opportunity-amount"]').classes()).toContain('pending-value')
+
+    await wrapper.get('[data-testid="edit-opportunity"]').trigger('click')
+    expect(wrapper.find('[data-testid="opportunity-amount-cny-missing"]').exists()).toBe(false)
+    await wrapper.get('[aria-label="Opportunity 名称"]').setValue('仍在合格商机阶段')
+    await wrapper.get('[data-modal-submit]').trigger('submit')
+    await flushPromises()
+
+    expect(update).toHaveBeenCalledTimes(1)
+    expect(update.mock.calls[0]?.[1]).toMatchObject({ title: '仍在合格商机阶段', amount: '', originalAmount: '', amountCny: '' })
+    expect(wrapper.find('[role="dialog"]').exists()).toBe(false)
+    expect(wrapper.get('h1').text()).toBe('仍在合格商机阶段')
+    expect(wrapper.get('[data-testid="opportunity-amount"]').text()).toBe('待补填')
   })
 })

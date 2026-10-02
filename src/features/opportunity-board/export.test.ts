@@ -53,6 +53,17 @@ describe('full-result board export', () => {
     expect(workbook.sheets[0].rows).toHaveLength(2)
   })
 
+  it.each(['', '0.00'])('exports an amount not entered yet (%j) as a dash and an empty CNY cell, never as 0', (amount) => {
+    const result = boardResultFixture().data
+    result.items = [
+      { ...result.items[0], id: 'unknown', stage: 'qualified_opportunity', amount, currency: 'USD', amountCny: null },
+      { ...result.items[0], id: 'known', amount: '1234.50', currency: 'USD', amountCny: '8765.40' },
+    ]
+    const workbook = boardWorkbook(result, ['amount', 'amountCny'], null, 'en-US')
+    expect(workbook.sheets[0].rows[1]).toEqual([{ v: '—', s: 5 }, { v: '', s: 16 }])
+    expect(workbook.sheets[0].rows[2]).toEqual([{ v: 'USD 1234.50', s: 5 }, { v: 8765.4, s: 16 }])
+  })
+
   it('writes CNY amounts as numbers and drops characters XML forbids', () => {
     const result = boardResultFixture().data
     result.items = [{ ...result.items[0], id: 'a', customerName: 'A\u000bB\u0000C', amountCny: '1234567.89' }]

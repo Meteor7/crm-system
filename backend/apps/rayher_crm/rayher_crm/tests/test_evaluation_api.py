@@ -29,7 +29,7 @@ from rayher_crm.services.evaluations import (
     update_evaluation_run,
     update_evaluation_status,
 )
-from rayher_crm.services.opportunities import create_opportunity_action, create_strategy_opportunity, get_strategy_opportunity, mark_opportunity_lost
+from rayher_crm.services.opportunities import create_opportunity_action, create_strategy_opportunity, get_strategy_opportunity, mark_opportunity_lost, update_strategy_opportunity
 from rayher_crm.services.opportunity_stages import CUSTOMER_BUDGET_APPROVED, DEMO_DONE, LOST, QUALIFIED_OPPORTUNITY
 from rayher_crm.services.sites import create_site
 from rayher_crm.services.visits import create_visit
@@ -140,6 +140,43 @@ class TestEvaluationApi(FrappeTestCase):
         for status in ("Internal Review", "Customer Review"):
             current = update_evaluation_status(evaluation_id, {"status": status}, current["modified"])
         return current
+
+    def test_customer_review_moves_an_opportunity_without_amounts_that_then_needs_them(self):
+        # Trial rule: an S1 Opportunity may still have no amount; reaching Customer Review moves it to
+        # Demo done all the same, and the next ordinary edit there asks for the amounts.
+        opportunity_id = self.request["opportunityId"]
+        frappe.set_user(self.sales)
+        current = get_strategy_opportunity(opportunity_id)
+        cleared = update_strategy_opportunity(
+            opportunity_id, {"amount": "", "originalAmount": "", "amountCny": ""}, current["modified"],
+        )
+        self.assertEqual((cleared["stage"], cleared["amount"], cleared["amountCny"]), (QUALIFIED_OPPORTUNITY, "", ""))
+
+        frappe.set_user(self.engineer)
+        reviewed = self._reach_customer_review(self.request["evaluationId"])
+        self.assertEqual(reviewed["status"], "Customer Review")
+
+        frappe.set_user(self.sales)
+        advanced = get_strategy_opportunity(opportunity_id)
+        self.assertEqual(
+            (advanced["stage"], advanced["amount"], advanced["originalAmount"], advanced["amountCny"]),
+            (DEMO_DONE, "", "", ""),
+        )
+        latest = advanced["stageHistory"][0]
+        self.assertEqual(
+            (latest["from"], latest["to"], latest["event"], latest["referenceName"]),
+            (QUALIFIED_OPPORTUNITY, DEMO_DONE, "demo_customer_review", self.request["evaluationId"]),
+        )
+        with self.assertRaises(CrmApiException) as missing:
+            update_strategy_opportunity(opportunity_id, {"title": "Demo done needs amounts"}, advanced["modified"])
+        self.assertEqual(missing.exception.code, "VALIDATION_ERROR")
+        filled = update_strategy_opportunity(
+            opportunity_id, {"amount": "180000", "originalAmount": "180000", "amountCny": "180000"}, advanced["modified"],
+        )
+        self.assertEqual((filled["stage"], filled["amount"], filled["amountCny"]), (DEMO_DONE, "180000.00", "180000.00"))
+        # The Demo result stays as recorded throughout.
+        demo = get_evaluation(self.request["evaluationId"])
+        self.assertEqual((demo["status"], [run["status"] for run in demo["runs"]]), ("Customer Review", ["Completed"]))
 
     def test_scoped_list_get_strict_status_graph_cas_and_acceptance(self):
         evaluation_id = self.request["evaluationId"]

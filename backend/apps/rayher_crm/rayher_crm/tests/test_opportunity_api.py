@@ -95,6 +95,88 @@ class TestOpportunityApi(FrappeTestCase):
     def _days_ago(self, days: int) -> str:
         return frappe.utils.add_days(frappe.utils.today(), -days)
 
+    def test_s1_amount_is_optional_but_required_once_advanced(self):
+        account, site = self._account_site(self.sales, "AmountOptional")
+        payload = self._input(account, site, self.sales)
+        payload.pop("amount")
+        payload.pop("originalAmount")
+        payload.pop("amountCny")
+
+        created = create_strategy_opportunity(payload)
+        self.assertEqual((created["amount"], created["originalAmount"], created["amountCny"]), ("", "", ""))
+        # Stored as the columns' "not entered yet" 0, never read back as a 0 amount.
+        self.assertEqual(
+            tuple(frappe.db.get_value("CRM Opportunity", created["id"], ["amount", "original_amount", "amount_cny"])),
+            (0, 0, 0),
+        )
+        # Blank and exact zero mean the same at S1.
+        for amounts in (
+            {"amount": "", "originalAmount": "", "amountCny": ""},
+            {"amount": "0", "originalAmount": "0.00", "amountCny": 0},
+        ):
+            with self.subTest(amounts=amounts):
+                unknown = create_strategy_opportunity(self._input(account, site, self.sales, **amounts))
+                self.assertEqual((unknown["amount"], unknown["originalAmount"], unknown["amountCny"]), ("", "", ""))
+
+        # Still at S1: an edit that also omits amounts is accepted, and the amounts reopen unknown.
+        edited = update_strategy_opportunity(created["id"], {"title": "Still S1, no amount"}, created["modified"])
+        self.assertEqual((edited["title"], edited["amount"], edited["amountCny"]), ("Still S1, no amount", "", ""))
+        self.assertEqual(get_strategy_opportunity(created["id"])["originalAmount"], "")
+        self.assertNotIn("amount", {row["field"] for row in edited["history"]})
+
+        # At S1 an amount can be entered and taken out again; its history runs from and back to empty.
+        priced = update_strategy_opportunity(
+            created["id"], {"amount": "1000", "originalAmount": "1000", "amountCny": "1000"}, edited["modified"],
+        )
+        self.assertEqual((priced["amount"], priced["originalAmount"], priced["amountCny"]), ("1000.00", "1000.00", "1000.00"))
+        cleared = update_strategy_opportunity(
+            created["id"], {"amount": "", "originalAmount": "", "amountCny": ""}, priced["modified"],
+        )
+        self.assertEqual((cleared["amount"], cleared["originalAmount"], cleared["amountCny"]), ("", "", ""))
+        self.assertEqual(
+            sorted((row["from"], row["to"]) for row in cleared["history"] if row["field"] == "amount"),
+            [("", "1000.00"), ("1000.00", "")],
+        )
+
+        # Trial exception: the Customer Review event can advance with an unknown amount.
+        advanced = advance_opportunity_fixture(cleared, "demo_done")
+        self.assertEqual(
+            (advanced["stage"], advanced["amount"], advanced["originalAmount"], advanced["amountCny"]),
+            ("demo_done", "", "", ""),
+        )
+
+        # Any further edit at S2 now requires the amounts, exactly as before, and names the field to fill in
+        # (amount and original amount as amountCny), not only a top-level message.
+        with self.assertRaises(CrmApiException) as missing:
+            update_strategy_opportunity(advanced["id"], {"title": "S2 needs amount"}, advanced["modified"])
+        self.assertEqual(
+            (missing.exception.code, missing.exception.field_errors),
+            ("VALIDATION_ERROR", {"amount": "Invalid amount"}),
+        )
+        for amounts, field_errors in (
+            ({"amount": "50000.00", "originalAmount": "50000.00", "amountCny": ""}, {"amountCny": "Required"}),
+            ({"amount": "0", "originalAmount": "50000.00", "amountCny": "50000.00"}, {"amount": "Invalid amount"}),
+            ({"amount": "-1", "originalAmount": "50000.00", "amountCny": "50000.00"}, {"amount": "Invalid amount"}),
+            (
+                {"amount": "50000.001", "originalAmount": "50000.00", "amountCny": "50000.00"},
+                {"amount": "Invalid amount"},
+            ),
+            (
+                {"amount": "50000.00", "originalAmount": "0", "amountCny": "50000.00"},
+                {"originalAmount": "Invalid amount"},
+            ),
+        ):
+            with self.subTest(amounts=amounts), self.assertRaises(CrmApiException) as invalid:
+                update_strategy_opportunity(advanced["id"], amounts, advanced["modified"])
+            self.assertEqual((invalid.exception.code, invalid.exception.field_errors), ("VALIDATION_ERROR", field_errors))
+
+        filled = update_strategy_opportunity(
+            advanced["id"],
+            {"title": "S2 with amount", "amount": "50000.00", "originalAmount": "50000.00", "amountCny": "50000.00"},
+            advanced["modified"],
+        )
+        self.assertEqual((filled["amount"], filled["originalAmount"], filled["amountCny"]), ("50000.00", "50000.00", "50000.00"))
+
     def test_create_list_update_history_and_account_360(self):
         account, site = self._account_site(self.sales, "Core")
         with self.assertRaises(CrmApiException) as terminal_create:
@@ -389,6 +471,34 @@ class TestOpportunityApi(FrappeTestCase):
             )
         self.assertEqual(lost_rfq.exception.code, "INVALID_TRANSITION")
 
+    def test_a_deal_lost_at_stage_one_stays_editable_without_amounts(self):
+        account, site = self._account_site(self.sales, "LostEarly")
+        blank = {"amount": "", "originalAmount": "", "amountCny": ""}
+        early = create_strategy_opportunity(self._input(account, site, self.sales, **blank))
+        lost = mark_opportunity_lost(early["id"], {"lostReason": "Budget frozen"}, early["modified"])
+        self.assertEqual((lost["stage"], lost["lostAtStage"], lost["amount"]), ("lost", "qualified_opportunity", ""))
+        # It never got past S1, so a later edit does not ask for amounts it never had.
+        edited = update_strategy_opportunity(lost["id"], {"competition": "Lost to a rival"}, lost["modified"])
+        self.assertEqual(
+            (edited["stage"], edited["competition"], edited["amount"], edited["amountCny"]),
+            ("lost", "Lost to a rival", "", ""),
+        )
+        # A migrated loss that does not say where it was lost is not known to be an early one: amounts are required.
+        frappe.db.set_value("CRM Opportunity", lost["id"], "lost_at_stage", None, update_modified=False)
+        unknown_stage = get_strategy_opportunity(lost["id"])
+        with self.assertRaises(CrmApiException) as undated:
+            update_strategy_opportunity(lost["id"], {"competition": "Unknown stage"}, unknown_stage["modified"])
+        self.assertEqual(undated.exception.field_errors, {"amount": "Invalid amount"})
+        # A deal lost further on still needs all three amounts to be edited, as before.
+        late = self._demo_done(create_strategy_opportunity(self._input(account, site, self.sales, title="Late", **blank)))
+        lost_late = mark_opportunity_lost(late["id"], {"lostReason": "Competitor won"}, late["modified"])
+        self.assertEqual(lost_late["lostAtStage"], "demo_done")
+        with self.assertRaises(CrmApiException) as missing:
+            update_strategy_opportunity(lost_late["id"], {"competition": "Too late"}, lost_late["modified"])
+        self.assertEqual(
+            (missing.exception.code, missing.exception.field_errors), ("VALIDATION_ERROR", {"amount": "Invalid amount"}),
+        )
+
     def test_marking_lost_records_the_stage_and_reopening_stays_below_it(self):
         account, site = self._account_site(self.sales, "Lost")
         opportunity = self._demo_done(create_strategy_opportunity(self._input(account, site, self.sales)))
@@ -506,15 +616,25 @@ class TestOpportunityApi(FrappeTestCase):
     def test_validation_rejects_invalid_money_date_ranges_and_enums(self):
         account, site = self._account_site(self.sales, "Validation")
         cases = [
-            ({"amount": 0}, "amount"), ({"amount": "1.001"}, "amount"),
+            # Blank or zero is an amount not entered yet at S1; anything else still has to be an exact amount.
+            ({"amount": "-1"}, "amount"), ({"amount": "1.001"}, "amount"),
+            ({"originalAmount": True}, "originalAmount"), ({"amountCny": "not-money"}, "amountCny"),
             ({"intentScore": -1}, "intentScore"), ({"poDate": "2026-02-30"}, "poDate"),
             ({"stage": "Open"}, "stage"), ({"stage": "需求发现"}, "stage"),
             ({"probabilityLevel": "certain"}, "probabilityLevel"), ({"currency": "ZZZ"}, "currency"),
         ]
         for overrides, fieldname in cases:
-            with self.subTest(fieldname=fieldname), self.assertRaises(CrmApiException) as invalid:
-                create_strategy_opportunity(self._input(account, site, self.sales, **overrides))
-            self.assertEqual(invalid.exception.code, "VALIDATION_ERROR")
+            with self.subTest(fieldname=fieldname):
+                with self.assertRaises(CrmApiException) as invalid:
+                    create_strategy_opportunity(self._input(account, site, self.sales, **overrides))
+                self.assertEqual(invalid.exception.code, "VALIDATION_ERROR")
+                # A money field also names itself, not only a message, and the message is the one the front end maps.
+                if fieldname in ("amount", "originalAmount", "amountCny"):
+                    self.assertEqual(invalid.exception.field_errors, {fieldname: "Invalid amount"})
+                    self.assertEqual(
+                        invalid.exception.public_message,
+                        f"{fieldname} must be positive with at most two decimal places.",
+                    )
 
     def test_endpoints_return_stable_envelopes(self):
         account, site = self._account_site(self.sales, "Endpoint")

@@ -22,9 +22,14 @@ export function addMoney(values: DecimalAmount[]): DecimalAmount {
   return fromCents(values.reduce((total, value) => total + cents(value), 0n))
 }
 
-export function moneyByCurrency<T extends { currency: string; amount: DecimalAmount }>(rows: T[]) {
+/**
+ * Totals per currency of the known amounts. An Opportunity amount nobody has entered yet is '' (allowed at
+ * Qualified opportunity) and adds nothing, not even its currency: count it with unknownAmountCount.
+ */
+export function moneyByCurrency<T extends { currency: string; amount: DecimalAmount | '' }>(rows: T[]) {
   const buckets = new Map<string, DecimalAmount[]>()
   rows.forEach((row) => {
+    if (!row.amount) return
     const currency = row.currency.trim().toUpperCase()
     if (!currency) throw new Error('Currency is required')
     buckets.set(currency, [...(buckets.get(currency) ?? []), row.amount])
@@ -33,7 +38,23 @@ export function moneyByCurrency<T extends { currency: string; amount: DecimalAmo
     .map(([currency, amounts]) => ({ currency, amount: addMoney(amounts) }))
 }
 
-export function formatMoney(value: DecimalAmount, currency: string): string {
+/** How many rows moneyByCurrency leaves out because their amount is not entered yet. */
+export function unknownAmountCount(rows: ReadonlyArray<{ amount: DecimalAmount | '' }>) {
+  return rows.filter((row) => !row.amount).length
+}
+
+/**
+ * The known totals per currency, followed by how many amounts are not entered yet, so a partial total never
+ * reads as complete: "CNY 100.00 · 1 条未填金额".
+ */
+export function formatKnownTotals<T extends { currency: string; amount: DecimalAmount | '' }>(rows: T[], unknownLabel: (count: number) => string) {
+  const unknown = unknownAmountCount(rows)
+  return [...moneyByCurrency(rows).map((item) => formatMoney(item.amount, item.currency)), ...(unknown ? [unknownLabel(unknown)] : [])].join(' · ')
+}
+
+/** An amount not entered yet ('') shows as a dash, never as 0 or an error; pages usually say so in words instead. */
+export function formatMoney(value: DecimalAmount | '', currency: string): string {
+  if (!value) return '—'
   const normalized = normalizeMoney(value)
   const [whole, fraction] = normalized.split('.')
   const grouped = whole.replace(/\B(?=(\d{3})+(?!\d))/g, ',')

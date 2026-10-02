@@ -220,4 +220,47 @@ describe('Leads pages', () => {
     expect(wrapper.text()).toContain('OPP-')
     expect(wrapper.find('[data-testid="convert-lead"]').exists()).toBe(false)
   })
+
+  it('converts a Lead with both amounts left blank, since the new Opportunity starts at stage 1', async () => {
+    const { api, pinia, router } = await pageContext()
+    const lead = (await api.getLead('LEAD-001')).data
+    const convertLead = vi.spyOn(api, 'convertLead').mockImplementation(async (id) => ({
+      data: {
+        lead: { ...lead, id, status: 'Converted', convertedAt: '2026-09-30', convertedAccountId: 'ACC-NEW', convertedContactId: 'CON-NEW', convertedOpportunityId: 'OPP-BLANK' },
+        accountId: 'ACC-NEW', contactId: 'CON-NEW', opportunityId: 'OPP-BLANK', reusedAccount: false, reusedContact: false,
+      },
+      meta: { requestId: 'req_convert_blank_amount' },
+      warnings: [],
+    }))
+    await router.push('/leads/LEAD-001')
+    const wrapper = mount(LeadDetailPage, { props: { apiClient: api }, global: { plugins: [pinia, router] } })
+    await flushPromises()
+
+    await wrapper.get('[data-testid="convert-lead"]').trigger('click')
+    await flushPromises()
+    for (const label of ['金额', '人民币金额']) {
+      const input = wrapper.get<HTMLInputElement>(`[aria-label="${label}"]`)
+      expect(input.attributes('required')).toBeUndefined()
+      expect(input.element.closest('label')?.querySelector('[data-required-mark]')).toBeNull()
+      // Blank and an exact 0 both mean "not entered yet", so the browser lets a typed 0 through; a supplied
+      // negative or over-precise value is still checked.
+      expect([input.attributes('min'), input.attributes('step')]).toEqual(['0', '0.01'])
+      await input.setValue('0')
+      expect(input.element.validity.valid).toBe(true)
+      await input.setValue('-1')
+      expect(input.element.validity.rangeUnderflow).toBe(true)
+      await input.setValue('')
+    }
+    await wrapper.get<HTMLSelectElement>('select[aria-label="设备类型"]').setValue('Aconca')
+    await wrapper.get('[data-testid="qualification-confirmed"]').setValue(true)
+    await wrapper.get('[data-testid="lead-convert-probability-level"]').setValue('pipeline')
+    await wrapper.get('[data-modal-submit]').trigger('submit')
+    await flushPromises()
+
+    expect(convertLead).toHaveBeenCalledTimes(1)
+    expect(convertLead).toHaveBeenCalledWith('LEAD-001', expect.objectContaining({ opportunityAmount: '', opportunityAmountCny: '', opportunityProbabilityLevel: 'pipeline', qualificationConfirmed: true }))
+    expect(wrapper.find('[role="dialog"]').exists()).toBe(false)
+    expect(wrapper.get('[data-testid="conversion-result"]').text()).toContain('Opportunity · OPP-BLANK')
+    expect(wrapper.find('[data-testid="convert-lead"]').exists()).toBe(false)
+  })
 })

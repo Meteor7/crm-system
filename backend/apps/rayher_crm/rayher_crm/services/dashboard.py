@@ -44,8 +44,18 @@ def _money(value: Decimal) -> str:
     return format(value.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP), ".2f")
 
 
+def _known_amount(value: Any) -> Decimal:
+    """An amount nobody has entered yet ("", allowed at S1) adds nothing to a money sum; it is not a 0 value."""
+
+    return Decimal("0.00") if value is None or value == "" else as_decimal(value)
+
+
 def _sum_amount(rows: list[dict]) -> Decimal:
-    return sum((as_decimal(row["amount"]) for row in rows), Decimal("0.00"))
+    return sum((_known_amount(row["amount"]) for row in rows), Decimal("0.00"))
+
+
+def _missing_amount_count(rows: list[dict]) -> int:
+    return sum(1 for row in rows if not row["amount"])
 
 
 def _amount_by(rows: list[dict], read_label: Callable[[dict], str], read_amount: Callable[[dict], Any]) -> list[dict]:
@@ -55,7 +65,7 @@ def _amount_by(rows: list[dict], read_label: Callable[[dict], str], read_amount:
         currency = str(row.get("currency") or "").upper()
         current = totals.setdefault((label, currency), {"count": 0, "amount": Decimal("0.00")})
         current["count"] += 1
-        current["amount"] += as_decimal(read_amount(row))
+        current["amount"] += _known_amount(read_amount(row))
     return [
         {"label": label, "currency": currency, "count": int(value["count"]), "amount": _money(value["amount"])}
         for (label, currency), value in totals.items()
@@ -72,6 +82,11 @@ def get_dashboard(query: dict[str, Any]) -> dict[str, Any]:
     account_ids = {item["id"] for item in accounts}
     pipeline = list_pipeline({})
     opportunities = [item for item in pipeline["opportunities"] if item["accountId"] in account_ids]
+    # An Opportunity whose amount is still unknown ("", allowed at S1) counts like any other in its stage,
+    # owner, account, segment and currency group, but money sums add known amounts only: it adds no value,
+    # never a 0, and each group that shows money reports how many amounts it leaves out.
+    unpriced = [item for item in opportunities if not item["amount"]]
+    priced = [item for item in opportunities if item["amount"]]
     bookings = [item for item in pipeline["bookings"] if item["accountId"] in account_ids]
     strategy = [item for item in list_strategy_opportunities() if item["accountId"] in account_ids]
     actions = []
@@ -100,6 +115,7 @@ def get_dashboard(query: dict[str, Any]) -> dict[str, Any]:
                 "currency": currency,
                 "amount": _money(_sum_amount(currency_rows)),
                 "count": len(currency_rows),
+                "missingAmountCount": _missing_amount_count(currency_rows),
             })
     owners = sorted({item["owner"] for item in [*open_opportunities, *confirmed]})
     owner_performance = []
@@ -112,6 +128,7 @@ def get_dashboard(query: dict[str, Any]) -> dict[str, Any]:
                 "owner": owner, "currency": currency,
                 "pipeline": _money(_sum_amount(owner_open)),
                 "booking": _money(_sum_amount(owner_bookings)),
+                "pipelineMissingAmountCount": _missing_amount_count(owner_open),
             })
     account_map = {item["id"]: item for item in accounts}
     top_accounts = []
@@ -123,6 +140,7 @@ def get_dashboard(query: dict[str, Any]) -> dict[str, Any]:
             top_accounts.append({
                 "accountId": account_id, "accountName": account_map[account_id]["name"], "currency": currency,
                 "pipeline": _money(_sum_amount(pipeline_rows)), "booking": _money(_sum_amount(booking_rows)),
+                "pipelineMissingAmountCount": _missing_amount_count(pipeline_rows),
             })
     top_accounts.sort(key=lambda item: (item["accountName"], item["currency"]))
 
@@ -137,13 +155,14 @@ def get_dashboard(query: dict[str, Any]) -> dict[str, Any]:
                 result.append({
                     "label": label, "currency": currency,
                     "pipeline": _money(_sum_amount(pipeline_rows)), "booking": _money(_sum_amount(booking_rows)),
+                    "pipelineMissingAmountCount": _missing_amount_count(pipeline_rows),
                 })
         return result
 
     booking_months: dict[tuple[str, str], dict[str, Any]] = defaultdict(lambda: {"amount": Decimal("0.00"), "count": 0})
     for booking in confirmed:
         month = booking["bookingDate"][:7]
-        booking_months[(month, booking["currency"])]["amount"] += as_decimal(booking["amount"])
+        booking_months[(month, booking["currency"])]["amount"] += _known_amount(booking["amount"])
         booking_months[(month, booking["currency"])]["count"] += 1
     booking_by_month = [
         {"label": label, "currency": currency, "amount": _money(value["amount"]), "count": int(value["count"])}
@@ -155,12 +174,16 @@ def get_dashboard(query: dict[str, Any]) -> dict[str, Any]:
     return {
         "asOf": as_of,
         "kpis": {
+            # Money only, with no count beside it: a currency whose Opportunities all lack an amount gets no
+            # row, since its total would be a fake 0; the two missing counts below say what is left out.
             "moneyByCurrency": [{
                 "currency": currency,
                 "openPipeline": _money(_sum_amount([item for item in open_opportunities if item["currency"] == currency])),
                 "confirmedBooking": _money(_sum_amount([item for item in confirmed if item["currency"] == currency])),
                 "cumulativeWon": _money(_sum_amount([item for item in opportunities if item["stage"] == PO_RECEIVED and item["currency"] == currency])),
-            } for currency in sorted({item["currency"] for item in [*opportunities, *bookings]})],
+            } for currency in sorted({item["currency"] for item in [*priced, *bookings]})],
+            "openPipelineMissingAmountCount": sum(item["stage"] in OPEN_STAGES for item in unpriced),
+            "cumulativeWonMissingAmountCount": sum(item["stage"] == PO_RECEIVED for item in unpriced),
             "overdueActions": sum(item["status"] == "Open" and item["due"] < today for item in actions),
             "pendingDemoRequests": sum(item["status"] in {"Engineer Review", "Manager Approval"} for item in demos),
             "activeEvaluations": sum(item["status"] not in {"Accepted", "Rejected"} for item in evaluations),

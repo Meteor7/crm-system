@@ -87,4 +87,34 @@ describe('paginated pages', () => {
     expect(wrapper.text()).toContain('Page 2')
     expect(router.currentRoute.value.query).toMatchObject({ page: '2', pageSize: '10' })
   })
+
+  it('says how many Opportunity amounts an Account pipeline total leaves out', async () => {
+    const api = createMockApi({ latency: 0, role: 'Manager' })
+    const [source] = (await api.listAccounts({ page: 1, pageSize: 10 })).data.items
+    vi.spyOn(api, 'listAccounts').mockResolvedValue({
+      data: { items: [
+        { ...source!, id: 'ACC-PARTIAL', pipelineAmount: 100, pipelineMissingAmountCount: 1 },
+        { ...source!, id: 'ACC-COMPLETE', pipelineAmount: 200, pipelineMissingAmountCount: 0 },
+        { ...source!, id: 'ACC-UNKNOWN', pipelineAmount: 0, pipelineMissingAmountCount: 2 },
+        { ...source!, id: 'ACC-ZERO', pipelineAmount: 0, pipelineMissingAmountCount: 0 },
+      ] },
+      meta: { requestId: 'req_pipeline_missing', page: 1, pageSize: 10, total: 4 },
+      warnings: [],
+    })
+    const pinia = createPinia()
+    useAppStore(pinia).bootstrap = (await api.getBootstrap()).data
+    const router = createAppRouter()
+    await router.push('/accounts')
+    await router.isReady()
+
+    const wrapper = mount(AccountsPage, { props: { apiClient: api }, global: { plugins: [pinia, router] } })
+    await flushPromises()
+    expect(wrapper.get('[data-account-pipeline-missing="ACC-PARTIAL"]').text()).toBe('1 条未填金额')
+    expect(wrapper.find('[data-account-pipeline-missing="ACC-COMPLETE"]').exists()).toBe(false)
+    // Nothing known yet reads as insufficient data, not as a ¥0 pipeline; a real zero stays ¥0.
+    expect(wrapper.get('[data-account-pipeline="ACC-UNKNOWN"]').text()).toBe('数据不足')
+    expect(wrapper.get('[data-account-pipeline-missing="ACC-UNKNOWN"]').text()).toBe('2 条未填金额')
+    expect(wrapper.get('[data-account-pipeline="ACC-ZERO"]').text()).toBe('¥0')
+    expect(wrapper.get('[data-account-pipeline="ACC-PARTIAL"]').text()).toBe('¥100')
+  })
 })

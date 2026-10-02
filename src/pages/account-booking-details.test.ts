@@ -91,6 +91,23 @@ describe('Account and Booking details', () => {
     await vi.waitFor(() => expect(wrapper.get('[data-testid="account-360"]').text()).toContain('示例企业044科技（更新）有限责任公司'))
   })
 
+  it('shows an Opportunity amount nobody has entered yet as not entered in Account 360, never as 0', async () => {
+    const apiClient = createMockApi({ latency: 0 })
+    const accountDetail = await apiClient.getAccount360('ACC-001')
+    const known = accountDetail.data.opportunities[0]!
+    accountDetail.data.opportunities = [
+      { ...known, id: 'OPP-KNOWN', amount: '100.00', currency: 'CNY' },
+      { ...known, id: 'OPP-UNKNOWN', stage: 'qualified_opportunity', amount: '', currency: 'CNY' },
+    ]
+    vi.spyOn(apiClient, 'getAccount360').mockResolvedValue(accountDetail)
+    const wrapper = await mountRoute('/accounts/ACC-001', AccountDetailPage, apiClient)
+
+    const text = wrapper.get('[data-testid="account-360"]').text()
+    expect(text).toContain('OPP-KNOWN · CNY 100.00 ·')
+    expect(text).toContain('OPP-UNKNOWN · 待补填 ·')
+    expect(text).not.toContain('OPP-UNKNOWN · CNY 0.00')
+  })
+
   it('loads every installed-tool page for the routed Account instead of the global first 200', async () => {
     const apiClient = createMockApi({ latency: 0 })
     const seed = (await apiClient.listInstalledTools({ page: 1, pageSize: 1 })).data.items[0]

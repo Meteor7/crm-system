@@ -49,6 +49,24 @@ describe('customer report model', () => {
     expect(values(buildCustomerReportModel(detail, '2026-07-17', 'en-US'), 'Opportunities')).toContain('Upside')
   })
 
+  it('never reports a pipeline total over an amount nobody has entered as complete', async () => {
+    const detail = (await createMockApi({ latency: 0 }).getAccount360('ACC-001')).data
+    const known = detail.opportunities[0]!
+    detail.opportunities = [
+      { ...known, id: 'OPP-KNOWN', stage: 'demo_done', amount: '100.00', currency: 'CNY' },
+      { ...known, id: 'OPP-UNKNOWN', stage: 'qualified_opportunity', amount: '', currency: 'CNY' },
+    ]
+    const spec = buildCustomerReportModel(detail, '2026-09-30')
+
+    expect(values(spec, '客户全貌 Overview')).toContain('CNY 100.00 · 1 条未填金额')
+    expect(values(spec, '客户全貌 Overview')).not.toContain('CNY 100.00')
+    expect(values(buildCustomerReportModel(detail, '2026-09-30', 'en-US'), 'Overview')).toContain('CNY 100.00 · 1 without an amount')
+    const rows = spec.sheets.find((sheet) => sheet.name === '商机 Opportunities')!.rows
+    const amountColumn = rows.find((row) => row.some((cell) => cell.v === '金额 / Amount'))!.findIndex((cell) => cell.v === '金额 / Amount')
+    expect(rows.find((row) => row[0]?.v === 'OPP-UNKNOWN')?.[amountColumn]?.v).toBe('—')
+    expect(rows.find((row) => row[0]?.v === 'OPP-KNOWN')?.[amountColumn]?.v).toBe('100.00')
+  })
+
   it('deduplicates equivalent actions and includes opportunity next actions', async () => {
     const detail = (await createMockApi({ latency: 0 }).getAccount360('ACC-001')).data
     const spec = buildCustomerReportModel(detail, '2026-07-17')

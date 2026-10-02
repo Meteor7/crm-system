@@ -279,6 +279,49 @@ class TestLeadApi(FrappeTestCase):
         self.assertEqual(repeated, converted)
         self.assertEqual(frappe.db.count("CRM Opportunity", {"source_lead": lead["id"]}), 1)
 
+    def test_convert_lead_without_opportunity_amount(self):
+        frappe.set_user(self.sales)
+        account = create_account(self._account_input("Lead Unpriced Account"))
+        site = create_site(account["id"], self._site_input("Lead Unpriced Site"))
+        contact_input = self._contact_input(account["id"], "Lead Unpriced Contact")
+        contact_input["siteId"] = site["id"]
+        contact = create_contact(contact_input)
+        existing = {"accountId": account["id"], "contactId": contact["id"], "siteId": site["id"]}
+
+        # A conversion always creates a qualified (S1) Opportunity, whose amounts may still be unknown.
+        omitted = self._conversion_input(**existing)
+        omitted.pop("opportunityAmount")
+        omitted.pop("opportunityAmountCny")
+        lead = create_lead(self._input("Unpriced Conversion Lead"))
+        converted = convert_lead(lead["id"], omitted)
+        opportunity = get_strategy_opportunity(converted["opportunityId"])
+        self.assertEqual(
+            (opportunity["stage"], opportunity["amount"], opportunity["originalAmount"], opportunity["amountCny"]),
+            (QUALIFIED_OPPORTUNITY, "", "", ""),
+        )
+        self.assertEqual(
+            tuple(frappe.db.get_value("CRM Opportunity", converted["opportunityId"], ["amount", "original_amount", "amount_cny"])),
+            (0, 0, 0),
+        )
+        # Converting the same Lead again returns the first result and creates no second Opportunity.
+        self.assertEqual(convert_lead(lead["id"], omitted), converted)
+        self.assertEqual(frappe.db.count("CRM Opportunity", {"source_lead": lead["id"]}), 1)
+
+        # Blank and exact zero mean the same; one amount entered does not require the other.
+        for label, amounts, expected in (
+            ("Blank", {"opportunityAmount": "", "opportunityAmountCny": ""}, ("", "", "")),
+            ("Zero", {"opportunityAmount": "0", "opportunityAmountCny": "0.00"}, ("", "", "")),
+            ("Priced", {"opportunityAmount": "1200.5", "opportunityAmountCny": ""}, ("1200.50", "1200.50", "")),
+        ):
+            with self.subTest(label=label):
+                lead = create_lead(self._input(f"{label} Conversion Lead"))
+                converted = convert_lead(lead["id"], self._conversion_input(**existing, **amounts))
+                opportunity = get_strategy_opportunity(converted["opportunityId"])
+                self.assertEqual(
+                    (opportunity["stage"], (opportunity["amount"], opportunity["originalAmount"], opportunity["amountCny"])),
+                    (QUALIFIED_OPPORTUNITY, expected),
+                )
+
     def test_manager_can_choose_opportunity_owner_during_conversion(self):
         frappe.set_user(self.sales)
         account = create_account(self._account_input("Lead Assigned Account"))
@@ -387,18 +430,30 @@ class TestLeadApi(FrappeTestCase):
         frappe.set_user(self.sales)
         lead = create_lead(self._input("Invalid Conversion Lead"))
         before = frappe.db.count("CRM Opportunity")
-        for invalid in ("0", "-1", "1.234", "not-money"):
-            with self.assertRaises(CrmApiException) as failure:
-                convert_lead(
-                    lead["id"],
-                    self._conversion_input(
-                        opportunityAmount=invalid,
-                        newAccount=self._account_input("Invalid Conversion Account"),
-                        newSite=self._site_input("Invalid Conversion Site"),
-                        newContact=self._contact_input("placeholder", "Invalid Conversion Contact"),
-                    ),
-                )
-            self.assertEqual(failure.exception.code, "VALIDATION_ERROR")
+        # Blank or zero is an amount not entered yet (test_convert_lead_without_opportunity_amount).
+        messages = {
+            "opportunityAmount": "opportunityAmount must be blank or a non-negative amount with at most two decimal places.",
+            "opportunityAmountCny": "opportunityAmountCny must be positive with at most two decimal places.",
+        }
+        for field, invalid in (
+            *(("opportunityAmount", value) for value in ("-1", "1.234", "not-money", True)),
+            *(("opportunityAmountCny", value) for value in ("-1", "1.234", "not-money")),
+        ):
+            with self.subTest(field=field, invalid=invalid):
+                with self.assertRaises(CrmApiException) as failure:
+                    convert_lead(
+                        lead["id"],
+                        self._conversion_input(
+                            **{field: invalid},
+                            newAccount=self._account_input("Invalid Conversion Account"),
+                            newSite=self._site_input("Invalid Conversion Site"),
+                            newContact=self._contact_input("placeholder", "Invalid Conversion Contact"),
+                        ),
+                    )
+                self.assertEqual(failure.exception.code, "VALIDATION_ERROR")
+                # The API names the field that is wrong, for either amount, with the message the front end maps.
+                self.assertEqual(failure.exception.field_errors, {field: "Invalid amount"})
+                self.assertEqual(failure.exception.public_message, messages[field])
         with self.assertRaises(CrmApiException) as bad_date:
             convert_lead(
                 lead["id"],

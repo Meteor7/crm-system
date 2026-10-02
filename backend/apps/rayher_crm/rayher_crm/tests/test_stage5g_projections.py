@@ -125,7 +125,41 @@ class TestStage5GProjections(FrappeTestCase):
         self.assertEqual((projected["nextAction"], projected["due"]), (action["title"], "2026-08-30"))
         self.assertEqual([item["id"] for item in result["bookings"]], [booking["id"]])
         self.assertEqual(result["totals"], [{"currency": "CNY", "openPipeline": "1000.00", "confirmedBooking": "500.00"}])
+        self.assertEqual(result["openPipelineMissingAmountCount"], 0)
         self.assertNotIn("Hidden Projection", {item["title"] for item in list_pipeline({})["opportunities"]})
+
+    def test_an_unknown_amount_stays_out_of_pipeline_and_account_totals(self):
+        account, site, _contact = self._base(self.sales, "Unpriced")
+        priced = self._opportunity(account, site, self.sales, "Priced Projection", QUALIFIED_OPPORTUNITY, 1000)
+        unpriced = create_strategy_opportunity({
+            "probabilityLevel": "pipeline", "accountId": account["id"], "siteId": site["id"],
+            "title": "Unpriced Projection", "owner": self.sales, "amount": "", "intentScore": 70,
+            "poDate": "2026-12-31", "toolType": "Inspection", "saleType": "New Equipment", "subRegion": "East",
+            "currency": "USD", "originalAmount": "", "amountCny": "", "qualificationConfirmed": True,
+        })
+
+        frappe.set_user(self.sales)
+        result = list_pipeline({"accountId": account["id"]})
+        amounts = {priced["id"]: "1000.00", unpriced["id"]: ""}
+        self.assertEqual({item["id"]: item["amount"] for item in result["opportunities"]}, amounts)
+        # An unknown amount is neither 0 nor a currency to total: no USD 0.00 row, and the total
+        # says how many open Opportunities it leaves out, the same one the list shows without an amount.
+        self.assertEqual(result["totals"], [{"currency": "CNY", "openPipeline": "1000.00", "confirmedBooking": "0.00"}])
+        self.assertEqual(result["openPipelineMissingAmountCount"], 1)
+        # Only money leaves it out: it still counts in its stage and for its owner, like the priced one.
+        for query in ({"status": QUALIFIED_OPPORTUNITY}, {"owner": self.sales}):
+            with self.subTest(query=query):
+                filtered = list_pipeline({"accountId": account["id"], **query})
+                self.assertEqual({item["id"] for item in filtered["opportunities"]}, set(amounts))
+                self.assertEqual(filtered["totals"], result["totals"])
+                self.assertEqual(filtered["openPipelineMissingAmountCount"], 1)
+        detail = get_account_360(account["id"])
+        # The account lists both Opportunities; its pipeline figure adds the known amount only.
+        self.assertEqual({item["id"]: item["amount"] for item in detail["opportunities"]}, amounts)
+        # A second currency would zero the account's pipeline figure; an unknown USD deal must not.
+        self.assertEqual(
+            (detail["account"]["pipelineAmount"], detail["account"]["pipelineMissingAmountCount"]), (1000.0, 1),
+        )
 
     def test_account_360_expands_scoped_canonical_rows_without_get_writes(self):
         account, site, contact = self._base(self.sales, "Detail")

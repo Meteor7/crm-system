@@ -1,5 +1,5 @@
 import type { Account360Dto, ActionDto } from '@/types/crm'
-import { formatMoney, moneyByCurrency } from '@/domain/money'
+import { formatKnownTotals, formatMoney, moneyByCurrency } from '@/domain/money'
 import { personnelDisplayName } from '@/demo/personnel'
 import type { Locale } from '@/i18n'
 import { bookingTitle } from '@/features/shared/system-labels'
@@ -93,8 +93,9 @@ export function buildCustomerReportModel(detail: Account360Dto, reportDate: stri
   const account = detail.account
   const actions = reportActions(detail, reportDate, locale)
   const risks = reportRisks(detail, locale)
-  const pipeline = moneyByCurrency(detail.opportunities.filter((item) => open(item.stage)))
-    .map((item) => formatMoney(item.amount, item.currency)).join(' · ')
+  // Known amounts only, followed by how many are not entered yet, so the total never reads as complete.
+  const pipeline = formatKnownTotals(detail.opportunities.filter((item) => open(item.stage)),
+    (count) => locale === 'en-US' ? `${count} without an amount` : `${count} 条未填金额`)
   const booking = moneyByCurrency(detail.bookings.filter((item) => item.status === 'Confirmed'))
     .map((item) => formatMoney(item.amount, item.currency)).join(' · ')
   const demoCount = detail.demoRequests.length + detail.evaluations.length

@@ -221,4 +221,29 @@ describe('Leads&Opportunities workspace', () => {
     await flushPromises()
     expect(router.currentRoute.value.path).toBe('/opportunities/OPP-001')
   })
+
+  it('shows Opportunity amounts nobody has entered as not entered and never totals them as complete', async () => {
+    const { api, pinia, router } = await context('/leads-opportunities?view=opportunities')
+    const [template] = (await api.listStrategyOpportunities({ page: 1, pageSize: 1 })).data.items
+    const items = [
+      { ...template!, id: 'OPP-KNOWN', stage: 'qualified_opportunity' as const, currency: 'CNY', amount: '100.00', originalAmount: '100.00', amountCny: '100.00' },
+      { ...template!, id: 'OPP-UNKNOWN', stage: 'qualified_opportunity' as const, currency: 'CNY', amount: '', originalAmount: '', amountCny: '' },
+    ]
+    vi.spyOn(api, 'listStrategyOpportunities').mockResolvedValue({ data: { items }, meta: { requestId: 'req_unknown_amounts', total: 2, page: 1, pageSize: 12 }, warnings: [] })
+    const wrapper = mount(LeadsOpportunitiesPage, { props: { apiClient: api, fixedView: 'opportunities' }, global: { plugins: [pinia, router] } })
+    await flushPromises()
+
+    expect(wrapper.get('[data-opportunity-amount="OPP-KNOWN"]').text()).toBe('CNY 100.00')
+    const unknown = wrapper.get('[data-opportunity-id="OPP-UNKNOWN"]')
+    expect(unknown.get('[data-opportunity-amount="OPP-UNKNOWN"]').text()).toBe('待补填')
+    expect(unknown.text()).toContain('原始金额 待补填')
+    expect(unknown.get('[data-opportunity-amount-cny="OPP-UNKNOWN"]').text()).toBe('人民币金额 待补填')
+    expect(unknown.text()).not.toContain('0.00')
+
+    // One order of CNY 100 and one unknown: the column shows the known total and the unknown count, not a complete CNY 100.
+    await wrapper.get('[data-opportunity-layout="board"]').trigger('click')
+    const column = wrapper.get('[data-opportunity-stage="qualified_opportunity"]')
+    expect(column.get('header em').text()).toBe('CNY 100.00 · 1 条未填金额')
+    expect(column.get('[data-opportunity-id="OPP-UNKNOWN"] dd').text()).toBe('待补填')
+  })
 })

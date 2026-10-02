@@ -2,6 +2,7 @@ import { flushPromises, mount } from '@vue/test-utils'
 import { setLocale } from '@/i18n'
 import { describe, expect, it } from 'vitest'
 import { opportunities } from '@/demo/operations-data'
+import { accounts, sites } from '@/api/mock-data'
 import type { StrategyOpportunityDto } from '@/types/workspaces'
 import OpportunityEditorModal from './OpportunityEditorModal.vue'
 
@@ -210,9 +211,9 @@ describe('OpportunityEditorModal qualification and level rules', () => {
 })
 
 describe('OpportunityEditorModal amount in CNY', () => {
-  it('asks for the amount in CNY on every Opportunity and flags one that has none yet', async () => {
+  it('asks for the amount in CNY once past stage 1 and flags an Opportunity that has none yet', async () => {
     const create = mount(OpportunityEditorModal, { props })
-    expect(create.get('[aria-label="人民币金额"]').attributes('required')).toBeDefined()
+    expect(create.get('[aria-label="人民币金额"]').attributes('required')).toBeUndefined()
     expect(create.find('[data-testid="opportunity-amount-cny-missing"]').exists()).toBe(false)
 
     const filled = mount(OpportunityEditorModal, { props: { ...props, opportunity: { ...legacyOpportunity('Service'), amountCny: '32500000.00' } } })
@@ -220,10 +221,99 @@ describe('OpportunityEditorModal amount in CNY', () => {
     expect(filled.find('[data-testid="opportunity-amount-cny-missing"]').exists()).toBe(false)
 
     const missing = mount(OpportunityEditorModal, { props: { ...props, opportunity: { ...legacyOpportunity('Service'), amountCny: '' } } })
+    expect(missing.get('[aria-label="人民币金额"]').attributes('required')).toBe('')
     expect(missing.get('[data-testid="opportunity-amount-cny-missing"]').text()).toBe('这个商机还没有人民币金额，保存前请先填写。')
     await missing.get('[aria-label="人民币金额"]').setValue('1234.5')
     await missing.get('form').trigger('submit')
     expect(missing.emitted('submit')?.[0]?.[0]).toMatchObject({ amountCny: '1234.5' })
+
+    // Saving at stage 1 does not need it, so there is nothing to flag.
+    const early = mount(OpportunityEditorModal, { props: { ...props, opportunity: { ...legacyOpportunity('Service'), stage: 'qualified_opportunity', amountCny: '' } } })
+    expect(early.find('[data-testid="opportunity-amount-cny-missing"]').exists()).toBe(false)
+  })
+})
+
+describe('OpportunityEditorModal amount requirement', () => {
+  it('does not mark amount fields required when creating a new Opportunity', () => {
+    const wrapper = mount(OpportunityEditorModal, { props })
+    expect(wrapper.get('[aria-label="金额"]').attributes('required')).toBeUndefined()
+    expect(wrapper.get('[aria-label="人民币金额"]').attributes('required')).toBeUndefined()
+    expect(wrapper.get('[aria-label="原始金额"]').attributes('required')).toBeUndefined()
+  })
+
+  it('marks amount fields required when editing an Opportunity past stage 1', () => {
+    const wrapper = mount(OpportunityEditorModal, {
+      props: { ...props, opportunity: { ...legacyOpportunity('New Equipment'), stage: 'demo_done' } },
+    })
+    expect(wrapper.get('[aria-label="金额"]').attributes('required')).toBe('')
+    expect(wrapper.get('[aria-label="人民币金额"]').attributes('required')).toBe('')
+    // The original amount defaults to the amount, as before.
+    expect(wrapper.get('[aria-label="原始金额"]').attributes('required')).toBeUndefined()
+  })
+
+  it('does not mark amount fields required when editing an Opportunity still at stage 1', () => {
+    const wrapper = mount(OpportunityEditorModal, {
+      props: { ...props, opportunity: { ...legacyOpportunity('New Equipment'), stage: 'qualified_opportunity' } },
+    })
+    expect(wrapper.get('[aria-label="金额"]').attributes('required')).toBeUndefined()
+    expect(wrapper.get('[aria-label="人民币金额"]').attributes('required')).toBeUndefined()
+  })
+
+  it('treats a deal lost at stage 1 as still at stage 1, and one lost later as past it', () => {
+    const lostAt = (lostAtStage: string) => mount(OpportunityEditorModal, {
+      props: { ...props, opportunity: { ...legacyOpportunity('New Equipment'), stage: 'lost', lostAtStage, lostReason: 'Budget frozen' } as StrategyOpportunityDto },
+    })
+    const early = lostAt('qualified_opportunity')
+    expect(early.get('[aria-label="金额"]').attributes('required')).toBeUndefined()
+    expect(early.get('[aria-label="人民币金额"]').attributes('required')).toBeUndefined()
+    expect(early.find('[data-testid="opportunity-amount-cny-missing"]').exists()).toBe(false)
+    const late = lostAt('demo_done')
+    expect(late.get('[aria-label="金额"]').attributes('required')).toBe('')
+    expect(late.get('[aria-label="人民币金额"]').attributes('required')).toBe('')
+    // A migrated loss without its stage is treated as past stage 1, as the backend does.
+    expect(lostAt('').get('[aria-label="金额"]').attributes('required')).toBe('')
+  })
+
+  it('submits a new stage-1 Opportunity with all three amounts blank, never as 0', async () => {
+    const wrapper = mount(OpportunityEditorModal, { props: { accounts, sitesByAccount: sites, defaultOwner: 'person002@crm.example.invalid', currentUserId: 'person002@crm.example.invalid' } })
+    await wrapper.get('[data-testid="qualification-confirmed"]').setValue(true)
+    await wrapper.get('[aria-label="Opportunity 名称"]').setValue('早期缺陷检测机会')
+    await wrapper.get('[aria-label="成功概率"]').setValue('pipeline')
+    await wrapper.get('form').trigger('submit')
+
+    const payload = wrapper.emitted('submit')?.[0]?.[0] as Record<string, unknown>
+    expect(payload).toMatchObject({ title: '早期缺陷检测机会', amount: '', originalAmount: '', amountCny: '', qualificationConfirmed: true })
+    expect(payload).not.toHaveProperty('stage')
+  })
+
+  it('re-opens the returned stage-1 record with its amounts not entered and saves it again unchanged', async () => {
+    // The server serves amounts nobody has entered as ''.
+    const returned = { ...legacyOpportunity('New Equipment'), stage: 'qualified_opportunity', amount: '', originalAmount: '', amountCny: '' } as StrategyOpportunityDto
+    const wrapper = mount(OpportunityEditorModal, { props: { ...props, opportunity: returned } })
+    for (const label of ['金额', '原始金额', '人民币金额']) {
+      expect((wrapper.get(`[aria-label="${label}"]`).element as HTMLInputElement).value).toBe('')
+    }
+    expect(wrapper.find('[data-testid="opportunity-amount-cny-missing"]').exists()).toBe(false)
+
+    await wrapper.get('[aria-label="Opportunity 名称"]').setValue('仍在合格商机阶段')
+    await wrapper.get('form').trigger('submit')
+    expect(wrapper.emitted('submit')?.[0]?.[0]).toMatchObject({ title: '仍在合格商机阶段', amount: '', originalAmount: '', amountCny: '' })
+
+    // A supplied amount is still sent as typed.
+    await wrapper.get('[aria-label="金额"]').setValue('50000.00')
+    await wrapper.get('[aria-label="人民币金额"]').setValue('50000.00')
+    await wrapper.get('form').trigger('submit')
+    expect(wrapper.emitted('submit')?.[1]?.[0]).toMatchObject({ amount: '50000.00', originalAmount: '50000.00', amountCny: '50000.00' })
+  })
+
+  it('sends the original amount blank when the amount is cleared at stage 1, not the old one beside an unknown amount', async () => {
+    const priced = { ...legacyOpportunity('New Equipment'), stage: 'qualified_opportunity', amount: '100.00', originalAmount: '100.00', amountCny: '100.00' } as StrategyOpportunityDto
+    const wrapper = mount(OpportunityEditorModal, { props: { ...props, opportunity: priced } })
+    await wrapper.get('[aria-label="金额"]').setValue('')
+    await wrapper.get('[aria-label="人民币金额"]').setValue('')
+    await wrapper.get('form').trigger('submit')
+
+    expect(wrapper.emitted('submit')?.[0]?.[0]).toMatchObject({ amount: '', originalAmount: '', amountCny: '' })
   })
 })
 

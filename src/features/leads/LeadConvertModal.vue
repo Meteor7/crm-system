@@ -193,8 +193,9 @@ const opportunityTitleInput = useLocalizedInput(() => form.opportunityTitle, (va
         <label><span>{{ t('detail.contact') }}{{ t('detail.ownerSuffix') }}<RequiredMark /></span><PersonnelSelect v-model="form.contactOwner" :roles="['Sales']" :ariaLabel="t('detail.owner')" required /></label>
       </template>
       <label><span>{{ t('oppEditor.name') }}<RequiredMark /></span><input v-model="opportunityTitleInput" :aria-label="t('oppEditor.name')" required /></label>
-      <label><span>{{ t('oppEditor.amount') }}<RequiredMark /></span><input v-model="form.opportunityAmount" :aria-label="t('oppEditor.amount')" type="number" min="0.01" step="0.01" required /></label>
-      <label><span>{{ t('oppEditor.amountCny') }}<RequiredMark /></span><input v-model="form.opportunityAmountCny" :aria-label="t('oppEditor.amountCny')" type="number" min="0.01" step="0.01" required /></label>
+      <!-- The conversion always creates a stage-1 Opportunity, whose amounts may stay blank (or an exact 0, the same "not entered yet") until later. -->
+      <label><span>{{ t('oppEditor.amount') }}</span><input v-model="form.opportunityAmount" :aria-label="t('oppEditor.amount')" type="number" min="0" step="0.01" /></label>
+      <label><span>{{ t('oppEditor.amountCny') }}</span><input v-model="form.opportunityAmountCny" :aria-label="t('oppEditor.amountCny')" type="number" min="0" step="0.01" /></label>
       <label><span>{{ t('oppEditor.poDate') }}<RequiredMark /></span><input v-model="form.opportunityCloseDate" :aria-label="t('oppEditor.poDate')" type="date" required /></label>
       <label><span>{{ t('detail.owner') }}<RequiredMark /></span><PersonnelSelect v-model="form.opportunityOwner" :roles="app.bootstrap?.user.role === 'Manager' ? ['Sales', 'Manager'] : ['Sales']" :ariaLabel="t('detail.owner')" required /></label>
       <label><span>{{ t('oppEditor.toolType') }}<RequiredMark /></span><AccountSegmentSelect v-model="form.toolType" :segments="equipmentChoices" :label="t('oppEditor.toolType')" :custom-option-label="locale === 'en-US' ? '+ Custom equipment type' : '＋自定义设备类型'" :custom-input-label="t('oppEditor.toolType')" :custom-placeholder="locale === 'en-US' ? 'Enter a custom equipment type' : '请输入自定义设备类型'" :empty-placeholder="locale === 'en-US' ? 'Select equipment type' : '请选择设备类型'" :custom-on-empty="false" required /></label>

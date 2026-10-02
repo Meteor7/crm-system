@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from decimal import Decimal
 from typing import Any
 
 import frappe
@@ -30,7 +31,6 @@ from rayher_crm.services.equipment import normalize_equipment, register_equipmen
 from rayher_crm.services.money import (
     MoneyValidationError,
     as_decimal,
-    decimal_string,
     optional_money_text,
     required_positive_money,
 )
@@ -117,13 +117,32 @@ ACTION_STATUSES = ("Open", "Done")
 
 
 def _positive_money(value: Any, fieldname: str):
+    # The same field hint as required_positive_money, so the form marks the amount and not only a message.
+    message = f"{fieldname} must be positive with at most two decimal places."
     try:
         parsed = as_decimal(value)
     except MoneyValidationError as exc:
-        raise CrmApiException("VALIDATION_ERROR", f"{fieldname} must be positive with at most two decimal places.") from exc
+        raise CrmApiException("VALIDATION_ERROR", message, field_errors={fieldname: "Invalid amount"}) from exc
     if not parsed:
-        raise CrmApiException("VALIDATION_ERROR", f"{fieldname} must be positive with at most two decimal places.")
+        raise CrmApiException("VALIDATION_ERROR", message, field_errors={fieldname: "Invalid amount"})
     return parsed
+
+
+def _optional_positive_money(value: Any, fieldname: str, invalid=_positive_money) -> Decimal:
+    """Like _positive_money, but blank or zero means "not entered yet"; stored as 0.00.
+
+    Only a qualified (S1) Opportunity may leave its amounts unknown. `value` arrives blank from a
+    fresh payload (None or ""), as a Decimal computed earlier in this call (the originalAmount
+    fallback), or as the "0.00" that `_current_input()` reads back on every edit of an Opportunity
+    that has no amount yet. Anything that is not an exact amount with at most two decimal places
+    still fails, with the error `invalid` raises for it.
+    """
+    if value is None or str(value).strip() == "":
+        return Decimal("0.00")
+    try:
+        return as_decimal(value)
+    except MoneyValidationError:
+        return invalid(value, fieldname)
 
 
 def _percentage(value: Any, fieldname: str) -> int:
@@ -166,7 +185,9 @@ def _tool_type(payload: dict[str, Any], current: str | None) -> str:
     return normalize_equipment(submitted, "toolType")
 
 
-def _validate_opportunity(payload: dict[str, Any], current_tool_type: str | None = None) -> dict[str, Any]:
+def _validate_opportunity(
+    payload: dict[str, Any], current_tool_type: str | None = None, *, require_amount: bool = True,
+) -> dict[str, Any]:
     account_id = required_text(payload, "accountId")
     site_id = required_text(payload, "siteId")
     _require_account(account_id)
@@ -179,9 +200,14 @@ def _validate_opportunity(payload: dict[str, Any], current_tool_type: str | None
     if not po_date:
         raise CrmApiException("VALIDATION_ERROR", "poDate is required.", field_errors={"poDate": "Required"})
 
-    amount = _positive_money(payload.get("amount"), "amount")
-    original_amount = _positive_money(payload.get("originalAmount", amount), "originalAmount")
-    amount_cny = required_positive_money(payload.get("amountCny"), "amountCny")
+    if require_amount:
+        amount = _positive_money(payload.get("amount"), "amount")
+        original_amount = _positive_money(payload.get("originalAmount", amount), "originalAmount")
+        amount_cny = required_positive_money(payload.get("amountCny"), "amountCny")
+    else:
+        amount = _optional_positive_money(payload.get("amount"), "amount")
+        original_amount = _optional_positive_money(payload.get("originalAmount", amount), "originalAmount")
+        amount_cny = _optional_positive_money(payload.get("amountCny"), "amountCny", required_positive_money)
     stage = validate_choice(payload.get("stage"), "stage", OPPORTUNITY_STAGES)
     score = _percentage(payload.get("intentScore", 20), "intentScore")
     return {
@@ -414,7 +440,8 @@ def serialize_opportunity(doc, recoveries=None, loss_reviews=None) -> dict[str, 
         "lostAt": to_iso_timestamp(doc.lost_at) if doc.lost_at else "",
         "lostBy": doc.lost_by or "",
         "probabilityLevel": doc.probability_level or "",
-        "amount": decimal_string(exact.amount if exact else doc.amount or 0),
+        # 0 is an amount nobody has entered yet (allowed at S1): "" like amountCny, never a 0.
+        "amount": optional_money_text(exact.amount if exact else doc.amount or 0),
         "poDate": str(doc.po_date or ""),
         "updated": to_iso_timestamp(doc.modified),
         "modified": to_iso_timestamp(doc.modified),
@@ -423,7 +450,7 @@ def serialize_opportunity(doc, recoveries=None, loss_reviews=None) -> dict[str, 
         "saleType": doc.sale_type,
         "subRegion": doc.sub_region,
         "currency": doc.currency,
-        "originalAmount": decimal_string(exact.original_amount if exact else doc.original_amount or 0),
+        "originalAmount": optional_money_text(exact.original_amount if exact else doc.original_amount or 0),
         "amountCny": optional_money_text(exact.amount_cny if exact else "0"),
         "shipmentDate": str(doc.shipment_date or ""),
         "fatDate": str(doc.fat_date or ""),
@@ -536,7 +563,10 @@ def create_strategy_opportunity(payload: dict[str, Any]) -> dict[str, Any]:
     assert_capability("deal:write")
     ensure_server_generated_id(payload)
     assert_qualification_confirmed(payload)
-    values = _validate_opportunity({**payload, "stage": payload.get("stage") or QUALIFIED_OPPORTUNITY})
+    # Every new Opportunity starts at S1 (checked just below), where the amounts may still be unknown.
+    values = _validate_opportunity(
+        {**payload, "stage": payload.get("stage") or QUALIFIED_OPPORTUNITY}, require_amount=False,
+    )
     if values["stage"] != QUALIFIED_OPPORTUNITY:
         raise CrmApiException("INVALID_TRANSITION", f"New Opportunity must start at {QUALIFIED_OPPORTUNITY}.")
     assert_initial_probability_level(values["probability_level"])
@@ -606,7 +636,13 @@ def update_strategy_opportunity(name: str, payload: dict[str, Any], expected_mod
         "original_amount": as_decimal(current_input["originalAmount"]),
         "amount_cny": as_decimal(current_input["amountCny"] or 0),
     }
-    values = _validate_opportunity({**current_input, **payload}, current_tool_type=doc.tool_type)
+    # The stage never changes here, so the stored one decides: past S1 every edit needs all three amounts.
+    # A deal lost at S1 never got past it, so it may still leave them blank.
+    reached = doc.lost_at_stage if doc.stage == LOST and doc.lost_at_stage else doc.stage
+    values = _validate_opportunity(
+        {**current_input, **payload}, current_tool_type=doc.tool_type,
+        require_amount=(reached != QUALIFIED_OPPORTUNITY),
+    )
     if values["stage"] != doc.stage:
         raise CrmApiException(
             "INVALID_TRANSITION", "Opportunity stages change only through their workflow actions.",
@@ -665,9 +701,9 @@ def update_strategy_opportunity(name: str, payload: dict[str, Any], expected_mod
             if fieldname in MONEY_FIELDS:
                 if stored_money[fieldname] != value:
                     setattr(doc, fieldname, value)
-                    # A first CNY amount is recorded as filled in from empty, not changed from 0.
-                    before = optional_money_text(stored_money[fieldname]) if fieldname == "amount_cny" else decimal_string(stored_money[fieldname])
-                    changes.append((fieldname, before, decimal_string(value)))
+                    # A first amount is recorded as filled in from empty, not changed from 0; one taken
+                    # out again at S1 goes back to empty.
+                    changes.append((fieldname, optional_money_text(stored_money[fieldname]), optional_money_text(value)))
                 continue
             current = _decode_list(getattr(doc, fieldname)) if fieldname in LIST_FIELDS else getattr(doc, fieldname)
             stored = json.dumps(value, ensure_ascii=False) if fieldname in LIST_FIELDS else value
