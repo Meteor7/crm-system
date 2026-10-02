@@ -401,13 +401,13 @@ describe('delivery workflow pages', () => {
     expect(wrapper.text()).not.toContain('On Hold')
     await wrapper.get('[data-evaluation-view="preparation"]').trigger('click')
     await wrapper.get('[data-set-ddl="EVAL-101"]').trigger('click')
-    await wrapper.get('[aria-label="Test Run DDL"]').setValue('2026-09-30')
+    await wrapper.get('[aria-label="Test Run DDL"]').setValue('2099-12-31')
     await wrapper.get('.modal-card form').trigger('submit')
     await flushPromises()
 
-    expect(setDeadline).toHaveBeenCalledWith('EVAL-101', { testRunDeadline: '2026-09-30', expectedModified })
+    expect(setDeadline).toHaveBeenCalledWith('EVAL-101', { testRunDeadline: '2099-12-31', expectedModified })
     expect(wrapper.get('[data-api-warning]').text()).toContain('Test Run DDL 晚于客户预期时间')
-    expect((await repository.read()).evaluations.find((item) => item.id === 'EVAL-101')?.testRunDeadline).toBe('2026-09-30')
+    expect((await repository.read()).evaluations.find((item) => item.id === 'EVAL-101')?.testRunDeadline).toBe('2099-12-31')
 
     await wrapper.get('[aria-label="Evaluation 客户"]').setValue('ACC-006')
     await flushPromises()

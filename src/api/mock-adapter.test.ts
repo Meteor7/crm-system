@@ -1607,11 +1607,12 @@ describe('mock CRM API', () => {
       await expect(fae.setEvaluationTestRunDeadline('EVAL-103', { testRunDeadline }))
         .rejects.toMatchObject({ code: 'VALIDATION_ERROR' })
     }
-    const saved = await fae.setEvaluationTestRunDeadline('EVAL-103', { testRunDeadline: '2026-09-30' })
-    expect(saved.data.testRunDeadline).toBe('2026-09-30')
+    // Far in the future: a fixed near date stops being valid once that day is past in Shanghai.
+    const saved = await fae.setEvaluationTestRunDeadline('EVAL-103', { testRunDeadline: '2099-12-31' })
+    expect(saved.data.testRunDeadline).toBe('2099-12-31')
     expect(saved.warnings).toContain('Test Run DDL 晚于客户预期时间，请 Sales 与客户沟通')
     expect((await sales.listEvaluations({})).data.items.find((item) => item.id === 'EVAL-103')?.testRunDeadline)
-      .toBe('2026-09-30')
+      .toBe('2099-12-31')
   })
 
   it('does not warn when the customer expected date is empty or invalid', async () => {
@@ -1622,7 +1623,7 @@ describe('mock CRM API', () => {
       })
       const fae = createMockApi({ repository, latency: 0, role: 'Engineer', assignedAccountIds: ['ACC-001'] })
 
-      const saved = await fae.setEvaluationTestRunDeadline('EVAL-103', { testRunDeadline: '2026-10-01' })
+      const saved = await fae.setEvaluationTestRunDeadline('EVAL-103', { testRunDeadline: '2099-12-31' })
       expect(saved.warnings).toEqual([])
     }
   })
