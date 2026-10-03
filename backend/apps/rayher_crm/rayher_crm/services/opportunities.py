@@ -34,7 +34,7 @@ from rayher_crm.services.money import (
     optional_money_text,
     required_positive_money,
 )
-from rayher_crm.services.notifications import active_crm_users, create_notification
+from rayher_crm.services.notifications import active_crm_users, create_notification, notify_if_reachable
 from rayher_crm.services.opportunity_bookings import (
     booking_amount,
     booking_amount_cny,
@@ -71,6 +71,11 @@ SALE_TYPES = {"New Equipment", "Repeat Order", "Service"}
 LIST_FIELDS = ("payment_milestones", "strengths", "red_flags", "information_needed")
 # Compared as decimals, so an amount saved again unchanged is not recorded as an edit.
 MONEY_FIELDS = ("amount", "original_amount", "amount_cny")
+# An Opportunity carries a value from Demo done on (#22); before that its amount may be unknown.
+AMOUNT_REQUIRED = "Required from Demo done"
+AMOUNT_REQUIRED_MESSAGE = "The amount and the amount in CNY are required from Demo done."
+# Stage history note of a Demo done that waited for the amount until the owner saved it.
+PENDING_AMOUNT_REASON = "Demo done pending amount"
 
 
 def delete_strategy_opportunity(name: str) -> dict[str, str]:
@@ -94,6 +99,9 @@ def delete_strategy_opportunity(name: str) -> dict[str, str]:
             "CRM Opportunity Action",
         ):
             frappe.db.delete(doctype, {"opportunity": name})
+        # The notice of a Demo done waiting for the amount names the Opportunity itself. A notification
+        # cannot be deleted as a document and its link would refuse the delete below, so it is removed here.
+        frappe.db.delete("CRM Notification Event", {"source_doctype": "CRM Opportunity", "source_name": name})
         # Warnings handling names the Opportunity in a Data field, so it never blocks the delete; it goes too.
         # A locking read: the current rows, not this request's snapshot.
         handlings = [row[0] for row in frappe.db.sql(
@@ -202,6 +210,36 @@ def _single_sales_objective(value: Any, stored: str | None = None) -> str:
     return text
 
 
+def cny_amount_for(currency: str, amount: Decimal, amount_cny: Decimal) -> Decimal:
+    """A CNY Opportunity has one amount (#87): its CNY amount is that amount, whatever was sent with it."""
+
+    return amount if currency == "CNY" else amount_cny
+
+
+# API field and column of each amount an Opportunity needs from Demo done on; every edit past S1 requires all three.
+GATED_AMOUNTS = (("amount", "amount"), ("originalAmount", "original_amount"), ("amountCny", "amount_cny"))
+
+
+def _missing_amounts(doc) -> list[str]:
+    return [field for field, column in GATED_AMOUNTS if frappe.utils.flt(doc.get(column)) <= 0]
+
+
+def _has_amounts(doc) -> bool:
+    return not _missing_amounts(doc)
+
+
+def _assert_amounts_for_stage(doc, stage: str) -> None:
+    """Every way forward into Demo done or a later milestone needs the amount and the CNY amount."""
+
+    if stage not in MILESTONE_STAGES or stage_index(stage) < stage_index(DEMO_DONE):
+        return
+    missing = _missing_amounts(doc)
+    if missing:
+        raise CrmApiException(
+            "VALIDATION_ERROR", AMOUNT_REQUIRED_MESSAGE, field_errors={field: AMOUNT_REQUIRED for field in missing},
+        )
+
+
 def _validate_opportunity(
     payload: dict[str, Any], current_tool_type: str | None = None, stored_objective: str | None = None,
     *, require_amount: bool = True,
@@ -221,11 +259,19 @@ def _validate_opportunity(
     if require_amount:
         amount = _positive_money(payload.get("amount"), "amount")
         original_amount = _positive_money(payload.get("originalAmount", amount), "originalAmount")
-        amount_cny = required_positive_money(payload.get("amountCny"), "amountCny")
     else:
         amount = _optional_positive_money(payload.get("amount"), "amount")
         original_amount = _optional_positive_money(payload.get("originalAmount", amount), "originalAmount")
-        amount_cny = _optional_positive_money(payload.get("amountCny"), "amountCny", required_positive_money)
+        # An amount entered without an original amount is its own original, as when the key is left out:
+        # otherwise the Opportunity would pass S1 and then fail every edit on the missing original amount.
+        if amount and not original_amount:
+            original_amount = amount
+    if require_amount and currency != "CNY":
+        entered_cny = required_positive_money(payload.get("amountCny"), "amountCny")
+    else:
+        # Still checked as money when it is sent, also for a CNY Opportunity that will not store it.
+        entered_cny = _optional_positive_money(payload.get("amountCny"), "amountCny", required_positive_money)
+    amount_cny = cny_amount_for(currency, amount, entered_cny)
     stage = validate_choice(payload.get("stage"), "stage", OPPORTUNITY_STAGES)
     score = _percentage(payload.get("intentScore", 20), "intentScore")
     return {
@@ -454,6 +500,7 @@ def serialize_opportunity(doc, recoveries=None, loss_reviews=None) -> dict[str, 
         "site": (frappe.db.get_value("Address", doc.site, "address_title") or doc.site) if can_read_site else "",
         "owner": doc.opportunity_owner,
         "stage": doc.stage,
+        "pendingStageAdvance": doc.pending_stage_advance or "",
         "stageChangedAt": to_iso_timestamp(doc.stage_changed_at) if doc.stage_changed_at else "",
         "budgetApprovedOn": str(doc.budget_approved_on or ""),
         "lostAtStage": doc.lost_at_stage or "",
@@ -658,6 +705,11 @@ def update_strategy_opportunity(name: str, payload: dict[str, Any], expected_mod
         "original_amount": as_decimal(current_input["originalAmount"]),
         "amount_cny": as_decimal(current_input["amountCny"] or 0),
     }
+    # Leaving CNY: the stored CNY amount was the amount mirrored, not a conversion Sales entered, so it
+    # does not carry over into another currency as a 1:1 rate. The caller sends one or it is asked for.
+    new_currency = str(payload.get("currency") or doc.currency or "").strip().upper()
+    if doc.currency == "CNY" and new_currency != "CNY" and "amountCny" not in payload:
+        current_input["amountCny"] = ""
     # The stage never changes here, so the stored one decides: past S1 every edit needs all three amounts.
     # A deal lost at S1 never got past it, so it may still leave them blank.
     reached = doc.lost_at_stage if doc.stage == LOST and doc.lost_at_stage else doc.stage
@@ -747,6 +799,8 @@ def update_strategy_opportunity(name: str, payload: dict[str, Any], expected_mod
             if recovery_plan is not None:
                 create_recovery(event, recovery_plan)
                 notify_downgrade(doc, event)
+        # Under the row lock taken above, so a double submit or a concurrent save applies it once.
+        _apply_pending_stage_advance(doc)
     except Exception:
         frappe.db.rollback(save_point=savepoint)
         raise
@@ -879,16 +933,75 @@ def _move_stage(
 ):
     """Change the stage and append its history row in the same transaction; returns the history row."""
 
+    # A rollback returns to a stage already reached; every other move into Demo done or later is gated.
+    if source != "rollback":
+        _assert_amounts_for_stage(doc, to_stage)
     recorded_at = at or frappe.utils.now_datetime()
     from_stage = doc.stage
     doc.stage = to_stage
     # Follows the business time of the arrival, e.g. the budget approval date Sales declared.
     doc.stage_changed_at = recorded_at if reached_at is None else reached_at
+    # A forward move spends a Demo done that was waiting for the amount. A loss and the reopening after
+    # it do not: the Demo still stands, so the amounts still move the reopened Opportunity to Demo done.
+    pending = doc.pending_stage_advance if to_stage != LOST and source != "rollback" else ""
+    if pending:
+        doc.pending_stage_advance = ""
     doc.save(ignore_permissions=True)
+    if pending:
+        _append_history(doc.name, "pendingStageAdvance", _pending_stage_advance_value(doc.name), "")
     return append_stage_history(
         doc.name, from_stage, to_stage, source=source, event=event, at=recorded_at,
         reference_doctype=reference_doctype, reference_name=reference_name, reason=reason,
         reached_at=reached_at, reached_at_basis=reached_at_basis,
+    )
+
+
+def _pending_stage_advance_value(opportunity_id: str) -> str:
+    """The value the Opportunity's current waiting advance was recorded with: JSON text, or ''."""
+
+    rows = frappe.get_all(
+        "CRM Opportunity History", filters={"opportunity": opportunity_id, "field": "pendingStageAdvance"},
+        fields=["to_value"], order_by="at desc, creation desc", limit=1,
+    )
+    return (rows[0].to_value or "") if rows else ""
+
+
+def _hold_stage_advance(doc, target_stage: str, *, reference_doctype: str, reference_name: str) -> None:
+    """Keep the Opportunity at its stage until the owner saves the amount; the workflow step stands.
+
+    Recorded once: a second Demo event while it waits changes nothing and notifies nobody again.
+    """
+
+    if doc.pending_stage_advance == target_stage:
+        return
+    doc.pending_stage_advance = target_stage
+    # Saving moves modified, so an editor opened before sees the change and reloads.
+    doc.save(ignore_permissions=True)
+    _append_history(doc.name, "pendingStageAdvance", "", {
+        "stage": target_stage, "referenceDoctype": reference_doctype, "referenceName": reference_name,
+    })
+    # Sourced from the Opportunity (delete_strategy_opportunity removes the notice) and skipped for an owner who left.
+    notify_if_reachable(
+        recipient=doc.opportunity_owner, category="Opportunity", title="Enter the amount to reach Demo done",
+        message=(
+            f"{doc.title}: the Demo reached customer review. Enter the amount and the amount in CNY "
+            "to move the Opportunity to Demo done."
+        )[:1000],
+        route=f"/opportunities/{doc.name}", source_doctype="CRM Opportunity", source_name=doc.name,
+    )
+
+
+def _apply_pending_stage_advance(doc) -> None:
+    """Move an Opportunity whose Demo done waited for the amount, in the save that enters the amount."""
+
+    if doc.pending_stage_advance != DEMO_DONE or doc.stage != QUALIFIED_OPPORTUNITY or not _has_amounts(doc):
+        return
+    held = _decode_object(_pending_stage_advance_value(doc.name))
+    # Reached now: the Opportunity could not be at Demo done before it had an amount.
+    _move_stage(
+        doc, DEMO_DONE, source="event", event="demo_customer_review",
+        reference_doctype=held.get("referenceDoctype") or None, reference_name=held.get("referenceName") or None,
+        reason=PENDING_AMOUNT_REASON,
     )
 
 
@@ -995,6 +1108,8 @@ def request_internal_validation(name: str, payload: dict[str, Any], expected_mod
     assert_capability("deal:write")
     doc = _lock_opportunity_for_action(name, expected_modified)
     _require_stage(doc, (QUOTATION_SENT,), "Internal validation")
+    # Asked here, not only at approval: Managers should not be sent a request they cannot approve.
+    _assert_amounts_for_stage(doc, INTERNAL_VALIDATION)
     if doc.sale_type == "Service":
         raise CrmApiException(
             "INVALID_TRANSITION", "Internal validation is only available for equipment Opportunities.",
@@ -1305,6 +1420,8 @@ def rollback_opportunity_stage(
         )
         if reopening:
             mark_reopened(doc.name, event.recorded_at)
+            # A Demo done that was waiting when the deal was lost applies as soon as the amounts are there.
+            _apply_pending_stage_advance(doc)
     except Exception:
         frappe.db.rollback(save_point=savepoint)
         raise
@@ -1330,7 +1447,9 @@ def advance_opportunity_for_event(
     )
     if not rows:
         raise CrmApiException("OPPORTUNITY_NOT_FOUND", "Opportunity was not found.")
-    doc = frappe.get_doc("CRM Opportunity", opportunity_id)
+    # A locking read: the committed row, not this transaction's older snapshot, since the owner may
+    # have saved the amount (and moved the stage) while this workflow step waited for the lock.
+    doc = frappe.get_doc("CRM Opportunity", opportunity_id, for_update=True)
     if doc.stage == LOST:
         if event == "demo_customer_review":
             # Customer feedback on a lost deal is still recorded; it does not reopen the deal.
@@ -1343,6 +1462,11 @@ def advance_opportunity_for_event(
             "CONFLICT",
             f"Opportunity must be at {required_stage} before workflow completion can move it to {target_stage}.",
         )
+    if target_stage == DEMO_DONE and not _has_amounts(doc):
+        # The Demo result must never be lost for a missing amount, nor may the deal skip the gate:
+        # the advance waits for the owner to save the amount (see _apply_pending_stage_advance).
+        _hold_stage_advance(doc, target_stage, reference_doctype=reference_doctype, reference_name=reference_name)
+        return
     _move_stage(
         doc, target_stage, source="event", event=event,
         reference_doctype=reference_doctype, reference_name=reference_name,

@@ -186,7 +186,10 @@ describe('Leads pages', () => {
     await wrapper.get('[aria-label="业务领域自定义"]').setValue('Power Semiconductor')
     await wrapper.get('[aria-label="Opportunity 名称"]').setValue('示例企业016缺陷检测正式商机')
     await wrapper.get('[aria-label="金额"]').setValue(9800000)
-    await wrapper.get('[aria-label="人民币金额"]').setValue(9800000)
+    // The converted Opportunity is in CNY: its amount in CNY follows the amount instead of being typed again.
+    const amountCny = wrapper.get<HTMLInputElement>('[aria-label="人民币金额"]')
+    expect([amountCny.element.value, amountCny.attributes('readonly')]).toEqual(['9800000', ''])
+    expect(wrapper.get('[data-testid="lead-amount-cny-follows"]').text()).toBe('随金额自动填写，无需另填。')
     const toolTypeSelect = wrapper.get<HTMLSelectElement>('select[aria-label="设备类型"]')
     expect(toolTypeSelect.element.value).toBe('')
     expect(wrapper.find('input[aria-label="设备类型"]').exists()).toBe(false)
@@ -242,15 +245,20 @@ describe('Leads pages', () => {
       const input = wrapper.get<HTMLInputElement>(`[aria-label="${label}"]`)
       expect(input.attributes('required')).toBeUndefined()
       expect(input.element.closest('label')?.querySelector('[data-required-mark]')).toBeNull()
-      // Blank and an exact 0 both mean "not entered yet", so the browser lets a typed 0 through; a supplied
-      // negative or over-precise value is still checked.
       expect([input.attributes('min'), input.attributes('step')]).toEqual(['0', '0.01'])
-      await input.setValue('0')
-      expect(input.element.validity.valid).toBe(true)
-      await input.setValue('-1')
-      expect(input.element.validity.rangeUnderflow).toBe(true)
-      await input.setValue('')
     }
+    // Blank and an exact 0 both mean "not entered yet", so the browser lets a typed 0 through; a supplied
+    // negative or over-precise value is still checked. The amount in CNY only mirrors what is typed here.
+    const amount = wrapper.get<HTMLInputElement>('[aria-label="金额"]')
+    const amountCny = wrapper.get<HTMLInputElement>('[aria-label="人民币金额"]')
+    expect(amountCny.attributes('readonly')).toBe('')
+    await amount.setValue('0')
+    expect(amount.element.validity.valid).toBe(true)
+    expect(amountCny.element.value).toBe('0')
+    await amount.setValue('-1')
+    expect(amount.element.validity.rangeUnderflow).toBe(true)
+    await amount.setValue('')
+    expect(amountCny.element.value).toBe('')
     await wrapper.get<HTMLSelectElement>('select[aria-label="设备类型"]').setValue('Aconca')
     await wrapper.get('[data-testid="qualification-confirmed"]').setValue(true)
     await wrapper.get('[data-testid="lead-convert-probability-level"]').setValue('pipeline')

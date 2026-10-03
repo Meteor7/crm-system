@@ -174,6 +174,66 @@ describe('Opportunity detail', () => {
     unset.unmount()
   })
 
+  it('says beside the stage that a Demo done is waiting for the amount, and only then', async () => {
+    const setup = await context()
+    const current = (await setup.api.getStrategyOpportunity('OPP-001')).data
+    vi.spyOn(setup.api, 'getStrategyOpportunity').mockResolvedValue({
+      data: { ...current, stage: 'qualified_opportunity' as const, currency: 'CNY', pendingStageAdvance: 'demo_done' as const },
+      meta: { requestId: 'req_pending_demo_done' },
+      warnings: [],
+    })
+    const waiting = mountPage(setup)
+    await flushPromises()
+    expect(waiting.get('[data-testid="opportunity-stage"]').text()).toContain('Demo 已完成。填写金额后，商机会自动进入 Demo 完成阶段。')
+    expect(waiting.findAll('[data-testid="opportunity-pending-demo-done"]')).toHaveLength(1)
+
+    // In another currency the Opportunity waits for the amount in CNY as well, and the note names it.
+    const foreignSetup = await context()
+    vi.spyOn(foreignSetup.api, 'getStrategyOpportunity').mockResolvedValue({
+      data: { ...current, stage: 'qualified_opportunity' as const, currency: 'USD', amount: '5000.00', originalAmount: '5000.00', amountCny: '', pendingStageAdvance: 'demo_done' as const },
+      meta: { requestId: 'req_pending_demo_done_usd' },
+      warnings: [],
+    })
+    const foreign = mountPage(foreignSetup)
+    await flushPromises()
+    expect(foreign.get('[data-testid="opportunity-pending-demo-done"]').text()).toBe('Demo 已完成。填写金额和人民币金额后，商机会自动进入 Demo 完成阶段。')
+
+    const plain = mountPage(await context())
+    await flushPromises()
+    expect(plain.find('[data-testid="opportunity-stage"]').exists()).toBe(true)
+    expect(plain.find('[data-testid="opportunity-pending-demo-done"]').exists()).toBe(false)
+
+    // Lost while waiting: the amounts do not move a lost deal, so the note is not shown until it is reopened.
+    const lostSetup = await context()
+    vi.spyOn(lostSetup.api, 'getStrategyOpportunity').mockResolvedValue({
+      data: { ...current, stage: 'lost' as const, lostAtStage: 'qualified_opportunity' as const, pendingStageAdvance: 'demo_done' as const },
+      meta: { requestId: 'req_pending_lost' },
+      warnings: [],
+    })
+    const lost = mountPage(lostSetup)
+    await flushPromises()
+    expect(lost.find('[data-testid="opportunity-stage"]').exists()).toBe(true)
+    expect(lost.find('[data-testid="opportunity-pending-demo-done"]').exists()).toBe(false)
+  })
+
+  it('explains in the stage history a Demo done that was reached when the amount was entered', async () => {
+    const setup = await context('OPP-008')
+    const current = (await setup.api.getStrategyOpportunity('OPP-008')).data
+    // The same words on another event were typed by a user, here as the reason of the budget confirmation.
+    const stageHistory = current.stageHistory.map((row) => ['demo_customer_review', 'budget_confirmed'].includes(row.event) ? { ...row, reason: 'Demo done pending amount' } : row)
+    vi.spyOn(setup.api, 'getStrategyOpportunity').mockResolvedValue({
+      data: { ...current, stageHistory }, meta: { requestId: 'req_pending_amount_reason' }, warnings: [],
+    })
+    const wrapper = mountPage(setup)
+    await flushPromises()
+
+    const waited = wrapper.findAll('[data-stage-history-id]').find((row) => row.attributes('data-stage-history-event') === 'demo_customer_review')!
+    // The server's note is translated; a reason a user typed is shown as written.
+    expect(waited.get('.stage-history-reason').text()).toBe('Demo 完成时还没有金额，补填金额后进入本阶段')
+    const typed = wrapper.findAll('[data-stage-history-id]').find((row) => row.attributes('data-stage-history-event') === 'budget_confirmed')!
+    expect(typed.get('.stage-history-reason').text()).toBe('Demo done pending amount')
+  })
+
   it('keeps Site-restricted Opportunities readable without exposing invalid main-record actions', async () => {
     const setup = await context('OPP-001', false, 'Sales')
     const getStrategyOpportunity = setup.api.getStrategyOpportunity.bind(setup.api)

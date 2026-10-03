@@ -29,7 +29,15 @@ from rayher_crm.services.evaluations import (
     update_evaluation_run,
     update_evaluation_status,
 )
-from rayher_crm.services.opportunities import create_opportunity_action, create_strategy_opportunity, get_strategy_opportunity, mark_opportunity_lost, update_strategy_opportunity
+from rayher_crm.services.opportunities import (
+    advance_opportunity_for_event,
+    create_opportunity_action,
+    create_strategy_opportunity,
+    get_strategy_opportunity,
+    mark_opportunity_lost,
+    rollback_opportunity_stage,
+    update_strategy_opportunity,
+)
 from rayher_crm.services.opportunity_stages import CUSTOMER_BUDGET_APPROVED, DEMO_DONE, LOST, QUALIFIED_OPPORTUNITY
 from rayher_crm.services.sites import create_site
 from rayher_crm.services.visits import create_visit
@@ -73,7 +81,7 @@ class TestEvaluationApi(FrappeTestCase):
             "enabled": 1, "send_welcome_email": 0, "roles": [{"role": role}],
         }).insert(ignore_permissions=True).name
 
-    def _approved_source(self, suffix: str, sales: str, engineer: str):
+    def _approved_source(self, suffix: str, sales: str, engineer: str, *, priced: bool = True):
         frappe.set_user("Administrator")
         account = frappe.get_doc({
             "doctype": "Customer", "customer_name": f"Evaluation {suffix}", "customer_type": "Company",
@@ -97,10 +105,11 @@ class TestEvaluationApi(FrappeTestCase):
             "probabilityLevel": "pipeline",
             "accountId": account.name, "siteId": site["id"],
             "title": f"Evaluation {suffix} Opportunity", "owner": sales,
-            "stage": QUALIFIED_OPPORTUNITY, "forecast": "Pipeline", "amount": 200000,
+            "stage": QUALIFIED_OPPORTUNITY, "forecast": "Pipeline", "amount": 200000 if priced else "",
             "intentScore": 70, "poDate": "2026-12-31", "toolType": "Inspection",
             "saleType": "New Equipment", "subRegion": "East China", "currency": "CNY",
-            "originalAmount": 200000, "amountCny": 200000, "qualificationConfirmed": True,
+            "originalAmount": 200000 if priced else "", "amountCny": 200000 if priced else "",
+            "qualificationConfirmed": True,
         })
         frappe.set_user("Administrator")
         request = frappe.get_doc({
@@ -141,42 +150,147 @@ class TestEvaluationApi(FrappeTestCase):
             current = update_evaluation_status(evaluation_id, {"status": status}, current["modified"])
         return current
 
-    def test_customer_review_moves_an_opportunity_without_amounts_that_then_needs_them(self):
-        # Trial rule: an S1 Opportunity may still have no amount; reaching Customer Review moves it to
-        # Demo done all the same, and the next ordinary edit there asks for the amounts.
-        opportunity_id = self.request["opportunityId"]
-        frappe.set_user(self.sales)
-        current = get_strategy_opportunity(opportunity_id)
-        cleared = update_strategy_opportunity(
-            opportunity_id, {"amount": "", "originalAmount": "", "amountCny": ""}, current["modified"],
+    def _pending_notices(self, opportunity_id: str) -> list[tuple[str, str, str]]:
+        rows = frappe.get_all(
+            "CRM Notification Event", filters={"source_doctype": "CRM Opportunity", "source_name": opportunity_id},
+            fields=["recipient_user", "category", "route"],
         )
-        self.assertEqual((cleared["stage"], cleared["amount"], cleared["amountCny"]), (QUALIFIED_OPPORTUNITY, "", ""))
+        return [(row.recipient_user, row.category, row.route) for row in rows]
 
+    def test_customer_review_without_an_amount_keeps_the_demo_and_waits_for_the_amount(self):
+        _account, request = self._approved_source("Unpriced", self.sales, self.engineer, priced=False)
+        opportunity_id, evaluation_id = request["opportunityId"], request["evaluationId"]
         frappe.set_user(self.engineer)
-        reviewed = self._reach_customer_review(self.request["evaluationId"])
-        self.assertEqual(reviewed["status"], "Customer Review")
+        reviewed = self._reach_customer_review(evaluation_id)
 
+        # The Demo result is saved; the Opportunity cannot enter Demo done without its amount.
+        self.assertEqual(reviewed["status"], "Customer Review")
         frappe.set_user(self.sales)
-        advanced = get_strategy_opportunity(opportunity_id)
+        waiting = get_strategy_opportunity(opportunity_id)
+        self.assertEqual((waiting["stage"], waiting["pendingStageAdvance"]), (QUALIFIED_OPPORTUNITY, DEMO_DONE))
+        self.assertFalse(frappe.db.exists(
+            "CRM Opportunity Stage History", {"opportunity": opportunity_id, "event": "demo_customer_review"},
+        ))
+        self.assertEqual(self._pending_notices(opportunity_id), [(self.sales, "Opportunity", f"/opportunities/{opportunity_id}")])
+
+        # Another Demo event before the amount arrives changes nothing and notifies nobody again.
+        frappe.set_user(self.engineer)
+        advance_opportunity_for_event(
+            opportunity_id, "demo_customer_review", reference_doctype="CRM Evaluation", reference_name=evaluation_id,
+        )
+        frappe.set_user(self.sales)
+        self.assertEqual(get_strategy_opportunity(opportunity_id)["modified"], waiting["modified"])
+        self.assertEqual(len(self._pending_notices(opportunity_id)), 1)
+
+        # An edit without the amount leaves the Opportunity waiting.
+        renamed = update_strategy_opportunity(opportunity_id, {"title": "Unpriced, renamed"}, waiting["modified"])
+        self.assertEqual((renamed["stage"], renamed["pendingStageAdvance"]), (QUALIFIED_OPPORTUNITY, DEMO_DONE))
+
+        # The save that enters the amount applies the waiting advance in the same transaction.
+        amounts = {"amount": "200000", "originalAmount": "200000", "amountCny": "200000"}
+        priced = update_strategy_opportunity(opportunity_id, amounts, renamed["modified"])
         self.assertEqual(
-            (advanced["stage"], advanced["amount"], advanced["originalAmount"], advanced["amountCny"]),
-            (DEMO_DONE, "", "", ""),
+            (priced["stage"], priced["pendingStageAdvance"], priced["amount"], priced["amountCny"]),
+            (DEMO_DONE, "", "200000.00", "200000.00"),
         )
-        latest = advanced["stageHistory"][0]
+        [move] = [row for row in priced["stageHistory"] if row["event"] == "demo_customer_review"]
         self.assertEqual(
-            (latest["from"], latest["to"], latest["event"], latest["referenceName"]),
-            (QUALIFIED_OPPORTUNITY, DEMO_DONE, "demo_customer_review", self.request["evaluationId"]),
+            (move["from"], move["to"], move["source"], move["referenceDoctype"], move["referenceName"],
+             move["reason"], move["reachedAtBasis"], move["actor"]),
+            (QUALIFIED_OPPORTUNITY, DEMO_DONE, "event", "CRM Evaluation", evaluation_id,
+             "Demo done pending amount", "recorded", self.sales),
         )
-        with self.assertRaises(CrmApiException) as missing:
-            update_strategy_opportunity(opportunity_id, {"title": "Demo done needs amounts"}, advanced["modified"])
-        self.assertEqual(missing.exception.code, "VALIDATION_ERROR")
-        filled = update_strategy_opportunity(
-            opportunity_id, {"amount": "180000", "originalAmount": "180000", "amountCny": "180000"}, advanced["modified"],
+        # Reached when the amount arrived: the stage date is not backdated to the Demo review.
+        self.assertEqual((move["reachedAt"], priced["stageChangedAt"]), (move["recordedAt"], move["recordedAt"]))
+
+        # A second submit of the same form is stale, and later saves never move the stage again.
+        with self.assertRaises(CrmApiException) as twice:
+            update_strategy_opportunity(opportunity_id, amounts, renamed["modified"])
+        self.assertEqual(twice.exception.code, "VERSION_CONFLICT")
+        repriced = update_strategy_opportunity(
+            opportunity_id, {"amount": "210000", "originalAmount": "210000", "amountCny": "210000"}, priced["modified"],
         )
-        self.assertEqual((filled["stage"], filled["amount"], filled["amountCny"]), (DEMO_DONE, "180000.00", "180000.00"))
-        # The Demo result stays as recorded throughout.
-        demo = get_evaluation(self.request["evaluationId"])
+        self.assertEqual(repriced["stage"], DEMO_DONE)
+        frappe.set_user(self.engineer)
+        advance_opportunity_for_event(
+            opportunity_id, "demo_customer_review", reference_doctype="CRM Evaluation", reference_name=evaluation_id,
+        )
+        self.assertEqual(frappe.db.count(
+            "CRM Opportunity Stage History", {"opportunity": opportunity_id, "event": "demo_customer_review"},
+        ), 1)
+        self.assertEqual(len(self._pending_notices(opportunity_id)), 1)
+
+        # The Demo result stays as recorded throughout, and the Demo carries on as usual.
+        demo = get_evaluation(evaluation_id)
         self.assertEqual((demo["status"], [run["status"] for run in demo["runs"]]), ("Customer Review", ["Completed"]))
+        archived = update_evaluation_status(
+            evaluation_id, {"status": "Accepted", "customerComment": "Customer signed off"}, demo["modified"],
+        )
+        self.assertEqual(archived["status"], "Accepted")
+
+    def test_a_waiting_demo_done_outlasts_a_loss_and_applies_once_reopened_with_amounts(self):
+        # The Demo still stands after a loss, so a reopened deal is not stuck at S1 for want of a new Demo.
+        amounts = {"amount": "1000", "originalAmount": "1000", "amountCny": "1000"}
+
+        def demo_moves(opportunity_id: str) -> int:
+            return frappe.db.count(
+                "CRM Opportunity Stage History", {"opportunity": opportunity_id, "event": "demo_customer_review"},
+            )
+
+        def held_then_lost(suffix: str) -> tuple[str, dict]:
+            _account, request = self._approved_source(suffix, self.sales, self.engineer, priced=False)
+            frappe.set_user(self.engineer)
+            self._reach_customer_review(request["evaluationId"])
+            frappe.set_user(self.sales)
+            opportunity_id = request["opportunityId"]
+            lost = mark_opportunity_lost(
+                opportunity_id, {"lostReason": "Budget cut"}, get_strategy_opportunity(opportunity_id)["modified"],
+            )
+            self.assertEqual(
+                (lost["stage"], lost["lostAtStage"], lost["pendingStageAdvance"]), (LOST, QUALIFIED_OPPORTUNITY, DEMO_DONE),
+            )
+            return opportunity_id, lost
+
+        # Amounts entered while lost change nothing yet; the reopening applies the waiting advance.
+        opportunity_id, lost = held_then_lost("Unpriced Lost")
+        priced = update_strategy_opportunity(opportunity_id, amounts, lost["modified"])
+        self.assertEqual((priced["stage"], priced["pendingStageAdvance"], priced["amount"]), (LOST, DEMO_DONE, "1000.00"))
+        self.assertEqual(demo_moves(opportunity_id), 0)
+        frappe.set_user(self.manager)
+        reopened = rollback_opportunity_stage(opportunity_id, QUALIFIED_OPPORTUNITY, "Customer came back", priced["modified"])
+        self.assertEqual((reopened["stage"], reopened["pendingStageAdvance"]), (DEMO_DONE, ""))
+        self.assertEqual(demo_moves(opportunity_id), 1)
+
+        # Reopened without amounts it keeps waiting at S1, and the save that enters them applies it.
+        opportunity_id, lost = held_then_lost("Unpriced Reopened")
+        frappe.set_user(self.manager)
+        reopened = rollback_opportunity_stage(opportunity_id, QUALIFIED_OPPORTUNITY, "Customer came back", lost["modified"])
+        self.assertEqual((reopened["stage"], reopened["pendingStageAdvance"]), (QUALIFIED_OPPORTUNITY, DEMO_DONE))
+        frappe.set_user(self.sales)
+        advanced = update_strategy_opportunity(opportunity_id, amounts, reopened["modified"])
+        self.assertEqual((advanced["stage"], advanced["pendingStageAdvance"]), (DEMO_DONE, ""))
+        self.assertEqual(demo_moves(opportunity_id), 1)
+
+    def test_holding_the_advance_does_not_fail_when_the_owner_cannot_be_notified(self):
+        _account, request = self._approved_source("Unpriced Gone", self.sales, self.engineer, priced=False)
+        opportunity_id = request["opportunityId"]
+        frappe.set_user("Administrator")
+        frappe.db.set_value("User", self.sales, "enabled", 0)
+        try:
+            # The hold itself must not fail for a Sales owner who left. The Demo workflow's own notices
+            # to that owner are #75, so the event is raised directly here.
+            frappe.set_user(self.engineer)
+            advance_opportunity_for_event(
+                opportunity_id, "demo_customer_review",
+                reference_doctype="CRM Evaluation", reference_name=request["evaluationId"],
+            )
+            frappe.set_user(self.manager)
+            waiting = get_strategy_opportunity(opportunity_id)
+            self.assertEqual((waiting["stage"], waiting["pendingStageAdvance"]), (QUALIFIED_OPPORTUNITY, DEMO_DONE))
+            self.assertEqual(self._pending_notices(opportunity_id), [])
+        finally:
+            frappe.set_user("Administrator")
+            frappe.db.set_value("User", self.sales, "enabled", 1)
 
     def test_scoped_list_get_strict_status_graph_cas_and_acceptance(self):
         evaluation_id = self.request["evaluationId"]

@@ -36,6 +36,7 @@ const FIXED_MESSAGES: Partial<Record<string, Record<string, CopyPair>>> = {
     'A comment is required to reject an internal validation.': ['A comment is required to reject an internal validation.', '驳回内部生产审批时必须填写审批意见。'],
     'booking is required.': ['Enter the Booking details.', '请填写 Booking 信息。'],
     'amountCny is required.': ['Enter the amount in CNY.', '请填写人民币金额。'],
+    'The amount and the amount in CNY are required from Demo done.': ['Enter the amount and the amount in CNY on the Opportunity first: they are required from Demo done on.', '请先在商机上填写金额和人民币金额：从 Demo 完成阶段起必须有金额。'],
     'amountCny is unchanged.': ['The amount in CNY has not changed.', '人民币金额没有变化。'],
     'A CNY Booking uses its amount.': ['A CNY Booking uses its own amount; no separate amount in CNY is needed.', '人民币订单直接使用订单金额，不需要另填人民币金额。'],
     'A reason is required to correct the CNY amount.': ['Enter a reason to correct the amount in CNY.', '更正人民币金额必须填写原因。'],

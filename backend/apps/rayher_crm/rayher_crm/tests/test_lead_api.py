@@ -307,11 +307,18 @@ class TestLeadApi(FrappeTestCase):
         self.assertEqual(convert_lead(lead["id"], omitted), converted)
         self.assertEqual(frappe.db.count("CRM Opportunity", {"source_lead": lead["id"]}), 1)
 
-        # Blank and exact zero mean the same; one amount entered does not require the other.
+        # Blank and exact zero mean the same. A CNY Opportunity takes its CNY amount from the amount (#87);
+        # in another currency one amount entered does not require the other.
         for label, amounts, expected in (
             ("Blank", {"opportunityAmount": "", "opportunityAmountCny": ""}, ("", "", "")),
             ("Zero", {"opportunityAmount": "0", "opportunityAmountCny": "0.00"}, ("", "", "")),
-            ("Priced", {"opportunityAmount": "1200.5", "opportunityAmountCny": ""}, ("1200.50", "1200.50", "")),
+            ("Priced", {"opportunityAmount": "1200.5", "opportunityAmountCny": ""}, ("1200.50", "1200.50", "1200.50")),
+            ("Mismatch", {"opportunityAmount": "1200.5", "opportunityAmountCny": "99"}, ("1200.50", "1200.50", "1200.50")),
+            (
+                "Foreign",
+                {"currency": "USD", "opportunityAmount": "1200.5", "opportunityAmountCny": ""},
+                ("1200.50", "1200.50", ""),
+            ),
         ):
             with self.subTest(label=label):
                 lead = create_lead(self._input(f"{label} Conversion Lead"))

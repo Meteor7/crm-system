@@ -216,11 +216,14 @@ describe('OpportunityEditorModal amount in CNY', () => {
     expect(create.get('[aria-label="人民币金额"]').attributes('required')).toBeUndefined()
     expect(create.find('[data-testid="opportunity-amount-cny-missing"]').exists()).toBe(false)
 
-    const filled = mount(OpportunityEditorModal, { props: { ...props, opportunity: { ...legacyOpportunity('Service'), amountCny: '32500000.00' } } })
+    // In another currency Sales enter the amount in CNY by hand.
+    const foreign = { ...legacyOpportunity('Service'), currency: 'USD' }
+    const filled = mount(OpportunityEditorModal, { props: { ...props, opportunity: { ...foreign, amountCny: '32500000.00' } } })
     expect((filled.get('[aria-label="人民币金额"]').element as HTMLInputElement).value).toBe('32500000.00')
+    expect(filled.get('[aria-label="人民币金额"]').attributes('readonly')).toBeUndefined()
     expect(filled.find('[data-testid="opportunity-amount-cny-missing"]').exists()).toBe(false)
 
-    const missing = mount(OpportunityEditorModal, { props: { ...props, opportunity: { ...legacyOpportunity('Service'), amountCny: '' } } })
+    const missing = mount(OpportunityEditorModal, { props: { ...props, opportunity: { ...foreign, amountCny: '' } } })
     expect(missing.get('[aria-label="人民币金额"]').attributes('required')).toBe('')
     expect(missing.get('[data-testid="opportunity-amount-cny-missing"]').text()).toBe('这个商机还没有人民币金额，保存前请先填写。')
     await missing.get('[aria-label="人民币金额"]').setValue('1234.5')
@@ -228,8 +231,86 @@ describe('OpportunityEditorModal amount in CNY', () => {
     expect(missing.emitted('submit')?.[0]?.[0]).toMatchObject({ amountCny: '1234.5' })
 
     // Saving at stage 1 does not need it, so there is nothing to flag.
-    const early = mount(OpportunityEditorModal, { props: { ...props, opportunity: { ...legacyOpportunity('Service'), stage: 'qualified_opportunity', amountCny: '' } } })
+    const early = mount(OpportunityEditorModal, { props: { ...props, opportunity: { ...foreign, stage: 'qualified_opportunity', amountCny: '' } } })
     expect(early.find('[data-testid="opportunity-amount-cny-missing"]').exists()).toBe(false)
+  })
+
+  it('fills the amount in CNY from the amount for a CNY Opportunity and hands it back when the currency changes', async () => {
+    const wrapper = mount(OpportunityEditorModal, { props })
+    const amountCny = () => wrapper.get('[aria-label="人民币金额"]')
+    // A new Opportunity starts in CNY: one amount, shown twice, typed once.
+    await wrapper.get('[aria-label="金额"]').setValue('120000')
+    expect((amountCny().element as HTMLInputElement).value).toBe('120000')
+    expect(amountCny().attributes('readonly')).toBe('')
+    expect(wrapper.get('[data-testid="opportunity-amount-cny-follows"]').text()).toBe('随金额自动填写，无需另填。')
+
+    // In another currency the mirrored figure would be wrong by the exchange rate, so it does not stay.
+    await wrapper.get('[aria-label="币种"]').setValue('USD')
+    expect(amountCny().attributes('readonly')).toBeUndefined()
+    expect(wrapper.find('[data-testid="opportunity-amount-cny-follows"]').exists()).toBe(false)
+    expect((amountCny().element as HTMLInputElement).value).toBe('')
+    await amountCny().setValue('860000')
+    await wrapper.get('[aria-label="金额"]').setValue('125000')
+    expect((amountCny().element as HTMLInputElement).value).toBe('860000')
+
+    // Back in CNY the amount takes over again, also when it is cleared.
+    await wrapper.get('[aria-label="币种"]').setValue('CNY')
+    expect((amountCny().element as HTMLInputElement).value).toBe('125000')
+    await wrapper.get('[aria-label="金额"]').setValue('')
+    expect((amountCny().element as HTMLInputElement).value).toBe('')
+  })
+
+  it('gives a foreign-currency Opportunity its stored amount in CNY back after a detour through CNY', async () => {
+    const wrapper = mount(OpportunityEditorModal, {
+      props: { ...props, opportunity: { ...legacyOpportunity('Service'), currency: 'USD', amount: '125000.00', amountCny: '860000.00' } },
+    })
+    const amountCny = () => wrapper.get('[aria-label="人民币金额"]').element as HTMLInputElement
+    expect(amountCny().value).toBe('860000.00')
+    await wrapper.get('[aria-label="币种"]').setValue('CNY')
+    expect(amountCny().value).toBe('125000.00')
+    await wrapper.get('[aria-label="币种"]').setValue('USD')
+    expect(amountCny().value).toBe('860000.00')
+
+    // A figure typed but not yet saved survives the detour as well.
+    await wrapper.get('[aria-label="人民币金额"]').setValue('900000')
+    await wrapper.get('[aria-label="币种"]').setValue('CNY')
+    await wrapper.get('[aria-label="币种"]').setValue('USD')
+    expect(amountCny().value).toBe('900000')
+  })
+
+  it('never flags a CNY Opportunity for a missing amount in CNY: it follows the amount', () => {
+    const legacy = mount(OpportunityEditorModal, { props: { ...props, opportunity: { ...legacyOpportunity('Service'), currency: 'CNY', amount: '5000.00', amountCny: '' } } })
+    expect(legacy.find('[data-testid="opportunity-amount-cny-missing"]').exists()).toBe(false)
+    expect((legacy.get('[aria-label="人民币金额"]').element as HTMLInputElement).value).toBe('5000.00')
+  })
+})
+
+describe('OpportunityEditorModal Demo done waiting for the amount', () => {
+  it('tells the owner that entering the amount moves the Opportunity to Demo done', async () => {
+    const waiting = mount(OpportunityEditorModal, {
+      props: { ...props, opportunity: { ...legacyOpportunity('New Equipment'), stage: 'qualified_opportunity', currency: 'CNY', amount: '', originalAmount: '', amountCny: '', pendingStageAdvance: 'demo_done' } },
+    })
+    const note = waiting.get('[data-testid="opportunity-pending-demo-done"]')
+    expect(note.text()).toBe('Demo 已完成。填写金额后，商机会自动进入 Demo 完成阶段。')
+    // In another currency the amount in CNY is entered too, and the Opportunity waits for both: the note says so.
+    await waiting.get('[aria-label="币种"]').setValue('USD')
+    expect(note.text()).toBe('Demo 已完成。填写金额和人民币金额后，商机会自动进入 Demo 完成阶段。')
+    setLocale('en-US'); await flushPromises()
+    expect(note.text()).toBe('The Demo is complete. Enter the amount and the amount in CNY to move this Opportunity to Demo done.')
+    setLocale('zh-CN'); await flushPromises()
+    // Still stage 1: the amounts stay optional, so any other field can be saved without them.
+    expect(waiting.get('[aria-label="金额"]').attributes('required')).toBeUndefined()
+
+    const plain = mount(OpportunityEditorModal, {
+      props: { ...props, opportunity: { ...legacyOpportunity('New Equipment'), stage: 'qualified_opportunity', pendingStageAdvance: '' } },
+    })
+    expect(plain.find('[data-testid="opportunity-pending-demo-done"]').exists()).toBe(false)
+    // Lost while waiting: the mark is kept for a reopening, but the amounts do not move a lost deal, so nothing promises it.
+    const lost = mount(OpportunityEditorModal, {
+      props: { ...props, opportunity: { ...legacyOpportunity('New Equipment'), stage: 'lost', lostAtStage: 'qualified_opportunity', pendingStageAdvance: 'demo_done' } },
+    })
+    expect(lost.find('[data-testid="opportunity-pending-demo-done"]').exists()).toBe(false)
+    expect(mount(OpportunityEditorModal, { props }).find('[data-testid="opportunity-pending-demo-done"]').exists()).toBe(false)
   })
 })
 

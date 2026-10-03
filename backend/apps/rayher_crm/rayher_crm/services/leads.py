@@ -276,6 +276,7 @@ def _validate_conversion(payload: dict[str, Any]) -> dict[str, Any]:
     from rayher_crm.services.opportunities import (
         _optional_positive_money,
         assert_initial_probability_level,
+        cny_amount_for,
         assert_qualification_confirmed,
         required_positive_money,
     )
@@ -298,12 +299,14 @@ def _validate_conversion(payload: dict[str, Any]) -> dict[str, Any]:
     )
     assert_initial_probability_level(probability_level, "opportunityProbabilityLevel")
     # The new Opportunity is always qualified (S1), so both amounts may be left for later.
+    amount = _optional_opportunity_amount(payload.get("opportunityAmount"))
+    amount_cny = _optional_positive_money(
+        payload.get("opportunityAmountCny"), "opportunityAmountCny", required_positive_money,
+    )
     return {
         "title": required_text(payload, "opportunityTitle"),
-        "amount": _optional_opportunity_amount(payload.get("opportunityAmount")),
-        "amount_cny": _optional_positive_money(
-            payload.get("opportunityAmountCny"), "opportunityAmountCny", required_positive_money,
-        ),
+        "amount": amount,
+        "amount_cny": cny_amount_for(currency, amount, amount_cny),
         "po_date": po_date,
         "currency": currency,
         "owner": resolve_write_owner(payload.get("opportunityOwner")),

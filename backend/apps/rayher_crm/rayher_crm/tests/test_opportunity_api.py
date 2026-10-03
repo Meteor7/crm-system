@@ -25,6 +25,7 @@ from rayher_crm.services.opportunities import (
     get_strategy_opportunity,
     list_strategy_opportunities,
     mark_opportunity_lost,
+    request_internal_validation,
     rollback_opportunity_stage,
     update_opportunity_stakeholder,
     update_strategy_opportunity,
@@ -139,23 +140,26 @@ class TestOpportunityApi(FrappeTestCase):
             [("", "1000.00"), ("1000.00", "")],
         )
 
-        # Trial exception: the Customer Review event can advance with an unknown amount.
-        advanced = advance_opportunity_fixture(cleared, "demo_done")
+        # From Demo done on the amounts are required (#22): the Customer Review event leaves the Opportunity
+        # at S1, waiting, and the save that enters the amounts applies the advance.
+        waiting = advance_opportunity_fixture(cleared, "demo_done")
         self.assertEqual(
-            (advanced["stage"], advanced["amount"], advanced["originalAmount"], advanced["amountCny"]),
-            ("demo_done", "", "", ""),
+            (waiting["stage"], waiting["pendingStageAdvance"], waiting["amount"], waiting["amountCny"]),
+            ("qualified_opportunity", "demo_done", "", ""),
         )
+        advanced = update_strategy_opportunity(
+            waiting["id"], {"amount": "1000", "originalAmount": "1000", "amountCny": "1000"}, waiting["modified"],
+        )
+        self.assertEqual((advanced["stage"], advanced["pendingStageAdvance"]), ("demo_done", ""))
 
-        # Any further edit at S2 now requires the amounts, exactly as before, and names the field to fill in
+        # An edit at S2 cannot take the amounts out again, and names the field to fill in
         # (amount and original amount as amountCny), not only a top-level message.
-        with self.assertRaises(CrmApiException) as missing:
-            update_strategy_opportunity(advanced["id"], {"title": "S2 needs amount"}, advanced["modified"])
-        self.assertEqual(
-            (missing.exception.code, missing.exception.field_errors),
-            ("VALIDATION_ERROR", {"amount": "Invalid amount"}),
-        )
         for amounts, field_errors in (
-            ({"amount": "50000.00", "originalAmount": "50000.00", "amountCny": ""}, {"amountCny": "Required"}),
+            ({"amount": "", "originalAmount": "", "amountCny": ""}, {"amount": "Invalid amount"}),
+            (
+                {"currency": "USD", "amount": "50000.00", "originalAmount": "50000.00", "amountCny": ""},
+                {"amountCny": "Required"},
+            ),
             ({"amount": "0", "originalAmount": "50000.00", "amountCny": "50000.00"}, {"amount": "Invalid amount"}),
             ({"amount": "-1", "originalAmount": "50000.00", "amountCny": "50000.00"}, {"amount": "Invalid amount"}),
             (
@@ -177,6 +181,161 @@ class TestOpportunityApi(FrappeTestCase):
             advanced["modified"],
         )
         self.assertEqual((filled["amount"], filled["originalAmount"], filled["amountCny"]), ("50000.00", "50000.00", "50000.00"))
+
+    def test_no_forward_stage_move_without_the_amounts(self):
+        # Rows from before the gate may sit past S1 without amounts; none of them moves forward until
+        # the amounts are entered. Marking lost and a Manager rollback stay available.
+        account, site = self._account_site(self.sales, "Gate")
+        moves = {
+            "demo_done": lambda current: confirm_budget_approved(
+                current["id"], {"approvedOn": frappe.utils.today()}, current["modified"],
+            ),
+            "customer_budget_approved": lambda current: advance_opportunity_for_event(
+                current["id"], "rfq_approved", reference_doctype="CRM RFQ", reference_name="gate",
+            ),
+            "rfq_validated": lambda current: advance_opportunity_for_event(
+                current["id"], "quotation_published", reference_doctype="CRM Quotation Version", reference_name="gate",
+            ),
+            # Refused when it is requested, before any Manager is asked to approve it.
+            "quotation_sent": lambda current: request_internal_validation(current["id"], {}, current["modified"]),
+        }
+        for stage, move in moves.items():
+            with self.subTest(stage=stage):
+                frappe.set_user(self.sales)
+                opportunity = advance_opportunity_fixture(
+                    create_strategy_opportunity(self._input(account, site, self.sales, title=f"Gate {stage}")), stage,
+                )
+                frappe.db.set_value(
+                    "CRM Opportunity", opportunity["id"], {"amount": 0, "original_amount": 0, "amount_cny": 0},
+                    update_modified=False,
+                )
+                current = get_strategy_opportunity(opportunity["id"])
+                self.assertEqual((current["stage"], current["amount"], current["amountCny"]), (stage, "", ""))
+                with self.assertRaises(CrmApiException) as blocked:
+                    move(current)
+                self.assertEqual(
+                    (blocked.exception.code, blocked.exception.field_errors),
+                    (
+                        "VALIDATION_ERROR",
+                        {
+                            "amount": "Required from Demo done", "originalAmount": "Required from Demo done",
+                            "amountCny": "Required from Demo done",
+                        },
+                    ),
+                )
+                self.assertEqual(get_strategy_opportunity(opportunity["id"])["stage"], stage)
+
+                if stage != "demo_done":
+                    frappe.set_user(self.manager)
+                    rolled_back = rollback_opportunity_stage(
+                        opportunity["id"], "demo_done", "Amounts were never entered", current["modified"],
+                    )
+                    self.assertEqual(rolled_back["stage"], "demo_done")
+                    current = rolled_back
+                frappe.set_user(self.sales)
+                lost = mark_opportunity_lost(opportunity["id"], {"lostReason": "No budget"}, current["modified"])
+                self.assertEqual(lost["stage"], "lost")
+
+    def test_an_amount_without_an_original_amount_is_its_own_original(self):
+        # Every edit past S1 requires the original amount, so an Opportunity must not get there without one.
+        account, site = self._account_site(self.sales, "Original")
+        created = create_strategy_opportunity(self._input(
+            account, site, self.sales, amount="100", originalAmount="", amountCny="100",
+        ))
+        self.assertEqual((created["amount"], created["originalAmount"]), ("100.00", "100.00"))
+        # An original amount that was entered is kept, and one sent blank beside a new amount follows it.
+        kept = update_strategy_opportunity(created["id"], {"amount": "120", "originalAmount": "110"}, created["modified"])
+        self.assertEqual((kept["amount"], kept["originalAmount"], kept["amountCny"]), ("120.00", "110.00", "120.00"))
+        unpriced = create_strategy_opportunity(self._input(
+            account, site, self.sales, title="Unpriced original", amount="", originalAmount="", amountCny="",
+        ))
+        priced = update_strategy_opportunity(
+            unpriced["id"], {"amount": "80", "originalAmount": "", "amountCny": "80"}, unpriced["modified"],
+        )
+        self.assertEqual((priced["amount"], priced["originalAmount"]), ("80.00", "80.00"))
+
+        # A row from before this rule may hold an amount without its original: the Demo done waits for it
+        # like for any other missing amount, and the next save completes it and moves the Opportunity.
+        legacy = create_strategy_opportunity(self._input(account, site, self.sales, title="Legacy original"))
+        frappe.db.set_value("CRM Opportunity", legacy["id"], "original_amount", 0, update_modified=False)
+        waiting = self._demo_done(legacy)
+        self.assertEqual(
+            (waiting["stage"], waiting["pendingStageAdvance"], waiting["originalAmount"]),
+            ("qualified_opportunity", "demo_done", ""),
+        )
+        moved = update_strategy_opportunity(legacy["id"], {"title": "Legacy original, saved"}, waiting["modified"])
+        self.assertEqual(
+            (moved["stage"], moved["pendingStageAdvance"], moved["originalAmount"]), ("demo_done", "", moved["amount"]),
+        )
+        # From there on an ordinary edit goes through.
+        self.assertEqual(
+            update_strategy_opportunity(legacy["id"], {"title": "Edited at Demo done"}, moved["modified"])["title"],
+            "Edited at Demo done",
+        )
+
+    def test_a_waiting_opportunity_can_be_deleted_with_its_notice(self):
+        account, site = self._account_site(self.sales, "WaitingDelete")
+        opportunity = create_strategy_opportunity(self._input(
+            account, site, self.sales, amount="", originalAmount="", amountCny="",
+        ))
+        waiting = self._demo_done(opportunity)
+        self.assertEqual(waiting["pendingStageAdvance"], "demo_done")
+        notice = {"source_doctype": "CRM Opportunity", "source_name": opportunity["id"]}
+        self.assertEqual(frappe.db.count("CRM Notification Event", notice), 1)
+        # Another Opportunity's notice is not touched.
+        other = create_strategy_opportunity(self._input(
+            account, site, self.sales, title="Other waiting", amount="", originalAmount="", amountCny="",
+        ))
+        self._demo_done(other)
+        other_notice = {"source_doctype": "CRM Opportunity", "source_name": other["id"]}
+
+        frappe.set_user("Administrator")
+        self.assertEqual(delete_strategy_opportunity(opportunity["id"]), {"id": opportunity["id"], "status": "Deleted"})
+        self.assertFalse(frappe.db.exists("CRM Opportunity", opportunity["id"]))
+        self.assertEqual(frappe.db.count("CRM Notification Event", notice), 0)
+        self.assertEqual(frappe.db.count("CRM Notification Event", other_notice), 1)
+
+    def test_a_cny_opportunity_takes_its_cny_amount_from_the_amount(self):
+        # A CNY Opportunity has one amount (#87): whatever the form sends as the CNY amount, the amount wins.
+        account, site = self._account_site(self.sales, "CnyFollows")
+        created = create_strategy_opportunity(self._input(
+            account, site, self.sales, currency="CNY", amount="100", originalAmount="100", amountCny="90",
+        ))
+        self.assertEqual((created["amount"], created["amountCny"]), ("100.00", "100.00"))
+        repriced = update_strategy_opportunity(created["id"], {"amount": "250", "originalAmount": "250"}, created["modified"])
+        self.assertEqual((repriced["amount"], repriced["amountCny"]), ("250.00", "250.00"))
+        only_cny = update_strategy_opportunity(created["id"], {"amountCny": "999"}, repriced["modified"])
+        self.assertEqual((only_cny["amount"], only_cny["amountCny"]), ("250.00", "250.00"))
+        blank = create_strategy_opportunity(self._input(
+            account, site, self.sales, title="CNY, amount unknown", currency="CNY",
+            amount="", originalAmount="", amountCny="500",
+        ))
+        self.assertEqual((blank["amount"], blank["amountCny"]), ("", ""))
+
+        # Another currency keeps the CNY amount Sales entered by hand.
+        foreign = create_strategy_opportunity(self._input(
+            account, site, self.sales, title="USD deal", currency="USD",
+            amount="100", originalAmount="100", amountCny="720",
+        ))
+        self.assertEqual((foreign["amount"], foreign["amountCny"]), ("100.00", "720.00"))
+        # Switching it to CNY makes the CNY amount follow from then on.
+        switched = update_strategy_opportunity(foreign["id"], {"currency": "CNY"}, foreign["modified"])
+        self.assertEqual((switched["amount"], switched["amountCny"]), ("100.00", "100.00"))
+
+        # Leaving CNY does not keep the mirrored figure as a 1:1 conversion: the CNY amount is unknown
+        # again at S1, and asked for from Demo done on, unless the caller sends one with the change.
+        left = update_strategy_opportunity(created["id"], {"currency": "USD"}, only_cny["modified"])
+        self.assertEqual((left["currency"], left["amount"], left["amountCny"]), ("USD", "250.00", ""))
+        advanced = self._demo_done(create_strategy_opportunity(self._input(
+            account, site, self.sales, title="CNY at Demo done", currency="CNY", amount="300", originalAmount="300",
+        )))
+        with self.assertRaises(CrmApiException) as unconverted:
+            update_strategy_opportunity(advanced["id"], {"currency": "USD"}, advanced["modified"])
+        self.assertEqual(unconverted.exception.field_errors, {"amountCny": "Required"})
+        converted = update_strategy_opportunity(
+            advanced["id"], {"currency": "USD", "amountCny": "2150"}, advanced["modified"],
+        )
+        self.assertEqual((converted["currency"], converted["amount"], converted["amountCny"]), ("USD", "300.00", "2150.00"))
 
     def test_create_list_update_history_and_account_360(self):
         account, site = self._account_site(self.sales, "Core")
@@ -490,12 +649,12 @@ class TestOpportunityApi(FrappeTestCase):
         with self.assertRaises(CrmApiException) as undated:
             update_strategy_opportunity(lost["id"], {"competition": "Unknown stage"}, unknown_stage["modified"])
         self.assertEqual(undated.exception.field_errors, {"amount": "Invalid amount"})
-        # A deal lost further on still needs all three amounts to be edited, as before.
-        late = self._demo_done(create_strategy_opportunity(self._input(account, site, self.sales, title="Late", **blank)))
+        # A deal lost further on had its amounts to get there, and an edit cannot take them out.
+        late = self._demo_done(create_strategy_opportunity(self._input(account, site, self.sales, title="Late")))
         lost_late = mark_opportunity_lost(late["id"], {"lostReason": "Competitor won"}, late["modified"])
         self.assertEqual(lost_late["lostAtStage"], "demo_done")
         with self.assertRaises(CrmApiException) as missing:
-            update_strategy_opportunity(lost_late["id"], {"competition": "Too late"}, lost_late["modified"])
+            update_strategy_opportunity(lost_late["id"], {"competition": "Too late", **blank}, lost_late["modified"])
         self.assertEqual(
             (missing.exception.code, missing.exception.field_errors), ("VALIDATION_ERROR", {"amount": "Invalid amount"}),
         )

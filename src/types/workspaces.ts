@@ -297,6 +297,8 @@ export interface StrategyOpportunityDto {
   stage: OpportunityStage
   /** UTC ISO timestamp of the latest arrival at the current stage, or ''. */
   stageChangedAt: string
+  /** A Demo reached customer review before the amount was entered; saving the amount applies the move. */
+  pendingStageAdvance?: 'demo_done' | ''
   /** YYYY-MM-DD on which Sales declared the customer approved the budget, or ''. */
   budgetApprovedOn: string
   /** The open stage the Opportunity was lost at. Empty unless lost, and possibly empty for a migrated loss. */

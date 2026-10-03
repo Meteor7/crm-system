@@ -207,7 +207,7 @@ watch(() => [route.query.page, route.query.pageSize, route.query.status, route.q
               <td class="opportunity-number" :data-opportunity-number="item.id">{{ item.id }}</td>
               <td><RouterLink class="record-link" :to="{ name: 'opportunity-detail', params: { opportunityId: item.id } }" :data-opportunity-link="item.id"><strong>{{ item.title }}</strong></RouterLink></td>
               <td><strong>{{ item.account }}</strong><small>{{ item.site }}</small></td>
-              <td><strong>{{ stageLabel(item.stage) }}</strong></td>
+              <td><strong>{{ stageLabel(item.stage) }}</strong><small v-if="item.pendingStageAdvance === 'demo_done' && item.stage === 'qualified_opportunity'" class="pending-stage-marker" :data-testid="`opportunity-pending-badge-${item.id}`" :title="t(item.currency === 'CNY' ? 'oppEditor.pendingDemoDone' : 'oppEditor.pendingDemoDoneForeign')">{{ t('oppEditor.pendingDemoDoneShort') }}</small></td>
               <td>{{ formatDisplayDate(item.poDate) }}</td>
               <td><strong :data-opportunity-amount="item.id">{{ amountText(item.amount, item.currency) }}</strong><small>{{ locale === 'en-US' ? 'Original' : '原始金额' }} {{ amountText(item.originalAmount, item.currency) }}</small><small :data-opportunity-amount-cny="item.id">{{ t('oppEditor.amountCny') }} {{ item.amountCny ? formatMoney(item.amountCny, 'CNY') : t('oppEditor.amountCnyPending') }}</small></td>
               <td data-opportunity-probability-level><StatusBadge :label="opportunityProbabilityLevelLabel(item.probabilityLevel, locale)" :tone="opportunityProbabilityLevelTone(item.probabilityLevel)" /></td>
@@ -229,6 +229,7 @@ watch(() => [route.query.page, route.query.pageSize, route.query.status, route.q
               <article v-for="item in visibleBoardRows[stageName]" :key="item.id" class="opportunity-board-card" :data-opportunity-id="item.id">
                 <div class="board-card-topline"><span>{{ item.id }}</span><StatusBadge :label="opportunityProbabilityLevelLabel(item.probabilityLevel, locale)" :tone="opportunityProbabilityLevelTone(item.probabilityLevel)" data-opportunity-board-probability-level /></div>
                 <RouterLink class="record-link" :to="{ name: 'opportunity-detail', params: { opportunityId: item.id } }" :data-opportunity-board-link="item.id">{{ item.title }}</RouterLink>
+                <small v-if="item.pendingStageAdvance === 'demo_done' && item.stage === 'qualified_opportunity'" class="pending-stage-marker board-pending-marker" :data-testid="`opportunity-board-pending-badge-${item.id}`" :title="t(item.currency === 'CNY' ? 'oppEditor.pendingDemoDone' : 'oppEditor.pendingDemoDoneForeign')">{{ t('oppEditor.pendingDemoDoneShort') }}</small>
                 <p>{{ item.account }}<small>{{ item.site }}</small></p>
                 <dl>
                   <div><dt>{{ t('detail.amount') }}</dt><dd>{{ amountText(item.amount, item.currency) }}</dd></div>
@@ -263,6 +264,8 @@ watch(() => [route.query.page, route.query.pageSize, route.query.status, route.q
 .opportunity-board-column>header div{display:flex;align-items:center;justify-content:space-between;gap:8px}
 .opportunity-board-column>header strong{color:var(--crm-navy);font-size:10px}
 .optional-stage-marker{margin-left:6px;padding:1px 5px;color:var(--crm-text-muted);border:1px dashed #b9b2a8;border-radius:999px;font-size:7px;font-weight:700}
+.pending-stage-marker,.opportunity-table td small.pending-stage-marker{display:block;width:fit-content;padding:1px 5px;color:#8a651d;background:var(--crm-warning-soft);border:1px solid currentColor;border-radius:999px;font-size:7px;font-weight:700;white-space:nowrap}
+.board-pending-marker{justify-self:start}
 .opportunity-board-column>header span{color:var(--crm-text-muted);font-size:8px}
 .opportunity-board-column>header em{color:var(--crm-teal);font-size:13px;font-style:normal;font-weight:800}
 .opportunity-board-cards{display:grid;align-content:start;gap:9px;padding:10px}

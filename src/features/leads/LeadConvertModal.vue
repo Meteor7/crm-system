@@ -103,6 +103,8 @@ watch(qualificationConfirmed, (confirmed) => {
 // Whoever converts sets the new Opportunity's first level, including a Manager converting for Sales.
 const levelError = useLocaleMessage()
 watch(() => form.probabilityLevel, () => { levelError.value = '' })
+// The converted Opportunity is in CNY, so its amount in CNY is its amount: shown, not typed (#87).
+watch(() => form.opportunityAmount, (amount) => { form.opportunityAmountCny = amount }, { immediate: true })
 
 function submit() {
   if (!qualificationConfirmed.value) {
@@ -195,7 +197,7 @@ const opportunityTitleInput = useLocalizedInput(() => form.opportunityTitle, (va
       <label><span>{{ t('oppEditor.name') }}<RequiredMark /></span><input v-model="opportunityTitleInput" :aria-label="t('oppEditor.name')" required /></label>
       <!-- The conversion always creates a stage-1 Opportunity, whose amounts may stay blank (or an exact 0, the same "not entered yet") until later. -->
       <label><span>{{ t('oppEditor.amount') }}</span><input v-model="form.opportunityAmount" :aria-label="t('oppEditor.amount')" type="number" min="0" step="0.01" /></label>
-      <label><span>{{ t('oppEditor.amountCny') }}</span><input v-model="form.opportunityAmountCny" :aria-label="t('oppEditor.amountCny')" type="number" min="0" step="0.01" /></label>
+      <label class="amount-cny-field"><span>{{ t('oppEditor.amountCny') }}</span><input v-model="form.opportunityAmountCny" :aria-label="t('oppEditor.amountCny')" type="number" min="0" step="0.01" readonly /><small data-testid="lead-amount-cny-follows">{{ t('oppEditor.amountCnyFollows') }}</small></label>
       <label><span>{{ t('oppEditor.poDate') }}<RequiredMark /></span><input v-model="form.opportunityCloseDate" :aria-label="t('oppEditor.poDate')" type="date" required /></label>
       <label><span>{{ t('detail.owner') }}<RequiredMark /></span><PersonnelSelect v-model="form.opportunityOwner" :roles="app.bootstrap?.user.role === 'Manager' ? ['Sales', 'Manager'] : ['Sales']" :ariaLabel="t('detail.owner')" required /></label>
       <label><span>{{ t('oppEditor.toolType') }}<RequiredMark /></span><AccountSegmentSelect v-model="form.toolType" :segments="equipmentChoices" :label="t('oppEditor.toolType')" :custom-option-label="locale === 'en-US' ? '+ Custom equipment type' : '＋自定义设备类型'" :custom-input-label="t('oppEditor.toolType')" :custom-placeholder="locale === 'en-US' ? 'Enter a custom equipment type' : '请输入自定义设备类型'" :empty-placeholder="locale === 'en-US' ? 'Select equipment type' : '请选择设备类型'" :custom-on-empty="false" required /></label>
@@ -209,7 +211,9 @@ const opportunityTitleInput = useLocalizedInput(() => form.opportunityTitle, (va
 </template>
 
 <style scoped>
-.conversion-note{margin:0 0 12px;padding:10px 12px;color:var(--crm-text-muted);background:var(--crm-teal-soft);border-radius:9px;font-size:10px;line-height:1.6}.form-error{margin:0 0 12px;padding:10px;color:var(--crm-danger);background:var(--crm-danger-soft);border-radius:8px;font-size:10px}.convert-form{display:grid;grid-template-columns:1fr 1fr;gap:13px}.convert-form label{display:grid;gap:6px;color:var(--crm-text-muted);font-size:10px;font-weight:700}.convert-form input,.convert-form select{width:100%;min-height:38px;padding:8px 10px;color:var(--crm-text);background:#fff;border:1px solid var(--crm-line);border-radius:8px;outline:0}.convert-form select:disabled{background:var(--crm-surface)}@media(max-width:560px){.convert-form{grid-template-columns:1fr}}
+.amount-cny-field small{color:var(--crm-text-muted);font-size:8px;font-weight:400;line-height:1.45}
+.convert-form input[readonly]{background:var(--crm-surface-muted);cursor:default}
+.conversion-note{margin:0 0 12px;padding:10px 12px;color:var(--crm-text-muted);background:var(--crm-teal-soft);border-radius:9px;font-size:10px;line-height:1.6}.form-error{margin:0 0 12px;padding:10px;color:var(--crm-danger);background:var(--crm-danger-soft);border-radius:8px;font-size:10px}.convert-form{display:grid;grid-template-columns:1fr 1fr;gap:13px}.convert-form label{display:grid;gap:6px;align-content:start;color:var(--crm-text-muted);font-size:10px;font-weight:700}.convert-form input,.convert-form select{width:100%;min-height:38px;padding:8px 10px;color:var(--crm-text);background:#fff;border:1px solid var(--crm-line);border-radius:8px;outline:0}.convert-form select:disabled{background:var(--crm-surface)}@media(max-width:560px){.convert-form{grid-template-columns:1fr}}
 .convert-form small.field-error{color:var(--crm-danger);font-size:9px;line-height:1.45}
 .qualification-field{display:grid;grid-column:1/-1;gap:5px;padding:10px 12px;background:var(--crm-teal-soft);border-radius:9px}.convert-form .qualification-check{display:flex;align-items:center;gap:8px;color:var(--crm-text);cursor:pointer}.convert-form .qualification-check input{width:16px;min-height:16px;height:16px;flex:0 0 auto;margin:0;padding:0;accent-color:var(--crm-teal)}.qualification-field small{color:var(--crm-danger);font-size:9px}
 </style>

@@ -246,4 +246,35 @@ describe('Leads&Opportunities workspace', () => {
     expect(column.get('header em').text()).toBe('CNY 100.00 · 1 条未填金额')
     expect(column.get('[data-opportunity-id="OPP-UNKNOWN"] dd').text()).toBe('待补填')
   })
+
+  it('marks an Opportunity whose Demo done is waiting for the amount beside its stage in the list', async () => {
+    const { api, pinia, router } = await context('/leads-opportunities?view=opportunities')
+    const [template] = (await api.listStrategyOpportunities({ page: 1, pageSize: 1 })).data.items
+    const items = [
+      { ...template!, id: 'OPP-WAITING', stage: 'qualified_opportunity' as const, currency: 'CNY', amount: '', originalAmount: '', amountCny: '', pendingStageAdvance: 'demo_done' as const },
+      // In another currency the amount is there but the amount in CNY is not: the tooltip names both.
+      { ...template!, id: 'OPP-WAITING-USD', stage: 'qualified_opportunity' as const, currency: 'USD', amount: '5000.00', originalAmount: '5000.00', amountCny: '', pendingStageAdvance: 'demo_done' as const },
+      { ...template!, id: 'OPP-PLAIN', stage: 'qualified_opportunity' as const, pendingStageAdvance: '' as const },
+      // Lost while waiting: the mark is kept for a reopening, but nothing is promised on a lost deal.
+      { ...template!, id: 'OPP-LOST-WAITING', stage: 'lost' as const, lostAtStage: 'qualified_opportunity' as const, pendingStageAdvance: 'demo_done' as const },
+    ]
+    vi.spyOn(api, 'listStrategyOpportunities').mockResolvedValue({ data: { items }, meta: { requestId: 'req_pending_demo_done', total: 4, page: 1, pageSize: 12 }, warnings: [] })
+    const wrapper = mount(LeadsOpportunitiesPage, { props: { apiClient: api, fixedView: 'opportunities' }, global: { plugins: [pinia, router] } })
+    await flushPromises()
+
+    expect(wrapper.find('[data-opportunity-id="OPP-LOST-WAITING"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="opportunity-pending-badge-OPP-LOST-WAITING"]').exists()).toBe(false)
+    const badge = wrapper.get('[data-testid="opportunity-pending-badge-OPP-WAITING"]')
+    expect([badge.text(), badge.attributes('title')]).toEqual(['待补金额', 'Demo 已完成。填写金额后，商机会自动进入 Demo 完成阶段。'])
+    const foreign = wrapper.get('[data-testid="opportunity-pending-badge-OPP-WAITING-USD"]')
+    expect([foreign.text(), foreign.attributes('title')]).toEqual(['待补金额', 'Demo 已完成。填写金额和人民币金额后，商机会自动进入 Demo 完成阶段。'])
+    expect(wrapper.find('[data-testid="opportunity-pending-badge-OPP-PLAIN"]').exists()).toBe(false)
+
+    // The board shows the same Opportunities as cards: the waiting one is marked there too.
+    await wrapper.get('[data-opportunity-layout="board"]').trigger('click')
+    expect(wrapper.get('[data-testid="opportunity-board-pending-badge-OPP-WAITING"]').text()).toBe('待补金额')
+    expect(wrapper.get('[data-testid="opportunity-board-pending-badge-OPP-WAITING-USD"]').attributes('title')).toBe('Demo 已完成。填写金额和人民币金额后，商机会自动进入 Demo 完成阶段。')
+    expect(wrapper.find('[data-testid="opportunity-board-pending-badge-OPP-PLAIN"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="opportunity-board-pending-badge-OPP-LOST-WAITING"]').exists()).toBe(false)
+  })
 })

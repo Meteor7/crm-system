@@ -37,6 +37,7 @@ it.each([
   ['VALIDATION_ERROR', 'expectedPoDate is required.', 'expected PO date', '预计 PO 日期'],
   ['VALIDATION_ERROR', 'A comment is required to reject an internal validation.', 'comment is required', '必须填写审批意见'],
   ['VALIDATION_ERROR', 'booking is required.', 'Booking details', 'Booking 信息'],
+  ['VALIDATION_ERROR', 'The amount and the amount in CNY are required from Demo done.', 'required from Demo done on', '从 Demo 完成阶段起必须有金额'],
   ['VALIDATION_ERROR', 'singleSalesObjective is too long.', 'single sales objective is too long', '本单目标过长'],
   ['VALIDATION_ERROR', 'opportunityAmount must be blank or a non-negative amount with at most two decimal places.', 'can be left blank', '金额可以留空'],
   ['VALIDATION_ERROR', 'amount must be positive with at most two decimal places.', 'amount is not valid', '金额无效'],

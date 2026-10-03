@@ -15,6 +15,9 @@ import type { OpportunityStageHistoryDto } from '@/types/workspaces'
 
 defineProps<{ history: OpportunityStageHistoryDto[] }>()
 const { t, locale } = useI18n()
+// The note the server writes on a Demo done that waited for the amount. Only that event carries it as a
+// system note: a loss or a rollback with the same words was typed by a user and is shown as written.
+const PENDING_AMOUNT_REASON = 'Demo done pending amount'
 
 // A declared date is a calendar day, so it is shown without a time of day.
 function reachedAtText(row: OpportunityStageHistoryDto) {
@@ -39,7 +42,7 @@ function moveText(row: OpportunityStageHistoryDto) {
     <ol v-if="history.length" class="stage-history-list">
       <li v-for="row in history" :key="row.id" :data-stage-history-id="row.id" :data-stage-history-event="row.event">
         <div class="stage-history-move"><strong>{{ moveText(row) }}</strong><StatusBadge :label="opportunityStageHistoryEventLabel(row.event, locale)" :tone="opportunityStageHistoryEventTone(row.event)" /></div>
-        <p v-if="row.reason" class="stage-history-reason">{{ row.reason }}</p>
+        <p v-if="row.reason" class="stage-history-reason">{{ row.event === 'demo_customer_review' && row.reason === PENDING_AMOUNT_REASON ? t('detail.pendingAmountReason') : row.reason }}</p>
         <span>{{ personnelDisplayName(row.actor) }} · <time :datetime="row.recordedAt">{{ formatDisplayDateTime(row.recordedAt) }}</time></span>
         <small v-if="showsSeparateReachedAt(row)" data-stage-history-reached>{{ reachedAtSummary(row) }}</small>
       </li>
