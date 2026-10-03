@@ -21,7 +21,10 @@ Run on a restored copy first::
 
 The Review region filter stays off until verify passes and Sales have confirmed the report::
 
-    bench --site <site> set-config -p crm_cockpit_region_migration_verified true
+    bench --site <site> set-config -p crm_cockpit_region_migration_verified True
+
+``-p`` reads the value as a Python literal, so it is ``True``; a lowercase ``true`` fails. To take the flag back out,
+``bench --site <site> set-config crm_cockpit_region_migration_verified None`` (without ``-p``) removes the key.
 """
 
 from __future__ import annotations
