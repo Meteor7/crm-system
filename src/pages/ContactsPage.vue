@@ -13,6 +13,7 @@ import StatusBadge from '@/design-system/StatusBadge.vue'
 import FilterBar from '@/features/shared/FilterBar.vue'
 import PaginationControls from '@/features/shared/PaginationControls.vue'
 import { readAllPages } from '@/features/shared/read-all-pages'
+import { sitesInAccountOrder } from '@/features/accounts/account-sites'
 import ContactModal from '@/features/contacts/ContactModal.vue'
 import ModalShell from '@/design-system/ModalShell.vue'
 import { formatDisplayDate } from '@/domain/time'
@@ -82,15 +83,11 @@ function siteLabel(contact: ContactSummaryDto) {
 
 async function loadReferences() {
   accounts.value = await readAllPages((page, pageSize) => props.apiClient.listAccounts({ page, pageSize }))
-  const details = await Promise.all(accounts.value.map(async (account) => {
-    try {
-      const result = await props.apiClient.getAccount360(account.id)
-      return result.data.sites.map((site) => ({ ...site, accountId: account.id }))
-    } catch {
-      return []
-    }
-  }))
-  sites.value = details.flat()
+  try {
+    sites.value = sitesInAccountOrder(accounts.value, (await props.apiClient.listAccountSites()).data)
+  } catch {
+    sites.value = []
+  }
 }
 
 async function load() {

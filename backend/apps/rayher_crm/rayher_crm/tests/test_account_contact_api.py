@@ -17,7 +17,7 @@ from rayher_crm.services.contacts import (
     update_contact,
     contacts_for_account,
 )
-from rayher_crm.services.sites import _require_site, create_site, sites_for_account
+from rayher_crm.services.sites import _require_site, create_site, list_account_sites, sites_for_account
 from rayher_crm.services.visits import create_visit
 
 
@@ -248,6 +248,58 @@ class TestAccountContactApi(FrappeTestCase):
                 foreign_contact["modified"],
             )
         self.assertEqual(contact_write.exception.code, "SCOPE_DENIED")
+
+    def test_account_sites_in_one_read_are_the_sites_of_each_account_360(self):
+        engineer = self._user("crm-account-contact-engineer@example.invalid", "CRM Engineer")
+        frappe.set_user(self.sales)
+        own = create_account(self._account_input("One Read Own"))
+        own_sites = [create_site(own["id"], self._site_input(name)) for name in ("One Read Fab A", "One Read Fab B")]
+        empty = create_account(self._account_input("One Read No Site"))
+        frappe.set_user(self.other_sales)
+        private = create_account(self._account_input("One Read Private"))
+        create_site(private["id"], self._site_input("One Read Private Fab"))
+        public_input = self._account_input("One Read Public")
+        public_input["visibility"] = "Public"
+        public = create_account(public_input)
+        public_site = create_site(public["id"], self._site_input("One Read Public Fab"))
+        frappe.set_user("Administrator")
+        frappe.get_doc({
+            "doctype": "CRM Account Engineer Assignment", "customer": public["id"], "engineer": engineer, "enabled": 1,
+        }).insert(ignore_permissions=True)
+        made = {own["id"], empty["id"], private["id"], public["id"]}
+
+        def one_read():
+            return [site for site in list_account_sites() if site["accountId"] in made]
+
+        def one_by_one():
+            listed = [item["id"] for item in list_accounts({"page": 1, "pageSize": 200})[0] if item["id"] in made]
+            return [
+                {"accountId": account, **site}
+                for account in sorted(listed) for site in get_account_360(account)["sites"]
+            ]
+
+        # A Sales user reads the Sites of their own Accounts; a Public Account of someone else shares none.
+        frappe.set_user(self.sales)
+        self.assertEqual(
+            [(site["accountId"], site["id"]) for site in one_read()],
+            [(own["id"], site["id"]) for site in reversed(own_sites)],
+        )
+        self.assertEqual(one_read()[0], {"accountId": own["id"], **own_sites[1]})
+        # An Engineer reads the Sites of the Accounts assigned to them, a Manager all of them.
+        frappe.set_user(engineer)
+        self.assertEqual(one_read(), [{"accountId": public["id"], **public_site}])
+        frappe.set_user(self.manager)
+        self.assertEqual({site["accountId"] for site in one_read()}, {own["id"], private["id"], public["id"]})
+        # For a Sales user and a Manager it is what the Account 360 of each listed Account returns
+        # (an Engineer has no Account 360: it needs visit:view).
+        for user in (self.sales, self.other_sales, self.manager):
+            frappe.set_user(user)
+            self.assertEqual(one_read(), one_by_one(), user)
+
+    def test_account_sites_in_one_read_need_the_account_capability(self):
+        frappe.set_user("Guest")
+        with self.assertRaises(frappe.PermissionError):
+            list_account_sites()
 
     def test_account_city_dictionary_uses_all_customer_records(self):
         frappe.set_user(self.sales)

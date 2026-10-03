@@ -63,6 +63,7 @@ describe('Frappe method contract', () => {
       updateAccount: 'accounts.update_account',
       deleteAccount: 'accounts.delete_account',
       getAccount360: 'accounts.get_account_360',
+      listAccountSites: 'accounts.list_account_sites',
       createAccountSite: 'accounts.create_account_site',
       updateAccountSite: 'accounts.update_account_site',
       deleteAccountSite: 'accounts.delete_account_site',

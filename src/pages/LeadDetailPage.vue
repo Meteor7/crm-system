@@ -14,6 +14,7 @@ import StatusBadge from '@/design-system/StatusBadge.vue'
 import LeadEditorModal from '@/features/leads/LeadEditorModal.vue'
 import LeadConvertModal from '@/features/leads/LeadConvertModal.vue'
 import { readAllPages } from '@/features/shared/read-all-pages'
+import { sitesInAccountOrder } from '@/features/accounts/account-sites'
 import { formatDisplayDate } from '@/domain/time'
 import { useI18n, useLocaleMessage } from '@/i18n'
 import { salesEnumLabel } from '@/features/shared/sales-i18n'
@@ -105,11 +106,12 @@ async function loadReferences() {
     sites.value = []
     return
   }
-  const details = await Promise.allSettled(accounts.value.map((account) => props.apiClient.getAccount360(account.id)))
-  contacts.value = details.flatMap((result) => result.status === 'fulfilled' ? result.value.data.contacts : [])
-  sites.value = details.flatMap((result, index) => result.status === 'fulfilled'
-    ? result.value.data.sites.map((site) => ({ ...site, accountId: accounts.value[index].id }))
-    : [])
+  const [contactRows, siteRows] = await Promise.allSettled([
+    readAllPages((page, pageSize) => props.apiClient.listContacts({ page, pageSize, contactStatus: 'Active' })),
+    props.apiClient.listAccountSites(),
+  ])
+  contacts.value = contactRows.status === 'fulfilled' ? contactRows.value : []
+  sites.value = siteRows.status === 'fulfilled' ? sitesInAccountOrder(accounts.value, siteRows.value.data) : []
 }
 async function load() {
   const current = ++sequence

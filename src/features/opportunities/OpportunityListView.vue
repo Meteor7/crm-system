@@ -19,6 +19,7 @@ import DataState from '@/design-system/DataState.vue'
 import StatusBadge from '@/design-system/StatusBadge.vue'
 import PaginationControls from '@/features/shared/PaginationControls.vue'
 import { readAllPages } from '@/features/shared/read-all-pages'
+import { sitesByAccountId } from '@/features/accounts/account-sites'
 import OpportunityEditorModal from './OpportunityEditorModal.vue'
 import { useAppStore } from '@/stores/app'
 import type { AccountSummaryDto, SiteDto } from '@/types/crm'
@@ -123,9 +124,9 @@ async function load() {
     total.value = opportunityResult.meta?.total ?? rows.value.length
     accounts.value = accountRows
     if (app.can('contact:view')) {
-      const details = await Promise.all(accounts.value.map((account) => props.apiClient.getAccount360(account.id)))
+      const sites = await props.apiClient.listAccountSites()
       if (current !== sequence) return
-      sitesByAccount.value = Object.fromEntries(details.map((detail) => [detail.data.account.id, detail.data.sites]))
+      sitesByAccount.value = sitesByAccountId(accounts.value, sites.data)
     } else {
       sitesByAccount.value = {}
     }

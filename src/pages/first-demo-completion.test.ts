@@ -9,6 +9,7 @@ import DocumentCenterPage from './DocumentCenterPage.vue'
 import InstalledToolsPage from './InstalledToolsPage.vue'
 import OpportunityStrategyPage from './OpportunityStrategyPage.vue'
 import ServiceCalendarPage from './ServiceCalendarPage.vue'
+import { withAccountSites } from '@/features/accounts/mock-account-sites'
 import { createMockApi } from '@/api/mock-adapter'
 import { createAppRouter } from '@/app/router'
 
@@ -33,7 +34,7 @@ describe('first demo completion contract', () => {
   })
 
   it('renders each completion area in the business workspaces', async () => {
-    const apiClient = createMockApi({ latency: 0 })
+    const apiClient = await withAccountSites(createMockApi({ latency: 0 }))
     const router = createAppRouter()
     await router.push('/leads-opportunities?view=opportunities')
     await router.isReady()

@@ -55,6 +55,7 @@ import {
   type OpportunityMilestoneStage,
 } from '@/domain/opportunity-stages'
 import { readAllPages } from '@/features/shared/read-all-pages'
+import { sitesByAccountId } from '@/features/accounts/account-sites'
 import { useI18n, useLocaleMessage, localeMessage } from '@/i18n'
 import { salesEnumLabel } from '@/features/shared/sales-i18n'
 
@@ -209,8 +210,7 @@ async function loadReferences() {
     sitesByAccount.value = {}
     return
   }
-  const details = await Promise.all(accounts.value.map((account) => props.apiClient.getAccount360(account.id)))
-  sitesByAccount.value = Object.fromEntries(details.map((detail) => [detail.data.account.id, detail.data.sites]))
+  sitesByAccount.value = sitesByAccountId(accounts.value, (await props.apiClient.listAccountSites()).data)
 }
 async function saveOpportunity(input: CreateStrategyOpportunityInput) {
   if (!selected.value) return

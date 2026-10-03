@@ -2,6 +2,7 @@ import { createPinia } from 'pinia'
 import { flushPromises, mount } from '@vue/test-utils'
 import { createMemoryHistory, createRouter } from 'vue-router'
 import { describe, expect, it, vi } from 'vitest'
+import { withAccountSites } from '@/features/accounts/mock-account-sites'
 import { createMockApi } from '@/api/mock-adapter'
 import { useAppStore } from '@/stores/app'
 import LeadsOpportunitiesPage from './LeadsOpportunitiesPage.vue'
@@ -13,7 +14,7 @@ function deferred<T>() {
 }
 
 async function context(initial = '/leads-opportunities') {
-  const api = createMockApi({ latency: 0 })
+  const api = await withAccountSites(createMockApi({ latency: 0 }))
   const pinia = createPinia()
   useAppStore(pinia).bootstrap = (await api.getBootstrap()).data
   const router = createRouter({

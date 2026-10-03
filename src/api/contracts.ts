@@ -24,6 +24,7 @@ import type { PlanDto, PlanQuery, PlanDetails, PlanDetailQuery } from '@/feature
 import type { CockpitSettings, CockpitSettingsInput, ReviewDto, ReviewQuery, ReviewDetails, Target, TargetInput, WarningActionInput, WarningHandling, WarningPlanInput, WarningsDto } from '@/features/cockpit/types'
 import type {
   Account360Dto,
+  AccountSiteDto,
   AccountSummaryDto,
   ApiResponse,
   BootstrapDto,
@@ -208,6 +209,8 @@ export interface CrmApi {
   updateAccount(id: string, input: CreateAccountInput, expectedModified?: string): Promise<ApiResponse<AccountSummaryDto>>
   deleteAccount(id: string): Promise<ApiResponse<{ id: string; status: 'Deleted' }>>
   getAccount360(id: string): Promise<ApiResponse<Account360Dto>>
+  /** Every Site the user may read, across Accounts, in one request. */
+  listAccountSites(): Promise<ApiResponse<AccountSiteDto[]>>
   createAccountSite(accountId: string, input: Omit<SiteDto, 'id'>): Promise<ApiResponse<SiteDto>>
   updateAccountSite(accountId: string, siteId: string, input: Omit<SiteDto, 'id'>): Promise<ApiResponse<SiteDto>>
   deleteAccountSite(accountId: string, siteId: string): Promise<ApiResponse<{ id: string }>>

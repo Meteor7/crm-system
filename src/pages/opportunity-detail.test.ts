@@ -3,6 +3,7 @@ import { flushPromises, mount } from '@vue/test-utils'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createAppRouter } from '@/app/router'
 import { CrmApiError } from '@/api'
+import { withAccountSites } from '@/features/accounts/mock-account-sites'
 import { createMockApi } from '@/api/mock-adapter'
 import { createMemorySalesRepository } from '@/demo/sales-repository'
 import { useAppStore } from '@/stores/app'
@@ -28,7 +29,7 @@ async function context(
   role: 'Manager' | 'Sales' | 'Engineer' = 'Manager',
   options: Omit<MockOptions, 'latency' | 'role'> = {},
 ) {
-  const api = createMockApi({ latency: 0, role, ...options })
+  const api = await withAccountSites(createMockApi({ latency: 0, role, ...options }))
   if (requireVersion) requireOpportunityVersion(api)
   const pinia = createPinia()
   useAppStore(pinia).bootstrap = (await api.getBootstrap()).data

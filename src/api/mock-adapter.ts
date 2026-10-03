@@ -1836,6 +1836,10 @@ export function createMockApi(options: {
       return response({ id, status: 'Deleted' as const })
     },
 
+    async listAccountSites() {
+      throw new CrmApiError('BACKEND_NOT_CONNECTED', 'Account sites require the business API.', 'account_sites_unavailable', false)
+    },
+
     async getAccount360(id: string) {
       await ensureDemoPrimaryContacts()
       await wait()

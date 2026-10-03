@@ -101,6 +101,10 @@ describe('mock CRM API', () => {
     expect((await engineer.listAccounts({ pageSize: 100 })).data.items.map((item) => item.id)).toEqual(['ACC-001', 'ACC-003'])
   })
 
+  it('leaves the Sites of every Account to the business API', async () => {
+    await expect(createMockApi({ latency: 0 }).listAccountSites()).rejects.toMatchObject({ code: 'BACKEND_NOT_CONNECTED' })
+  })
+
   it('keeps Public visibility limited to Account data while honoring child owners', async () => {
     const salesRepository = createMemorySalesRepository()
     salesRepository.snapshot.accounts.find((item) => item.id === 'ACC-006')!.visibility = 'Public'

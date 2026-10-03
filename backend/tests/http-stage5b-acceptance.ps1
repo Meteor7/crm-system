@@ -23,6 +23,7 @@ $created = [ordered]@{
     Contact = $null
     Account = $null
     ForeignAccount = $null
+    ForeignSite = $null
     User = $null
 }
 
@@ -92,6 +93,17 @@ try {
     }
     $foreign = Invoke-CrmPost $adminSession 'rayher_crm.api.v1.accounts.create_account' @{ input = $foreignInput }
     $created.ForeignAccount = $foreign.data.id
+    $foreignSite = Invoke-CrmPost $adminSession 'rayher_crm.api.v1.accounts.create_account_site' @{
+        accountId = $created.ForeignAccount
+        input = @{
+            name = "HTTP Foreign Site $stamp"
+            city = 'Beijing'
+            type = 'Fab'
+            process = 'Frontend'
+            status = [string]::Concat([char]0x91CF, [char]0x4EA7)
+        }
+    }
+    $created.ForeignSite = $foreignSite.data.id
 
     $salesSession = New-Object Microsoft.PowerShell.Commands.WebRequestSession
     Invoke-RestMethod -Uri "$BaseUrl/api/method/login" -Method Post -Body @{ usr = $salesEmail; pwd = $salesPassword } -WebSession $salesSession | Out-Null
@@ -215,6 +227,19 @@ try {
     if ($conversion.data.lead.id -ne $created.Lead) { throw 'Lead conversion response omitted or changed the canonical Lead.' }
     $converted360 = Invoke-RestMethod -Uri "$BaseUrl/api/method/rayher_crm.api.v1.accounts.get_account_360?id=$($created.ConversionAccount)" -WebSession $salesSession
     $created.ConversionSite = $converted360.message.data.sites[0].id
+    # One request for every Site the caller may read: the Site of the caller's own Account is in it, and the Site
+    # of the foreign Account, which the Manager reads through the same endpoint, is not.
+    $allSites = @((Invoke-RestMethod -Uri "$BaseUrl/api/method/rayher_crm.api.v1.accounts.list_account_sites" -WebSession $salesSession).message.data)
+    if (-not ($allSites | Where-Object { $_.accountId -eq $created.ConversionAccount -and $_.id -eq $created.ConversionSite })) {
+        throw 'HTTP list_account_sites omitted the Site of the Account the caller owns.'
+    }
+    if ($allSites | Where-Object { $_.id -eq $created.ForeignSite -or $_.accountId -eq $created.ForeignAccount }) {
+        throw 'HTTP list_account_sites returned a Site of a foreign Account to a Sales user.'
+    }
+    $managerSites = @((Invoke-RestMethod -Uri "$BaseUrl/api/method/rayher_crm.api.v1.accounts.list_account_sites" -WebSession $adminSession).message.data)
+    if (-not ($managerSites | Where-Object { $_.accountId -eq $created.ForeignAccount -and $_.id -eq $created.ForeignSite })) {
+        throw 'HTTP list_account_sites omitted the foreign Site for the Manager; the Sales check above would prove nothing.'
+    }
 
     $list = Invoke-RestMethod -Uri "$BaseUrl/api/method/rayher_crm.api.v1.accounts.list_accounts?search=HTTP%20Account%20$stamp&page=1&pageSize=20" -WebSession $salesSession
     if ($list.message.meta.total -lt 1) { throw 'HTTP scoped Account list did not return the created record.' }
@@ -227,7 +252,7 @@ try {
     }
     if ($scopeStatus -ne 403) { throw "Expected HTTP 403 for foreign Account detail, got $scopeStatus." }
 
-    Write-Output 'Stage 5B authenticated HTTP acceptance passed: create/list/update/409/scope-403/assignment-403/convert.'
+    Write-Output 'Stage 5B authenticated HTTP acceptance passed: create/list/update/409/scope-403/assignment-403/convert/sites.'
 } finally {
     $adminPassword = $null
     $salesPassword = $null
@@ -246,6 +271,7 @@ try {
     Remove-TestDoc 'Customer' $created.ConversionAccount
     Remove-TestDoc 'Contact' $created.Contact
     Remove-TestDoc 'Customer' $created.Account
+    Remove-TestDoc 'Address' $created.ForeignSite
     Remove-TestDoc 'Customer' $created.ForeignAccount
     Remove-TestDoc 'User' $created.User
 }

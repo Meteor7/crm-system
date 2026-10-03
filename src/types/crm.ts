@@ -130,6 +130,9 @@ export interface SiteDto {
   status: '量产' | '建设中' | '规划中'
 }
 
+/** A Site read across Accounts, with the Account it belongs to. */
+export type AccountSiteDto = SiteDto & { accountId: string }
+
 export type BuyingRole = 'Decision Maker' | 'Economic Buyer' | 'Champion' | 'Technical Champion' | 'Technical Evaluator' | 'Procurement' | 'Influencer' | 'Blocker' | 'User'
 
 export type ContactStatus = 'Active' | 'Left Company' | 'Archived'

@@ -8,6 +8,7 @@ import frappe
 
 from rayher_crm.api.v1.errors import CrmApiException
 from rayher_crm.permissions.roles import assert_capability, resolve_crm_role
+from rayher_crm.permissions.scope import conditions_for_doctype
 from rayher_crm.services.accounts import _require_account
 from rayher_crm.services.common import ensure_server_generated_id, required_text, resolve_write_owner, validate_choice
 
@@ -91,6 +92,37 @@ def sites_for_account(account_id: str) -> list[dict[str, Any]]:
         as_dict=True,
     )
     return [serialize_site(frappe.get_doc("Address", row.name)) for row in names]
+
+
+def list_account_sites() -> list[dict[str, Any]]:
+    """Every Site the caller may read, each with the ``accountId`` it belongs to, in one query.
+
+    The Accounts are the ones in the caller's Customer row scope, and of those a Sales user reads the
+    Sites of their own only (see ``can_read_site_data``). For a Manager and a Sales user that is what the
+    Account 360 of each listed Account returns; an Engineer gets the Sites of the Accounts assigned to
+    them. Pages that offer Sites across Accounts read this instead of one Account 360 per Account (#136).
+    """
+
+    assert_capability("account:view")
+    scope = conditions_for_doctype("Customer")
+    values: list[Any] = []
+    if resolve_crm_role() == "Sales":
+        scope = f"({scope}) AND `tabCustomer`.`custom_crm_owner` = %s"
+        values.append(frappe.session.user)
+    rows = frappe.db.sql(
+        f"""SELECT `link`.`link_name` AS `account`, `address`.`name`, `address`.`address_title`,
+            `address`.`city`, `address`.`custom_crm_site_type`, `address`.`custom_crm_process`,
+            `address`.`custom_crm_status`
+        FROM `tabAddress` AS `address`
+        INNER JOIN `tabDynamic Link` AS `link` ON `link`.`parent` = `address`.`name`
+        INNER JOIN `tabCustomer` ON `tabCustomer`.`name` = `link`.`link_name`
+        WHERE `link`.`parenttype` = 'Address' AND `link`.`parentfield` = 'links'
+          AND `link`.`link_doctype` = 'Customer' AND ({scope})
+        ORDER BY `link`.`link_name`, `address`.`modified` DESC""",
+        tuple(values),
+        as_dict=True,
+    )
+    return [{"accountId": row.account, **serialize_site(row)} for row in rows]
 
 
 def create_site(account_id: str, payload: dict[str, Any]) -> dict[str, Any]:

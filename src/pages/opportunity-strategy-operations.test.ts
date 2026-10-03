@@ -2,6 +2,7 @@ import { flushPromises, mount } from '@vue/test-utils'
 import { RouterLink } from 'vue-router'
 import { createPinia, setActivePinia } from 'pinia'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { withAccountSites } from '@/features/accounts/mock-account-sites'
 import { createMockApi } from '@/api/mock-adapter'
 import { createAppRouter } from '@/app/router'
 import { ROLE_PROFILES } from '@/domain/permissions'
@@ -41,7 +42,7 @@ describe('Mock customer and opportunity operations', () => {
     const router = createAppRouter()
     await router.push('/accounts')
     await router.isReady()
-    const apiClient = createMockApi({ latency: 0 })
+    const apiClient = await withAccountSites(createMockApi({ latency: 0 }))
     apiClient.listAccountCities = vi.fn().mockResolvedValue({ data: ['苏州', '昆山'] })
     const wrapper = mount(AccountsPage, {
       props: { apiClient },
@@ -60,7 +61,7 @@ describe('Mock customer and opportunity operations', () => {
     const router = createAppRouter()
     await router.push('/accounts')
     await router.isReady()
-    const apiClient = createMockApi({ latency: 0 })
+    const apiClient = await withAccountSites(createMockApi({ latency: 0 }))
     const createAccount = vi.spyOn(apiClient, 'createAccount')
     const createAccountSite = vi.spyOn(apiClient, 'createAccountSite')
     const wrapper = mount(AccountsPage, {
@@ -87,7 +88,7 @@ describe('Mock customer and opportunity operations', () => {
     const router = createAppRouter()
     await router.push('/accounts')
     await router.isReady()
-    const apiClient = createMockApi({ latency: 0 })
+    const apiClient = await withAccountSites(createMockApi({ latency: 0 }))
     const createAccount = vi.spyOn(apiClient, 'createAccount')
     const wrapper = mount(AccountsPage, {
       props: { apiClient },
@@ -114,7 +115,7 @@ describe('Mock customer and opportunity operations', () => {
     const router = createAppRouter()
     await router.push('/accounts')
     await router.isReady()
-    const apiClient = createMockApi({ latency: 0 })
+    const apiClient = await withAccountSites(createMockApi({ latency: 0 }))
     const createAccount = vi.spyOn(apiClient, 'createAccount')
     const createAccountSite = vi.spyOn(apiClient, 'createAccountSite')
     const wrapper = mount(AccountsPage, {
@@ -149,7 +150,7 @@ describe('Mock customer and opportunity operations', () => {
     const router = createAppRouter()
     await router.push('/accounts')
     await router.isReady()
-    const apiClient = createMockApi({ latency: 0 })
+    const apiClient = await withAccountSites(createMockApi({ latency: 0 }))
     const createAccount = vi.spyOn(apiClient, 'createAccount')
     const originalCreateAccountSite = apiClient.createAccountSite.bind(apiClient)
     const createAccountSite = vi.spyOn(apiClient, 'createAccountSite')
@@ -212,7 +213,7 @@ describe('Mock customer and opportunity operations', () => {
     const router = createAppRouter()
     await router.push('/leads-opportunities?view=opportunities')
     await router.isReady()
-    const apiClient = createMockApi({ latency: 0 })
+    const apiClient = await withAccountSites(createMockApi({ latency: 0 }))
     const updateStrategyOpportunity = vi.spyOn(apiClient, 'updateStrategyOpportunity')
     const wrapper = mount(OpportunityStrategyPage, {
       props: { apiClient },
@@ -243,7 +244,7 @@ describe('Mock customer and opportunity operations', () => {
   })
 
   it('opens the Contact detail when an Opportunity Contact name is clicked', async () => {
-    const api = createMockApi({ latency: 0 })
+    const api = await withAccountSites(createMockApi({ latency: 0 }))
     const { contact } = await linkFirstAvailableContact(api)
     const linkedContactId = contact.id
     const router = createAppRouter()
@@ -274,7 +275,7 @@ describe('Mock customer and opportunity operations', () => {
   })
 
   it('quick creates a Contact for the Opportunity account and selects it', async () => {
-    const api = createMockApi({ latency: 0 })
+    const api = await withAccountSites(createMockApi({ latency: 0 }))
     const router = createAppRouter()
     await router.push('/leads-opportunities?view=opportunities')
     await router.isReady()
@@ -302,7 +303,7 @@ describe('Mock customer and opportunity operations', () => {
   })
 
   it('reacts to Opportunity route queries for filter, view, account prefill, and one-shot create', async () => {
-    const api = createMockApi({ latency: 0 })
+    const api = await withAccountSites(createMockApi({ latency: 0 }))
     const { opportunity } = await linkFirstAvailableContact(api)
     const router = createAppRouter()
     await router.push('/leads-opportunities?view=opportunities')
@@ -333,7 +334,7 @@ describe('Mock customer and opportunity operations', () => {
     await router.push('/leads-opportunities?view=opportunities')
     await router.isReady()
     const wrapper = mount(OpportunityStrategyPage, {
-      props: { apiClient: createMockApi({ latency: 0 }) },
+      props: { apiClient: await withAccountSites(createMockApi({ latency: 0 })) },
       global: { plugins: [setRole('Manager'), router] },
     })
     await flushPromises()

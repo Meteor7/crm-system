@@ -15,6 +15,7 @@ import StakeholderEditorModal from '@/features/opportunities/StakeholderEditorMo
 import ActionEditorModal from '@/features/opportunities/ActionEditorModal.vue'
 import BookingEditorModal from '@/features/opportunities/BookingEditorModal.vue'
 import ContactModal from '@/features/contacts/ContactModal.vue'
+import { sitesByAccountId } from '@/features/accounts/account-sites'
 import { formatMoney, moneyByCurrency } from '@/domain/money'
 import { formatDisplayDate } from '@/domain/time'
 import { opportunityProbabilityLevelLabel, opportunityProbabilityLevelTone } from '@/domain/opportunity-probability'
@@ -92,8 +93,7 @@ async function loadOpportunities(preferredId = selectedId.value) {
 async function loadAccounts() {
   const result = await props.apiClient.listAccounts({ page: 1, pageSize: 100 })
   accounts.value = result.data.items
-  const details = await Promise.all(accounts.value.map((account) => props.apiClient.getAccount360(account.id)))
-  sitesByAccount.value = Object.fromEntries(details.map((detail) => [detail.data.account.id, detail.data.sites]))
+  sitesByAccount.value = sitesByAccountId(accounts.value, (await props.apiClient.listAccountSites()).data)
 }
 async function loadBookings() {
   const result = await props.apiClient.listPipeline({})

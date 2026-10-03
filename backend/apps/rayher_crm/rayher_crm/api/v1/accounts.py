@@ -62,6 +62,12 @@ def get_account_360(id: str) -> dict:
     return success_response(accounts.get_account_360(id))
 
 
+@frappe.whitelist(methods=["GET"])
+@api_endpoint
+def list_account_sites() -> dict:
+    return success_response(sites.list_account_sites())
+
+
 @frappe.whitelist(methods=["POST"])
 @api_endpoint
 def create_account_site(accountId: str, input: Any) -> dict:

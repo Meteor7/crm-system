@@ -3,6 +3,7 @@ import { createPinia } from 'pinia'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createMemoryHistory, createRouter } from 'vue-router'
 import { navigation } from '@/app/navigation'
+import { withAccountSites } from '@/features/accounts/mock-account-sites'
 import { createMockApi } from '@/api/mock-adapter'
 import { useAppStore } from '@/stores/app'
 import { createAppRouter } from '@/app/router'
@@ -124,7 +125,7 @@ describe('P1 business workspace', () => {
   })
 
   it('switches the selected opportunity and its strategy evidence', async () => {
-    const wrapper = mount(OpportunityStrategyPage, { props: { apiClient: createMockApi({ latency: 0 }) }, global: { plugins: [createPinia(), createAppRouter()] } })
+    const wrapper = mount(OpportunityStrategyPage, { props: { apiClient: await withAccountSites(createMockApi({ latency: 0 })) }, global: { plugins: [createPinia(), createAppRouter()] } })
     await new Promise((resolve) => setTimeout(resolve, 0))
     await wrapper.get('[data-opportunity-id="OPP-007"]').trigger('click')
     expect(wrapper.get('[data-testid="selected-opportunity"]').text()).toContain('先进封装外观检测')
