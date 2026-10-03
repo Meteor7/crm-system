@@ -5,8 +5,10 @@ import {
   matchingRegion,
   normalizeStoredRegion,
   presetRegion,
+  regionDepth,
   regionLabel,
   regionOptions,
+  territoryOptionLabel,
 } from './regions'
 
 describe('Customer regions', () => {
@@ -41,5 +43,20 @@ describe('Customer regions', () => {
     expect(regionLabel('Southeast Asia', 'zh-CN')).toBe('Southeast Asia')
     expect(normalizeStoredRegion('华中')).toBe('Central China')
     expect(normalizeStoredRegion('  西北 ')).toBe('西北')
+  })
+
+  it('labels the territories above the regions and indents a filter option by its depth in the tree', () => {
+    const parents = { Asia: 'World', China: 'Asia', 'East China': 'China' }
+    expect(['World', 'Asia', 'China'].map((name) => regionLabel(name, 'zh-CN'))).toEqual(['全球', '亚洲', '中国'])
+    expect(regionLabel('China', 'en-US')).toBe('China')
+    expect(['World', 'Asia', 'China', 'East China', 'Taiwan'].map((name) => regionDepth(name, parents))).toEqual([0, 1, 2, 3, 0])
+    expect(territoryOptionLabel('World', parents, 'zh-CN')).toBe('全球')
+    expect(territoryOptionLabel('East China', parents, 'zh-CN')).toBe('\u00a0'.repeat(6) + '华东')
+    // A server without the tree sends no parents: every option is flat.
+    expect(territoryOptionLabel('East China', undefined, 'en-US')).toBe('East China')
+    // Parents that loop still end, and an inherited property is neither a parent nor a label.
+    expect(regionDepth('a', { a: 'b', b: 'a' })).toBe(1)
+    expect(regionDepth('constructor', {})).toBe(0)
+    expect(regionLabel('constructor', 'zh-CN')).toBe('constructor')
   })
 })

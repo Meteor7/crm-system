@@ -1,7 +1,7 @@
 import type { Locale } from '@/i18n'
 import { opportunityStageLabel } from '@/domain/opportunity-stages'
 import { opportunityProbabilityLevelLabel } from '@/domain/opportunity-probability'
-import { regionLabel } from '@/domain/regions'
+import { regionDepth, regionLabel } from '@/domain/regions'
 import type { BoardColumn, BoardCondition, BoardDefinition, BoardField, BoardFilters, BoardGroup, BoardOperator, BoardQuery, BoardRow } from './types'
 
 export const columnLabels: Record<BoardColumn | 'stageAgeDays', [string, string]> = {
@@ -49,7 +49,12 @@ export function optionLabel(field: string, value: string, label: string, locale:
 }
 export function fieldOptions(field: BoardField, filters: BoardFilters, locale: Locale) {
   const choices: Partial<Record<BoardField, BoardFilters['stages']>> = { stage: filters.stages, probabilityLevel: filters.probabilityLevels, sales: filters.sales, region: filters.regions, market: filters.markets, equipment: filters.equipment }
-  return (choices[field] ?? []).map(o => ({ value: o.value, label: optionLabel(field, o.value, o.label, locale) }))
+  return (choices[field] ?? []).map(o => {
+    const option = { value: o.value, label: optionLabel(field, o.value, o.label, locale) }
+    // Regions are listed as the sales territory tree; a value below a territory is indented under it.
+    const depth = field === 'region' ? regionDepth(o.value, filters.regionParents) : 0
+    return depth ? { ...option, depth } : option
+  })
 }
 export function validateDefinition(d: BoardDefinition, filters: BoardFilters, locale: Locale): string {
   const say = (en: string, zh: string) => text([en, zh], locale)

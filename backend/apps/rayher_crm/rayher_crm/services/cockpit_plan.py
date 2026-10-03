@@ -9,7 +9,7 @@ from __future__ import annotations
 from datetime import date, timedelta
 from decimal import Decimal
 
-from rayher_crm.services.cockpit_metrics import bounds, insufficient, iso, metric, number, stamp
+from rayher_crm.services.cockpit_metrics import bounds, in_region, insufficient, iso, metric, number, stamp
 from rayher_crm.services.equipment_names import equipment_key
 from rayher_crm.services.opportunity_stages import OPEN_STAGES, PROBABILITY_LEVELS
 
@@ -71,7 +71,7 @@ def build_plan(data, query, now):
         customer = customers.get(account)
         return bool(customer and (not owner_filter or owner == owner_filter)
                     and (not query.get("market") or customer.get("custom_crm_segment") == query["market"])
-                    and (not query.get("region") or customer.get("custom_crm_region") == query["region"]))
+                    and in_region(query, customer))
 
     def missing_date(key, account, owner):
         undated[key].append({"salesOwner": owner or None,

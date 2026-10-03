@@ -68,7 +68,7 @@ export interface PipelineCoverage {
 export interface ReviewDto {
   period: { kind: PeriodKind; start: string; end: string; asOf: string; previousStart: string; previousEnd: string; complete: boolean; previousAnchor: string; nextAnchor: string; hasNext: boolean }
   // equipment: the Opportunities board catalog; a record matches through the opportunity it is linked to.
-  filters: { sales: { id: string; name: string }[]; markets: string[]; regions: string[]; regionReady: boolean; equipment?: string[] }
+  filters: { sales: { id: string; name: string }[]; markets: string[]; regions: string[]; regionParents?: Record<string, string>; regionReady: boolean; equipment?: string[] }
   // unclassified: under an equipment filter, records in the period with no opportunity (left out, not guessed).
   activities: { key: ActivityKey; actual: Metric; previous: Metric; delta: number | null; target: TargetMetric; unclassified?: number | null }[]
   pipeline: { key: string; count: Metric; amount: Metric }[]

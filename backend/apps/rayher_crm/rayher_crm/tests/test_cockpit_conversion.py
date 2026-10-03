@@ -97,6 +97,10 @@ class TestConversions(unittest.TestCase):
         self.assertEqual(details["reached_qualified_opportunity"][0]["owner"], "alice")
         for changed in ({"sales": "bob"}, {"region": "Other"}, {"market": "Other"}):
             self.assertEqual(build_conversions(data, {**historical, **changed}, NOW, COVERAGE)[0]["items"][0]["fromCount"], 0)
+        # A territory, spelled out by cockpit.scoped() as the regions it covers, selects all of them.
+        china = {**historical, "region": "China", "regions": {"China", "East China"}}
+        self.assertEqual(build_conversions(data, china, NOW, COVERAGE)[0]["items"][0]["fromCount"], 1)
+        self.assertEqual(build_conversions(data, {**china, "regions": {"China"}}, NOW, COVERAGE)[0]["items"][0]["fromCount"], 0)
         result, _ = build_conversions(data, historical, NOW, {"stage": "2024-01-01"})
         self.assertFalse(result["complete"])
 

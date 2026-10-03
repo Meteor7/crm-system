@@ -22,3 +22,4 @@ rayher_crm.patches.v1_0.normalize_crm_regions
 rayher_crm.patches.v1_0.backfill_opportunity_cny_amount
 rayher_crm.patches.v1_0.sync_cny_opportunity_amounts
 rayher_crm.patches.v1_0.backfill_opportunity_loss_reviews
+rayher_crm.patches.v1_0.seed_sales_territories

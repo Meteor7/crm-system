@@ -12,6 +12,8 @@ Decisions recorded in docs/opportunity-board/backend-handoff.md:
   stays unknown (None), never zero, and matches no date or age condition.
 - A missing CNY amount matches no amount condition and is counted apart from the known total.
 - ``not_in`` keeps rows whose value is empty: a customer without a region is not in East China.
+- A region value may be a sales territory (territory_tree): it stands for every region below it, so
+  ``in`` reads "within" and ``not_in`` "not within". Grouping and the region column stay the customer's region.
 - Only open stages (S1-S6) can have gone 21 days without a stage change; closed ones are done.
 """
 
@@ -24,6 +26,7 @@ from decimal import Decimal
 
 from rayher_crm.services.equipment_names import canonical_equipment, equipment_spellings
 from rayher_crm.services.opportunity_stages import OPEN_STAGES, OPPORTUNITY_STAGES, PROBABILITY_LEVELS
+from rayher_crm.services.territory_tree import ancestors
 
 # China has kept UTC+8 without daylight saving since 1991; a fixed offset needs no tz database.
 SHANGHAI = timezone(timedelta(hours=8), "Asia/Shanghai")
@@ -369,20 +372,22 @@ def next_actions(actions):
     return {opportunity: value[1] for opportunity, value in best.items()}
 
 
-def board_rows(opportunities, owner_names, actions, now, equipment=()):
+def board_rows(opportunities, owner_names, actions, now, equipment=(), region_parents=None):
     """One row per Opportunity; ``now`` is the evaluation time (naive values are Shanghai time).
 
     ``equipment`` is the catalog: a stored type is shown and matched under the catalog spelling
-    with the same key, so "NANSI" rows are "Nansi" rows.
+    with the same key, so "NANSI" rows are "Nansi" rows. ``region_parents`` is the territory tree
+    (name -> parent): a row matches a region condition through its region or a territory above it.
     """
 
     today = stamp(now).astimezone(SHANGHAI).date()
     upcoming = next_actions(actions)
     spellings = equipment_spellings(equipment)
-    return [_row(opp, owner_names, upcoming.get(opp["name"]), today, spellings) for opp in opportunities]
+    parents = region_parents or {}
+    return [_row(opp, owner_names, upcoming.get(opp["name"]), today, spellings, parents) for opp in opportunities]
 
 
-def _row(opp, owner_names, next_action, today, spellings):
+def _row(opp, owner_names, next_action, today, spellings, region_parents):
     changed = stamp(opp.get("stage_changed_at"))
     changed_day = changed.astimezone(SHANGHAI).date() if changed else None
     # A change recorded later today (or a declared day ahead of the clock) is day 0, not negative.
@@ -424,6 +429,8 @@ def _row(opp, owner_names, next_action, today, spellings):
         "title": dto["title"],
         "customerName": customer_name,
         "region": dto["region"],
+        # The region with the territories above it; empty without a region.
+        "regionPath": frozenset((dto["region"], *ancestors(dto["region"], region_parents))) if dto["region"] else frozenset(),
         "market": dto["market"],
         "equipment": dto["equipment"],
         "sales": owner or None,
@@ -445,12 +452,15 @@ def _row(opp, owner_names, next_action, today, spellings):
 
 def _predicate(condition):
     field, op, value = condition["field"], condition["operator"], condition["value"]
-    if op == "in":
-        wanted = set(value)
-        return lambda facts: facts[field] in wanted
-    if op == "not_in":
-        unwanted = set(value)
-        return lambda facts: facts[field] not in unwanted
+    if op in LIST_OPERATORS:
+        listed = set(value)
+        if field == "region":
+            def inside(facts):
+                return not listed.isdisjoint(facts["regionPath"])
+        else:
+            def inside(facts):
+                return facts[field] in listed
+        return inside if op == "in" else lambda facts: not inside(facts)
     if op == "contains":
         needle = value.casefold()
         return lambda facts: needle in facts["customerName"].casefold()
@@ -471,13 +481,14 @@ def _predicate(condition):
 
 def _matcher(query):
     scope = [
-        (SCOPE_FIELDS[key], set(values)) for key, values in query["scope"].items() if values
+        _predicate({"field": SCOPE_FIELDS[key], "operator": "in", "value": values})
+        for key, values in query["scope"].items() if values
     ]
     predicates = [_predicate(condition) for condition in query["conditions"]]
     combine = all if query["match"] == "all" else any
 
     def matches(facts):
-        if any(facts[field] not in values for field, values in scope):
+        if not all(inside(facts) for inside in scope):
             return False
         return not predicates or combine(predicate(facts) for predicate in predicates)
 

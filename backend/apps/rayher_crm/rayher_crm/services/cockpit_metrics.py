@@ -82,6 +82,17 @@ def insufficient(reason="history_coverage"):
     return metric(None, "insufficient", reason)
 
 
+def in_region(query, customer):
+    """Whether a customer passes the region filter.
+
+    The filter names a region or a sales territory. cockpit.scoped() spells it out as query["regions"],
+    the regions it covers; without that list it is the one region it names.
+    """
+
+    region = query.get("region")
+    return not region or customer.get("custom_crm_region") in query.get("regions", (region,))
+
+
 def number(value):
     try:
         result = Decimal(str(value))
@@ -259,7 +270,7 @@ def quotation_expiry(data, query, reference, days=14, now=None):
     rows, incomplete = [], False
     for quote in data["quotes"]:
         customer = customers.get(quote.get("account"))
-        if not customer or (query.get("region") and customer.get("custom_crm_region") != query["region"]) \
+        if not customer or not in_region(query, customer) \
                 or (query.get("market") and customer.get("custom_crm_segment") != query["market"]):
             continue
         owner = quote.get("quotation_owner")
@@ -343,7 +354,7 @@ def build_review(data, query, now, coverage, quotation_expiry_days=14, stage6_no
         customer = customers.get(account)
         return bool(customer and (not owner_filter or owner == owner_filter)
                     and (not query.get("market") or customer.get("custom_crm_segment") == query["market"])
-                    and (not query.get("region") or customer.get("custom_crm_region") == query["region"]))
+                    and in_region(query, customer))
 
     def entry(record, account, owner, when, kind, **extra):
         return {"id": record["name"], "title": record.get("title") or record.get("subject") or record.get("ref_no") or record["name"],

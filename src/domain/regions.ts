@@ -88,6 +88,33 @@ export function normalizeStoredRegion(value: string) {
   return presetRegion(value) || collapseRegion(value)
 }
 
+/** The sales territories above the regions in the default tree; like the regions, stored in English. */
+const TERRITORY_LABELS: Record<string, Record<Locale, string>> = {
+  World: { 'zh-CN': '全球', 'en-US': 'World' },
+  Asia: { 'zh-CN': '亚洲', 'en-US': 'Asia' },
+  China: { 'zh-CN': '中国', 'en-US': 'China' },
+}
+
 export function regionLabel(value: string, locale: Locale) {
-  return isRegionPreset(value) ? REGION_LABELS[value][locale] : value
+  if (isRegionPreset(value)) return REGION_LABELS[value][locale]
+  return Object.hasOwn(TERRITORY_LABELS, value) ? TERRITORY_LABELS[value][locale] : value
+}
+
+/** The parent of each name in the sales territory tree, as the region filters send it. */
+export type RegionParents = Readonly<Record<string, string>>
+
+/** How many territories sit above a name; 0 for the top of the tree and for a region outside it. */
+export function regionDepth(value: string, parents: RegionParents = {}) {
+  const seen = new Set([value])
+  let depth = 0
+  for (let name = value; Object.hasOwn(parents, name) && !seen.has(parents[name]); depth++) {
+    name = parents[name]
+    seen.add(name)
+  }
+  return depth
+}
+
+/** A region filter option in a native select: the label, indented by its depth in the tree. */
+export function territoryOptionLabel(value: string, parents: RegionParents | undefined, locale: Locale) {
+  return '\u00a0\u00a0'.repeat(regionDepth(value, parents)) + regionLabel(value, locale)
 }

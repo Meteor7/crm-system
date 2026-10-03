@@ -85,6 +85,22 @@ describe('Opportunities board', () => {
     await settle()
     expect(api.queryOpportunities).toHaveBeenLastCalledWith(expect.objectContaining({ conditions: [{ field: 'stage', operator: 'in', value: ['internal_validation'] }] }))
   })
+  it('lists region options as the territory tree, indented, and sends the territory that is chosen', async () => {
+    const { wrapper, api } = await setup('Manager', api => {
+      api.getOpportunityFilters = vi.fn(async () => response({
+        ...boardFiltersFixture(), regionReady: true,
+        regions: ['World', 'Asia', 'China', 'East China', 'Taiwan'].map(value => ({ value, label: value })), regionParents: { Asia: 'World', China: 'Asia', 'East China': 'China' },
+      }))
+    })
+    const scope = wrapper.get('.scope-item')
+    const options = scope.findAll('.board-options label')
+    expect(options.map(option => option.text())).toEqual(['全球', '亚洲', '中国', '华东', 'Taiwan'])
+    expect(options.map(option => option.get('span').attributes('style') ?? '')).toEqual(['', 'padding-left: 14px;', 'padding-left: 28px;', 'padding-left: 42px;', ''])
+    await options[2].get('input').setValue(true); await settle()
+    // The chosen territory reads without its indent in the closed control.
+    expect(scope.get('summary').text()).toContain('中国')
+    expect(api.queryOpportunities).toHaveBeenLastCalledWith(expect.objectContaining({ scope: expect.objectContaining({ regions: ['China'] }) }))
+  })
   it('disables unavailable regions, including restored saved-query grouping', async () => {
     const { wrapper, api } = await setup('Manager', api => {
       api.getOpportunityFilters = vi.fn(async () => response({ ...boardFiltersFixture(), regions: [], regionReady: false }))

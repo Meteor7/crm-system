@@ -9,7 +9,7 @@ const root = ref<HTMLDetailsElement | null>(null)
 const search = ref('')
 const selected = computed(() => props.modelValue.map(value => props.options.find(o => o.value === value)?.label ?? value))
 const options = computed(() => {
-  const missing = props.modelValue.filter(v => !props.options.some(o => o.value === v)).map(v => ({ value: v, label: v }))
+  const missing: BoardOption[] = props.modelValue.filter(v => !props.options.some(o => o.value === v)).map(v => ({ value: v, label: v }))
   return [...props.options, ...missing].filter(o => o.label.toLocaleLowerCase().includes(search.value.toLocaleLowerCase()))
 })
 function toggle(value: string, checked: boolean) { emit('update:modelValue', checked ? [...props.modelValue, value] : props.modelValue.filter(v => v !== value)) }
@@ -26,7 +26,7 @@ onBeforeUnmount(() => document.removeEventListener('click', outside))
     <div class="board-options" :aria-label="label">
       <input v-model="search" type="search" :aria-label="locale === 'en-US' ? 'Search options' : '搜索选项'" :placeholder="locale === 'en-US' ? 'Search…' : '搜索…'" />
       <button v-if="modelValue.length" type="button" @click="emit('update:modelValue', [])">{{ locale === 'en-US' ? 'Clear selection' : '清空选择' }}</button>
-      <label v-for="option in options" :key="option.value"><input type="checkbox" :checked="modelValue.includes(option.value)" @change="toggle(option.value, ($event.target as HTMLInputElement).checked)" /><span>{{ option.label }}</span></label>
+      <label v-for="option in options" :key="option.value"><input type="checkbox" :checked="modelValue.includes(option.value)" @change="toggle(option.value, ($event.target as HTMLInputElement).checked)" /><span :style="option.depth ? { paddingLeft: `${option.depth * 14}px` } : undefined">{{ option.label }}</span></label>
       <p v-if="!options.length">{{ locale === 'en-US' ? 'No options' : '暂无选项' }}</p>
     </div>
   </details>

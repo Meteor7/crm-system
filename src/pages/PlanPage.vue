@@ -7,6 +7,7 @@ import { requestErrorMessage } from '@/api/request-state'
 import { useAppStore } from '@/stores/app'
 import { useI18n, useLocaleMessage } from '@/i18n'
 import { labels, metricText, nextPeriodStart } from '@/features/cockpit/presentation'
+import RegionSelect from '@/features/cockpit/RegionSelect.vue'
 import { cockpitRoute, pickScope, planStart, readCockpitQuery, reviewAnchorForPlan, type CockpitContext } from '@/features/cockpit/scope'
 import type { Metric, PeriodKind, ReviewDto } from '@/features/cockpit/types'
 import type { PlanDto, PlanDetails, PlanItem, PlanKind, PlanMetric, PlanMoney, PlanQuery } from '@/features/cockpit/plan-types'
@@ -146,7 +147,7 @@ onBeforeUnmount(() => { revision++; detailRevision++; cardObserver?.disconnect()
     </header>
     <nav class="plan-controls" :aria-label="copy('Plan filters', '计划筛选')">
       <div class="view-tabs"><RouterLink :to="reviewRoute">Review</RouterLink><strong aria-current="page">Plan</strong><RouterLink :to="warningsRoute">Warnings</RouterLink><RouterLink :to="boardRoute">Opportunities</RouterLink></div>
-      <label><span class="filter-name">{{ copy('Region', '区域') }}</span><select v-model="query.region" aria-label="Region" :disabled="!filters.regionReady"><option value="">{{ copy('All regions', '全部区域') }}</option><option v-for="region in filters.regions" :key="region" :value="region">{{ label(region) }}</option></select></label>
+      <label><span class="filter-name">{{ copy('Region', '区域') }}</span><RegionSelect v-model="query.region" :regions="filters.regions" :parents="filters.regionParents" :disabled="!filters.regionReady" :all-label="copy('All regions', '全部区域')" /></label>
       <label><span class="filter-name">{{ copy('Sales', '销售') }}</span><select v-model="query.sales" aria-label="Sales"><option value="">{{ copy('All sales reps', '全部销售') }}</option><option v-for="person in filters.sales" :key="person.id" :value="person.id">{{ person.name }}</option></select></label>
       <label><span class="filter-name">{{ copy('Market', '市场') }}</span><select v-model="query.market" aria-label="Market"><option value="">{{ copy('All markets', '全部市场') }}</option><option v-for="market in filters.markets" :key="market" :value="market">{{ market }}</option></select></label>
       <label><span class="filter-name">{{ copy('Equipment', '设备') }}</span><select v-model="query.equipment" aria-label="Equipment"><option value="">{{ copy('All equipment', '全部设备') }}</option><option v-for="equipment in filters.equipment ?? []" :key="equipment" :value="equipment">{{ equipment }}</option></select></label>

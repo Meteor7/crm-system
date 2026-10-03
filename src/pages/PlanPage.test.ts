@@ -123,6 +123,16 @@ describe('Plan business interface', () => {
     expect(wrapper.get('.kpi.tests strong').text()).toBe('Insufficient data')
     wrapper.unmount()
   })
+  it('lists the region filter as the territory tree and sends the territory that is chosen', async () => {
+    const plan = planFixture()
+    plan.filters = { ...plan.filters, regions: ['World', 'Asia', 'China', 'East China', 'Taiwan'], regionParents: { Asia: 'World', China: 'Asia', 'East China': 'China' }, regionReady: true }
+    const { api, wrapper } = await setup('Manager', plan)
+    const select = wrapper.get('select[aria-label="Region"]')
+    expect(select.findAll('option').slice(1).map(option => option.element.textContent)).toEqual(['全球', '\u00a0\u00a0亚洲', '\u00a0\u00a0\u00a0\u00a0中国', '\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0华东', 'Taiwan'])
+    await select.setValue('China'); await flushPromises()
+    expect(api.getPlan).toHaveBeenLastCalledWith(expect.objectContaining({ region: 'China' }))
+    wrapper.unmount()
+  })
   it('passes filters, the server period anchor and pagination to the same business detail endpoint', async () => {
     const { api, wrapper } = await setup()
     await wrapper.get('select[aria-label="Sales"]').setValue('alice'); await flushPromises()

@@ -44,7 +44,7 @@
 
 已推送的 setup/custom_fields.py 中 Customer.custom_crm_region 仍为 Data。需完成 Customer 区域与 Opportunity.sub_region 的 Select、共享选项、变体归一、存量 dry-run/确认/迁移/核验。
 
-默认值是 East China / South China / West China / North China / Central China，支持已约定的共享自定义选项。Review 仅按客户主档区域筛选。区域核验完成后才设置 crm_cockpit_region_migration_verified 并启用筛选；不需要新建区域主数据表。
+默认值是 East China / South China / West China / North China / Central China，支持已约定的共享自定义选项。Review 仅按客户主档区域筛选。区域核验完成后才设置 crm_cockpit_region_migration_verified 并启用筛选；不需要新建区域主数据表。（2026-10-03 补充：客户区域仍是唯一的存储值；其上叠加了销售区域树 `CRM Sales Territory`，筛选可选上级节点，口径见 `docs/sales-cockpit-metric-definitions.md`。）
 
 ### 3. 历史覆盖证据 — 部署方提供，Codex 使用状态
 

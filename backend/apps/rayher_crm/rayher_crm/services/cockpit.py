@@ -18,6 +18,8 @@ from rayher_crm.services.cockpit_plan import PLAN_METRICS, build_plan, plan_peri
 from rayher_crm.services.cockpit_conversion import build_conversions, pipeline_coverage
 from rayher_crm.services.equipment import equipment_key, list_equipment_types
 from rayher_crm.services.cockpit_settings import thresholds
+from rayher_crm.services import territory_tree
+from rayher_crm.services.territories import region_tree
 from rayher_crm.services.warning_handling import FIELDS as HANDLING_FIELDS, HANDLING, REVISION, REVISION_FIELDS, handling_records
 
 TARGET = "CRM Cockpit Target"
@@ -47,8 +49,11 @@ def options():
                  and regions and all(not r.get("custom_crm_region") or r["custom_crm_region"] in regions for r in customers))
     sales_ids = {r["parent"] for r in read("Has Role", "parent", {"role": "CRM Sales", "parenttype": "User"})}
     people = linked("User", "name full_name", "name", sales_ids)
+    # The region filter lists the sales territory tree, each territory before the ones below it, then the
+    # regions no territory is named after; regionParents is the parent of each name that has one.
+    names, parents = region_tree(regions) if ready else ([], {})
     return customers, people, {"sales": [{"id": r["name"], "name": r["full_name"] or r["name"]} for r in people],
-                              "markets": markets, "regions": regions if ready else [], "regionReady": ready,
+                              "markets": markets, "regions": names, "regionParents": parents, "regionReady": ready,
                               # The same catalog as the Opportunities board; equipment is an opportunity field.
                               # A legacy type of only punctuation ("-") has no comparison key, so it cannot filter.
                               "equipment": [t for t in list_equipment_types() if equipment_key(t)]}
@@ -115,7 +120,11 @@ def load_data(customers, people):
 
 
 def scoped(query):
-    """Validated filters, the customers they select and the stable filter options."""
+    """Validated filters, the customers they select and the stable filter options.
+
+    The region filter names a region or a sales territory; a territory selects the customers of every region
+    below it. The regions it covers are added to the query as "regions" for the rules that check a customer.
+    """
     customers, people, filters = options()
     if query["region"] and (not filters["regionReady"] or query["region"] not in filters["regions"]):
         raise CrmApiException("VALIDATION_ERROR", "Region migration is not verified or region is invalid.")
@@ -125,7 +134,9 @@ def scoped(query):
         raise CrmApiException("VALIDATION_ERROR", "Invalid equipment type.")
     if query["sales"] and query["sales"] not in {r["id"] for r in filters["sales"]}:
         raise CrmApiException("VALIDATION_ERROR", "Invalid sales owner.")
-    customers = [r for r in customers if (not query["region"] or r["custom_crm_region"] == query["region"])
+    if query["region"]:
+        query["regions"] = territory_tree.covered(query["region"], filters["regions"], filters["regionParents"])
+    customers = [r for r in customers if (not query["region"] or r["custom_crm_region"] in query["regions"])
                  and (not query["market"] or r["custom_crm_segment"] == query["market"])]
     return customers, people, filters
 

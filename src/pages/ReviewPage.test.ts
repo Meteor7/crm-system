@@ -316,6 +316,22 @@ describe('Manager Review', () => {
 })
 
 describe('Approved Review integration', () => {
+  it('lists the region filter as the territory tree and sends the territory that is chosen', async () => {
+    const { wrapper, api } = await setup()
+    api.getReview = vi.fn(async () => {
+      const data = reviewFixture()
+      data.filters = { ...data.filters, regions: ['World', 'Asia', 'China', 'East China', 'Taiwan'], regionParents: { Asia: 'World', China: 'Asia', 'East China': 'China' }, regionReady: true }
+      return { data, warnings: [], meta: { requestId: 'territories', generatedAt: '' } }
+    })
+    await wrapper.get('input[type="date"]').setValue('2026-09-14'); await flushPromises()
+    const select = wrapper.get('select[aria-label="Region"]')
+    // A territory before the ones below it, each level indented; a region outside the tree is flat.
+    expect(select.findAll('option').slice(1).map(option => option.element.textContent)).toEqual(['全球', '\u00a0\u00a0亚洲', '\u00a0\u00a0\u00a0\u00a0中国', '\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0华东', 'Taiwan'])
+    await select.setValue('China'); await flushPromises()
+    expect(api.getReview).toHaveBeenLastCalledWith(expect.objectContaining({ region: 'China' }))
+    wrapper.unmount()
+  })
+
   it('labels preset regions in Chinese, keeps custom regions as stored and preserves API filter scope for the individual chart', async () => {
     const { wrapper, api } = await setup()
     setLocale('en-US'); await flushPromises()

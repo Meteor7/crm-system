@@ -9,7 +9,7 @@ import { useI18n, useLocaleMessage } from '@/i18n'
 import { detailRoute, labels, metricText, monotoneCurvePath, nextMonday, targetStart } from '@/features/cockpit/presentation'
 import { cockpitRoute, defaultReviewAnchor, pickScope, type CockpitContext } from '@/features/cockpit/scope'
 import ReviewConversionPanel from '@/features/cockpit/ReviewConversionPanel.vue'
-import { regionLabel } from '@/domain/regions'
+import RegionSelect from '@/features/cockpit/RegionSelect.vue'
 import type { ActivityKey, Metric, PeriodKind, ReviewDetails, ReviewDto, ReviewQuery, TargetInput, ReviewRow } from '@/features/cockpit/types'
 
 const props = withDefaults(defineProps<{ apiClient?: CrmApi }>(), { apiClient: () => defaultApi })
@@ -256,7 +256,7 @@ async function saveTarget() {
     </header>
     <nav class="review-controls" :aria-label="copy('Review filters', '看板筛选')">
       <strong class="review-tab">Review</strong><RouterLink class="plan-tab" :to="planRoute">Plan</RouterLink><RouterLink v-if="data || query.anchor || error" class="plan-tab" :to="warningsRoute">Warnings</RouterLink><span v-else class="plan-tab is-disabled" role="link" aria-disabled="true" :title="copy('Available once the page has loaded', '页面加载完成后可用')">Warnings</span><RouterLink class="plan-tab" :to="boardRoute">Opportunities</RouterLink>
-      <label><span class="filter-name">{{ copy('Region', '区域') }}</span><select v-model="query.region" :disabled="loading || !filterOptions.regionReady" aria-label="Region"><option value="">{{ filterOptions.regionReady ? copy('All regions', '全部区域') : copy('Region migration pending', '区域待迁移') }}</option><option v-for="region in filterOptions.regions" :key="region" :value="region">{{ regionLabel(region, locale) }}</option></select></label>
+      <label><span class="filter-name">{{ copy('Region', '区域') }}</span><RegionSelect v-model="query.region" :regions="filterOptions.regions" :parents="filterOptions.regionParents" :disabled="loading || !filterOptions.regionReady" :all-label="filterOptions.regionReady ? copy('All regions', '全部区域') : copy('Region migration pending', '区域待迁移')" /></label>
       <label><span class="filter-name">{{ copy('Sales', '销售') }}</span><select v-model="query.sales" :disabled="loading" aria-label="Sales"><option value="">{{ copy('All sales', '全部销售') }}</option><option v-for="person in filterOptions.sales" :key="person.id" :value="person.id">{{ person.name }}</option></select></label>
       <label><span class="filter-name">{{ copy('Market', '市场') }}</span><select v-model="query.market" :disabled="loading" aria-label="Market"><option value="">{{ copy('All markets', '全部市场') }}</option><option v-for="market in filterOptions.markets" :key="market" :value="market">{{ market }}</option></select></label>
       <label><span class="filter-name">{{ copy('Equipment', '设备') }}</span><select v-model="query.equipment" :disabled="loading" aria-label="Equipment"><option value="">{{ copy('All equipment', '全部设备') }}</option><option v-for="equipment in filterOptions.equipment ?? []" :key="equipment" :value="equipment">{{ equipment }}</option></select></label>

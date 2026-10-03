@@ -20,7 +20,7 @@
 | 接口 | 方法 | 参数 | data |
 |---|---|---|---|
 | `query_opportunities` | POST | `input` | `{items, asOf, summary, groups}`；分页信息放在 `meta.page / pageSize / total` |
-| `get_opportunity_filters` | GET | 无 | `{sales, regions, markets, equipment, stages, probabilityLevels, regionReady}` |
+| `get_opportunity_filters` | GET | 无 | `{sales, regions, regionParents, markets, equipment, stages, probabilityLevels, regionReady}` |
 | `list_opportunity_queries` | GET | 无 | `{items: SavedQuery[]}`，只返回当前用户自己的查询 |
 | `save_opportunity_query` | POST | `input`，可选 `id`、`expectedModified` | 完整的 `SavedQuery` |
 | `delete_opportunity_query` | POST | `id`, `expectedModified` | `{id, status: "Deleted"}` |
@@ -119,10 +119,9 @@
 ## get_opportunity_filters
 
 - `sales`：Manager 看到的是所有 CRM Sales 用户，加上自己范围内实际出现的商机负责人；Sales 只看到自己；Engineer 看到其可见商机的负责人。按姓名排序。
-- `regions`、`markets`、`regionReady` 直接复用 Review 的 `cockpit.options()`，口径完全一致。区域未就绪时 `regions: []`、`regionReady: false`。此时在 `scope.regions`、region 条件或 `groupBy: "region"` 里提交区域都会返回 `VALIDATION_ERROR`；按区域排序仍然允许，行上的 `region` 照常返回客户主档的存储值。
+- `regions`、`markets`、`regionReady` 直接复用 Review 的 `cockpit.options()`，口径完全一致。区域未就绪时 `regions: []`、`regionReady: false`。此时在 `scope.regions`、region 条件或 `groupBy: "region"` 里提交区域都会返回 `VALIDATION_ERROR`；按区域排序仍然允许，行上的 `region` 照常返回客户主档的存储值。`regions` 按销售区域树的顺序列出（上级在前，树外的区域在后），`regionParents` 给出每个值的上级。区域值可以是上级节点：`scope.regions` 和 region 条件的 `in` 表示"属于该节点或其下级"，`not_in` 表示"不属于"；保存的查询里存的是节点本身，不是它当时覆盖的区域。分组和区域列仍是客户自己的区域。
 - `equipment`：设备类型目录，和 `opportunities.list_equipment_types` 相同：五个预设在前，然后是自定义类型（按加入顺序）。和市场一样是全量选项，不随权限范围收窄。
 - `stages`、`probabilityLevels`：固定枚举，`label` 为英文。
-- 区域沿用现有的平级区域，本期不引入 World › Asia › China 这样的层级。
 
 ## 保存查询
 

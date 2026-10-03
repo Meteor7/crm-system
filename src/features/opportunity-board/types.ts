@@ -7,8 +7,8 @@ export interface BoardScope { sales: string[]; regions: string[]; markets: strin
 export interface BoardSort { field: Exclude<BoardColumn, 'amount'> | 'stageAgeDays'; direction: 'asc' | 'desc' }
 export interface BoardDefinition { scope: BoardScope; match: 'all' | 'any'; conditions: BoardCondition[]; sort: BoardSort; groupBy: BoardGroup | null; columns: BoardColumn[] }
 export type BoardQuery = Omit<BoardDefinition, 'columns'> & { page: number; pageSize: number }
-export interface BoardOption { value: string; label: string }
-export interface BoardFilters { sales: BoardOption[]; regions: BoardOption[]; markets: BoardOption[]; equipment: BoardOption[]; stages: BoardOption[]; probabilityLevels: BoardOption[]; regionReady: boolean }
+export interface BoardOption { value: string; label: string; depth?: number }
+export interface BoardFilters { sales: BoardOption[]; regions: BoardOption[]; markets: BoardOption[]; equipment: BoardOption[]; stages: BoardOption[]; probabilityLevels: BoardOption[]; regionReady: boolean; regionParents?: Record<string, string> }
 export interface BoardRow {
   id: string; title: string; accountId: string; customerName: string
   region: string | null; salesId: string; salesName: string; stage: string

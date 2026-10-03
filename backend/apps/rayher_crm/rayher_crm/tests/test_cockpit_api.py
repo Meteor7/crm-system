@@ -144,7 +144,7 @@ class TestCockpitApi(FrappeTestCase):
             self.assertEqual(plan["period"], {"kind": "year", "start": "2031-01-01", "end": "2031-12-31",
                                               "previousAnchor": "2030-01-01", "nextAnchor": "2032-01-01"})
             self.assertEqual(set(plan["summary"]), {"visits", "tests", "actions", "po"})
-            self.assertEqual(set(plan["filters"]), {"sales", "markets", "regions", "regionReady", "equipment"})
+            self.assertEqual(set(plan["filters"]), {"sales", "markets", "regions", "regionParents", "regionReady", "equipment"})
             # The equipment catalog of the Opportunities board; presets are always offered.
             self.assertIn("Kibo", plan["filters"]["equipment"])
             with patch.object(cockpit, "list_equipment_types", return_value=["Kibo", "-"]):

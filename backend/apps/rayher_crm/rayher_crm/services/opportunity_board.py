@@ -103,6 +103,7 @@ def _board_context(*, include_rows: bool) -> dict[str, Any]:
         # The equipment catalog: presets, then custom types; every stored value is one of them.
         "equipment": list_equipment_types(),
         "regions": review_filters["regions"],
+        "regionParents": review_filters.get("regionParents", {}),
         "markets": review_filters["markets"],
         "regionReady": bool(review_filters["regionReady"]),
     }
@@ -110,13 +111,15 @@ def _board_context(*, include_rows: bool) -> dict[str, Any]:
         "asOf": to_iso_timestamp(now),
         "rows": rules.board_rows(
             opportunities, names, frappe.db.sql(_ACTIONS_SQL.format(scope=scope), as_dict=True), now,
-            equipment=options["equipment"],
+            equipment=options["equipment"], region_parents=options["regionParents"],
         ) if include_rows else [],
         "options": options,
         "filters": {
             "sales": sorted((_option(sales_id, names.get(sales_id)) for sales_id in sales_ids),
                             key=lambda item: (item["label"].casefold(), item["value"])),
+            # The sales territory tree in display order; regionParents is the parent of each value that has one.
             "regions": [_option(value) for value in options["regions"]],
+            "regionParents": options["regionParents"],
             "markets": [_option(value) for value in options["markets"]],
             "equipment": [_option(value) for value in options["equipment"]],
             "stages": [_option(stage, label) for stage, label in rules.STAGE_LABELS.items()],

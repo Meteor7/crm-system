@@ -256,6 +256,10 @@ class TestPlanRules(unittest.TestCase):
         self.assertEqual(ids(plan["_details"]["all"]), ["a-old", "v1", "ev1", "a1", "a2", "opp1"])
         plan = build_plan(fixture(), {**WEEK, "region": "South China"}, NOW)
         self.assertEqual(ids(plan["_details"]["all"]), ["v2", "opp2"])
+        # A territory, spelled out by cockpit.scoped() as the regions it covers, selects all of them.
+        china = {**WEEK, "region": "China", "regions": {"China", "East China", "South China"}}
+        self.assertEqual(ids(build_plan(fixture(), china, NOW)["_details"]["all"]), ids(build_plan(fixture(), WEEK, NOW)["_details"]["all"]))
+        self.assertEqual(ids(build_plan(fixture(), {**china, "regions": {"China", "South China"}}, NOW)["_details"]["all"]), ["v2", "opp2"])
 
     def test_a_record_without_its_date_is_not_a_zero(self):
         data = fixture()

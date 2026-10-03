@@ -37,6 +37,14 @@ def run(board_rows_, **query):
     return [row.dto["id"] for row in ordered], summary, groups
 
 
+# Regions in a territory tree: World > Asia > China > the two regions; Overseas is a region outside the tree.
+REGION_PARENTS = {"Asia": "World", "China": "Asia", "East China": "China", "South China": "China"}
+TERRITORY_OPTIONS = {
+    **OPTIONS, "regions": ["World", "Asia", "China", "East China", "South China", "Overseas"],
+    "regionParents": REGION_PARENTS,
+}
+
+
 def invalid(query, options=OPTIONS):
     with unittest.TestCase().assertRaises(BoardQueryError) as caught:
         validate_query(query, options)
@@ -116,6 +124,16 @@ class TestValidation(unittest.TestCase):
         # An empty region scope and sorting by region stay allowed.
         validate_query({"scope": {"regions": []}, "sort": {"field": "region", "direction": "desc"}}, unready)
         self.assertEqual(invalid({"scope": {"regions": ["West China"]}}), "scope.regions")
+
+    def test_a_territory_is_a_region_value_like_any_other(self):
+        self.assertEqual(
+            validate_query({"scope": {"regions": ["China"]}}, TERRITORY_OPTIONS)["scope"]["regions"], ["China"])
+        self.assertEqual(invalid({"scope": {"regions": ["Europe"]}}, TERRITORY_OPTIONS), "scope.regions")
+        # The definition that is saved keeps the territory, not the regions it covers today.
+        definition = validate_definition({
+            "columns": ["region"], "conditions": [{"field": "region", "operator": "not_in", "value": ["Asia"]}],
+        }, TERRITORY_OPTIONS)
+        self.assertEqual(definition["conditions"][0]["value"], ["Asia"])
 
     def test_saved_definitions_need_known_unique_columns_and_no_paging(self):
         definition = validate_definition({"columns": ["customerName", "stage"], "match": "any"}, OPTIONS)
@@ -309,6 +327,49 @@ class TestLegacyRows(unittest.TestCase):
         self.assertEqual([(group["key"], group["label"]) for group in groups],
                          [("pipeline", "Pipeline"), ("pending", "Pending sales confirmation")])
         self.assertEqual(run(board, conditions=[{"field": "probabilityLevel", "operator": "in", "value": ["pending"]}])[0], ["o2"])
+
+
+class TestTerritories(unittest.TestCase):
+    def setUp(self):
+        self.board = board_rows([
+            opportunity("east"), opportunity("south", region="South China"),
+            opportunity("overseas", region="Overseas"), opportunity("none", region=None),
+        ], {"alice": "Alice"}, [], NOW, region_parents=REGION_PARENTS)
+
+    def run_board(self, **query):
+        ordered, _summary, groups = build_board(self.board, validate_query(query, TERRITORY_OPTIONS))
+        return sorted(row.dto["id"] for row in ordered), groups
+
+    def test_a_territory_selects_the_regions_below_it(self):
+        def scoped(*regions):
+            return self.run_board(scope={"regions": list(regions)})[0]
+
+        def where(op, *regions):
+            return self.run_board(conditions=[{"field": "region", "operator": op, "value": list(regions)}])[0]
+
+        self.assertEqual(scoped("China"), ["east", "south"])
+        self.assertEqual(scoped("World"), ["east", "south"])
+        self.assertEqual(scoped("South China"), ["south"])
+        self.assertEqual(scoped("East China", "Overseas"), ["east", "overseas"])
+        self.assertEqual(where("in", "Asia"), ["east", "south"])
+        # Not within China: a region outside the tree, and no region at all.
+        self.assertEqual(where("not_in", "China"), ["none", "overseas"])
+        self.assertEqual(where("not_in", "East China"), ["none", "overseas", "south"])
+        self.assertEqual(self.run_board(scope={"regions": ["China"]}, conditions=[
+            {"field": "region", "operator": "not_in", "value": ["South China"]}])[0], ["east"])
+
+    def test_groups_and_the_region_column_stay_the_customers_own_region(self):
+        ids, groups = self.run_board(scope={"regions": ["China"]}, groupBy="region")
+
+        self.assertEqual(ids, ["east", "south"])
+        self.assertEqual([(group["key"], group["count"]) for group in groups], [("East China", 1), ("South China", 1)])
+        self.assertEqual({row.dto["id"]: row.dto["region"] for row in self.board},
+                         {"east": "East China", "south": "South China", "overseas": "Overseas", "none": None})
+
+    def test_rows_built_without_a_tree_match_their_own_region_only(self):
+        board = rows(opportunity("east"), opportunity("south", region="South China"))
+        ordered, _summary, _groups = build_board(board, validate_query({"scope": {"regions": ["East China"]}}, OPTIONS))
+        self.assertEqual([row.dto["id"] for row in ordered], ["east"])
 
 
 if __name__ == "__main__":

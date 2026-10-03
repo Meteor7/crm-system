@@ -11,6 +11,7 @@ from rayher_crm.setup.enum_normalization import normalize_crm_enums
 from rayher_crm.setup.equipment_types import sync_after_migrate as sync_equipment_types
 from rayher_crm.setup.indexes import install_stage5f_indexes
 from rayher_crm.setup.money_schema import enforce_money_column_contract
+from rayher_crm.services.territories import ensure_default_territories
 from erpnext.regional.address_template.setup import set_up_address_templates
 
 SYSTEM_TIME_ZONE = "Asia/Shanghai"
@@ -41,6 +42,8 @@ def after_install() -> None:
     enforce_money_column_contract()
     normalize_crm_enums()
     install_approved_controlled_documents()
+    # A new site starts with the default territory tree; an existing one gets it from a patch, once.
+    ensure_default_territories()
 
 
 def after_migrate() -> None:

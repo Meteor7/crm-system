@@ -40,6 +40,19 @@ async function setup(role: UserRole = 'Manager', attach = false) {
 }
 
 describe('Warnings page', () => {
+  it('lists the region filter as the territory tree and sends the territory that is chosen', async () => {
+    const { wrapper, api } = await setup()
+    const data = warningsFixture()
+    data.filters = { ...data.filters, regions: ['World', 'Asia', 'China', 'East China', 'Taiwan'], regionParents: { Asia: 'World', China: 'Asia', 'East China': 'China' }, regionReady: true }
+    api.getWarnings = vi.fn(async () => ({ data, warnings: [], meta }))
+    await wrapper.get('select[aria-label="Market"]').setValue('Frontend'); await flushPromises()
+    const select = wrapper.get('select[aria-label="Region"]')
+    expect(select.findAll('option').slice(1).map(option => option.element.textContent)).toEqual(['全球', '\u00a0\u00a0亚洲', '\u00a0\u00a0\u00a0\u00a0中国', '\u00a0\u00a0\u00a0\u00a0\u00a0\u00a0华东', 'Taiwan'])
+    await select.setValue('China'); await flushPromises()
+    expect(api.getWarnings).toHaveBeenLastCalledWith(expect.objectContaining({ region: 'China', market: 'Frontend' }))
+    wrapper.unmount()
+  })
+
   it('shows the four zones with the Review scope, owners and links to the source records', async () => {
     const { wrapper, api } = await setup()
     expect(api.getWarnings).toHaveBeenCalledWith({ period: 'week', sales: '', market: '', region: '', equipment: '' })

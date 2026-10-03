@@ -2,7 +2,7 @@
 from decimal import Decimal
 
 from rayher_crm.services.cockpit_metrics import (
-    covered, field_at, grouped, insufficient, iso, metric, month_shift, number, period, stamp,
+    covered, field_at, grouped, in_region, insufficient, iso, metric, month_shift, number, period, stamp,
 )
 from rayher_crm.services.equipment_names import equipment_key
 from rayher_crm.services.opportunity_stages import MILESTONE_STAGES, OPEN_STAGES
@@ -34,7 +34,7 @@ def build_conversions(data, query, now, coverage, threshold=45):
         customer = customers.get(opportunity.get("account"))
         if not customer or stamp(opportunity["creation"]) > at:
             continue
-        if query.get("region") and customer.get("custom_crm_region") != query["region"]:
+        if not in_region(query, customer):
             continue
         if query.get("market") and customer.get("custom_crm_segment") != query["market"]:
             continue

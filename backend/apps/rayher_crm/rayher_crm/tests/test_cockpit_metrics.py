@@ -763,6 +763,21 @@ class TestCockpitMetrics(unittest.TestCase):
         self.assertEqual(build_review(data, {**QUERY, "region": "East China"}, NOW, COVERAGE)["pipeline"][1]["count"]["value"], 1)
         self.assertEqual(build_review(data, {**QUERY, "region": "South China"}, NOW, COVERAGE)["pipeline"][1]["count"]["value"], 0)
 
+    def test_a_territory_spelled_out_as_regions_selects_every_region_it_covers(self):
+        # cockpit.scoped() spells a territory out as the regions it covers; without that list the name stands alone.
+        data = fixture()
+        china = {**QUERY, "region": "China", "regions": {"China", "East China", "South China"}}
+        count = lambda query: build_review(data, query, NOW, COVERAGE)["pipeline"][1]["count"]["value"]
+        self.assertEqual(count(china), 1)
+        self.assertEqual(count({**china, "regions": {"China", "South China"}}), 0)
+        self.assertEqual(count({**QUERY, "region": "China"}), 0)
+        data["quotes"] = [{"name": "q-exp", "account": "c", "quotation_owner": "alice", "status": "Published", "opportunity": "opp", "current_published_version": "v-exp"}]
+        data["versions"] = [{"name": "v-exp", "quotation": "q-exp", "version_no": 1, "published_at": "2026-09-01", "account": "c", "quotation_owner": "alice",
+                             "status": "Published", "valid_until": "2026-09-20"}]
+        expiring = lambda query: [r["id"] for r in quotation_expiry(data, query, NOW, 14, NOW)["items"]]
+        self.assertEqual(expiring(china), ["q-exp"])
+        self.assertEqual(expiring({**china, "regions": {"China", "South China"}}), [])
+
     def test_po_uses_actual_date_year_and_stall_requires_lookback_coverage(self):
         data = fixture()
         data["stages"] = [stage("po_confirmed", "2025-12-31", recorded_at="2026-01-02")]
