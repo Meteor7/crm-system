@@ -174,6 +174,54 @@ describe('Opportunity detail', () => {
     unset.unmount()
   })
 
+  it('lists each competitor with their strengths and our response, and says so when there are none', async () => {
+    const setup = await context('OPP-001')
+    const getStrategyOpportunity = setup.api.getStrategyOpportunity.bind(setup.api)
+    const stored = await getStrategyOpportunity('OPP-001')
+    const withCompetitors = {
+      ...stored,
+      data: {
+        ...stored.data,
+        competitors: [
+          { name: 'Acme Metrology', strengths: 'Installed base at the fab', response: 'Local service team' },
+          { name: '本地竞争对手', strengths: '', response: '样片测试指标领先' },
+        ],
+      },
+    } as Awaited<ReturnType<typeof getStrategyOpportunity>>
+    setup.api.getStrategyOpportunity = async () => withCompetitors
+    const wrapper = mountPage(setup)
+    await flushPromises()
+
+    const card = wrapper.get('[data-testid="opportunity-competitors"]')
+    expect(card.get('header').text()).toBe('竞争对手2')
+    const acme = card.get('[data-competitor-name="Acme Metrology"]')
+    expect(acme.get('strong').text()).toBe('Acme Metrology')
+    expect(acme.get('[data-competitor-field="strengths"]').text()).toBe('对方优势Installed base at the fab')
+    expect(acme.get('[data-competitor-field="response"]').text()).toBe('我方应对Local service team')
+    // A text nobody entered takes no line.
+    const local = card.get('[data-competitor-name="本地竞争对手"]')
+    expect(local.find('[data-competitor-field="strengths"]').exists()).toBe(false)
+    expect(local.get('[data-competitor-field="response"]').text()).toBe('我方应对样片测试指标领先')
+    // The card sits with the other Blue Sheet lists, after the red flags.
+    const cards = wrapper.findAll('.detail-right > section').map((section) => section.classes().find((name) => name.endsWith('-card') && !['detail-card', 'evidence-card'].includes(name)))
+    expect(cards).toEqual(['influence-card', 'strength-card', 'risk-card', 'competitor-card', 'information-card'])
+    setLocale('en-US'); await flushPromises()
+    expect(card.get('header').text()).toBe('Competitors2')
+    expect(acme.get('[data-competitor-field="strengths"]').text()).toBe('Their strengthsInstalled base at the fab')
+    expect(acme.get('[data-competitor-field="response"]').text()).toBe('Our responseLocal service team')
+    setLocale('zh-CN'); await flushPromises()
+
+    // An Opportunity from an adapter that predates the field has no list at all.
+    const plain = mountPage(await context('OPP-001'))
+    await flushPromises()
+    const empty = plain.get('[data-testid="opportunity-competitors"]')
+    expect(empty.get('header').text()).toBe('竞争对手0')
+    expect(empty.get('.empty-copy').text()).toBe('尚未添加竞争对手。')
+    expect(empty.find('.competitor-list').exists()).toBe(false)
+    wrapper.unmount()
+    plain.unmount()
+  })
+
   it('says beside the stage that a Demo done is waiting for the amount, and only then', async () => {
     const setup = await context()
     const current = (await setup.api.getStrategyOpportunity('OPP-001')).data

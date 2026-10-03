@@ -9,7 +9,8 @@ import { preferredPersonnelId } from '@/demo/personnel'
 import { OPPORTUNITY_PROBABILITY_LEVELS, opportunityProbabilityLevelLabel, opportunityProbabilityLevelRank } from '@/domain/opportunity-probability'
 import { isClosedOpportunityStage, opportunityStageLabel } from '@/domain/opportunity-stages'
 import type { AccountSummaryDto, SiteDto } from '@/types/crm'
-import type { CreateStrategyOpportunityInput, StrategyOpportunityDto } from '@/types/workspaces'
+import { Plus, Trash2 } from '@lucide/vue'
+import { MAX_OPPORTUNITY_COMPETITORS, type CreateStrategyOpportunityInput, type OpportunityCompetitor, type StrategyOpportunityDto } from '@/types/workspaces'
 import { useI18n, useLocaleMessage } from '@/i18n'
 import { salesEnumLabel } from '@/features/shared/sales-i18n'
 
@@ -95,6 +96,24 @@ const qualificationError = useLocaleMessage()
 const MAX_OBJECTIVE_LENGTH = 2000
 const objectiveError = useLocaleMessage()
 watch(() => form.value.singleSalesObjective, () => { objectiveError.value = '' })
+// Blue Sheet competition, one row per competitor. Kept apart from the form so a row left blank is never sent.
+// The server's limits on the trimmed texts, counted in characters like the objective, so no native maxlength.
+const MAX_COMPETITOR_NAME = 140
+const MAX_COMPETITOR_TEXT = 1000
+const characters = (value: string) => Array.from(value).length
+// The server decides what a repeated name is (Python's casefold, which JavaScript does not have). The form only
+// catches the plain case, names equal in lower case, and so never refuses two names the server would accept;
+// a pair only full case folding equates (ß and SS) is refused by the server, with its message shown in the form.
+const foldName = (value: string) => value.toLowerCase()
+const competitorRows = ref<OpportunityCompetitor[]>((props.opportunity?.competitors ?? []).map((row) => ({
+  name: row.name ?? '', strengths: row.strengths ?? '', response: row.response ?? '',
+})))
+const competitorsError = useLocaleMessage()
+watch(competitorRows, () => { competitorsError.value = '' }, { deep: true })
+function addCompetitor() {
+  if (competitorRows.value.length < MAX_OPPORTUNITY_COMPETITORS) competitorRows.value.push({ name: '', strengths: '', response: '' })
+}
+function removeCompetitor(index: number) { competitorRows.value.splice(index, 1) }
 // Purchase intent stays independent of the level.
 const isLevelOwner = computed(() => Boolean(props.currentUserId) && props.opportunity?.owner === props.currentUserId)
 // The level is frozen once the PO is received or the Opportunity is lost.
@@ -132,6 +151,23 @@ function submit() {
     objectiveError.value = message('oppEditor.objectiveTooLong')
     return
   }
+  // The server's rules: every competitor has a name, a name appears once, and the texts keep to their lengths.
+  const competitors = competitorRows.value
+    .map((row) => ({ name: row.name.trim(), strengths: row.strengths.trim(), response: row.response.trim() }))
+    .filter((row) => row.name || row.strengths || row.response)
+  if (competitors.some((row) => !row.name)) {
+    competitorsError.value = message('oppEditor.competitorNameRequired')
+    return
+  }
+  if (new Set(competitors.map((row) => foldName(row.name))).size !== competitors.length) {
+    competitorsError.value = message('oppEditor.competitorDuplicate')
+    return
+  }
+  if (competitors.some((row) => characters(row.name) > MAX_COMPETITOR_NAME
+    || characters(row.strengths) > MAX_COMPETITOR_TEXT || characters(row.response) > MAX_COMPETITOR_TEXT)) {
+    competitorsError.value = message('oppEditor.competitorTooLong')
+    return
+  }
   if (!props.opportunity && !qualificationConfirmed.value) {
     qualificationError.value = message('oppEditor.qualificationRequired')
     return
@@ -154,6 +190,7 @@ function submit() {
     // Without an amount (allowed at stage 1) the original amount goes out blank too, never a stale one beside an unknown amount.
     amount: form.value.amount, intentScore: Number(form.value.intentScore), originalAmount: form.value.amount ? form.value.originalAmount || form.value.amount : '',
     paymentMilestones: lines(paymentText.value), strengths: lines(strengthsText.value), redFlags: lines(redFlagsText.value), informationNeeded: lines(informationText.value),
+    competitors,
   }
   // A non-owner or frozen edit leaves the level untouched.
   if (canSetProbabilityLevel.value) value.probabilityLevel = probabilityLevel ?? ''
@@ -226,6 +263,20 @@ const equipmentChoices = computed(() => props.equipmentTypes ?? EQUIPMENT_PRESET
       <label><span>{{ t('oppEditor.shipmentDate') }}</span><input v-model="form.shipmentDate" :aria-label="t('oppEditor.shipmentDate')" type="date" /></label>
       <label><span>{{ t('oppEditor.fatDate') }}</span><input v-model="form.fatDate" :aria-label="t('oppEditor.fatDate')" type="date" /></label>
       <label class="wide"><span>{{ t('oppEditor.competition') }}</span><input v-model="form.competition" :aria-label="t('oppEditor.competition')" /></label>
+      <div class="wide competitor-field" data-testid="opportunity-competitors">
+        <div class="competitor-head">
+          <span>{{ t('oppEditor.competitors') }}</span>
+          <button type="button" data-testid="add-competitor" :disabled="competitorRows.length >= MAX_OPPORTUNITY_COMPETITORS" @click="addCompetitor"><Plus :size="12" />{{ t('oppEditor.addCompetitor') }}</button>
+        </div>
+        <div v-for="(row, index) in competitorRows" :key="index" class="competitor-row" data-testid="competitor-row">
+          <input v-model="row.name" :aria-label="`${t('oppEditor.competitorName')} ${index + 1}`" :placeholder="t('oppEditor.competitorName')" />
+          <textarea v-model="row.strengths" :aria-label="`${t('oppEditor.competitorStrengths')} ${index + 1}`" :placeholder="t('oppEditor.competitorStrengths')" rows="2" />
+          <textarea v-model="row.response" :aria-label="`${t('oppEditor.competitorResponse')} ${index + 1}`" :placeholder="t('oppEditor.competitorResponse')" rows="2" />
+          <button type="button" data-action="remove-competitor" :aria-label="`${t('oppEditor.removeCompetitor')} ${index + 1}`" @click="removeCompetitor(index)"><Trash2 :size="12" /></button>
+        </div>
+        <small v-if="!competitorRows.length" class="competitor-empty">{{ t('oppEditor.noCompetitors') }}</small>
+        <small v-if="competitorsError" class="field-error" data-field-error="competitors">{{ competitorsError }}</small>
+      </div>
       <label class="wide"><span>{{ t('oppEditor.singleSalesObjective') }}</span><textarea v-model="form.singleSalesObjective" :aria-label="t('oppEditor.singleSalesObjective')" rows="3" /><small v-if="objectiveError" class="field-error" data-field-error="singleSalesObjective">{{ objectiveError }}</small></label>
       <label><span>{{ t('oppEditor.payment') }}</span><textarea v-model="paymentText" :aria-label="t('oppEditor.payment')" rows="3" /></label>
       <label><span>{{ t('oppEditor.strength') }}</span><textarea v-model="strengthsText" :aria-label="t('oppEditor.strength')" rows="3" /></label>
@@ -239,6 +290,9 @@ const equipmentChoices = computed(() => props.equipmentTypes ?? EQUIPMENT_PRESET
 .form-error{margin:0 0 12px;padding:10px;color:var(--crm-danger);background:var(--crm-danger-soft);border-radius:8px;font-size:9px}.opportunity-form-grid{display:grid;grid-template-columns:1fr 1fr;gap:13px}.opportunity-form-grid label{display:grid;gap:6px;align-content:start}.opportunity-form-grid label.wide,.opportunity-form-grid .wide{grid-column:1/-1}.opportunity-form-grid span{color:var(--crm-text-muted);font-size:9px;font-weight:700}.opportunity-form-grid input,.opportunity-form-grid select,.opportunity-form-grid textarea{box-sizing:border-box;width:100%;padding:9px 10px;background:#fff;border:1px solid var(--crm-line);border-radius:8px;font:inherit}.opportunity-form-grid input,.opportunity-form-grid select{height:38px}.opportunity-form-grid textarea{resize:vertical}.opportunity-form-grid :focus{border-color:var(--crm-teal);outline:0}.intent-slider-row{display:grid;grid-template-columns:minmax(0,1fr) 28px;gap:10px;align-items:center;height:38px}.opportunity-form-grid .intent-slider-row input[type="range"]{height:22px;padding:0;background:transparent;border:0;border-radius:0;accent-color:var(--crm-teal);cursor:pointer}.opportunity-form-grid .intent-slider-row input[type="range"]:focus-visible{outline:2px solid var(--crm-teal);outline-offset:2px}.intent-slider-row output{text-align:right;color:var(--crm-text);font-size:11px;font-weight:700;font-variant-numeric:tabular-nums}.opportunity-form-grid select:disabled{color:var(--crm-text-muted);background:var(--crm-surface-muted);cursor:not-allowed}.probability-level-field small{color:var(--crm-text-muted);font-size:8px;line-height:1.45}@media(max-width:560px){.opportunity-form-grid{grid-template-columns:1fr}.opportunity-form-grid label.wide,.opportunity-form-grid .wide{grid-column:auto}}
 .readonly-stage{display:grid;gap:6px;align-content:start}.readonly-stage span{color:var(--crm-text-muted);font-size:9px;font-weight:700}.readonly-stage strong{display:flex;height:38px;box-sizing:border-box;align-items:center;padding:0 10px;color:var(--crm-text);background:var(--crm-surface-muted);border:1px solid var(--crm-line);border-radius:8px;font-size:10px}
 .opportunity-form-grid small.field-error{color:var(--crm-danger);font-size:8px;line-height:1.45}
+.competitor-field{display:grid;gap:8px}.competitor-head{display:flex;align-items:center;justify-content:space-between;gap:10px}.competitor-head button{display:inline-flex;align-items:center;gap:4px;height:26px;padding:0 9px;color:var(--crm-teal);background:#fff;border:1px solid var(--crm-line);border-radius:7px;font:inherit;font-size:9px;font-weight:700;cursor:pointer}.competitor-head button:disabled{color:var(--crm-text-muted);background:var(--crm-surface-muted);cursor:not-allowed}
+.competitor-row{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.5fr) minmax(0,1.5fr) 30px;gap:8px;align-items:start}.competitor-row button{display:grid;place-items:center;width:30px;height:38px;padding:0;color:var(--crm-text-muted);background:#fff;border:1px solid var(--crm-line);border-radius:8px;cursor:pointer}.competitor-row button:hover{color:var(--crm-danger);border-color:var(--crm-danger)}.competitor-empty{color:var(--crm-text-muted);font-size:8px;line-height:1.45}
+@media(max-width:560px){.competitor-row{grid-template-columns:minmax(0,1fr) 30px}.competitor-row textarea{grid-column:1/-1}.competitor-row button{grid-column:2;grid-row:1}}
 .amount-cny-field small{color:var(--crm-warning,#9a6700);font-size:8px;line-height:1.45}
 .amount-cny-field small.amount-cny-follows{color:var(--crm-text-muted)}
 .opportunity-form-grid input[readonly]{color:var(--crm-text);background:var(--crm-surface-muted);cursor:default}.opportunity-form-grid input[readonly]:focus{border-color:var(--crm-line)}

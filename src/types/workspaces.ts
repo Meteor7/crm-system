@@ -29,6 +29,15 @@ export const OPPORTUNITY_STAKEHOLDER_STANCES = ['Support', 'Neutral', 'Against']
 export type OpportunityStakeholderStance = typeof OPPORTUNITY_STAKEHOLDER_STANCES[number]
 export const OPPORTUNITY_STAKEHOLDER_RESPONSE_MODES = ['Growth', 'Trouble', 'Even Keel', 'Overconfident'] as const
 export type OpportunityStakeholderResponseMode = typeof OPPORTUNITY_STAKEHOLDER_RESPONSE_MODES[number]
+/** Blue Sheet competition: one row per competitor. */
+export interface OpportunityCompetitor {
+  name: string
+  /** What the competitor is strong at in this deal. */
+  strengths: string
+  /** How we answer it. */
+  response: string
+}
+export const MAX_OPPORTUNITY_COMPETITORS = 10
 export const OPPORTUNITY_ACTION_STATUSES = ['Open', 'Done'] as const
 export type OpportunityActionStatus = typeof OPPORTUNITY_ACTION_STATUSES[number]
 
@@ -162,6 +171,8 @@ export interface CreateStrategyOpportunityInput {
   fatDate?: string
   paymentMilestones?: string[]
   competition?: string
+  /** Left out, the stored list is kept; an empty list clears it. */
+  competitors?: OpportunityCompetitor[]
   singleSalesObjective?: string
   winReason?: string
   lostReason?: string
@@ -333,6 +344,8 @@ export interface StrategyOpportunityDto {
   fatDate: string
   paymentMilestones: string[]
   competition: string
+  /** Blue Sheet competitors; adapters that predate the field omit it. */
+  competitors?: OpportunityCompetitor[]
   /** Blue Sheet objective; adapters and records that predate the field may omit it. */
   singleSalesObjective?: string
   winReason: string

@@ -68,7 +68,7 @@ from rayher_crm.services.loss_review import create_loss_review, mark_reopened, r
 
 
 SALE_TYPES = {"New Equipment", "Repeat Order", "Service"}
-LIST_FIELDS = ("payment_milestones", "strengths", "red_flags", "information_needed")
+LIST_FIELDS = ("payment_milestones", "competitors", "strengths", "red_flags", "information_needed")
 # Compared as decimals, so an amount saved again unchanged is not recorded as an edit.
 MONEY_FIELDS = ("amount", "original_amount", "amount_cny")
 # An Opportunity carries a value from Demo done on (#22); before that its amount may be unknown.
@@ -126,6 +126,13 @@ STAKEHOLDER_RESPONSE_MODES = ("", "Growth", "Trouble", "Even Keel", "Overconfide
 # A Small Text column holds far more than anyone writes; the limit keeps an overlong value a field error.
 # Keep it in step with MAX_OBJECTIVE_LENGTH and oppEditor.objectiveTooLong in the front end, and with generated-error-messages.ts.
 MAX_SINGLE_SALES_OBJECTIVE = 2000
+# Blue Sheet competition, one row per competitor. Keep the limits in step with the Opportunity form
+# (MAX_OPPORTUNITY_COMPETITORS, MAX_COMPETITOR_NAME and MAX_COMPETITOR_TEXT there) and the messages with
+# generated-error-messages.ts.
+MAX_COMPETITORS = 10
+MAX_COMPETITOR_NAME = 140
+MAX_COMPETITOR_TEXT = 1000
+COMPETITOR_TEXT_FIELDS = ("strengths", "response")
 ACTION_STATUSES = ("Open", "Done")
 
 
@@ -208,6 +215,43 @@ def _single_sales_objective(value: Any, stored: str | None = None) -> str:
             field_errors={"singleSalesObjective": f"Maximum length is {MAX_SINGLE_SALES_OBJECTIVE}"},
         )
     return text
+
+
+def _competitors(value: Any) -> list[dict[str, str]]:
+    """The competitors of an Opportunity: a name each, with their strengths and our response as optional text."""
+
+    def refuse(message: str, hint: str):
+        return CrmApiException("VALIDATION_ERROR", message, field_errors={"competitors": hint})
+
+    if value in (None, ""):
+        return []
+    malformed = refuse("competitors must be a list of competitors.", "Invalid value")
+    if not isinstance(value, list) or any(not isinstance(row, dict) for row in value):
+        raise malformed
+    if len(value) > MAX_COMPETITORS:
+        raise refuse(f"competitors cannot have more than {MAX_COMPETITORS} rows.", f"At most {MAX_COMPETITORS} rows")
+    rows: list[dict[str, str]] = []
+    names: set[str] = set()
+    for row in value:
+        # A text left out or sent as null is blank; unknown keys are dropped.
+        texts = {key: "" if row.get(key) is None else row[key] for key in ("name", *COMPETITOR_TEXT_FIELDS)}
+        if any(not isinstance(text, str) for text in texts.values()):
+            raise malformed
+        texts = {key: text.strip() for key, text in texts.items()}
+        if not texts["name"]:
+            raise refuse("Each competitor needs a name.", "Name required")
+        if len(texts["name"]) > MAX_COMPETITOR_NAME or any(
+            len(texts[key]) > MAX_COMPETITOR_TEXT for key in COMPETITOR_TEXT_FIELDS
+        ):
+            raise refuse(
+                "A competitor entry is too long.",
+                f"Maximum length is {MAX_COMPETITOR_NAME} for the name and {MAX_COMPETITOR_TEXT} for each text",
+            )
+        if texts["name"].casefold() in names:
+            raise refuse("A competitor is listed twice.", "Duplicate name")
+        names.add(texts["name"].casefold())
+        rows.append(texts)
+    return rows
 
 
 def cny_amount_for(currency: str, amount: Decimal, amount_cny: Decimal) -> Decimal:
@@ -296,6 +340,7 @@ def _validate_opportunity(
         "fat_date": optional_date(payload.get("fatDate"), "fatDate"),
         "payment_milestones": _string_list(payload.get("paymentMilestones"), "paymentMilestones"),
         "competition": str(payload.get("competition") or "").strip(),
+        "competitors": _competitors(payload.get("competitors")),
         "single_sales_objective": _single_sales_objective(payload.get("singleSalesObjective"), stored_objective),
         "win_reason": str(payload.get("winReason") or "").strip(),
         "lost_reason": str(payload.get("lostReason") or "").strip(),
@@ -523,6 +568,7 @@ def serialize_opportunity(doc, recoveries=None, loss_reviews=None) -> dict[str, 
         "fatDate": str(doc.fat_date or ""),
         "paymentMilestones": _decode_list(doc.payment_milestones),
         "competition": doc.competition or "",
+        "competitors": _decode_list(doc.competitors),
         "singleSalesObjective": doc.single_sales_objective or "",
         "winReason": doc.win_reason or "",
         "lostReason": doc.lost_reason or "",
@@ -677,6 +723,7 @@ def _current_input(doc) -> dict[str, Any]:
         "fatDate": str(doc.fat_date or ""),
         "paymentMilestones": _decode_list(doc.payment_milestones),
         "competition": doc.competition or "",
+        "competitors": _decode_list(doc.competitors),
         "singleSalesObjective": doc.single_sales_objective or "",
         "winReason": doc.win_reason or "",
         "lostReason": doc.lost_reason or "",

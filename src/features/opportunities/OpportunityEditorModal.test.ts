@@ -516,3 +516,150 @@ describe('OpportunityEditorModal single sales objective', () => {
     wrapper.unmount()
   })
 })
+
+describe('OpportunityEditorModal competitors', () => {
+  const stored = [
+    { name: 'Acme Metrology', strengths: 'Installed base at the fab', response: 'Local service team' },
+    { name: '本地竞争对手', strengths: '', response: '样片测试指标领先' },
+  ]
+  const rowsOf = (wrapper: ReturnType<typeof mount>) => wrapper.findAll('[data-testid="competitor-row"]')
+  const submitted = (wrapper: ReturnType<typeof mount>, call = 0) => (wrapper.emitted('submit')?.[call]?.[0] as { competitors?: unknown }).competitors
+
+  it('starts without rows on a new Opportunity and submits the rows that are filled in', async () => {
+    const wrapper = mount(OpportunityEditorModal, { props: { ...props, defaultOwner: 'person002@crm.example.invalid', currentUserId: 'person002@crm.example.invalid' } })
+    expect(rowsOf(wrapper)).toHaveLength(0)
+    expect(wrapper.get('[data-testid="opportunity-competitors"]').text()).toContain('尚未添加竞争对手。')
+    // The free-text field is the notes; the rows are the competitors.
+    expect(wrapper.find('[aria-label="竞争备注"]').exists()).toBe(true)
+
+    await wrapper.get('[data-testid="add-competitor"]').trigger('click')
+    await wrapper.get('[data-testid="add-competitor"]').trigger('click')
+    await wrapper.get('[data-testid="add-competitor"]').trigger('click')
+    expect(rowsOf(wrapper)).toHaveLength(3)
+    await wrapper.get('[aria-label="竞争对手名称 1"]').setValue('  Acme Metrology ')
+    await wrapper.get('[aria-label="对方优势 1"]').setValue(' Installed base at the fab ')
+    await wrapper.get('[aria-label="我方应对 1"]').setValue('Local service team')
+    await wrapper.get('[aria-label="竞争对手名称 3"]').setValue('Name only')
+    await wrapper.get('[data-testid="qualification-confirmed"]').setValue(true)
+    await wrapper.get('[aria-label="成功概率"]').setValue('upside')
+    await wrapper.get('form').trigger('submit')
+    // Trimmed, and the row left entirely blank is not sent.
+    expect(submitted(wrapper)).toEqual([
+      { name: 'Acme Metrology', strengths: 'Installed base at the fab', response: 'Local service team' },
+      { name: 'Name only', strengths: '', response: '' },
+    ])
+    wrapper.unmount()
+  })
+
+  it('loads the stored rows, resends them with an unrelated edit, and removes one', async () => {
+    const opportunity = { ...legacyOpportunity('New Equipment'), competitors: stored } as StrategyOpportunityDto
+    const wrapper = mount(OpportunityEditorModal, { props: { ...props, opportunity } })
+    expect(rowsOf(wrapper)).toHaveLength(2)
+    expect((wrapper.get('[aria-label="竞争对手名称 2"]').element as HTMLInputElement).value).toBe('本地竞争对手')
+    expect((wrapper.get('[aria-label="我方应对 2"]').element as HTMLTextAreaElement).value).toBe('样片测试指标领先')
+
+    await wrapper.get('[aria-label="Opportunity 名称"]').setValue('Retitled')
+    await wrapper.get('form').trigger('submit')
+    expect(submitted(wrapper)).toEqual(stored)
+    // Editing never changes the Opportunity it was opened with.
+    expect(opportunity.competitors).toEqual(stored)
+
+    await wrapper.get('[aria-label="移除竞争对手 1"]').trigger('click')
+    expect(rowsOf(wrapper)).toHaveLength(1)
+    expect((wrapper.get('[aria-label="竞争对手名称 1"]').element as HTMLInputElement).value).toBe('本地竞争对手')
+    await wrapper.get('form').trigger('submit')
+    expect(submitted(wrapper, 1)).toEqual([stored[1]])
+    // Removing the last row clears the list.
+    await wrapper.get('[aria-label="移除竞争对手 1"]').trigger('click')
+    await wrapper.get('form').trigger('submit')
+    expect(submitted(wrapper, 2)).toEqual([])
+    wrapper.unmount()
+  })
+
+  it('an Opportunity from before the field opens without rows and submits an empty list', async () => {
+    const wrapper = mount(OpportunityEditorModal, { props: { ...props, opportunity: legacyOpportunity('New Equipment') } })
+    expect(rowsOf(wrapper)).toHaveLength(0)
+    await wrapper.get('form').trigger('submit')
+    expect(submitted(wrapper)).toEqual([])
+    wrapper.unmount()
+  })
+
+  it('asks for a name on a row that has text, and refuses a repeated name', async () => {
+    const opportunity = { ...legacyOpportunity('New Equipment'), competitors: [stored[0]] } as StrategyOpportunityDto
+    const wrapper = mount(OpportunityEditorModal, { props: { ...props, opportunity } })
+    await wrapper.get('[data-testid="add-competitor"]').trigger('click')
+    await wrapper.get('[aria-label="对方优势 2"]').setValue('Price')
+    await wrapper.get('form').trigger('submit')
+    expect(wrapper.emitted('submit')).toBeUndefined()
+    expect(wrapper.get('[data-field-error="competitors"]').text()).toBe('请填写竞争对手名称')
+
+    // Typing answers the message; the same name in another case is the same competitor.
+    await wrapper.get('[aria-label="竞争对手名称 2"]').setValue(' acme metrology ')
+    expect(wrapper.find('[data-field-error="competitors"]').exists()).toBe(false)
+    await wrapper.get('form').trigger('submit')
+    expect(wrapper.emitted('submit')).toBeUndefined()
+    expect(wrapper.get('[data-field-error="competitors"]').text()).toBe('同一个竞争对手只能填写一次')
+
+    setLocale('en-US'); await flushPromises()
+    expect(wrapper.get('[data-field-error="competitors"]').text()).toBe('A competitor can be listed only once')
+    expect(wrapper.get('[data-testid="add-competitor"]').text()).toBe('Add competitor')
+    expect(wrapper.find('[aria-label="Competition notes"]').exists()).toBe(true)
+    setLocale('zh-CN'); await flushPromises()
+
+    // The form is never stricter than the server: names the server keeps apart (dotless ı and I) go through,
+    // and so does a pair only the server's full case folding equates (ß and SS), which the server then refuses.
+    for (const [first, second] of [['Irmak', 'ırmak'], ['Straße GmbH', 'STRASSE GMBH']]) {
+      const before = wrapper.emitted('submit')?.length ?? 0
+      await wrapper.get('[aria-label="竞争对手名称 1"]').setValue(first)
+      await wrapper.get('[aria-label="竞争对手名称 2"]').setValue(second)
+      await wrapper.get('form').trigger('submit')
+      expect(wrapper.find('[data-field-error="competitors"]').exists()).toBe(false)
+      expect(wrapper.emitted('submit')).toHaveLength(before + 1)
+    }
+    await wrapper.get('[aria-label="竞争对手名称 1"]').setValue(stored[0].name)
+    await wrapper.get('[aria-label="竞争对手名称 2"]').setValue('Other vendor')
+    await wrapper.get('form').trigger('submit')
+    expect(submitted(wrapper, 2)).toEqual([stored[0], { name: 'Other vendor', strengths: 'Price', response: '' }])
+    wrapper.unmount()
+  })
+
+  it('holds the name to 140 and each text to 1000 characters, counted as characters', async () => {
+    const opportunity = { ...legacyOpportunity('New Equipment'), competitors: [stored[0]] } as StrategyOpportunityDto
+    const wrapper = mount(OpportunityEditorModal, { props: { ...props, opportunity } })
+    const name = wrapper.get('[aria-label="竞争对手名称 1"]')
+    const strengths = wrapper.get('[aria-label="对方优势 1"]')
+    const response = wrapper.get('[aria-label="我方应对 1"]')
+    // No native maxlength: it counts UTF-16 units, which would stop an emoji or a rare Chinese character early.
+    for (const field of [name, strengths, response]) expect(field.attributes('maxlength')).toBeUndefined()
+
+    const tooLong = '竞争对手名称最多 140 个字符，对方优势和我方应对各最多 1000 个字符'
+    for (const [field, limit] of [[name, 140], [strengths, 1000], [response, 1000]] as const) {
+      const before = wrapper.emitted('submit')?.length ?? 0
+      await field.setValue('x'.repeat(limit + 1))
+      await wrapper.get('form').trigger('submit')
+      expect(wrapper.emitted('submit')?.length ?? 0).toBe(before)
+      expect(wrapper.get('[data-field-error="competitors"]').text()).toBe(tooLong)
+      // The limit itself is fine, blanks around it do not count, and an emoji is one character.
+      await field.setValue('  ' + '😀'.repeat(limit) + '  ')
+      expect(wrapper.find('[data-field-error="competitors"]').exists()).toBe(false)
+      await wrapper.get('form').trigger('submit')
+      expect(wrapper.emitted('submit')).toHaveLength(before + 1)
+    }
+    expect(submitted(wrapper, 2)).toEqual([{ name: '😀'.repeat(140), strengths: '😀'.repeat(1000), response: '😀'.repeat(1000) }])
+    wrapper.unmount()
+  })
+
+  it('stops adding rows at ten competitors', async () => {
+    const competitors = Array.from({ length: 9 }, (_, index) => ({ name: `Competitor ${index + 1}`, strengths: '', response: '' }))
+    const opportunity = { ...legacyOpportunity('New Equipment'), competitors } as StrategyOpportunityDto
+    const wrapper = mount(OpportunityEditorModal, { props: { ...props, opportunity } })
+    const add = wrapper.get('[data-testid="add-competitor"]')
+    expect(add.attributes('disabled')).toBeUndefined()
+    await add.trigger('click')
+    expect(rowsOf(wrapper)).toHaveLength(10)
+    expect(add.attributes('disabled')).toBeDefined()
+    await wrapper.get('[aria-label="移除竞争对手 10"]').trigger('click')
+    expect(add.attributes('disabled')).toBeUndefined()
+    wrapper.unmount()
+  })
+})

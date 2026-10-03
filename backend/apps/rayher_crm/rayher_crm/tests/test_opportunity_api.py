@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+
 import frappe
 from frappe.tests.utils import FrappeTestCase
 
@@ -959,6 +961,83 @@ class TestOpportunityApi(FrappeTestCase):
         self.assertEqual(frappe.db.count("CRM Opportunity Stage History", stage_rows), 0)
         self.assertEqual(frappe.db.count("CRM Opportunity History", stage_rows), 0)
         self.assertEqual(relation_counts(), (0, 0))
+
+    def test_competitors_are_stored_per_row_and_validated(self):
+        account, site = self._account_site(self.sales, "Competitors")
+        # Callers that never send the list still create an Opportunity; it reads back empty.
+        plain = create_strategy_opportunity(self._input(account, site, self.sales, title="No competitors"))
+        self.assertEqual(plain["competitors"], [])
+
+        rows = [
+            {"name": "  Acme Metrology ", "strengths": " Installed base at the fab ", "response": " Local service team ", "rank": 1},
+            {"name": "本地竞争对手", "strengths": "", "response": "样片测试指标领先"},
+            {"name": "Name only"},
+        ]
+        stored = [
+            {"name": "Acme Metrology", "strengths": "Installed base at the fab", "response": "Local service team"},
+            {"name": "本地竞争对手", "strengths": "", "response": "样片测试指标领先"},
+            {"name": "Name only", "strengths": "", "response": ""},
+        ]
+        created = create_strategy_opportunity(self._input(account, site, self.sales, competitors=rows))
+        # Trimmed, in the order entered, and only the three known keys are kept.
+        self.assertEqual(created["competitors"], stored)
+        self.assertEqual(get_strategy_opportunity(created["id"])["competitors"], stored)
+        listed, _, _, _ = list_strategy_opportunities({"opportunityId": created["id"], "page": 1, "pageSize": 20})
+        self.assertEqual([item["competitors"] for item in listed], [stored])
+
+        # A partial edit that does not resend the list keeps it, and records no change for it.
+        retitled = update_strategy_opportunity(created["id"], {"title": "Another edit"}, created["modified"])
+        self.assertEqual((retitled["title"], retitled["competitors"]), ("Another edit", stored))
+        self.assertNotIn("competitors", [row["field"] for row in retitled["history"]])
+        # The free-text notes are a separate field and stay as they were.
+        noted = update_strategy_opportunity(created["id"], {"competition": "Price pressure"}, retitled["modified"])
+        self.assertEqual((noted["competition"], noted["competitors"]), ("Price pressure", stored))
+
+        revised = [stored[1], {"name": "Acme Metrology", "strengths": "Price", "response": ""}]
+        updated = update_strategy_opportunity(created["id"], {"competitors": revised}, noted["modified"])
+        self.assertEqual(updated["competitors"], revised)
+        changes = [(row["from"], row["to"]) for row in updated["history"] if row["field"] == "competitors"]
+        self.assertEqual([(json.loads(before), json.loads(after)) for before, after in changes], [(stored, revised)])
+
+        def rejected(payload: dict, modified: str) -> tuple:
+            with self.assertRaises(CrmApiException) as raised:
+                update_strategy_opportunity(created["id"], payload, modified)
+            return raised.exception.code, raised.exception.public_message, raised.exception.field_errors
+
+        named = {"name": "Other", "strengths": "", "response": ""}
+        # The front end maps these exact messages to its Chinese copy.
+        cases = (
+            ("not-a-list", "competitors must be a list of competitors.", "Invalid value"),
+            (["Acme"], "competitors must be a list of competitors.", "Invalid value"),
+            ([{"name": "Acme", "strengths": 5}], "competitors must be a list of competitors.", "Invalid value"),
+            ([{"name": "  ", "strengths": "Price"}], "Each competitor needs a name.", "Name required"),
+            ([named, {"name": " other "}], "A competitor is listed twice.", "Duplicate name"),
+            ([{"name": "x" * 141}], "A competitor entry is too long.", "Maximum length is 140 for the name and 1000 for each text"),
+            ([{"name": "Long", "response": "x" * 1001}], "A competitor entry is too long.", "Maximum length is 140 for the name and 1000 for each text"),
+            ([{"name": f"Competitor {index}"} for index in range(11)], "competitors cannot have more than 10 rows.", "At most 10 rows"),
+        )
+        for value, message, hint in cases:
+            with self.subTest(message=message, value=str(value)[:40]):
+                self.assertEqual(
+                    rejected({"competitors": value}, updated["modified"]),
+                    ("VALIDATION_ERROR", message, {"competitors": hint}),
+                )
+        with self.assertRaises(CrmApiException) as refused:
+            create_strategy_opportunity(self._input(account, site, self.sales, title="Refused", competitors=[{"name": ""}]))
+        self.assertEqual(refused.exception.field_errors, {"competitors": "Name required"})
+        self.assertEqual(get_strategy_opportunity(created["id"])["competitors"], revised)
+
+        # The limits themselves are accepted: 10 rows, a 140-character name, 1000 characters of text.
+        full = [{"name": f"Competitor {index}", "strengths": "", "response": ""} for index in range(9)]
+        full.append({"name": "n" * 140, "strengths": "s" * 1000, "response": "r" * 1000})
+        at_limit = update_strategy_opportunity(created["id"], {"competitors": full}, updated["modified"])
+        self.assertEqual(at_limit["competitors"], full)
+
+        # An empty list, null or "" clears it.
+        cleared = update_strategy_opportunity(created["id"], {"competitors": []}, at_limit["modified"])
+        self.assertEqual(cleared["competitors"], [])
+        again = update_strategy_opportunity(created["id"], {"competitors": [named]}, cleared["modified"])
+        self.assertEqual(update_strategy_opportunity(created["id"], {"competitors": None}, again["modified"])["competitors"], [])
 
     def test_single_sales_objective_has_a_length_limit(self):
         account, site = self._account_site(self.sales, "ObjectiveLimit")
