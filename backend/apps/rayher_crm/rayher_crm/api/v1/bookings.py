@@ -16,7 +16,11 @@ from rayher_crm.services.common import as_payload
 @api_endpoint
 def list_bookings(**query) -> dict:
     items, total, page, page_size = bookings.list_bookings(query)
-    return success_response({"items": items}, page=page, pageSize=page_size, total=total)
+    data: dict = {"items": items}
+    # Asked for by the Booking page: read in the same request as the page, so both describe the same moment.
+    if str(query.get("summary") or "").strip().lower() in {"1", "true"}:
+        data["summary"] = bookings.booking_summary(query)
+    return success_response(data, page=page, pageSize=page_size, total=total)
 
 
 @frappe.whitelist(methods=["GET"])

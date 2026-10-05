@@ -72,6 +72,7 @@ import type {
   ContactListQuery,
   ContactSummaryDto,
   BookingDto,
+  BookingPageData,
   LeadConversionInput,
   LeadConversionResult,
   LeadDto,
@@ -246,7 +247,7 @@ export interface CrmApi {
   /** 只读：Requirement 在迁移期为只读视图（契约 A5）；后端需裁决“锁写的 DocType + ingest 通道”或“外部视图”。 */
   listRequirements(query: ListQuery): Promise<ApiResponse<PageData<RequirementDto>>>
   listPipeline(query: ListQuery): Promise<ApiResponse<PipelineDto>>
-  listBookings(query: ListQuery): Promise<ApiResponse<PageData<BookingDto>>>
+  listBookings(query: ListQuery): Promise<ApiResponse<BookingPageData>>
   createBooking(input: UpsertBookingInput): Promise<ApiResponse<BookingDto>>
   updateBooking(id: string, input: UpsertBookingInput, expectedModified?: string): Promise<ApiResponse<BookingDto>>
   deleteBooking(id: string): Promise<ApiResponse<{ id: string; status: 'Deleted' }>>

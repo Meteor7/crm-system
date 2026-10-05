@@ -7,7 +7,7 @@ import { RouterLink, useRoute, useRouter } from 'vue-router'
 import { api as defaultApi, type CrmApi } from '@/api'
 import { mapRequestError } from '@/api/request-state'
 import { useAppStore } from '@/stores/app'
-import type { AccountSummaryDto, BookingDto, BookingSource, ContactSummaryDto, CreateContactInput, OpportunityDto, SiteDto, UpsertBookingInput } from '@/types/crm'
+import type { AccountSummaryDto, BookingDto, BookingSource, BookingSummaryDto, ContactSummaryDto, CreateContactInput, OpportunityDto, SiteDto, UpsertBookingInput } from '@/types/crm'
 import type { ConvertBookingToInstalledToolInput } from '@/types/workspaces'
 import PageHeader from '@/design-system/PageHeader.vue'
 import DataState from '@/design-system/DataState.vue'
@@ -15,7 +15,7 @@ import StatusBadge from '@/design-system/StatusBadge.vue'
 import BookingEditorModal from '@/features/opportunities/BookingEditorModal.vue'
 import BookingInstalledToolModal from '@/features/opportunities/BookingInstalledToolModal.vue'
 import ContactModal from '@/features/contacts/ContactModal.vue'
-import { formatMoney, moneyByCurrency } from '@/domain/money'
+import { formatMoney, formatSummedTotals, moneyByCurrency } from '@/domain/money'
 import { formatDisplayDate } from '@/domain/time'
 import { readAllPages } from '@/features/shared/read-all-pages'
 import PaginationControls from '@/features/shared/PaginationControls.vue'
@@ -34,7 +34,8 @@ const pageSize = ref(typeof route.query.pageSize === 'string' && [10, 25, 50].in
 const opportunities = ref<OpportunityDto[]>([])
 const accounts = ref<AccountSummaryDto[]>([])
 const contacts = ref<ContactSummaryDto[]>([])
-const loading = ref(false)
+// Loading from the mount: the reference lists are read before the Bookings, and the page is not empty meanwhile.
+const loading = ref(true)
 const denied = ref(false)
 const error = useLocaleMessage()
 const requestId = ref('')
@@ -62,8 +63,19 @@ const engineerOptions = computed(() => (app.bootstrap?.personnel ?? personnelFor
   .filter((person) => person.role === 'Engineer' && person.availableForAssignment))
 const referencesReady = computed(() => accounts.value.length > 0 && contacts.value.length > 0)
 const visibleRows = computed(() => rows.value)
-const confirmedAmounts = computed(() => moneyByCurrency(rows.value.filter((item) => item.status === 'Confirmed')))
-const pendingCount = computed(() => rows.value.filter((item) => item.status === 'Pending').length)
+// The cards describe every Booking the filters match, not the page shown: the server adds them up in the same
+// request as the page. Without a summary (an older server) they fall back to the page, as they used to.
+const summary = ref<BookingSummaryDto | null>(null)
+const totalCount = computed(() => summary.value?.count ?? rows.value.length)
+const confirmedCount = computed(() => summary.value?.confirmed.count ?? rows.value.filter((item) => item.status === 'Confirmed').length)
+const confirmedAmounts = computed(() => summary.value
+  ? summary.value.confirmed.totals.map((total) => formatSummedTotals([total], 0, () => ''))
+  : moneyByCurrency(rows.value.filter((item) => item.status === 'Confirmed')).map((total) => formatMoney(total.amount, total.currency)))
+const pendingCount = computed(() => summary.value?.pendingCount ?? rows.value.filter((item) => item.status === 'Pending').length)
+// After a failed request the cards show no numbers (the last ones described another filter), nor while a load
+// with nothing to show yet is on its way (the first, a retry): the page they would fall back to is empty, and
+// zeroes would be numbers. A reload under numbers shown keeps them, as the list keeps its rows.
+const cardsUnavailable = computed(() => Boolean(error.value) || denied.value || (loading.value && !summary.value && !rows.value.length))
 let sequence = 0
 
 async function loadReferences() {
@@ -88,15 +100,17 @@ async function load() {
     const result = await props.apiClient.listBookings({
       contactId, accountId, status: status.value, source: bookingSource.value,
       ...(poDateFilter.value === 'missing' ? { actualPoDateMissing: '1' } : {}),
-      page: page.value, pageSize: pageSize.value,
+      page: page.value, pageSize: pageSize.value, summary: true,
     })
     if (current !== sequence) return
     rows.value = result.data.items
+    summary.value = result.data.summary ?? null
     total.value = result.meta?.total ?? rows.value.length
   } catch (reason) {
     if (current !== sequence) return
     const mapped = mapRequestError(reason)
     rows.value = []
+    summary.value = null
     opportunities.value = []
     error.value = mapped.localizedMessage ?? mapped.message
     requestId.value = mapped.requestId
@@ -211,9 +225,13 @@ watch(() => [route.query.page, route.query.pageSize, route.query.status, route.q
 })
 
 onMounted(async () => {
-  await app.loadBootstrap(props.apiClient)
-  await loadReferences()
-  await load()
+  try {
+    await app.loadBootstrap(props.apiClient)
+    await loadReferences()
+  } finally {
+    // The Bookings are read whatever became of the references, and the loading ends with them.
+    await load()
+  }
 })
 </script>
 
@@ -224,9 +242,9 @@ onMounted(async () => {
     </PageHeader>
 
     <section class="booking-metrics">
-      <article><span><PackageCheck :size="17" /></span><div><small>{{ t('booking.total') }}</small><strong>{{ rows.length }}</strong><p>{{ t('booking.scope') }}</p></div></article>
-      <article><span><CircleDollarSign :size="17" /></span><div><small>{{ t('booking.confirmedAmount') }}</small><strong v-for="total in confirmedAmounts" :key="total.currency">{{ formatMoney(total.amount, total.currency) }}</strong><p>{{ t('booking.confirmedCount', { count: rows.filter((item) => item.status === 'Confirmed').length }) }}</p></div></article>
-      <article><span><CalendarClock :size="17" /></span><div><small>{{ t('booking.pending') }}</small><strong>{{ pendingCount }}</strong><p>{{ t('booking.pendingHint') }}</p></div></article>
+      <article><span><PackageCheck :size="17" /></span><div><small>{{ t('booking.total') }}</small><strong data-booking-total>{{ cardsUnavailable ? '—' : totalCount }}</strong><p>{{ t('booking.scope') }}</p></div></article>
+      <article><span><CircleDollarSign :size="17" /></span><div><small>{{ t('booking.confirmedAmount') }}</small><strong v-for="total in (cardsUnavailable ? ['—'] : confirmedAmounts)" :key="total" data-booking-confirmed-total>{{ total }}</strong><p data-booking-confirmed-count>{{ cardsUnavailable ? '—' : t('booking.confirmedCount', { count: confirmedCount }) }}</p></div></article>
+      <article><span><CalendarClock :size="17" /></span><div><small>{{ t('booking.pending') }}</small><strong data-booking-pending>{{ cardsUnavailable ? '—' : pendingCount }}</strong><p>{{ t('booking.pendingHint') }}</p></div></article>
     </section>
 
     <p v-if="referenceWarning" class="reference-warning">{{ referenceWarning }}</p>

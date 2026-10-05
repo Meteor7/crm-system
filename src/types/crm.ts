@@ -82,8 +82,25 @@ export interface ListQuery {
   actualPoDateMissing?: string
   /** '1' lists only what is still in progress: Demo Requests not Converted or Cancelled, Demo Tests not Accepted or Rejected. */
   inProgress?: string
+  /** Bookings: also return the count and totals of everything the query matches, read in the same request as the page. */
+  summary?: boolean
   page?: number
   pageSize?: number
+}
+
+/** Count and totals of every Booking a list query matches, whatever page is shown. */
+export interface BookingSummaryDto {
+  count: number
+  pendingCount: number
+  confirmed: {
+    count: number
+    totals: Array<{ currency: string; amount: DecimalAmount }>
+  }
+}
+
+export interface BookingPageData extends PageData<BookingDto> {
+  /** Present when the query asked for it. */
+  summary?: BookingSummaryDto
 }
 
 export interface AccountSummaryDto {

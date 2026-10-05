@@ -278,18 +278,11 @@ def touch_source_opportunity(booking) -> None:
     frappe.clear_document_cache("CRM Opportunity", booking.source_opportunity)
 
 
-def list_bookings(query: dict[str, Any] | None = None):
-    assert_capability("deal:view")
+def _list_filters(query: dict[str, Any]) -> tuple[str, list[Any]]:
+    """WHERE clause and values of the Booking list: the caller's scope and the query's filters."""
+
     where_parts = [f"({conditions_for_doctype('CRM Booking')})"]
     values: list[Any] = []
-    if query is None:
-        where = where_parts[0]
-        rows = frappe.db.sql(
-            f"SELECT `name` FROM `tabCRM Booking` WHERE {where} ORDER BY `modified` DESC, `name` DESC",
-            as_dict=True,
-        )
-        return [serialize_booking(frappe.get_doc("CRM Booking", row.name)) for row in rows]
-    page, page_size, offset = normalize_pagination(query.get("page"), query.get("pageSize"))
     search = str(query.get("search") or "").strip()
     if search:
         pattern = f"%{search}%"
@@ -314,13 +307,56 @@ def list_bookings(query: dict[str, Any] | None = None):
     if date_to:
         where_parts.append("`ddl` <= %s")
         values.append(date_to)
-    where = " AND ".join(where_parts)
+    return " AND ".join(where_parts), values
+
+
+def list_bookings(query: dict[str, Any] | None = None):
+    assert_capability("deal:view")
+    if query is None:
+        where = f"({conditions_for_doctype('CRM Booking')})"
+        rows = frappe.db.sql(
+            f"SELECT `name` FROM `tabCRM Booking` WHERE {where} ORDER BY `modified` DESC, `name` DESC",
+            as_dict=True,
+        )
+        return [serialize_booking(frappe.get_doc("CRM Booking", row.name)) for row in rows]
+    page, page_size, offset = normalize_pagination(query.get("page"), query.get("pageSize"))
+    where, values = _list_filters(query)
     total = int(frappe.db.sql(f"SELECT COUNT(*) FROM `tabCRM Booking` WHERE {where}", tuple(values))[0][0])
     rows = frappe.db.sql(
         f"SELECT `name` FROM `tabCRM Booking` WHERE {where} ORDER BY `modified` DESC, `name` DESC LIMIT %s OFFSET %s",
         tuple([*values, page_size, offset]), as_dict=True,
     )
     return [serialize_booking(frappe.get_doc("CRM Booking", row.name)) for row in rows], total, page, page_size
+
+
+def booking_summary(query: dict[str, Any]) -> dict[str, Any]:
+    """Count, pending count and Confirmed totals of every Booking the list query matches, whatever page is shown.
+
+    The cards of the Booking page show these. They are computed here, in one statement, so that they describe
+    one moment: a browser that adds up pages fetched one after the other can count a record twice or miss it
+    when something changes in between. The totals are per currency, over the Confirmed Bookings.
+    """
+
+    assert_capability("deal:view")
+    where, values = _list_filters(query)
+    rows = frappe.db.sql(
+        "SELECT `status`, UPPER(TRIM(COALESCE(`currency`, ''))) AS `currency`, COUNT(*) AS `count`, "
+        "CAST(SUM(COALESCE(`amount`, 0)) AS CHAR) AS `amount` "
+        f"FROM `tabCRM Booking` WHERE {where} GROUP BY `status`, UPPER(TRIM(COALESCE(`currency`, '')))",
+        tuple(values), as_dict=True,
+    )
+    confirmed = [row for row in rows if row.status == "Confirmed"]
+    return {
+        "count": sum(int(row["count"]) for row in rows),
+        "pendingCount": sum(int(row["count"]) for row in rows if row.status == "Pending"),
+        "confirmed": {
+            "count": sum(int(row["count"]) for row in confirmed),
+            "totals": sorted(
+                ({"currency": row.currency, "amount": format(Decimal(row.amount).quantize(Decimal("0.01")), ".2f")} for row in confirmed),
+                key=lambda total: total["currency"],
+            ),
+        },
+    }
 
 
 def get_booking(name: str) -> dict[str, Any]:

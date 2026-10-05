@@ -5,9 +5,18 @@ from unittest.mock import patch
 import frappe
 from frappe.tests.utils import FrappeTestCase
 
+from rayher_crm.api.v1.bookings import list_bookings as list_bookings_endpoint
 from rayher_crm.api.v1.errors import CrmApiException
 from rayher_crm.services.accounts import create_account
-from rayher_crm.services.bookings import complete_service_booking, create_booking, delete_booking, get_booking, list_bookings, update_booking
+from rayher_crm.services.bookings import (
+    booking_summary,
+    complete_service_booking,
+    create_booking,
+    delete_booking,
+    get_booking,
+    list_bookings,
+    update_booking,
+)
 from rayher_crm.services.contacts import create_contact
 from rayher_crm.services.opportunities import confirm_po, create_strategy_opportunity, get_strategy_opportunity
 from rayher_crm.services.opportunity_stages import PO_RECEIVED, QUALIFIED_OPPORTUNITY
@@ -86,6 +95,39 @@ class TestBookingApi(FrappeTestCase):
         }
         payload.update(overrides)
         return payload
+
+    def test_summary_counts_and_totals_every_booking_the_query_matches(self):
+        account, _, contact, _ = self._records(self.sales, "Summary")
+        # The PO confirmation left one Confirmed CNY Booking; two Upsell Bookings join it.
+        create_booking(self._input(account, contact, None, self.sales, status="Pending", amount="100.00"))
+        create_booking(self._input(
+            account, contact, None, self.sales, currency="USD", amount="20000.00", amountCny="140000.00",
+        ))
+
+        summary = booking_summary({"accountId": account["id"], "page": 1, "pageSize": 1})
+        self.assertEqual((summary["count"], summary["pendingCount"], summary["confirmed"]["count"]), (3, 1, 2))
+        self.assertEqual(
+            summary["confirmed"]["totals"],
+            [{"currency": "CNY", "amount": "200000.00"}, {"currency": "USD", "amount": "20000.00"}],
+        )
+        # The filters of the list apply; the page does not.
+        pending = booking_summary({"accountId": account["id"], "status": "Pending"})
+        self.assertEqual((pending["count"], pending["pendingCount"], pending["confirmed"]), (1, 1, {"count": 0, "totals": []}))
+        # The endpoint returns it with the page, in the same request, only when asked; the browser sends "true".
+        # Its count is the list's total, whatever page is asked for.
+        for asked in ("true", "1"):
+            with_summary = list_bookings_endpoint(accountId=account["id"], page=1, pageSize=1, summary=asked)
+            self.assertEqual(with_summary["data"]["summary"], summary)
+            self.assertEqual((len(with_summary["data"]["items"]), with_summary["meta"]["total"]), (1, summary["count"]))
+        self.assertEqual(
+            list_bookings_endpoint(accountId=account["id"], page=2, pageSize=1, summary="true")["data"]["summary"], summary,
+        )
+        for not_asked in ({}, {"summary": "false"}, {"summary": "0"}, {"summary": ""}):
+            answer = list_bookings_endpoint(accountId=account["id"], page=1, pageSize=1, **not_asked)
+            self.assertNotIn("summary", answer["data"])
+        # The caller's scope applies: another Sales user sees none of them.
+        frappe.set_user(self.other_sales)
+        self.assertEqual(booking_summary({"accountId": account["id"]})["count"], 0)
 
     def test_create_list_get_update_and_cas(self):
         account, _, _, opportunity = self._records(self.sales, "Core")

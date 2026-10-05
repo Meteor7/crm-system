@@ -123,6 +123,78 @@ describe('Booking page', () => {
       .toEqual(latestResult.data.items.map((item) => item.id))
   })
 
+  it('shows the cards for every Booking the filters match, from the summary read with the page', async () => {
+    const { api, pinia, router } = await context()
+    const page = await api.listBookings({ page: 1, pageSize: 10 })
+    vi.spyOn(api, 'listBookings').mockResolvedValue({
+      ...page,
+      data: {
+        items: page.data.items.slice(0, 1),
+        summary: { count: 21, pendingCount: 6, confirmed: { count: 5, totals: [{ currency: 'CNY', amount: '30000.00' }, { currency: 'USD', amount: '20000.00' }] } },
+      },
+      meta: { requestId: 'req_booking_summary', total: 21 },
+    })
+    const wrapper = mount(BookingPage, { props: { apiClient: api }, global: { plugins: [pinia, router] } })
+    await flushPromises()
+
+    // One row on the page; the cards count all 21 and total the 5 confirmed ones, per currency.
+    expect(api.listBookings).toHaveBeenCalledWith(expect.objectContaining({ summary: true }))
+    expect(wrapper.findAll('[data-booking-id]')).toHaveLength(1)
+    expect(wrapper.get('[data-booking-total]').text()).toBe('21')
+    expect(wrapper.findAll('[data-booking-confirmed-total]').map((item) => item.text())).toEqual(['CNY 30,000.00', 'USD 20,000.00'])
+    expect(wrapper.get('[data-booking-confirmed-count]').text()).toBe('5 条已确认')
+    expect(wrapper.get('[data-booking-pending]').text()).toBe('6')
+  })
+
+  it('shows no numbers on the cards while the first load is on its way, after a reload fails, and until one succeeds', async () => {
+    const { api, pinia, router } = await context()
+    const page = await api.listBookings({ page: 1, pageSize: 10 })
+    const withSummary = {
+      ...page,
+      data: { items: page.data.items.slice(0, 1), summary: { count: 21, pendingCount: 6, confirmed: { count: 5, totals: [{ currency: 'CNY', amount: '30000.00' }] } } },
+      meta: { requestId: 'req_booking_summary', total: 21 },
+    }
+    const accounts = await api.listAccounts({ page: 1, pageSize: 200 })
+    const references = deferred<typeof accounts>()
+    vi.spyOn(api, 'listAccounts').mockImplementationOnce(() => references.promise)
+    const first = deferred<typeof withSummary>()
+    const reads = vi.spyOn(api, 'listBookings').mockImplementationOnce(() => first.promise).mockResolvedValue(withSummary)
+    const wrapper = mount(BookingPage, { props: { apiClient: api }, global: { plugins: [pinia, router] } })
+    await flushPromises()
+    // The reference lists are still being read, the Bookings not yet asked for: no numbers, not zeroes.
+    const cards = () => [wrapper.get('[data-booking-total]').text(), ...wrapper.findAll('[data-booking-confirmed-total]').map((item) => item.text()), wrapper.get('[data-booking-confirmed-count]').text(), wrapper.get('[data-booking-pending]').text()]
+    expect(reads).not.toHaveBeenCalled()
+    expect(cards()).toEqual(['—', '—', '—', '—'])
+    // The list is loading, not "no Bookings", meanwhile.
+    expect(wrapper.find('.state-loading').exists()).toBe(true)
+    expect(wrapper.find('.state-empty').exists()).toBe(false)
+    references.resolve(accounts)
+    await flushPromises()
+    // The first load of the Bookings is on its way: none either.
+    expect(reads).toHaveBeenCalledTimes(1)
+    expect(cards()).toEqual(['—', '—', '—', '—'])
+    first.resolve(withSummary)
+    await flushPromises()
+    expect(cards()).toEqual(['21', 'CNY 30,000.00', '5 条已确认', '6'])
+
+    // A reload that fails: the numbers of the filter before do not stay.
+    reads.mockRejectedValueOnce(new Error('booking list offline'))
+    await wrapper.get('[aria-label="来源"]').setValue('Upsell')
+    await flushPromises()
+    expect(wrapper.text()).toContain('booking list offline')
+    expect(cards()).toEqual(['—', '—', '—', '—'])
+
+    // The next load, on its way, shows none either; the one that succeeds brings the numbers of its own filter.
+    const retry = deferred<typeof withSummary>()
+    reads.mockImplementationOnce(() => retry.promise)
+    await wrapper.get('[aria-label="来源"]').setValue('All')
+    await flushPromises()
+    expect(cards()).toEqual(['—', '—', '—', '—'])
+    retry.resolve(withSummary)
+    await flushPromises()
+    expect(cards()).toEqual(['21', 'CNY 30,000.00', '5 条已确认', '6'])
+  })
+
   it('creates new Bookings only as Upsell because Opportunity Bookings come from the Opportunity workflow', async () => {
     const { api, pinia, router } = await context()
     const wrapper = mount(BookingPage, { props: { apiClient: api }, global: { plugins: [pinia, router] } })
