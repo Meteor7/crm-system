@@ -10,6 +10,7 @@ from frappe.utils import add_days, today
 
 from rayher_crm.api.v1 import evaluations as evaluations_api
 from rayher_crm.api.v1.errors import CrmApiException
+from rayher_crm.services.common import to_iso_timestamp
 from rayher_crm.services.accounts import get_account_360
 from rayher_crm.services.dashboard import get_dashboard
 from rayher_crm.services.ddl_reminders import send_ddl_reminders
@@ -620,6 +621,114 @@ class TestEvaluationApi(FrappeTestCase):
                 })
         current = get_evaluation(evaluation_id)
         self.assertEqual((current["testRunDeadline"], current["modified"]), (updated["testRunDeadline"], updated["modified"]))
+
+    def _workflow(self, request_id: str) -> dict:
+        return next(item for item in list_demo_workflows() if item["id"] == request_id)
+
+    def _set_progress(self, request_id: str, days_ago: int) -> None:
+        at = frappe.utils.add_days(frappe.utils.now_datetime(), -days_ago)
+        frappe.db.set_value("CRM Demo Request", request_id, "tracking", frappe.as_json({
+            "lastProgressAt": to_iso_timestamp(at), "lastProgressSummary": "Progress", "lastProgressActor": self.manager,
+        }))
+
+    def test_demo_workflow_health_follows_the_dates_of_a_demo_in_progress(self):
+        request_id, evaluation_id = self.request["id"], self.request["evaluationId"]
+        today = frappe.utils.today()
+        frappe.set_user(self.manager)
+
+        frappe.db.set_value("CRM Demo Request", request_id, "customer_expected_date", frappe.utils.add_days(today, 30))
+        self._set_progress(request_id, 0)
+        self.assertEqual(self._workflow(request_id)["health"], {
+            "level": "healthy", "reason": "今天有进展", "daysSinceProgress": 0, "daysToCustomerExpected": 30,
+        })
+        self.assertEqual(get_demo_workflow(request_id)["health"]["level"], "healthy")
+
+        self._set_progress(request_id, 6)
+        self.assertEqual(self._workflow(request_id)["health"], {
+            "level": "stalled", "reason": "已连续 6 天无有效进展", "daysSinceProgress": 6, "daysToCustomerExpected": 30,
+        })
+
+        frappe.db.set_value("CRM Demo Request", request_id, "customer_expected_date", frappe.utils.add_days(today, -3))
+        self.assertEqual(self._workflow(request_id)["health"], {
+            "level": "critical", "reason": "客户预期已逾期 3 天", "daysSinceProgress": 6, "daysToCustomerExpected": -3,
+        })
+
+        # A Test Run deadline that has passed is red while the run is still due, and history once it is under review.
+        frappe.db.set_value("CRM Demo Request", request_id, "customer_expected_date", frappe.utils.add_days(today, 30))
+        self._set_progress(request_id, 0)
+        frappe.db.set_value("CRM Evaluation", evaluation_id, "test_run_deadline", frappe.utils.add_days(today, -2))
+        self.assertEqual(
+            (self._workflow(request_id)["health"]["level"], self._workflow(request_id)["health"]["reason"]),
+            ("critical", "Test Run DDL 已逾期 2 天"),
+        )
+        frappe.db.set_value("CRM Evaluation", evaluation_id, "status", "Customer Review")
+        self.assertEqual(self._workflow(request_id)["health"]["level"], "healthy")
+
+    def test_demo_workflow_health_without_tracking_falls_back_to_history_and_creation(self):
+        request_id, evaluation_id = self.request["id"], self.request["evaluationId"]
+        frappe.set_user(self.manager)
+        frappe.db.set_value("CRM Demo Request", request_id, {
+            "customer_expected_date": frappe.utils.add_days(frappe.utils.today(), 30), "tracking": None,
+        })
+        now = frappe.utils.now_datetime()
+
+        def backdate(request_days: int, evaluation_days: int, created_days: int) -> None:
+            frappe.db.sql(
+                "UPDATE `tabCRM Demo Request History` SET `at` = %s WHERE `demo_request` = %s",
+                (frappe.utils.add_days(now, -request_days), request_id),
+            )
+            frappe.db.sql(
+                "UPDATE `tabCRM Evaluation History` SET `at` = %s WHERE `evaluation` = %s",
+                (frappe.utils.add_days(now, -evaluation_days), evaluation_id),
+            )
+            frappe.db.sql(
+                "UPDATE `tabCRM Demo Request` SET `creation` = %s WHERE `name` = %s",
+                (frappe.utils.add_days(now, -created_days), request_id),
+            )
+
+        self.assertTrue(frappe.db.count("CRM Demo Request History", {"demo_request": request_id}))
+        self.assertTrue(frappe.db.count("CRM Evaluation History", {"evaluation": evaluation_id}))
+        # The newest history row counts, whichever record it is on.
+        backdate(request_days=9, evaluation_days=6, created_days=12)
+        self.assertEqual(self._workflow(request_id)["health"], {
+            "level": "stalled", "reason": "已连续 6 天无有效进展", "daysSinceProgress": 6, "daysToCustomerExpected": 30,
+        })
+        backdate(request_days=2, evaluation_days=6, created_days=12)
+        self.assertEqual(self._workflow(request_id)["health"]["reason"], "2 天内有进展")
+
+        # Without any history the creation is all there is.
+        frappe.db.delete("CRM Demo Request History", {"demo_request": request_id})
+        frappe.db.delete("CRM Evaluation History", {"evaluation": evaluation_id})
+        self.assertEqual(self._workflow(request_id)["health"]["daysSinceProgress"], 12)
+
+    def test_demo_workflow_has_health_only_while_the_demo_is_under_way(self):
+        request_id, evaluation_id = self.request["id"], self.request["evaluationId"]
+        frappe.set_user(self.manager)
+        frappe.db.set_value("CRM Demo Request", request_id, "customer_expected_date", frappe.utils.add_days(frappe.utils.today(), -3))
+        self.assertEqual(self._workflow(request_id)["health"]["level"], "critical")
+
+        # Returned or rejected requests are still being worked on.
+        for status in ("Engineer Review", "Engineer Returned", "Manager Approval", "Manager Rejected"):
+            frappe.db.set_value("CRM Demo Request", request_id, "status", status)
+            self.assertEqual(self._workflow(request_id)["health"]["level"], "critical", status)
+        frappe.db.set_value("CRM Demo Request", request_id, "status", "Converted")
+
+        frappe.db.set_value("CRM Evaluation", evaluation_id, "status", "Accepted")
+        archived = self._workflow(request_id)
+        self.assertEqual(archived["archiveCategory"], "Completed")
+        self.assertNotIn("health", archived)
+
+        # A request is cancelled before it is converted, so it has no Evaluation.
+        frappe.db.set_value("CRM Demo Request", request_id, {"status": "Cancelled", "evaluation": None})
+        cancelled = self._workflow(request_id)
+        self.assertEqual((cancelled["status"], cancelled["evaluation"]), ("Cancelled", None))
+        self.assertNotIn("health", cancelled)
+
+        # A draft that was never submitted is not under way either: it must not count as a customer-date risk.
+        frappe.db.set_value("CRM Demo Request", request_id, "status", "Draft")
+        draft = self._workflow(request_id)
+        self.assertEqual((draft["status"], draft.get("stage")), ("Draft", None))
+        self.assertNotIn("health", draft)
 
     def test_deadline_forward_completion_and_read_only_workflow_projection(self):
         evaluation_id = self.request["evaluationId"]

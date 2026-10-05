@@ -14,6 +14,7 @@ from rayher_crm.rayher_crm.doctype.crm_evaluation.crm_evaluation import OPEN_RET
 from rayher_crm.permissions.scope import conditions_for_doctype
 from rayher_crm.services.common import normalize_pagination, optional_date, required_text, to_iso_timestamp
 from rayher_crm.services.concurrency import lock_document
+from rayher_crm.services.demo_health import calendar_day, derive_demo_health
 from rayher_crm.services.opportunities import advance_opportunity_for_event
 from rayher_crm.services.notifications import active_crm_users, notify_if_reachable
 
@@ -804,6 +805,20 @@ def _workflow_timeline(
     ]
 
 
+def _last_recorded_activity(request, request_history: list[Any], evaluation: dict[str, Any] | None) -> Any:
+    """When a Demo last moved, for a row whose tracking was never written or cannot be read.
+
+    Every Demo action writes tracking. A row without it was inserted directly (staging data, a
+    migration); the history of its Demo Request and of its Demo Test, and its creation, still say when
+    it last moved. Without them such a Demo would never count as stalled.
+    """
+
+    days = [calendar_day(row.at) for row in request_history]
+    if evaluation:
+        days += [calendar_day(row["at"]) for row in evaluation["history"]]
+    return max((day for day in days if day), default=None) or request.creation
+
+
 def list_demo_workflows(query: dict[str, Any] | None = None):
     assert_capability("demo_request:view")
     from rayher_crm.services.demo_artifacts import list_demo_artifacts
@@ -833,6 +848,7 @@ def list_demo_workflows(query: dict[str, Any] | None = None):
             (*values, page_size, offset), as_dict=True,
         )
     request_names = [row.name for row in request_rows]
+    today = frappe.utils.getdate(frappe.utils.today())
     history_by_request: dict[str, list[Any]] = {name: [] for name in request_names}
     if request_names:
         history_rows = frappe.get_all(
@@ -905,6 +921,21 @@ def list_demo_workflows(query: dict[str, Any] | None = None):
         stage = _workflow_stage(request.status, evaluation["status"] if evaluation else None)
         if stage:
             workflow["stage"] = stage
+        # Health describes a Demo that is under way, which is one with a lifecycle stage. A draft that
+        # was never submitted and a Demo that has ended (archived, terminated, cancelled) have none, so
+        # the boards neither colour them, count them as at risk, nor match them to a health filter.
+        if stage:
+            tracking = workflow["tracking"] if isinstance(workflow["tracking"], Mapping) else {}
+            # The Test Run deadline counts until the run is done; once the results are under review it is history.
+            run_is_due = bool(evaluation) and evaluation["status"] in PREPARATION_STATUSES | RUN_STATUSES
+            workflow["health"] = derive_demo_health(
+                last_progress_at=calendar_day(tracking.get("lastProgressAt")) or _last_recorded_activity(
+                    request, history_by_request.get(request.name, []), evaluation,
+                ),
+                customer_expected_date=request.customer_expected_date,
+                test_run_deadline=evaluation["testRunDeadline"] if run_is_due else None,
+                today=today,
+            )
         workflow["projectTimeline"] = _workflow_timeline(
             request,
             evaluation,
