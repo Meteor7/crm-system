@@ -91,6 +91,9 @@ const FIXED_MESSAGES: Partial<Record<string, Record<string, CopyPair>>> = {
   NOT_FOUND: {
     'Internal validation was not found.': ['Internal validation was not found.', '未找到该内部生产审批申请。'],
   },
+  SCOPE_DENIED: {
+    'Sales users can only assign records to themselves.': ['A Sales user can assign records only to themselves. Choose yourself as the owner.', '销售只能把记录分配给自己，请把负责人选为本人。'],
+  },
 }
 
 // "<action> is not available at <stage>." names the workflow action that the current stage does not allow.

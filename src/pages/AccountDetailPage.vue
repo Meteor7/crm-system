@@ -189,7 +189,7 @@ onMounted(() => { void loadEquipment(); void loadSegments(); void loadRegions() 
         <label><span>{{ t('detail.accountTier') }}</span><select v-model="accountForm.tier" :aria-label="t('detail.accountTier')"><option>S</option><option>A</option><option>B</option></select></label>
         <label><span>{{ t('detail.city') }}<RequiredMark /></span><input v-model="accountForm.city" :aria-label="t('detail.city')" required /></label>
         <label><span>{{ t('detail.region') }}<RequiredMark /></span><AccountSegmentSelect v-model="accountForm.region" :segments="regions" :label="t('detail.region')" :option-label="regionOptionLabel" :custom-option-label="t('region.customOption')" :custom-placeholder="t('region.customPlaceholder')" :empty-placeholder="t('region.choose')" :custom-on-empty="false" required /></label>
-        <label class="wide"><span>{{ t('detail.owner') }}<RequiredMark /></span><PersonnelSelect v-model="accountForm.owner" :roles="['Sales']" :ariaLabel="t('detail.owner')" required /></label>
+        <label class="wide"><span>{{ t('detail.owner') }}<RequiredMark /></span><PersonnelSelect owner v-model="accountForm.owner" :roles="['Sales']" :ariaLabel="t('detail.owner')" required /></label>
         <label class="wide"><span>{{ t('detail.access') }}<RequiredMark /></span><select v-model="accountForm.visibility" :aria-label="t('detail.access')" required><option value="Private">{{ t('detail.privateAccess') }}</option><option value="Public">{{ t('detail.publicAccess') }}</option></select></label>
       </div>
       <section class="site-editor" data-account-site-editor>

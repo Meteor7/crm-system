@@ -51,9 +51,15 @@ export function readRequestMeta<T>(result: ApiResponse<T>, now = new Date()): Re
   }
 }
 
+// One refusal under SCOPE_DENIED is the error of the write and nothing more: a Sales user named someone else
+// as the owner. The record is still the user's to see, so pages keep what they show. Every other SCOPE_DENIED
+// (a record that left the user's reach, or one they may read and not change) clears the page, as it did.
+const OWNER_ASSIGNMENT_REFUSED = 'Sales users can only assign records to themselves.'
+
 export function mapRequestError(error: unknown): RequestErrorState {
   if (error instanceof CrmApiError) {
     const denied = ['UNAUTHENTICATED', 'PERMISSION_DENIED', 'SCOPE_DENIED'].includes(error.code)
+      && !(error.code === 'SCOPE_DENIED' && error.message === OWNER_ASSIGNMENT_REFUSED)
     // An error without any text falls back to the default copy here too, so no page shows a blank error. A
     // denied one keeps its empty message: the denied panel has its own copy, which a retry hint would contradict.
     const blank = !hasText(error.message) && !denied

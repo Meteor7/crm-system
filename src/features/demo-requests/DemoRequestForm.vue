@@ -6,6 +6,7 @@ import RequiredMark from '@/design-system/RequiredMark.vue'
 import { cloneDemoRequestFormData, countDemoWafers, createEmptyDemoWafer, getDemoRequestHints } from '@/domain/demo-request-form'
 import { demoEngineerOwnerOptions, demoSalesOwnerOptions } from '@/demo/identities'
 import { personnelDisplayName } from '@/demo/personnel'
+import { useOwnOwnerOnly } from '@/stores/signed-in-user'
 import { useI18n } from '@/i18n'
 
 const props = withDefaults(defineProps<{
@@ -32,7 +33,9 @@ const hints = computed(() => getDemoRequestHints(locale.value))
 
 const draft = ref<DemoRequestFormData>(cloneDemoRequestFormData(props.modelValue))
 const waferCount = computed(() => countDemoWafers(draft.value))
-const salesOwnerOptions = demoSalesOwnerOptions()
+// A Sales user can name only themselves as the Sales contact (the server refuses anyone else).
+const ownOwnerOnly = useOwnOwnerOnly()
+const salesOwnerOptions = computed(() => demoSalesOwnerOptions().filter((owner) => !ownOwnerOnly.value || owner === ownOwnerOnly.value))
 const engineerOwnerOptions = demoEngineerOwnerOptions()
 
 watch(() => props.modelValue, (value) => {

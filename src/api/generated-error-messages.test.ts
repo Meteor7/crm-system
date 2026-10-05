@@ -101,6 +101,17 @@ it('localizes the owner-only success probability denial in Chinese and keeps it 
   expect(mapped).toMatchObject({ message: 'Only the Opportunity owner can set the probability level.', denied: true })
 })
 
+it('tells a Sales user in their language that a record can only be their own', () => {
+  const error = new CrmApiError('SCOPE_DENIED', 'Sales users can only assign records to themselves.', 'req_owner', false)
+  const mapped = mapRequestError(error)
+  setLocale('zh-CN')
+  expect(resolveLocaleMessage(mapped.localizedMessage!)).toBe('销售只能把记录分配给自己，请把负责人选为本人。')
+  setLocale('en-US')
+  expect(resolveLocaleMessage(mapped.localizedMessage!)).toBe('A Sales user can assign records only to themselves. Choose yourself as the owner.')
+  // It is the error of that write: nothing says the user may no longer see the record.
+  expect(mapped).toMatchObject({ message: 'Sales users can only assign records to themselves.', denied: false })
+})
+
 it('preserves arbitrary server errors, unrecognized stages and retired stage messages', () => {
   for (const [code, message] of [
     ['INVALID_TRANSITION', 'RFQ 自定义错误'],

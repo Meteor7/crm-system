@@ -38,7 +38,7 @@ function valueOf(event: Event) {
     </div>
     <label class="field">
       <span>{{ t('bookingEditor.owner') }}<RequiredMark :show="showRequiredMarks" /></span>
-      <PersonnelSelect :model-value="modelValue.owner" :roles="['Sales']" :ariaLabel="t('bookingEditor.owner')" :disabled="ownerDisabled" required @update:model-value="update('owner', $event)" />
+      <PersonnelSelect owner :model-value="modelValue.owner" :roles="['Sales']" :ariaLabel="t('bookingEditor.owner')" :disabled="ownerDisabled" required @update:model-value="update('owner', $event)" />
       <small v-if="errors.owner" data-field-error="owner">{{ errors.owner }}</small>
     </label>
     <label class="field wide">

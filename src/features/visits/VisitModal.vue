@@ -8,11 +8,13 @@ import PersonnelSelect from '@/design-system/PersonnelSelect.vue'
 import ContactPicker from '@/features/contacts/ContactPicker.vue'
 import { addIsoDateDays, shanghaiDate } from '@/domain/time'
 import { preferredPersonnelId } from '@/demo/personnel'
+import { useOwnOwnerOnly } from '@/stores/signed-in-user'
 import { useI18n } from '@/i18n'
 
 const props = withDefaults(defineProps<{ mode: 'create' | 'review' | 'edit'; visit?: VisitDto | null; accounts: AccountSummaryDto[]; contacts?: ContactSummaryDto[]; initialAccountId?: string; initialPrimaryContactId?: string; initialOpportunityId?: string; busy?: boolean; error?: string; requestId?: string; conflict?: boolean }>(), { contacts: () => [], initialAccountId: '', initialPrimaryContactId: '', initialOpportunityId: '', error: '', requestId: '' })
 const emit = defineEmits<{ close: []; submit: [payload: CreateVisitInput | UpdateVisitInput, file?: MultipartFilePart]; 'create-contact': [accountId: string]; reload: [] }>()
 const { locale, t } = useI18n()
+const ownOwnerOnly = useOwnOwnerOnly()
 const defaultDate = shanghaiDate()
 const defaultDue = addIsoDateDays(defaultDate, 1)
 const form = reactive({ accountId: '', primaryContactId: '', subject: '', date: defaultDate, visitType: 'On-site' as VisitDto['type'], owner: '', objective: '', outcome: '', nextAction: '', actionOwner: '', due: defaultDue })
@@ -24,7 +26,7 @@ watch(() => [props.mode, props.visit, props.accounts, props.initialAccountId, pr
   form.subject = props.visit?.subject ?? ''
   form.date = props.visit?.date ?? defaultDate
   form.visitType = props.visit?.type ?? 'On-site'
-  form.owner = props.visit?.owner ?? props.accounts.find((item) => item.id === form.accountId)?.owner ?? preferredPersonnelId('Sales', '')
+  form.owner = props.visit?.owner ?? (ownOwnerOnly.value || props.accounts.find((item) => item.id === form.accountId)?.owner || preferredPersonnelId('Sales', ''))
   form.objective = props.visit?.objective ?? t('visitModal.objectiveDefault')
   form.outcome = props.visit?.outcome ?? ''
   form.nextAction = props.visit?.nextAction ?? ''
@@ -68,7 +70,7 @@ function selectMeetingFile(event: Event) {
       <label><span>{{ t('visitModal.visitType') }}<RequiredMark /></span><select v-model="form.visitType" :aria-label="t('visitModal.visitTypeAria')" required><option value="On-site">{{ t('visitModal.onSite') }}</option><option value="Video">{{ t('visitModal.video') }}</option><option value="Phone">{{ t('visitModal.phone') }}</option></select></label>
       <label class="full"><span>{{ t('visitModal.subject') }}<RequiredMark /></span><input v-model="form.subject" :aria-label="t('visitModal.subjectAria')" required /></label>
       <label><span>{{ t('visitModal.date') }}<RequiredMark /></span><input v-model="form.date" :aria-label="t('visitModal.dateAria')" type="date" required /></label>
-      <label><span>{{ t('visitModal.owner') }}<RequiredMark /></span><PersonnelSelect v-model="form.owner" :roles="['Sales']" :ariaLabel="t('visitModal.ownerAria')" required /></label>
+      <label><span>{{ t('visitModal.owner') }}<RequiredMark /></span><PersonnelSelect owner v-model="form.owner" :roles="['Sales']" :ariaLabel="t('visitModal.ownerAria')" required /></label>
       <label class="full"><span>{{ t('visitModal.objective') }}<RequiredMark /></span><textarea v-model="form.objective" :aria-label="t('visitModal.objectiveAria')" required /></label>
       <label v-if="mode === 'create'" class="full"><span>{{ t('visitModal.recordFile') }}</span><input :aria-label="t('visitModal.recordFileAria')" type="file" @change="selectMeetingFile" /><small>{{ t('visitModal.recordHint') }}</small></label>
     </div>

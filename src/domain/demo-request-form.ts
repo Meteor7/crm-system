@@ -126,6 +126,8 @@ export function applyDemoRequestImport(
   imported: DemoRequestImportResult,
   accounts: AccountSummaryDto[],
   contacts: ContactSummaryDto[],
+  // Who the form may name as its Sales contact. A Sales user may name only themselves.
+  salesContacts: string[] = demoSalesOwnerOptions(),
 ) {
   const formData = cloneDemoRequestFormData(current)
   const scalarKeys: Array<keyof Omit<DemoRequestFormData, 'wafers' | 'salesContact' | 'demoOwner'>> = [
@@ -137,7 +139,7 @@ export function applyDemoRequestImport(
     const value = imported.formData[key]?.trim()
     if (value) formData[key] = value
   })
-  formData.salesContact = importedOwner(imported.formData.salesContact, demoSalesOwnerOptions(), current.salesContact)
+  formData.salesContact = importedOwner(imported.formData.salesContact, salesContacts, current.salesContact)
   formData.demoOwner = importedOwner(imported.formData.demoOwner, demoEngineerOwnerOptions(), current.demoOwner)
   if (imported.formData.wafers.some(hasWaferContent)) {
     formData.wafers = imported.formData.wafers.filter(hasWaferContent).map((wafer) => ({ ...wafer }))

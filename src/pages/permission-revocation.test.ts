@@ -155,6 +155,45 @@ describe('permission revocation', () => {
     expect(wrapper.find('[data-demo-request="DR-101"]').exists()).toBe(false)
   })
 
+  it('clears Demo Requests when the request has left the user\'s scope during a transition', async () => {
+    const repository = createDemoRepository(createMemoryDemoStorage(), seedDemoSnapshot)
+    await repository.transact((snapshot) => {
+      snapshot.demoRequests.find((item) => item.id === 'DR-101')!.status = 'Draft'
+    })
+    const base = createMockApi({ repository, latency: 0 })
+    // What the server answers when the request was reassigned and the user may no longer read it.
+    const outOfScope = new CrmApiError('SCOPE_DENIED', 'The Demo Request is outside the current user scope.', 'req_scope')
+    const apiClient = { ...base, transitionDemoRequest: vi.fn().mockRejectedValue(outOfScope) }
+    const wrapper = mount(DemoRequestsPage, { props: { apiClient }, global: await globals('/demo-requests') })
+    await flushPromises()
+
+    await wrapper.get('[data-demo-view="sales"]').trigger('click')
+    await wrapper.get('[data-demo-action="DR-101-submit"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('.state-denied').exists()).toBe(true)
+    expect(wrapper.find('[data-demo-request="DR-101"]').exists()).toBe(false)
+  })
+
+  it('keeps Demo Requests when a write is refused for what it asks, not for who asks', async () => {
+    const base = createMockApi({ repository: createDemoRepository(createMemoryDemoStorage(), seedDemoSnapshot), latency: 0 })
+    // What the server answers a Sales user who names another Sales user as the Sales contact of a new request.
+    const refused = new CrmApiError('SCOPE_DENIED', 'Sales users can only assign records to themselves.', 'req_refused')
+    const apiClient = { ...base, createDemoRequest: vi.fn().mockRejectedValue(refused) }
+    const wrapper = mount(DemoRequestsPage, { props: { apiClient }, global: await globals('/demo-requests') })
+    await flushPromises()
+
+    await wrapper.get('.page-actions .primary-button').trigger('click')
+    await wrapper.findComponent({ name: 'DemoRequestModal' }).vm.$emit('submit', {})
+    await flushPromises()
+    expect(apiClient.createDemoRequest).toHaveBeenCalledTimes(1)
+    // The refusal is shown as the error of that write; the page is not taken for one the user may no longer see,
+    // and the dialog stays open with what was typed.
+    expect(wrapper.find('.state-denied').exists()).toBe(false)
+    expect(wrapper.get('[data-api-error]').text()).toContain('销售只能把记录分配给自己，请把负责人选为本人。')
+    expect(wrapper.findComponent({ name: 'DemoRequestModal' }).exists()).toBe(true)
+    expect(wrapper.find('[data-demo-request="DR-101"]').exists()).toBe(true)
+  })
+
   it('clears Evaluations when permission is revoked during a status change', async () => {
     const repository = createDemoRepository(createMemoryDemoStorage(), seedDemoSnapshot)
     await repository.transact((snapshot) => {

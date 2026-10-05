@@ -113,6 +113,8 @@ def resolve_write_owner(requested_owner: Any, *, shared_sales: bool = False) -> 
     requested = requested_owner.strip() if isinstance(requested_owner, str) else ""
     if role == "Sales" and not shared_sales:
         if requested and requested != user_id:
+            # The client tells this refusal from a record out of reach by this sentence (src/api/request-state.ts):
+            # change the two together.
             raise CrmApiException("SCOPE_DENIED", "Sales users can only assign records to themselves.")
         return user_id
     if role not in {"Manager", "Sales"}:

@@ -216,7 +216,7 @@ const equipmentChoices = computed(() => props.equipmentTypes ?? EQUIPMENT_PRESET
       <label class="wide"><span>{{ t('oppEditor.name') }}<RequiredMark :show="!opportunity" /></span><input v-model="form.title" :aria-label="t('oppEditor.name')" required /></label>
       <label><span>{{ t('oppEditor.account') }}<RequiredMark :show="!opportunity" /></span><select v-model="form.accountId" :aria-label="t('oppEditor.account')" required><option value="" disabled>{{ t('quotations.selectAccount') }}</option><option v-for="account in accounts" :key="account.id" :value="account.id">{{ account.shortName }} · {{ account.name }}</option></select></label>
       <label><span>{{ t('oppEditor.site') }}<RequiredMark :show="!opportunity" /></span><select v-model="form.siteId" :aria-label="t('oppEditor.site')" required><option v-for="site in sites" :key="site.id" :value="site.id">{{ site.name }}</option></select></label>
-      <label><span>{{ t('oppEditor.owner') }}<RequiredMark :show="!opportunity" /></span><PersonnelSelect v-model="form.owner" :roles="['Sales', 'Manager']" :ariaLabel="t('oppEditor.owner')" required /></label>
+      <label><span>{{ t('oppEditor.owner') }}<RequiredMark :show="!opportunity" /></span><PersonnelSelect owner v-model="form.owner" :roles="['Sales', 'Manager']" :ariaLabel="t('oppEditor.owner')" required /></label>
       <div class="readonly-stage"><span>{{ t('oppEditor.stage') }}</span><strong>{{ opportunityStageLabel(currentStage, locale) }}</strong></div>
       <label class="probability-level-field">
         <span>{{ t('oppEditor.probabilityLevel') }}<RequiredMark :show="!opportunity" /></span>

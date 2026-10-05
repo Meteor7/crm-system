@@ -5,11 +5,13 @@ import ModalShell from '@/design-system/ModalShell.vue'
 import RequiredMark from '@/design-system/RequiredMark.vue'
 import PersonnelSelect from '@/design-system/PersonnelSelect.vue'
 import { preferredPersonnelId } from '@/demo/personnel'
+import { useSignedInUser } from '@/stores/signed-in-user'
 import { useI18n } from '@/i18n'
 import { salesEnumLabel } from '@/features/shared/sales-i18n'
 
 const props = defineProps<{ lead?: LeadDto | null; busy?: boolean; error?: string }>()
 const emit = defineEmits<{ close: []; submit: [payload: CreateLeadInput] }>()
+const signedIn = useSignedInUser()
 const { t, locale } = useI18n()
 
 const form = reactive({
@@ -35,7 +37,7 @@ watch(() => props.lead, (lead) => {
   form.email = lead?.email ?? ''
   form.source = lead?.source ?? 'Website'
   form.status = lead?.status ?? 'New'
-  form.owner = lead?.owner ?? preferredPersonnelId('Sales', '')
+  form.owner = lead?.owner ?? preferredPersonnelId('Sales', signedIn.value?.id ?? '')
   form.interest = lead?.interest ?? ''
   form.firstContactNote = lead?.firstContactNote ?? ''
   form.nextAction = lead?.nextAction ?? ''
@@ -67,7 +69,7 @@ function submit() {
       <label><span>{{ t('leadEditor.name') }}<RequiredMark :show="!lead" /></span><input v-model="form.name" :aria-label="t('leadEditor.name')" required /></label>
       <label><span>{{ t('leadEditor.company') }}<RequiredMark :show="!lead" /></span><input v-model="form.company" :aria-label="t('leadEditor.company')" required /></label>
       <label><span>{{ t('leadEditor.title') }}<RequiredMark :show="!lead" /></span><input v-model="form.title" :aria-label="t('leadEditor.title')" required /></label>
-       <label><span>{{ t('leadEditor.owner') }}<RequiredMark :show="!lead" /></span><PersonnelSelect v-model="form.owner" :roles="['Sales']" :ariaLabel="t('leadEditor.owner')" required /></label>
+       <label><span>{{ t('leadEditor.owner') }}<RequiredMark :show="!lead" /></span><PersonnelSelect owner v-model="form.owner" :roles="['Sales']" :ariaLabel="t('leadEditor.owner')" required /></label>
       <label><span>{{ t('leadEditor.phone') }}</span><input v-model="form.phone" :aria-label="t('leadEditor.phone')" /></label>
       <label><span>{{ t('leadEditor.email') }}</span><input v-model="form.email" :aria-label="t('leadEditor.email')" type="email" /></label>
        <label><span>{{ t('leadEditor.source') }}</span><select v-model="form.source" :aria-label="t('leadEditor.source')"><option v-for="item in ['Website', 'Trade Show', 'Partner Referral', 'Outbound', 'Customer Referral', 'Other']" :key="item" :value="item">{{ salesEnumLabel(item, locale) }}</option></select></label>

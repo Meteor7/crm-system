@@ -23,7 +23,7 @@ const form = ref<CreateOpportunityActionInput>({
     <p v-if="error" class="form-error">{{ error }}</p>
     <div class="action-form-grid">
       <label class="wide"><span>{{ t('actionEditor.title') }}<RequiredMark :show="!action" /></span><input v-model="form.title" :aria-label="t('actionEditor.title')" required /></label>
-      <label><span>{{ t('actionEditor.owner') }}<RequiredMark :show="!action" /></span><PersonnelSelect v-model="form.owner" :roles="['Sales', 'Engineer']" :ariaLabel="t('actionEditor.owner')" required /></label>
+      <label><span>{{ t('actionEditor.owner') }}<RequiredMark :show="!action" /></span><PersonnelSelect owner v-model="form.owner" :roles="['Sales', 'Engineer']" :ariaLabel="t('actionEditor.owner')" required /></label>
       <label><span>{{ t('actionEditor.dueDate') }}<RequiredMark :show="!action" /></span><input v-model="form.due" :aria-label="t('actionEditor.dueDate')" type="date" required /></label>
       <label><span>{{ t('detail.status') }}<RequiredMark :show="!action" /></span><select v-model="form.status" :aria-label="t('detail.status')" required><option v-for="item in OPPORTUNITY_ACTION_STATUSES" :key="item" :value="item">{{ salesEnumLabel(item, locale) }}</option></select></label>
       <label><span>{{ t('actionEditor.remark') }}</span><textarea v-model="form.remark" :aria-label="t('actionEditor.remark')" rows="3" maxlength="10000" :placeholder="t('actionEditor.remarkPlaceholder')" /></label>

@@ -1,7 +1,7 @@
 import { createPinia, setActivePinia } from 'pinia'
 import { mount, flushPromises } from '@vue/test-utils'
 import { createFrappeApi } from './frappe-adapter'
-import { localeMessage, setLocale, useLocaleMessage } from '@/i18n'
+import { localeMessage, resolveLocaleMessage, setLocale, useLocaleMessage } from '@/i18n'
 import { useDashboardStore } from '@/stores/dashboard'
 import { useAppStore } from '@/stores/app'
 import DataNotice from '@/design-system/DataNotice.vue'
@@ -52,6 +52,17 @@ describe('localized client failures', () => {
     setLocale('en-US')
     expect(notice.value).toContain(english)
     expect(fetchImpl).toHaveBeenCalledTimes(1)
+  })
+
+  it('takes a refused owner assignment for the error of that write, not for a record out of reach', () => {
+    // What the server answers a Sales user who names someone else as the owner.
+    const refused = mapRequestError(new CrmApiError('SCOPE_DENIED', 'Sales users can only assign records to themselves.', 'req_refused'))
+    expect(refused).toMatchObject({ denied: false, requestId: 'req_refused' })
+    expect(resolveLocaleMessage(refused.localizedMessage!)).toBe('销售只能把记录分配给自己，请把负责人选为本人。')
+    // Any other refusal under the same code is a record the user may no longer see.
+    expect(mapRequestError(new CrmApiError('SCOPE_DENIED', 'The Demo Request is outside the current user scope.', 'req_scope')).denied).toBe(true)
+    expect(mapRequestError(new CrmApiError('SCOPE_DENIED', '', 'req_scope')).denied).toBe(true)
+    expect(mapRequestError(new CrmApiError('PERMISSION_DENIED', 'Sales users can only assign records to themselves.', 'req_role')).denied).toBe(true)
   })
 
   it('keeps same-worded backend messages and field validation opaque', async () => {

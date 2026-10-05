@@ -10,6 +10,7 @@ import ModalShell from '@/design-system/ModalShell.vue'
 import RequiredMark from '@/design-system/RequiredMark.vue'
 import PersonnelSelect from '@/design-system/PersonnelSelect.vue'
 import DemoRequestForm from './DemoRequestForm.vue'
+import { useOwnOwnerOnly } from '@/stores/signed-in-user'
 import { useI18n, useLocaleMessage, localeMessage } from '@/i18n'
 
 const props = defineProps<{
@@ -25,6 +26,7 @@ const props = defineProps<{
 }>()
 const emit = defineEmits<{ close: []; submit: [payload: CreateDemoRequestInput | DemoRequestCommand]; 'create-contact': [accountId: string] }>()
 const { locale } = useI18n()
+const ownOwnerOnly = useOwnOwnerOnly()
 
 const accountId = ref('')
 const opportunityId = ref('')
@@ -158,6 +160,8 @@ async function importCompletedForm(event: Event) {
       response.data,
       props.accounts || [],
       props.contacts || [],
+      // A form that names a colleague leaves a Sales user's own name in place: the field offers nobody else.
+      ownOwnerOnly.value ? [ownOwnerOnly.value] : undefined,
     )
     formData.value = applied.formData
     if (applied.accountId) accountId.value = applied.accountId
