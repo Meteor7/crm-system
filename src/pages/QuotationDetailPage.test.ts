@@ -228,6 +228,50 @@ describe('QuotationDetailPage', () => {
     expect(wrapper.text()).toContain('Service expansion')
   })
 
+  it('holds the other commands and the focus refresh while an Opportunity is being linked', async () => {
+    const { client } = api(); const others = structuredClone(detail)
+    others.quotation.opportunityId = ''; others.quotation.opportunityTitle = 'Others'
+    others.version.opportunityId = ''; others.versions = [others.version]
+    vi.mocked(client.getQuotation).mockResolvedValue({ data: others, warnings: [] })
+    client.listStrategyOpportunities = vi.fn(async () => ({ data: { items: [
+      { id: 'OPP-AVAILABLE', title: 'Service expansion', accountId: 'ACC-001', account: 'Planck Fab' },
+    ] }, meta: { requestId: 'o', total: 1 }, warnings: [] })) as unknown as CrmApi['listStrategyOpportunities']
+    client.listQuotations = vi.fn(async () => ({ data: { items: [] }, meta: { requestId: 'q', total: 0 }, warnings: [] }))
+    let finishLink!: () => void
+    client.linkQuotationOpportunity = vi.fn(() => new Promise((resolve) => {
+      finishLink = () => {
+        const linked = structuredClone(others)
+        linked.quotation.opportunityId = 'OPP-AVAILABLE'; linked.quotation.opportunityTitle = 'Service expansion'
+        resolve({ data: linked, warnings: [] })
+      }
+    })) as unknown as CrmApi['linkQuotationOpportunity']
+    const discardQuotationDraft = vi.fn()
+    Object.assign(client, { discardQuotationDraft })
+    const confirm = vi.fn(() => true)
+    vi.stubGlobal('confirm', confirm)
+    const wrapper = await mountPage(client)
+    await wrapper.get('[data-testid="link-quotation-opportunity"]').trigger('click'); await flushPromises()
+    await wrapper.get('[data-testid="link-opportunity-select"]').setValue('OPP-AVAILABLE')
+    await wrapper.get('[data-modal-submit]').trigger('submit'); await flushPromises()
+    vi.mocked(client.getQuotation).mockClear()
+
+    // The link has been sent and not answered: no refresh reads the page, and the draft cannot be discarded.
+    window.dispatchEvent(new Event('focus'))
+    await flushPromises()
+    expect(client.getQuotation).not.toHaveBeenCalled()
+    const discard = wrapper.get('[data-testid="discard-quotation-draft"]')
+    expect(discard.attributes('disabled')).toBeDefined()
+    await discard.trigger('click')
+    expect(confirm).not.toHaveBeenCalled()
+    expect(discardQuotationDraft).not.toHaveBeenCalled()
+
+    finishLink()
+    await flushPromises()
+    expect(wrapper.text()).toContain('Service expansion')
+    expect(wrapper.get('[data-testid="discard-quotation-draft"]').attributes('disabled')).toBeUndefined()
+    wrapper.unmount()
+  })
+
   it('uses positive whole-number constraints for device and accessory quantities', async () => {
     const { client } = api(); const wrapper = await mountPage(client)
     await wrapper.get('[data-testid="add-system-device-1"] [role="combobox"]').trigger('click')
@@ -298,6 +342,73 @@ describe('QuotationDetailPage', () => {
     expect(save.mock.calls[0]![1].items[0].name).toBe('AOI 9200')
     expect(submit).toHaveBeenCalledWith('CRM-QTN-00001', '2026-08-10T10:00:01+08:00')
     expect(calls).toEqual(['save', 'submit'])
+  })
+
+  it('asks before discarding a first draft and says the whole quotation goes with it', async () => {
+    const { client } = api()
+    const discardQuotationDraft = vi.fn(async () => ({ data: { id: 'CRM-QTN-00001', deleted: true as const }, warnings: [] }))
+    Object.assign(client, { discardQuotationDraft })
+    const confirm = vi.fn(() => false)
+    vi.stubGlobal('confirm', confirm)
+    const wrapper = await mountPage(client)
+    const router = wrapper.vm.$router
+
+    await wrapper.get('[data-testid="discard-quotation-draft"]').trigger('click')
+    await flushPromises()
+    expect(confirm).toHaveBeenCalledWith('放弃这份草稿？整张报价单 PK20260810-A1 将被删除，无法恢复。')
+    expect(discardQuotationDraft).not.toHaveBeenCalled()
+    expect(router.currentRoute.value.path).toBe('/quotations/CRM-QTN-00001')
+
+    confirm.mockReturnValue(true)
+    const push = vi.spyOn(router, 'push').mockResolvedValue(undefined)
+    await wrapper.get('[data-testid="discard-quotation-draft"]').trigger('click')
+    await flushPromises()
+    expect(discardQuotationDraft).toHaveBeenCalledWith('CRM-QTN-00001', detail.version.modified)
+    expect(push).toHaveBeenCalledWith('/quotations')
+  })
+
+  it('asks before discarding a later draft and returns to the published version', async () => {
+    const { client } = api()
+    const published = { ...structuredClone(detail.version), status: 'Published' as const }
+    const later = structuredClone(detail)
+    later.version = { ...later.version, id: 'CRM-QTV-00002', version: 2 }
+    later.versions = [later.version, published]
+    later.quotation = { ...later.quotation, latestVersion: 2, currentVersionId: 'CRM-QTV-00002', currentPublishedVersionId: published.id }
+    vi.mocked(client.getQuotation).mockResolvedValue({ data: later, warnings: [] })
+    const restored = structuredClone(later)
+    restored.version = published
+    restored.versions = [published]
+    restored.quotation = { ...restored.quotation, status: 'Published', latestVersion: 1, currentVersionId: published.id }
+    const discardQuotationDraft = vi.fn(async () => ({ data: restored, warnings: [] }))
+    Object.assign(client, { discardQuotationDraft })
+    const confirm = vi.fn(() => true)
+    vi.stubGlobal('confirm', confirm)
+    const wrapper = await mountPage(client)
+
+    await wrapper.get('[data-testid="discard-quotation-draft"]').trigger('click')
+    await flushPromises()
+
+    expect(confirm).toHaveBeenCalledWith('放弃 PK20260810-A1 的 V2 草稿，回到已发布的版本？草稿内容无法恢复。')
+    expect(discardQuotationDraft).toHaveBeenCalledWith('CRM-QTN-00001', later.version.modified)
+    expect(wrapper.vm.$router.currentRoute.value.path).toBe('/quotations/CRM-QTN-00001')
+    expect(wrapper.attributes('data-editable')).toBe('false')
+    expect(wrapper.find('[data-testid="discard-quotation-draft"]').exists()).toBe(false)
+  })
+
+  it('does not offer to discard a draft that has been through approval', async () => {
+    const { client } = api()
+    const rejected = structuredClone(detail)
+    rejected.version.approvalStatus = 'Rejected'
+    rejected.version.currentApprovalId = 'CRM-QTA-00001'
+    rejected.quotation.approvalStatus = 'Rejected'
+    rejected.approvals = [{ id:'CRM-QTA-00001',quotationId:rejected.quotation.id,versionId:rejected.version.id,attempt:1,status:'Rejected',submittedBy:'sales@example.com',submittedAt:'2026-08-10T10:05:00+08:00',decidedBy:'manager@example.com',decidedAt:'2026-08-10T11:00:00+08:00',comment:'Revise commercial terms' }]
+    vi.mocked(client.getQuotation).mockResolvedValue({ data: rejected, warnings: [] })
+    const wrapper = await mountPage(client)
+
+    // The draft is still edited and submitted again; only discarding it is withheld.
+    expect(wrapper.attributes('data-editable')).toBe('true')
+    expect(wrapper.find('[data-testid="submit-quotation-approval"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="discard-quotation-draft"]').exists()).toBe(false)
   })
 
   it('locks a pending Sales quotation until a Manager decides it', async () => {
@@ -379,6 +490,210 @@ describe('QuotationDetailPage optimistic save recovery', () => {
     expect(save).toHaveBeenCalledTimes(2)
     expect(client.getQuotation).toHaveBeenCalledTimes(1)
     expect(wrapper.text()).toContain('报价单已被其他用户更新，请刷新后重新应用本地修改。')
+    wrapper.unmount()
+  })
+
+  it('does not bring a discarded draft back when a focus refresh returns late', async () => {
+    const { client } = api()
+    const published = { ...structuredClone(detail.version), status: 'Published' as const }
+    const later = structuredClone(detail)
+    later.version = { ...later.version, id: 'CRM-QTV-00002', version: 2 }
+    later.versions = [later.version, published]
+    later.quotation = { ...later.quotation, latestVersion: 2, currentVersionId: 'CRM-QTV-00002', currentPublishedVersionId: published.id }
+    vi.mocked(client.getQuotation).mockResolvedValue({ data: later, warnings: [] })
+    const restored = structuredClone(later)
+    restored.version = published
+    restored.versions = [published]
+    restored.quotation = { ...restored.quotation, status: 'Published', latestVersion: 1, currentVersionId: published.id }
+    Object.assign(client, { discardQuotationDraft: vi.fn(async () => ({ data: restored, warnings: [] })) })
+    vi.stubGlobal('confirm', vi.fn(() => true))
+    const wrapper = await mountPage(client)
+
+    // The refresh reads the draft while it still exists; its answer arrives after the discard.
+    let resolveRefresh!: (value: Awaited<ReturnType<CrmApi['getQuotation']>>) => void
+    vi.mocked(client.getQuotation).mockImplementationOnce(() => new Promise((resolve) => { resolveRefresh = resolve }))
+    window.dispatchEvent(new Event('focus'))
+    await wrapper.get('[data-testid="discard-quotation-draft"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.attributes('data-editable')).toBe('false')
+
+    resolveRefresh({ data: structuredClone(later), warnings: [] })
+    await flushPromises()
+
+    expect(wrapper.attributes('data-editable')).toBe('false')
+    expect(wrapper.find('[data-testid="discard-quotation-draft"]').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('does not show the error of a focus refresh that fails after the draft it asked for is gone', async () => {
+    const { client } = api()
+    const published = { ...structuredClone(detail.version), status: 'Published' as const }
+    const later = structuredClone(detail)
+    later.version = { ...later.version, id: 'CRM-QTV-00002', version: 2 }
+    later.versions = [later.version, published]
+    later.quotation = { ...later.quotation, latestVersion: 2, currentVersionId: 'CRM-QTV-00002', currentPublishedVersionId: published.id }
+    vi.mocked(client.getQuotation).mockResolvedValue({ data: later, warnings: [] })
+    const restored = structuredClone(later)
+    restored.version = published
+    restored.versions = [published]
+    restored.quotation = { ...restored.quotation, status: 'Published', latestVersion: 1, currentVersionId: published.id }
+    Object.assign(client, { discardQuotationDraft: vi.fn(async () => ({ data: restored, warnings: [] })) })
+    vi.stubGlobal('confirm', vi.fn(() => true))
+    const wrapper = await mountPage(client)
+
+    let rejectRefresh!: (reason: unknown) => void
+    vi.mocked(client.getQuotation).mockImplementationOnce(() => new Promise((_resolve, reject) => { rejectRefresh = reject }))
+    window.dispatchEvent(new Event('focus'))
+    await wrapper.get('[data-testid="discard-quotation-draft"]').trigger('click')
+    await flushPromises()
+    const { CrmApiError } = await import('@/api')
+    rejectRefresh(new CrmApiError('NOT_FOUND', 'Quotation version was not found.', 'req-late', false))
+    await flushPromises()
+
+    expect(wrapper.attributes('data-editable')).toBe('false')
+    expect(wrapper.text()).not.toContain('Quotation version was not found.')
+    wrapper.unmount()
+  })
+
+  it('holds the commands while another version is being loaded', async () => {
+    const { client } = api()
+    const published = { ...structuredClone(detail.version), status: 'Published' as const }
+    const later = structuredClone(detail)
+    later.version = { ...later.version, id: 'CRM-QTV-00002', version: 2 }
+    later.versions = [later.version, published]
+    later.quotation = { ...later.quotation, latestVersion: 2, currentVersionId: 'CRM-QTV-00002', currentPublishedVersionId: published.id }
+    vi.mocked(client.getQuotation).mockResolvedValue({ data: later, warnings: [] })
+    const discardQuotationDraft = vi.fn()
+    Object.assign(client, { discardQuotationDraft })
+    const confirm = vi.fn(() => true)
+    vi.stubGlobal('confirm', confirm)
+    const wrapper = await mountPage(client)
+
+    // The answer to "view V1" is on its way: the draft on screen must not be discarded or submitted meanwhile.
+    const history = structuredClone(later)
+    history.version = published
+    let resolveLoad!: (value: Awaited<ReturnType<CrmApi['getQuotation']>>) => void
+    vi.mocked(client.getQuotation).mockImplementationOnce(() => new Promise((resolve) => { resolveLoad = resolve }))
+    await wrapper.findComponent({ name: 'QuotationHistory' }).vm.$emit('select', published.id)
+    await flushPromises()
+
+    const discard = wrapper.get('[data-testid="discard-quotation-draft"]')
+    expect(discard.attributes('disabled')).toBeDefined()
+    expect(wrapper.get('[data-testid="submit-quotation-approval"]').attributes('disabled')).toBeDefined()
+    await discard.trigger('click')
+    expect(confirm).not.toHaveBeenCalled()
+    expect(discardQuotationDraft).not.toHaveBeenCalled()
+
+    resolveLoad({ data: history, warnings: [] })
+    await flushPromises()
+    expect(wrapper.attributes('data-editable')).toBe('false')
+    expect(wrapper.find('[data-testid="discard-quotation-draft"]').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('holds the commands from the click on a version, while unsaved edits are still being saved', async () => {
+    vi.useFakeTimers()
+    const { client, save } = api()
+    const published = { ...structuredClone(detail.version), status: 'Published' as const }
+    const later = structuredClone(detail)
+    later.version = { ...later.version, id: 'CRM-QTV-00002', version: 2 }
+    later.versions = [later.version, published]
+    later.quotation = { ...later.quotation, latestVersion: 2, currentVersionId: 'CRM-QTV-00002', currentPublishedVersionId: published.id }
+    vi.mocked(client.getQuotation).mockResolvedValue({ data: later, warnings: [] })
+    const discardQuotationDraft = vi.fn()
+    Object.assign(client, { discardQuotationDraft })
+    const confirm = vi.fn(() => true)
+    vi.stubGlobal('confirm', confirm)
+    const wrapper = await mountPage(client)
+
+    // An edit is waiting to be saved, and the save takes its time.
+    let finishSave!: () => void
+    save.mockImplementationOnce((_name, input) => new Promise((resolve) => {
+      finishSave = () => {
+        const saved = structuredClone(later)
+        saved.version = { ...saved.version, ...structuredClone(input), modified: '2026-08-10T10:00:01+08:00' }
+        resolve({ data: saved, warnings: [] })
+      }
+    }))
+    await wrapper.get('[aria-label="设备名称"]').setValue('改过的设备名')
+    const history = structuredClone(later)
+    history.version = published
+    let resolveLoad!: (value: Awaited<ReturnType<CrmApi['getQuotation']>>) => void
+    vi.mocked(client.getQuotation).mockImplementationOnce(() => new Promise((resolve) => { resolveLoad = resolve }))
+    await wrapper.findComponent({ name: 'QuotationHistory' }).vm.$emit('select', published.id)
+    await flushPromises()
+    expect(save).toHaveBeenCalledTimes(1)
+    expect(client.getQuotation).toHaveBeenCalledTimes(1)
+
+    // The version load has not even started, yet the draft can no longer be discarded.
+    const discard = wrapper.get('[data-testid="discard-quotation-draft"]')
+    expect(discard.attributes('disabled')).toBeDefined()
+    await discard.trigger('click')
+    expect(confirm).not.toHaveBeenCalled()
+    expect(discardQuotationDraft).not.toHaveBeenCalled()
+
+    finishSave()
+    await flushPromises()
+    expect(client.getQuotation).toHaveBeenCalledTimes(2)
+    resolveLoad({ data: history, warnings: [] })
+    await flushPromises()
+    expect(wrapper.attributes('data-editable')).toBe('false')
+    wrapper.unmount()
+  })
+
+  it('does not let a retry of a failed load release what a running command holds', async () => {
+    const { client } = api()
+    const published = structuredClone(detail)
+    published.version.status = 'Published'
+    published.versions = [published.version]
+    published.quotation = { ...published.quotation, status: 'Published', currentPublishedVersionId: published.version.id }
+    vi.mocked(client.getQuotation).mockResolvedValue({ data: published, warnings: [] })
+    const draftVersion = structuredClone(published)
+    draftVersion.version = { ...draftVersion.version, id: 'CRM-QTV-00002', version: 2, status: 'Draft' }
+    draftVersion.versions = [draftVersion.version, published.version]
+    draftVersion.quotation = { ...draftVersion.quotation, status: 'Draft', latestVersion: 2, currentVersionId: 'CRM-QTV-00002' }
+    let finishCreate!: () => void
+    const createQuotationVersion = vi.fn(() => new Promise((resolve) => { finishCreate = () => resolve({ data: draftVersion, warnings: [] }) }))
+    const discardQuotationDraft = vi.fn()
+    Object.assign(client, { createQuotationVersion, discardQuotationDraft })
+    const wrapper = await mountPage(client)
+
+    // Looking at a version fails: the error with its retry is on the page, and so are the header buttons.
+    const { CrmApiError } = await import('@/api')
+    vi.mocked(client.getQuotation).mockRejectedValueOnce(new CrmApiError('INTERNAL_ERROR', 'The request could not be completed.', 'req-load', true))
+    await wrapper.findComponent({ name: 'QuotationHistory' }).vm.$emit('select', published.version.id)
+    await flushPromises()
+    expect(wrapper.find('.state-error').exists()).toBe(true)
+
+    // "New version" has been sent and not answered. A retry now must neither read nor free the buttons.
+    await wrapper.get('[data-testid="create-quotation-version"]').trigger('click')
+    vi.mocked(client.getQuotation).mockClear()
+    await wrapper.findComponent({ name: 'DataState' }).vm.$emit('retry')
+    await flushPromises()
+    expect(client.getQuotation).not.toHaveBeenCalled()
+    expect(wrapper.get('[data-testid="create-quotation-version"]').attributes('disabled')).toBeDefined()
+
+    finishCreate()
+    await flushPromises()
+    expect(wrapper.attributes('data-editable')).toBe('true')
+    expect(wrapper.get('[data-testid="discard-quotation-draft"]').attributes('disabled')).toBeUndefined()
+    expect(discardQuotationDraft).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
+  it('shows what another user saved when a focus refresh finds the page clean', async () => {
+    const { client } = api()
+    const wrapper = await mountPage(client)
+    const remote = structuredClone(detail)
+    remote.version.items[0].name = '另一位用户保存的设备名'
+    remote.version.modified = '2026-08-10T10:00:02+08:00'
+    remote.versions = [remote.version]
+    vi.mocked(client.getQuotation).mockResolvedValueOnce({ data: remote, warnings: [] })
+
+    window.dispatchEvent(new Event('focus'))
+    await flushPromises()
+
+    expect((wrapper.get('[aria-label="设备名称"]').element as HTMLInputElement).value).toBe('另一位用户保存的设备名')
     wrapper.unmount()
   })
 

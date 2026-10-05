@@ -621,19 +621,37 @@ def create_version(name: str) -> dict[str, Any]:
 
 def discard_draft(name: str, expected_modified: str | None = None) -> dict[str, Any]:
     assert_capability("quotation:write")
-    master = _lock_quotation(name)
-    version = lock_document("CRM Quotation Version", master.current_version, expected_modified, "NOT_FOUND")
-    master.reload()
-    if version.quotation != master.name or version.name != master.current_version:
-        raise CrmApiException("NOT_FOUND", "Quotation version was not found.")
-    if version.status != "Draft": raise CrmApiException("QUOTATION_VERSION_LOCKED", "Only the current draft can be discarded.")
-    if version.approval_status == "Pending": raise CrmApiException("QUOTATION_VERSION_LOCKED", "A quotation pending approval cannot be discarded.")
-    version.delete(ignore_permissions=True)
-    if not master.current_published_version:
-        master.delete(ignore_permissions=True); return {"id": name, "deleted": True}
-    published = _require_version(master, None, fallback=master.current_published_version)
-    master.current_version = published.name; master.latest_version_no = published.version_no; master.status = published.status; master.save(ignore_permissions=True)
-    return get_quotation(master.name)
+    savepoint = f"crm_quotation_discard_{frappe.generate_hash(length=8)}"
+    frappe.db.savepoint(savepoint)
+    try:
+        master = _lock_quotation(name)
+        version = lock_document("CRM Quotation Version", master.current_version, expected_modified, "NOT_FOUND")
+        master.reload()
+        if version.quotation != master.name or version.name != master.current_version:
+            raise CrmApiException("NOT_FOUND", "Quotation version was not found.")
+        if version.status != "Draft": raise CrmApiException("QUOTATION_VERSION_LOCKED", "Only the current draft can be discarded.")
+        if version.approval_status == "Pending": raise CrmApiException("QUOTATION_VERSION_LOCKED", "A quotation pending approval cannot be discarded.")
+        # Approval history is immutable. A draft that went to review keeps its record, so it is revised
+        # and submitted again, never discarded together with a Manager's decision.
+        if frappe.db.exists("CRM Quotation Approval", {"quotation_version": version.name}):
+            raise CrmApiException("QUOTATION_VERSION_LOCKED", "A draft that has been through approval cannot be discarded. Revise it and submit it again.")
+        published = _require_version(master, None, fallback=master.current_published_version) if master.current_published_version else None
+        # Frappe refuses to delete a document that a Link field still names. The Quotation names the draft as
+        # its current version, so it is pointed back at the published version (or at nothing) before the delete.
+        if published:
+            master.current_version = published.name; master.latest_version_no = published.version_no; master.status = published.status
+        else:
+            master.current_version = None
+        master.save(ignore_permissions=True)
+        version.delete(ignore_permissions=True)
+        if published:
+            return get_quotation(master.name)
+        # The draft was the only version, so the Quotation goes with it.
+        master.delete(ignore_permissions=True)
+        return {"id": name, "deleted": True}
+    except Exception:
+        frappe.db.rollback(save_point=savepoint)
+        raise
 
 def _catalog_item_for_row(row, level: str, parent_id: str | None) -> str:
     normalized = _normalize_catalog_name(row.item_name)

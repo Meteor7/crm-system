@@ -781,6 +781,94 @@ class TestQuotationApi(FrappeTestCase):
         self.assertEqual(missing_error.exception.code, "NOT_FOUND")
         self.assertEqual(get_quotation(created["quotation"]["id"])["version"]["modified"], published["version"]["modified"])
 
+    def test_discard_removes_a_first_draft_together_with_its_quotation(self):
+        saved, _ = self._ready_quotation()
+        quotation_id = saved["quotation"]["id"]
+
+        self.assertEqual(discard_draft(quotation_id, saved["version"]["modified"]), {"id": quotation_id, "deleted": True})
+
+        self.assertFalse(frappe.db.exists("CRM Quotation Version", saved["version"]["id"]))
+        self.assertFalse(frappe.db.exists("CRM Quotation", quotation_id))
+
+    def test_discard_of_a_later_draft_returns_to_the_published_version(self):
+        saved, _ = self._ready_quotation()
+        quotation_id = saved["quotation"]["id"]
+        first = self._publish(quotation_id, saved["version"]["modified"])
+        draft = create_version(quotation_id)
+
+        restored = discard_draft(quotation_id, draft["version"]["modified"])
+
+        self.assertFalse(frappe.db.exists("CRM Quotation Version", draft["version"]["id"]))
+        self.assertEqual(
+            (restored["quotation"]["currentVersionId"], restored["quotation"]["status"], restored["quotation"]["latestVersion"]),
+            (first["version"]["id"], "Published", 1),
+        )
+        self.assertEqual([row["id"] for row in restored["versions"]], [first["version"]["id"]])
+        self.assertEqual(create_version(quotation_id)["version"]["version"], 2)
+
+    def test_discard_of_a_later_draft_restores_the_status_the_customer_decided(self):
+        saved, _ = self._ready_quotation()
+        quotation_id = saved["quotation"]["id"]
+        first = self._publish(quotation_id, saved["version"]["modified"])
+        decided = record_decision(quotation_id, "Accepted", "2026-08-10", "Customer approved", first["version"]["modified"])
+        self.assertEqual(decided["quotation"]["status"], "Accepted")
+        draft = create_version(quotation_id)
+        self.assertEqual(draft["quotation"]["status"], "Draft")
+
+        restored = discard_draft(quotation_id, draft["version"]["modified"])
+
+        self.assertEqual(
+            (restored["quotation"]["currentVersionId"], restored["quotation"]["status"], restored["version"]["status"]),
+            (first["version"]["id"], "Accepted", "Accepted"),
+        )
+
+    def test_a_draft_that_has_been_through_approval_is_not_discarded(self):
+        # Approval history is immutable: discarding a rejected draft would take the Manager's decision with it.
+        saved, _ = self._ready_quotation()
+        quotation_id = saved["quotation"]["id"]
+        submitted = submit_for_approval(quotation_id, saved["version"]["modified"])
+        frappe.set_user(self.manager)
+        rejected = review_approval(quotation_id, "Rejected", "Revise commercial terms", submitted["version"]["modified"])
+        frappe.set_user(self.sales)
+        notices = frappe.db.count("CRM Notification Event", {"source_doctype": "CRM Quotation", "source_name": quotation_id})
+
+        with self.assertRaises(CrmApiException) as refused:
+            discard_draft(quotation_id, rejected["version"]["modified"])
+
+        self.assertEqual(refused.exception.code, "CONFLICT")
+        self.assertIn("been through approval", refused.exception.public_message)
+        after = get_quotation(quotation_id)
+        self.assertEqual((after["version"]["id"], after["version"]["status"], after["version"]["approvalStatus"]), (saved["version"]["id"], "Draft", "Rejected"))
+        self.assertEqual([(row["attempt"], row["status"], row["comment"]) for row in after["approvals"]], [(1, "Rejected", "Revise commercial terms")])
+        self.assertEqual(
+            frappe.db.count("CRM Notification Event", {"source_doctype": "CRM Quotation", "source_name": quotation_id}),
+            notices,
+        )
+
+    def test_a_rejected_later_draft_is_not_discarded_either(self):
+        saved, _ = self._ready_quotation()
+        quotation_id = saved["quotation"]["id"]
+        submitted = submit_for_approval(quotation_id, saved["version"]["modified"])
+        frappe.set_user(self.manager)
+        first = review_approval(quotation_id, "Approved", "Approved", submitted["version"]["modified"])
+        frappe.set_user(self.sales)
+        draft = create_version(quotation_id)
+        resubmitted = submit_for_approval(quotation_id, draft["version"]["modified"])
+        frappe.set_user(self.manager)
+        rejected = review_approval(quotation_id, "Rejected", "Too low", resubmitted["version"]["modified"])
+        frappe.set_user(self.sales)
+
+        with self.assertRaises(CrmApiException) as refused:
+            discard_draft(quotation_id, rejected["version"]["modified"])
+
+        self.assertEqual(refused.exception.code, "CONFLICT")
+        after = get_quotation(quotation_id)
+        self.assertEqual(
+            (after["quotation"]["currentVersionId"], after["quotation"]["currentPublishedVersionId"]),
+            (draft["version"]["id"], first["version"]["id"]),
+        )
+        self.assertEqual([(row["attempt"], row["status"]) for row in after["approvals"]], [(2, "Rejected"), (1, "Approved")])
+
     def test_decision_does_not_overwrite_a_draft_created_after_master_read(self):
         opportunity = self._opportunity()
         created = create_quotation({"opportunityId": opportunity["id"]})

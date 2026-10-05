@@ -38,6 +38,8 @@ const editable = computed(() => Boolean(canMutateQuotation.value && selectedIsLa
 const isSales = computed(() => app.bootstrap?.user.role === 'Sales')
 const approvalPending = computed(() => selectedIsLatest.value && detail.value?.version.approvalStatus === 'Pending')
 const selectedApprovals = computed(() => detail.value?.approvals.filter((item) => item.versionId === detail.value?.version.id) ?? [])
+// A draft that has been through approval keeps its approval record: it is revised and submitted again, not discarded.
+const canDiscard = computed(() => editable.value && !selectedApprovals.value.length)
 const latestApproval = computed(() => selectedApprovals.value[0])
 const tone = computed<Tone>(() => detail.value?.version.status==='Accepted'?'positive':detail.value?.version.status==='Rejected'?'danger':detail.value?.version.status==='Published'?'info':detail.value?.version.status==='Expired'?'warning':'neutral')
 const approvalTone = computed<Tone>(() => detail.value?.version.approvalStatus==='Approved'?'positive':detail.value?.version.approvalStatus==='Rejected'?'danger':detail.value?.version.approvalStatus==='Pending'?'warning':'neutral')
@@ -89,7 +91,10 @@ async function refreshPreview(versionId: string) {
     if (current === previewSequence) previewError.value = messageWithError('quotationDetail.previewFailed', mapRequestError(reason))
   }
 }
-function applyDetail(value: QuotationDetailDto){ detail.value=value; void refreshPreview(value.version.id) }
+// Counts every state the page has shown. A background refresh that was asked for under an older
+// state must not replace a newer one (a discarded draft, a submitted or published version).
+let detailEpoch = 0
+function applyDetail(value: QuotationDetailDto){ detailEpoch+=1; detail.value=value; void refreshPreview(value.version.id) }
 async function loadAllContacts(accountId: string) {
   const items: ContactSummaryDto[] = []; let page = 1; let totalRows = 0
   do {
@@ -121,10 +126,16 @@ async function loadCatalog() {
   catalogError.value = ''
   try { catalog.value = (await props.apiClient.listQuotationCatalog()).data }
   catch (reason) { catalog.value = []; catalogError.value = messageWithError('quotationDetail.catalogFailed', mapRequestError(reason)) }
-}async function load(versionId?: string) {
+}
+// `busy` is one lock for everything that replaces what the page shows: the loads and every command.
+// It is taken only when it is free and released by whoever took it, so two of them never overlap and
+// no answer arrives for a state that another one has already replaced. `load` is always called with
+// the lock held, by loadHeld or selectVersion.
+async function load(versionId?: string) {
   clearSaveTimer(); loading.value = true; error.value = ''; requestId.value = ''; denied.value = false; contactError.value = ''; ready = false; revision = 0; savedRevision = 0
   try {
-    const result = await props.apiClient.getQuotation(quotationId.value, versionId); applyDetail(result.data); draft.value = asDraft(result.data.version)
+    const result = await props.apiClient.getQuotation(quotationId.value, versionId)
+    applyDetail(result.data); draft.value = asDraft(result.data.version)
     if (result.data.version.quotationType === 'Device') await loadCatalog()
     else { catalog.value = []; catalogError.value = '' }
     if (!versionId || versionId === result.data.quotation.currentVersionId) {
@@ -137,6 +148,8 @@ async function loadCatalog() {
   } catch(reason) { const mapped=mapRequestError(reason); error.value=mappedMessage(mapped); requestId.value=mapped.requestId; denied.value=mapped.denied }
   finally { loading.value=false }
 }
+// The first load and a retry after a failed one.
+async function loadHeld(versionId?: string) { if(busy.value)return; busy.value=true; try{ await load(versionId) }finally{ busy.value=false } }
 async function persistDraft(): Promise<boolean> {
   if (!editable.value || !draft.value || !detail.value || savedRevision >= revision) return true
   if (savePromise) return savePromise
@@ -157,14 +170,23 @@ async function persistDraft(): Promise<boolean> {
 }
 function scheduleSave(){ if(!ready || !editable.value)return; revision+=1; saveState.value='idle'; clearSaveTimer(); saveTimer=setTimeout(()=>{saveTimer=undefined;void persistDraft()},1000) }
 async function flushPendingSave(){ clearSaveTimer(); return persistDraft() }
-async function publish(){ if(!detail.value)return; busy.value=true; saveError.value=''; try{ if(!await flushPendingSave())return; applyDetail((await props.apiClient.publishQuotation(quotationId.value,detail.value!.version.modified)).data); draft.value=asDraft(detail.value!.version); revision=savedRevision; await loadCatalog() }catch(reason){saveError.value=mappedMessage(mapRequestError(reason))}finally{busy.value=false} }
-async function submitApproval(){ if(!detail.value)return; busy.value=true; saveError.value=''; try{ if(!await flushPendingSave())return; applyDetail((await props.apiClient.submitQuotationForApproval(quotationId.value,detail.value!.version.modified)).data);draft.value=asDraft(detail.value!.version);revision=savedRevision;await loadCatalog() }catch(reason){saveError.value=mappedMessage(mapRequestError(reason))}finally{busy.value=false} }
+async function publish(){ if(!detail.value||busy.value)return; busy.value=true; saveError.value=''; try{ if(!await flushPendingSave())return; applyDetail((await props.apiClient.publishQuotation(quotationId.value,detail.value!.version.modified)).data); draft.value=asDraft(detail.value!.version); revision=savedRevision; await loadCatalog() }catch(reason){saveError.value=mappedMessage(mapRequestError(reason))}finally{busy.value=false} }
+async function submitApproval(){ if(!detail.value||busy.value)return; busy.value=true; saveError.value=''; try{ if(!await flushPendingSave())return; applyDetail((await props.apiClient.submitQuotationForApproval(quotationId.value,detail.value!.version.modified)).data);draft.value=asDraft(detail.value!.version);revision=savedRevision;await loadCatalog() }catch(reason){saveError.value=mappedMessage(mapRequestError(reason))}finally{busy.value=false} }
 function openApproval(decisionValue: 'Approved'|'Rejected'){ approvalDecision.value={decision:decisionValue,comment:''};approvalOpen.value=true }
-async function reviewApproval(){ if(!detail.value)return;busy.value=true;saveError.value='';try{applyDetail((await props.apiClient.reviewQuotationApproval(quotationId.value,{...approvalDecision.value,expectedModified:detail.value.version.modified})).data);draft.value=asDraft(detail.value!.version);approvalOpen.value=false}catch(reason){saveError.value=mappedMessage(mapRequestError(reason))}finally{busy.value=false} }
-async function createVersion(){ busy.value=true; try{ applyDetail((await props.apiClient.createQuotationVersion(quotationId.value)).data); draft.value=asDraft(detail.value!.version); revision=0;savedRevision=0;await nextTick();ready=true }catch(reason){saveError.value=mappedMessage(mapRequestError(reason))}finally{busy.value=false} }
-async function discard(){ busy.value=true; clearSaveTimer(); try{ if(savePromise)await savePromise;revision=savedRevision;const result=await props.apiClient.discardQuotationDraft(quotationId.value,detail.value!.version.modified);if('deleted' in result.data){ready=false;await router.push('/quotations')}else{applyDetail(result.data);draft.value=asDraft(result.data.version)} }catch(reason){saveError.value=mappedMessage(mapRequestError(reason))}finally{busy.value=false} }
-async function selectVersion(versionId:string){ if(editable.value&&!await flushPendingSave())return;await load(versionId) }
-async function submitDecision(){ busy.value=true; try{ applyDetail((await props.apiClient.recordQuotationDecision(quotationId.value,{...decision.value,expectedModified:detail.value!.version.modified})).data);decisionOpen.value=false }catch(reason){saveError.value=mappedMessage(mapRequestError(reason))}finally{busy.value=false} }
+async function reviewApproval(){ if(!detail.value||busy.value)return;busy.value=true;saveError.value='';try{applyDetail((await props.apiClient.reviewQuotationApproval(quotationId.value,{...approvalDecision.value,expectedModified:detail.value.version.modified})).data);draft.value=asDraft(detail.value!.version);approvalOpen.value=false}catch(reason){saveError.value=mappedMessage(mapRequestError(reason))}finally{busy.value=false} }
+async function createVersion(){ if(busy.value)return; busy.value=true; try{ applyDetail((await props.apiClient.createQuotationVersion(quotationId.value)).data); draft.value=asDraft(detail.value!.version); revision=0;savedRevision=0;await nextTick();ready=true }catch(reason){saveError.value=mappedMessage(mapRequestError(reason))}finally{busy.value=false} }
+function discardConfirmation(){
+  if(!detail.value)return ''
+  const { refNo, currentPublishedVersionId } = detail.value.quotation
+  // Without a published version the draft is all there is, and the quotation goes with it.
+  return currentPublishedVersionId
+    ? ui(`Discard the V${detail.value.version.version} draft of ${refNo} and return to the published version? The draft cannot be recovered.`, `放弃 ${refNo} 的 V${detail.value.version.version} 草稿，回到已发布的版本？草稿内容无法恢复。`)
+    : ui(`Discard this draft? The whole quotation ${refNo} will be deleted and cannot be recovered.`, `放弃这份草稿？整张报价单 ${refNo} 将被删除，无法恢复。`)
+}
+async function discard(){ if(!detail.value||busy.value||!window.confirm(discardConfirmation()))return; busy.value=true; clearSaveTimer(); try{ if(savePromise)await savePromise;revision=savedRevision;const result=await props.apiClient.discardQuotationDraft(quotationId.value,detail.value!.version.modified);if('deleted' in result.data){ready=false;await router.push('/quotations')}else{applyDetail(result.data);draft.value=asDraft(result.data.version)} }catch(reason){saveError.value=mappedMessage(mapRequestError(reason))}finally{busy.value=false} }
+// The lock is held from the click on: saving what is pending and loading the version are one step.
+async function selectVersion(versionId:string){ if(busy.value)return; busy.value=true; try{ if(editable.value&&!await flushPendingSave())return; await load(versionId) }finally{ busy.value=false } }
+async function submitDecision(){ if(busy.value)return; busy.value=true; try{ applyDetail((await props.apiClient.recordQuotationDecision(quotationId.value,{...decision.value,expectedModified:detail.value!.version.modified})).data);decisionOpen.value=false }catch(reason){saveError.value=mappedMessage(mapRequestError(reason))}finally{busy.value=false} }
 async function loadLinkOpportunities(){
   if(!detail.value)return
   const candidates: StrategyOpportunityDto[]=[]; const quoted=new Set<string>(); let opportunityPage=1; let opportunityTotal=0; let quotationPage=1; let quotationTotal=0
@@ -178,24 +200,26 @@ async function openOpportunityLink(){
   linkBusy.value=true; linkError.value=''; linkOpportunityId.value=''
   try{await loadLinkOpportunities();linkOpen.value=true}catch(reason){const mapped=mapRequestError(reason);linkError.value=messageWithRequestId(mapped);linkOpen.value=true}finally{linkBusy.value=false}
 }
+// Linking replaces what the page shows like any other command, so it holds the others while it runs:
+// its answer must not arrive after a discard and put the draft back.
 async function linkOpportunity(){
-  if(!detail.value||!linkOpportunityId.value)return
-  linkBusy.value=true;linkError.value=''
-  try{const result=await props.apiClient.linkQuotationOpportunity(quotationId.value,linkOpportunityId.value,detail.value.version.modified);applyDetail(result.data);draft.value=asDraft(result.data.version);linkOpen.value=false}catch(reason){const mapped=mapRequestError(reason);linkError.value=messageWithRequestId(mapped)}finally{linkBusy.value=false}
+  if(!detail.value||!linkOpportunityId.value||busy.value)return
+  linkBusy.value=true;busy.value=true;linkError.value=''
+  try{const result=await props.apiClient.linkQuotationOpportunity(quotationId.value,linkOpportunityId.value,detail.value.version.modified);applyDetail(result.data);draft.value=asDraft(result.data.version);linkOpen.value=false}catch(reason){const mapped=mapRequestError(reason);linkError.value=messageWithRequestId(mapped)}finally{linkBusy.value=false;busy.value=false}
 }
 async function download(versionId?:string){ try{ const file=await props.apiClient.getQuotationPdf(quotationId.value,versionId); downloadBlob(file.blob,file.fileName) }catch(reason){saveError.value=mappedMessage(mapRequestError(reason))} }
 async function refreshCurrentIfClean(){
-  if(!ready || !detail.value || revision>savedRevision || saveTimer || savePromise)return
-  const requestedRevision=revision
+  if(!ready || !detail.value || busy.value || revision>savedRevision || saveTimer || savePromise)return
+  const requestedRevision=revision; const requestedEpoch=detailEpoch
   try {
     const result=await props.apiClient.getQuotation(quotationId.value,detail.value.version.id)
-    if(!ready || revision!==requestedRevision || revision>savedRevision || saveTimer || savePromise)return
+    if(!ready || busy.value || detailEpoch!==requestedEpoch || revision!==requestedRevision || revision>savedRevision || saveTimer || savePromise)return
     applyDetail(result.data); draft.value=asDraft(result.data.version)
   }
-  catch(reason){ saveError.value=mappedMessage(mapRequestError(reason)) }
+  catch(reason){ if(!ready || busy.value || detailEpoch!==requestedEpoch)return; saveError.value=mappedMessage(mapRequestError(reason)) }
 }
 function handleVisibility(){ if(document.visibilityState==='visible')void refreshCurrentIfClean() }
-onMounted(async()=>{window.addEventListener('focus',refreshCurrentIfClean);document.addEventListener('visibilitychange',handleVisibility);await app.loadBootstrap(props.apiClient);await load(linkedVersion.value)})
+onMounted(async()=>{window.addEventListener('focus',refreshCurrentIfClean);document.addEventListener('visibilitychange',handleVisibility);await app.loadBootstrap(props.apiClient);await loadHeld(linkedVersion.value)})
 onBeforeRouteLeave(async()=>{if(!ready||!editable.value)return true;return await flushPendingSave()})
 onBeforeUnmount(()=>{ready=false;previewSequence+=1;window.removeEventListener('focus',refreshCurrentIfClean);document.removeEventListener('visibilitychange',handleVisibility);clearSaveTimer();if(previewUrl.value)URL.revokeObjectURL(previewUrl.value)})
 </script>
@@ -206,18 +230,18 @@ onBeforeUnmount(()=>{ready=false;previewSequence+=1;window.removeEventListener('
         <button class="secondary-button" type="button" @click="router.push('/quotations')"><ArrowLeft :size="14" />{{ (locale === 'en-US' ? 'Back to list' : '返回列表') }}</button>
         <button v-if="detail.version.pdfAvailable" class="secondary-button" data-testid="download-quotation-pdf" type="button" @click="download(detail.version.id)"><Download :size="14" />{{ (locale === 'en-US' ? 'Download PDF' : '下载 PDF') }}</button>
         <button v-if="selectedIsLatest && !detail.quotation.opportunityId && canMutateQuotation" class="secondary-button" data-testid="link-quotation-opportunity" type="button" :disabled="busy || linkBusy" @click="openOpportunityLink"><Link2 :size="14" />{{ ui('Link opportunity', '关联商机') }}</button>
-        <button v-if="editable" class="danger-button" type="button" :disabled="busy" @click="discard"><Trash2 :size="14" />{{ (locale === 'en-US' ? 'Discard draft' : '放弃草稿') }}</button>
+        <button v-if="canDiscard" class="danger-button" data-testid="discard-quotation-draft" type="button" :disabled="busy" @click="discard"><Trash2 :size="14" />{{ (locale === 'en-US' ? 'Discard draft' : '放弃草稿') }}</button>
         <button v-if="editable && isSales && app.can('quotation:submit')" class="primary-button" data-testid="submit-quotation-approval" type="button" :disabled="busy" @click="submitApproval"><Send :size="14" />{{ ui('Submit for Manager approval', '提交经理审批') }}</button>
         <button v-if="editable && !isSales && app.can('quotation:publish')" class="primary-button" data-testid="publish-quotation" type="button" :disabled="busy" @click="publish"><Send :size="14" />{{ (locale === 'en-US' ? 'Publish official version' : '直接发布正式版本') }}</button>
         <button v-if="approvalPending && app.can('quotation:approve')" class="primary-button" data-testid="approve-quotation" type="button" :disabled="busy" @click="openApproval('Approved')"><ShieldCheck :size="14" />{{ (locale === 'en-US' ? 'Approve and publish' : '批准并发布') }}</button>
         <button v-if="approvalPending && app.can('quotation:approve')" class="danger-button" data-testid="reject-quotation" type="button" :disabled="busy" @click="openApproval('Rejected')"><ShieldX :size="14" />{{ (locale === 'en-US' ? 'Reject' : '驳回') }}</button>
-        <button v-if="selectedIsLatest && detail.version.status!=='Draft' && canMutateQuotation" class="primary-button" type="button" @click="createVersion"><FilePlus2 :size="14" />{{ (locale === 'en-US' ? 'Create new version' : '创建新版本') }}</button>
-        <button v-if="selectedIsLatest && ['Published','Expired'].includes(detail.version.status) && canMutateQuotation" class="secondary-button" type="button" @click="decisionOpen=true"><CheckCircle2 :size="14" />{{ (locale === 'en-US' ? 'Record customer result' : '记录客户结果') }}</button>
+        <button v-if="selectedIsLatest && detail.version.status!=='Draft' && canMutateQuotation" class="primary-button" data-testid="create-quotation-version" type="button" :disabled="busy" @click="createVersion"><FilePlus2 :size="14" />{{ (locale === 'en-US' ? 'Create new version' : '创建新版本') }}</button>
+        <button v-if="selectedIsLatest && ['Published','Expired'].includes(detail.version.status) && canMutateQuotation" class="secondary-button" type="button" :disabled="busy" @click="decisionOpen=true"><CheckCircle2 :size="14" />{{ (locale === 'en-US' ? 'Record customer result' : '记录客户结果') }}</button>
       </template>
     </PageHeader>
     <DataState v-if="loading" type="loading" />
     <DataState v-else-if="denied" type="denied" :message="error" :request-id="requestId" />
-    <DataState v-else-if="error||!detail||!draft" type="error" :message="error||(locale === 'en-US' ? 'Quotation failed to load' : '报价单加载失败')" :request-id="requestId" @retry="load(linkedVersion)" />
+    <DataState v-else-if="error||!detail||!draft" type="error" :message="error||(locale === 'en-US' ? 'Quotation failed to load' : '报价单加载失败')" :request-id="requestId" @retry="loadHeld(linkedVersion)" />
     <template v-else>
       <section class="summary-strip">
         <div><small>{{ ui('Name', '名称') }}</small><strong>{{ detail.quotation.refNo }}</strong><span>{{ detail.quotation.accountName }}</span></div>
