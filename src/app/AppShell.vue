@@ -10,6 +10,7 @@ import { hasCapability } from '@/domain/permissions'
 import { useNotificationStore } from '@/stores/notifications'
 import type { AppNotification, NotificationCategory } from '@/types/notifications'
 import { usingMock } from '@/api'
+import { SESSION_EXPIRED_EVENT, loginUrl } from '@/api/session'
 import { formatDisplayDate } from '@/domain/time'
 import { useI18n, useLocaleMessage } from '@/i18n'
 
@@ -45,14 +46,10 @@ const activeNavigationPath = computed(() => {
   return typeof route.meta.navigationPath === 'string' ? route.meta.navigationPath : route.path
 })
 
-const user = computed(() => store.bootstrap?.user ?? {
-  name: '演示员工24',
-  initials: 'LM',
-  role: 'Manager',
-  team: '大中华区销售',
-})
+// Nobody is shown as signed in until the server has said who is.
+const user = computed(() => store.bootstrap?.user ?? { name: '', team: '' })
 const roleLabel = computed(() => {
-  if (!store.bootstrap) return t('shell.salesManager')
+  if (!store.bootstrap) return ''
   const role = store.bootstrap.user.role
   return locale.value === 'en-US' ? role : { Manager: '经理', Sales: '销售', Engineer: '工程师' }[role]
 })
@@ -105,8 +102,14 @@ async function openNotification(notification: AppNotification) {
   }
 }
 
+// The session ended while the page was open. The page stays, so nothing typed is lost; the banner
+// offers the login page, and the notification polling stops asking a server that will only refuse.
+const sessionExpired = ref(false)
+function markSessionExpired() { sessionExpired.value = true }
+function signInAgain() { window.location.assign(loginUrl()) }
+
 async function refreshNotifications() {
-  if (usingMock || !store.bootstrap) return
+  if (usingMock || !store.bootstrap || sessionExpired.value) return
   try {
     await store.refreshNotifications()
   } catch (reason) {
@@ -185,12 +188,14 @@ async function submitPasswordChange() {
 }
 
 onMounted(async () => {
+  window.addEventListener(SESSION_EXPIRED_EVENT, markSessionExpired)
   await store.loadBootstrap()
   window.addEventListener('focus', refreshNotificationsWhenVisible)
   document.addEventListener('visibilitychange', refreshNotificationsWhenVisible)
   notificationTimer = window.setInterval(() => void refreshNotifications(), 30_000)
 })
 onBeforeUnmount(() => {
+  window.removeEventListener(SESSION_EXPIRED_EVENT, markSessionExpired)
   window.removeEventListener('focus', refreshNotificationsWhenVisible)
   document.removeEventListener('visibilitychange', refreshNotificationsWhenVisible)
   if (notificationTimer !== undefined) window.clearInterval(notificationTimer)
@@ -356,7 +361,7 @@ onBeforeUnmount(() => {
               <div class="account-profile">
                 <strong>{{ user.name }}</strong>
                 <small>{{ store.bootstrap?.user.id ?? t('shell.currentAccount') }}</small>
-                <span>{{ roleLabel }} · {{ user.team }}</span>
+                <span v-if="store.bootstrap">{{ roleLabel }} · {{ user.team }}</span>
               </div>
               <form v-if="!usingMock" class="password-setting" @submit.prevent="submitPasswordChange">
                 <h3><KeyRound :size="15" />{{ t('shell.changePassword') }}</h3>
@@ -373,6 +378,11 @@ onBeforeUnmount(() => {
         </div>
       </header>
 
+      <div v-if="sessionExpired" class="session-expired" role="alert" data-testid="session-expired">
+        <span>{{ t('shell.sessionExpired') }}</span>
+        <button class="primary-button" type="button" data-testid="sign-in-again" @click="signInAgain">{{ t('shell.signInAgain') }}</button>
+      </div>
+
       <main class="route-content" :class="{ 'standard-typography': usesStandardTypography }">
         <RouterView v-slot="{ Component }">
           <component :is="Component" :key="`${route.fullPath}:${store.identityRevision}`" :api-client="store.activeApi" />
@@ -383,6 +393,8 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
+.session-expired { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin: 12px 24px 0; padding: 10px 14px; color: #7a2e0e; background: #fff4e5; border: 1px solid #f5c98b; border-radius: 10px; font-size: 13px; font-weight: 600; }
+.session-expired .primary-button { flex: 0 0 auto; }
 .semicrm-app { position: relative; display: flex; min-height: 100dvh; overflow-x: hidden; isolation: isolate; }
 .app-sidebar { position: fixed; inset: 0 auto 0 0; z-index: 30; display: flex; width: 260px; flex-direction: column; padding: 22px 16px 18px; color: rgba(255,255,255,.88); background: var(--crm-navy-strong); border-right: 1px solid rgba(255,255,255,.08); transition: transform .22s ease; }
 .brand-block { display: flex; min-height: 52px; align-items: center; padding: 0 6px 14px; }

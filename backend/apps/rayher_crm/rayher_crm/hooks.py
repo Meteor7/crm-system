@@ -14,6 +14,10 @@ after_install = "rayher_crm.setup.install.after_install"
 after_migrate = "rayher_crm.setup.install.after_migrate"
 before_tests = "rayher_crm.tests.safety.before_tests"
 
+auth_hooks = [
+    "rayher_crm.security.api_session.require_session_for_crm_api",
+]
+
 after_request = [
     "rayher_crm.security.session_cookie.enforce_browser_session_cookie",
     "rayher_crm.api.v1.controlled_documents.apply_delivery_headers",

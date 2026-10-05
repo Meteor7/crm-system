@@ -65,6 +65,21 @@ try {
         throw 'Could not read the local Administrator password from the isolated secrets volume.'
     }
 
+    # A caller without a session is unauthenticated (401), not forbidden (403): the browser returns to the
+    # login page on 401 only. The answer carries no traceback, and the health check stays open.
+    $guestStatus = 0
+    $guestBody = ''
+    try {
+        Invoke-RestMethod -Uri "$BaseUrl/api/method/rayher_crm.api.v1.bootstrap.get_bootstrap" | Out-Null
+    } catch {
+        $guestStatus = [int]$_.Exception.Response.StatusCode
+        $guestBody = [string]$_.ErrorDetails.Message
+    }
+    if ($guestStatus -ne 401) { throw "Expected HTTP 401 for a CRM API call without a session, got $guestStatus." }
+    if ($guestBody -match 'Traceback') { throw 'The 401 for a CRM API call without a session exposed a traceback.' }
+    $health = Invoke-RestMethod -Uri "$BaseUrl/api/method/rayher_crm.api.v1.health.get_health"
+    if ($health.message.data.status -ne 'ok') { throw 'The health check is no longer open to a caller without a session.' }
+
     $adminSession = New-Object Microsoft.PowerShell.Commands.WebRequestSession
     Invoke-RestMethod -Uri "$BaseUrl/api/method/login" -Method Post -Body @{ usr = 'Administrator'; pwd = $adminPassword } -WebSession $adminSession | Out-Null
 
@@ -252,7 +267,7 @@ try {
     }
     if ($scopeStatus -ne 403) { throw "Expected HTTP 403 for foreign Account detail, got $scopeStatus." }
 
-    Write-Output 'Stage 5B authenticated HTTP acceptance passed: create/list/update/409/scope-403/assignment-403/convert/sites.'
+    Write-Output 'Stage 5B authenticated HTTP acceptance passed: guest-401/create/list/update/409/scope-403/assignment-403/convert/sites.'
 } finally {
     $adminPassword = $null
     $salesPassword = $null

@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { CrmApiError } from './contracts'
 import { createFrappeApi, FRAPPE_METHODS } from './frappe-adapter'
+import { SESSION_EXPIRED_EVENT } from './session'
 
 function jsonResponse(payload: unknown, status = 200, headers: HeadersInit = {}) {
   return new Response(JSON.stringify(payload), {
@@ -363,6 +364,79 @@ describe('Frappe JSON transport', () => {
     }))
     const promise = createFrappeApi({ fetchImpl: fetchMock }).getBootstrap()
     await expect(promise).rejects.toEqual(expect.objectContaining({ code, requestId: 'req_http' }))
+  })
+
+  describe('a session that is no longer signed in', () => {
+    // The adapter redirects once per page load, so each test loads it afresh.
+    async function freshAdapter() {
+      vi.resetModules()
+      return import('./frappe-adapter')
+    }
+
+    function stubLocation() {
+      const assign = vi.fn()
+      vi.stubGlobal('location', { pathname: '/assets/rayher_crm/crm/index.html', search: '?v=819a78af9dc5', hash: '#/warnings', assign })
+      return assign
+    }
+
+    function expiredSessionListener() {
+      const listener = vi.fn()
+      window.addEventListener(SESSION_EXPIRED_EVENT, listener)
+      return { listener, stop: () => window.removeEventListener(SESSION_EXPIRED_EVENT, listener) }
+    }
+
+    it('returns to the login page and keeps the current address when the bootstrap finds nobody signed in', async () => {
+      const assign = stubLocation()
+      const expired = expiredSessionListener()
+      const { createFrappeApi: create } = await freshAdapter()
+      const fetchMock = vi.fn().mockImplementation(async () => jsonResponse({ exc_type: 'AuthenticationError' }, 401))
+      const api = create({ fetchImpl: fetchMock })
+
+      await expect(api.getBootstrap()).rejects.toEqual(expect.objectContaining({ code: 'UNAUTHENTICATED', message: '登录已失效，请重新登录。' }))
+      await expect(api.getBootstrap()).rejects.toEqual(expect.objectContaining({ code: 'UNAUTHENTICATED' }))
+      expired.stop()
+
+      expect(assign).toHaveBeenCalledTimes(1)
+      expect(assign).toHaveBeenCalledWith(
+        `/login?redirect-to=${encodeURIComponent('/assets/rayher_crm/crm/index.html?v=819a78af9dc5#/warnings')}`,
+      )
+      expect(expired.listener).not.toHaveBeenCalled()
+    })
+
+    it('stays on the page and announces the expired session when any other call finds nobody signed in', async () => {
+      const assign = stubLocation()
+      const expired = expiredSessionListener()
+      const { createFrappeApi: create } = await freshAdapter()
+      const fetchMock = vi.fn().mockImplementation(async () => jsonResponse({ exc_type: 'AuthenticationError' }, 401))
+      const api = create({ fetchImpl: fetchMock })
+
+      // A background poll, a write, and a download: none of them may take the page away from what is being typed.
+      await expect(api.listNotifications({ page: 1, pageSize: 1 })).rejects.toEqual(expect.objectContaining({ code: 'UNAUTHENTICATED' }))
+      await expect(api.markAllNotificationsRead()).rejects.toEqual(expect.objectContaining({ code: 'UNAUTHENTICATED' }))
+      await expect(api.getContactFile('CRM-CF-1')).rejects.toEqual(expect.objectContaining({ code: 'UNAUTHENTICATED' }))
+      expired.stop()
+
+      expect(assign).not.toHaveBeenCalled()
+      expect(expired.listener).toHaveBeenCalledTimes(3)
+    })
+
+    it.each([
+      [403, { message: { data: null, error: { code: 'PERMISSION_DENIED', message: 'The current user is not permitted to perform this operation.' } } }, 'PERMISSION_DENIED'],
+      [403, { message: { data: null, error: { code: 'SCOPE_DENIED', message: 'The Account is outside the current user scope.' } } }, 'SCOPE_DENIED'],
+      [500, { message: { data: null, error: { code: 'INTERNAL_ERROR', message: 'The request could not be completed.' } } }, 'INTERNAL_ERROR'],
+    ] as const)('stays on the page, with the session still good, on HTTP %s %j', async (status, payload, code) => {
+      const assign = stubLocation()
+      const expired = expiredSessionListener()
+      const { createFrappeApi: create } = await freshAdapter()
+      const api = create({ fetchImpl: vi.fn().mockImplementation(async () => jsonResponse(payload, status)) })
+
+      await expect(api.getBootstrap()).rejects.toEqual(expect.objectContaining({ code }))
+      await expect(api.markAllNotificationsRead()).rejects.toEqual(expect.objectContaining({ code }))
+      expired.stop()
+
+      expect(assign).not.toHaveBeenCalled()
+      expect(expired.listener).not.toHaveBeenCalled()
+    })
   })
 
   it('normalizes fetch failures without exposing implementation errors', async () => {
