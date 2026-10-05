@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from unittest.mock import patch
+
 import frappe
 from frappe.tests.utils import FrappeTestCase
 from frappe.utils import add_days, today
@@ -104,6 +106,47 @@ class TestDdlReminders(FrappeTestCase):
             pluck="recipient_user",
         ))
         self.assertTrue({self.sales, self.manager}.issubset(seven_day_recipients))
+
+    def _booking_for_scope_test(self, suffix):
+        frappe.set_user(self.sales)
+        account = create_account({
+            "name": f"DDL Scope {suffix}", "shortName": f"DDL {suffix}", "segment": "Frontend",
+            "tier": "A", "city": "Shanghai", "region": "East China", "owner": self.sales,
+        })
+        site = create_site(account["id"], {
+            "name": f"DDL Site {suffix}", "city": "Shanghai", "type": "Fab", "process": "Frontend", "status": "量产",
+        })
+        contact = create_contact({
+            "accountId": account["id"], "siteId": site["id"], "name": f"DDL Contact {suffix}",
+            "title": "Director", "department": "Engineering", "relationship": "Developing",
+            "owner": self.sales, "status": "Active",
+        })
+        return frappe.get_doc({
+            "doctype": "CRM Booking", "account": account["id"], "primary_contact": contact["id"],
+            "booking_type": "Equipment", "equipment": "Inspection Tool", "quantity": 1,
+            "ddl": add_days(today(), 15), "amount": "1000.00", "currency": "CNY",
+            "status": "Confirmed", "booking_date": today(), "booking_owner": self.sales, "source": "Upsell",
+        }).insert(ignore_permissions=True)
+
+    def test_transferred_account_skips_stale_owner_without_stopping_other_reminders(self):
+        valid = self._booking_for_scope_test("valid")
+        stale = self._booking_for_scope_test("transferred")
+        frappe.set_user("Administrator")
+        new_owner = self._user("crm-ddl-new-owner@example.invalid", "CRM Sales")
+        frappe.db.set_value("Customer", stale.account, {
+            "custom_crm_owner": new_owner, "custom_crm_visibility": "Private",
+        })
+        send_ddl_reminders()
+        self.assertFalse(frappe.db.exists("CRM Notification Event", {
+            "source_doctype": "CRM Booking", "source_name": stale.name, "recipient_user": self.sales,
+        }))
+        for booking, recipient in ((stale, self.manager), (valid, self.sales)):
+            self.assertTrue(frappe.db.exists("CRM Notification Event", {
+                "source_doctype": "CRM Booking", "source_name": booking.name, "recipient_user": recipient,
+            }))
+        with patch("rayher_crm.services.notifications.create_notification", side_effect=RuntimeError("database unavailable")):
+            with self.assertRaisesRegex(RuntimeError, "database unavailable"):
+                send_ddl_reminders()
 
     def test_demo_and_test_run_deadlines_reach_all_assigned_people(self):
         request = frappe.get_doc({

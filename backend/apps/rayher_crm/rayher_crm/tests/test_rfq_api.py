@@ -4,6 +4,7 @@ from io import BytesIO
 from unittest.mock import patch
 
 import frappe
+from frappe.permissions import add_user_permission, remove_user_permission
 from frappe.tests.utils import FrappeTestCase
 from frappe.utils import random_string
 from pypdf import PdfWriter
@@ -210,6 +211,11 @@ class TestRfqApi(FrappeTestCase):
         self.assertEqual(manual.exception.code, "INVALID_TRANSITION")
 
         frappe.set_user(self.manager)
+        account = frappe.db.get_value("CRM RFQ", created["id"], "account")
+        frappe.db.set_value("Customer", account, {
+            "custom_crm_owner": self.other_sales,
+            "custom_crm_visibility": "Private",
+        })
         rollback_reason = "Customer changed the equipment specification."
         rolled_back = rollback_opportunity_stage(
             opportunity["id"], CUSTOMER_BUDGET_APPROVED, rollback_reason, latest["modified"],
@@ -219,12 +225,133 @@ class TestRfqApi(FrappeTestCase):
         self.assertEqual(reopened["status"], "Sales Revision")
         self.assertEqual(reopened["currentVersion"]["status"], "Returned")
         self.assertEqual(reopened["currentVersion"]["managerComment"], rollback_reason)
+        self.assertFalse(frappe.db.exists("CRM Notification Event", {
+            "source_name": created["id"],
+            "recipient_user": self.sales,
+            "title": "RFQ revision required after stage rollback",
+        }))
 
         revised_after_rollback = revise_rfq(
             created["id"], pdf_part("rollback-revision.pdf"), reopened["modified"], CleanScanner(),
         )
         self.assertEqual(revised_after_rollback["status"], "Engineer Review")
         self.assertEqual(revised_after_rollback["currentVersion"]["uploadedBy"], self.manager)
+
+    def test_revision_skips_unreachable_existing_engineer_and_notifies_reachable_one(self):
+        for mode in ("reachable", "disabled", "role_removed", "source_scope_lost"):
+            with self.subTest(recipient_state=mode):
+                opportunity = advance_opportunity_fixture(self._opportunity(), CUSTOMER_BUDGET_APPROVED)
+                created = create_rfq(
+                    {"opportunityId": opportunity["id"], "engineerId": self.engineer},
+                    pdf_part(), CleanScanner(),
+                )
+                frappe.set_user(self.engineer)
+                commented = submit_engineer_comment(created["id"], "Please review.", created["modified"])
+                frappe.set_user(self.manager)
+                returned = review_rfq(created["id"], "Returned", "Revision needed.", commented["modified"])
+                frappe.set_user("Administrator")
+                engineer = frappe.get_doc("User", self.engineer)
+                original_enabled = engineer.enabled
+                original_roles = [row.role for row in engineer.roles]
+                unrelated = None
+                try:
+                    if mode == "disabled":
+                        engineer.enabled = 0
+                        engineer.save(ignore_permissions=True)
+                    elif mode == "role_removed":
+                        engineer.set("roles", [{"role": role} for role in original_roles if role != "CRM Engineer"])
+                        engineer.save(ignore_permissions=True)
+                    elif mode == "source_scope_lost":
+                        frappe.set_user(self.other_sales)
+                        unrelated = create_account({
+                            "name": f"Revision notice scope {random_string(6)}", "shortName": "Notice",
+                            "segment": "Frontend", "tier": "A", "city": "Shanghai",
+                            "region": "East China", "owner": self.other_sales,
+                        })
+                        frappe.set_user("Administrator")
+                        add_user_permission("Customer", unrelated["id"], self.engineer, ignore_permissions=True)
+                    frappe.clear_cache(user=self.engineer)
+                    frappe.set_user(self.sales)
+                    revised = revise_rfq(
+                        created["id"], pdf_part("revised-recipient-policy.pdf"), returned["modified"], CleanScanner(),
+                    )
+                    self.assertEqual((revised["status"], revised["latestVersion"], len(revised["versions"])),
+                                     ("Engineer Review", 2, 2))
+                    self.assertEqual(revised["currentVersion"]["uploadedBy"], self.sales)
+                    notice = {"source_name": created["id"], "recipient_user": self.engineer,
+                              "title": "RFQ revision requires Engineer review"}
+                    self.assertEqual(bool(frappe.db.exists("CRM Notification Event", notice)), mode == "reachable")
+                finally:
+                    frappe.set_user("Administrator")
+                    if unrelated:
+                        remove_user_permission("Customer", unrelated["id"], self.engineer, ignore_permissions=True)
+                    engineer = frappe.get_doc("User", self.engineer)
+                    engineer.enabled = original_enabled
+                    engineer.set("roles", [{"role": role} for role in original_roles])
+                    engineer.save(ignore_permissions=True)
+                    frappe.clear_cache(user=self.engineer)
+
+    def test_revision_notification_persistence_failure_rolls_back_version_and_master(self):
+        opportunity = advance_opportunity_fixture(self._opportunity(), CUSTOMER_BUDGET_APPROVED)
+        created = create_rfq(
+            {"opportunityId": opportunity["id"], "engineerId": self.engineer},
+            pdf_part(), CleanScanner(),
+        )
+        frappe.set_user(self.engineer)
+        commented = submit_engineer_comment(created["id"], "Please review.", created["modified"])
+        frappe.set_user(self.manager)
+        returned = review_rfq(created["id"], "Returned", "Revision needed.", commented["modified"])
+        before = get_rfq(created["id"])
+        with patch("rayher_crm.services.notifications.create_notification",
+                   side_effect=RuntimeError("notification persistence unavailable")):
+            with self.assertRaisesRegex(RuntimeError, "notification persistence unavailable"):
+                revise_rfq(created["id"], pdf_part("failed-notice-revision.pdf"), returned["modified"], CleanScanner())
+        after = get_rfq(created["id"])
+        self.assertEqual((after["status"], after["latestVersion"], after["modified"], len(after["versions"])),
+                         (before["status"], before["latestVersion"], before["modified"], len(before["versions"])))
+        self.assertEqual(after["currentVersion"]["id"], before["currentVersion"]["id"])
+
+    def test_engineer_comment_skips_manager_restricted_by_user_permission(self):
+        opportunity = advance_opportunity_fixture(self._opportunity(), CUSTOMER_BUDGET_APPROVED)
+        created = create_rfq(
+            {"opportunityId": opportunity["id"], "engineerId": self.engineer},
+            pdf_part(),
+            CleanScanner(),
+        )
+        restricted = self._user("crm-rfq-restricted-manager@example.invalid", "CRM Manager")
+        frappe.set_user(self.other_sales)
+        unrelated = create_account({
+            "name": f"Restricted RFQ Manager {random_string(6)}",
+            "shortName": "Restricted",
+            "segment": "Frontend",
+            "tier": "A",
+            "city": "Shanghai",
+            "region": "East China",
+            "owner": self.other_sales,
+        })
+        frappe.set_user("Administrator")
+        add_user_permission("Customer", unrelated["id"], restricted, ignore_permissions=True)
+        frappe.clear_cache(user=restricted)
+        try:
+            frappe.set_user(self.engineer)
+            commented = submit_engineer_comment(
+                created["id"], "Specification is feasible.", created["modified"],
+            )
+            self.assertEqual(commented["status"], "Manager Approval")
+            self.assertFalse(frappe.db.exists("CRM Notification Event", {
+                "source_name": created["id"],
+                "recipient_user": restricted,
+                "title": "RFQ requires Manager approval",
+            }))
+            self.assertTrue(frappe.db.exists("CRM Notification Event", {
+                "source_name": created["id"],
+                "recipient_user": self.manager,
+                "title": "RFQ requires Manager approval",
+            }))
+        finally:
+            frappe.set_user("Administrator")
+            remove_user_permission("Customer", unrelated["id"], restricted, ignore_permissions=True)
+            frappe.clear_cache(user=restricted)
 
     def test_manager_approval_needs_a_budget_approved_open_opportunity(self):
         opportunity = advance_opportunity_fixture(self._opportunity(), CUSTOMER_BUDGET_APPROVED)
@@ -258,6 +385,29 @@ class TestRfqApi(FrappeTestCase):
         self.assertFalse(frappe.db.exists(
             "CRM Opportunity Stage History", {"opportunity": opportunity["id"], "event": "rfq_approved"},
         ))
+
+    def test_manager_decision_skips_revoked_sales_but_real_notice_failure_rolls_back(self):
+        opportunity = advance_opportunity_fixture(self._opportunity(), CUSTOMER_BUDGET_APPROVED)
+        created = create_rfq(
+            {"opportunityId": opportunity["id"], "engineerId": self.engineer}, pdf_part(), CleanScanner(),
+        )
+        frappe.set_user(self.engineer)
+        commented = submit_engineer_comment(created["id"], "Specification is feasible.", created["modified"])
+        frappe.set_user(self.manager)
+        with patch("rayher_crm.services.notifications.create_notification", side_effect=RuntimeError("notice write failed")):
+            with self.assertRaisesRegex(RuntimeError, "notice write failed"):
+                review_rfq(created["id"], "Returned", "Revise specification", commented["modified"])
+        self.assertEqual(get_rfq(created["id"])["status"], "Manager Approval")
+        account = frappe.db.get_value("CRM RFQ", created["id"], "account")
+        frappe.db.set_value("Customer", account, {
+            "custom_crm_owner": self.other_sales, "custom_crm_visibility": "Private",
+        })
+        returned = review_rfq(created["id"], "Returned", "Revise specification", commented["modified"])
+        self.assertEqual(returned["status"], "Sales Revision")
+        self.assertFalse(frappe.db.exists("CRM Notification Event", {
+            "source_doctype": "CRM RFQ", "source_name": created["id"], "recipient_user": self.sales,
+            "title": "RFQ Returned",
+        }))
 
     def test_manager_can_upload_an_initial_rfq_for_the_opportunity_owner(self):
         opportunity = self._opportunity()

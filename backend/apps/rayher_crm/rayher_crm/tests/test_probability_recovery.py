@@ -73,7 +73,7 @@ class TestProbabilityRecovery(FrappeTestCase):
         self.assertFalse(frappe.db.exists("CRM Probability Recovery", {"opportunity": opportunity["id"]}))
         self.assertFalse(frappe.db.exists("CRM Probability Recovery Revision", {"opportunity": opportunity["id"]}))
         self.assertEqual(frappe.db.count("CRM Notification Event", {"name": ["in", notifications]}), len(notifications))
-        self.assertTrue(any(event["id"] in row["route"] for row in list_notifications(page_size=200)["items"]))
+        self.assertFalse(any(event["id"] in row["route"] for row in list_notifications(page_size=200)["items"]))
 
     def test_plan_edit_stays_pending_and_only_owner_action_closes_this_event(self):
         opportunity = self._lower()
@@ -132,7 +132,7 @@ class TestProbabilityRecovery(FrappeTestCase):
             self._lower()
         self._save(opportunity, event, "Different plan")
         self.assertEqual(frappe.db.count("CRM Notification Event", self._notice_filters(opportunity)), len(notifications))
-        with patch("rayher_crm.services.probability_recovery.create_notification", side_effect=RuntimeError("notification unavailable")):
+        with patch("rayher_crm.services.probability_recovery.notify_if_reachable", side_effect=RuntimeError("notification unavailable")):
             with self.assertRaises(RuntimeError):
                 update_strategy_opportunity(opportunity["id"], {"probabilityLevel": "pipeline", "probabilityReason": "New delay",
                                             "probabilityActionPlan": "Arrange escalation"}, opportunity["modified"])
@@ -155,7 +155,7 @@ class TestProbabilityRecovery(FrappeTestCase):
                 raise RuntimeError("second delivery failed")
             return create_notification(**kwargs)
         with patch("rayher_crm.services.probability_recovery.active_crm_users", return_value=[self.manager, second_manager]), \
-             patch("rayher_crm.services.probability_recovery.create_notification", side_effect=deliver):
+             patch("rayher_crm.services.probability_recovery.notify_if_reachable", side_effect=deliver):
             with self.assertRaises(RuntimeError):
                 self._lower()
         self.assertFalse(frappe.db.exists("CRM Notification Event", self._notice_filters(self.opportunity)))
@@ -214,12 +214,63 @@ class TestProbabilityRecovery(FrappeTestCase):
         self.assertEqual(result["plan"], "Meet the technical buyer too")
         self.assertEqual([row["plan"] for row in result["history"]], ["Meet the technical buyer too", "Meet procurement"])
         self.assertEqual(result["history"][0]["actor"], self.manager)
+        notice_filters = {"source_doctype": "CRM Probability Recovery Revision",
+            "source_name": result["history"][0]["id"], "recipient_user": self.sales}
+        self.assertEqual(frappe.db.count("CRM Notification Event", notice_filters), 1)
         self.assertNotEqual(result["modified"], event["recovery"]["modified"])
         same = self._save(opportunity, event, result["plan"], result["modified"])
         self.assertEqual(same, result)
+        self.assertEqual(frappe.db.count("CRM Notification Event", notice_filters), 1)
         current = get_strategy_opportunity(opportunity["id"])["probabilityHistory"][0]
         for field in ("id", "from", "to", "reason", "actor", "at"):
             self.assertEqual(current[field], event[field])
+
+    def test_manager_plan_notice_follows_current_owner_and_stale_retry_does_not_duplicate(self):
+        from urllib.parse import quote
+
+        opportunity = self._lower()
+        event = opportunity["probabilityHistory"][0]
+        frappe.set_user("Administrator")
+        frappe.db.set_value("Customer", opportunity["accountId"], "custom_crm_visibility", "Public")
+        frappe.db.set_value("CRM Opportunity", opportunity["id"], "opportunity_owner", self.other)
+        frappe.set_user(self.manager)
+        current = get_strategy_opportunity(opportunity["id"])
+        result = self._save(current, event, "Follow up with the new owner")
+        revision = result["history"][0]["id"]
+        notices = frappe.get_all("CRM Notification Event", filters={
+            "source_doctype": "CRM Probability Recovery Revision", "source_name": revision,
+        }, fields=["recipient_user", "route", "dedupe_key"])
+        self.assertEqual(len(notices), 1)
+        self.assertEqual(notices[0].recipient_user, self.other)
+        self.assertEqual(notices[0].route,
+            f"/opportunities/{quote(opportunity['id'], safe='')}?probabilityEvent={quote(event['id'], safe='')}")
+        self.assertTrue(notices[0].dedupe_key)
+        with self.assertRaises(CrmApiException) as stale:
+            self._save(current, event, "Stale concurrent plan")
+        self.assertEqual(stale.exception.code, "VERSION_CONFLICT")
+        self.assertEqual(frappe.db.count("CRM Notification Event", {
+            "source_doctype": "CRM Probability Recovery Revision", "source_name": revision,
+        }), 1)
+        self.assertEqual(get_strategy_opportunity(opportunity["id"])["probabilityHistory"][0]["recovery"], result)
+
+    def test_plan_notification_failure_rolls_back_plan_and_revision_but_unreachable_owner_is_skipped(self):
+        opportunity = self._lower()
+        event = opportunity["probabilityHistory"][0]
+        frappe.set_user(self.manager)
+        with patch("rayher_crm.services.notifications.create_notification", side_effect=RuntimeError("notification unavailable")):
+            with self.assertRaises(RuntimeError):
+                self._save(opportunity, event, "Should roll back")
+        current = get_strategy_opportunity(opportunity["id"])["probabilityHistory"][0]["recovery"]
+        self.assertEqual(current, event["recovery"])
+        frappe.db.set_value("User", self.sales, "enabled", 0)
+        try:
+            result = self._save(opportunity, event, "Owner temporarily unavailable")
+            self.assertEqual(result["plan"], "Owner temporarily unavailable")
+            self.assertFalse(frappe.db.exists("CRM Notification Event", {
+                "source_doctype": "CRM Probability Recovery Revision", "source_name": result["history"][0]["id"],
+            }))
+        finally:
+            frappe.db.set_value("User", self.sales, "enabled", 1)
 
     def test_lists_batch_recovery_queries_and_keep_the_correct_event_mapping(self):
         first = self._lower()
@@ -268,6 +319,22 @@ class TestProbabilityRecovery(FrappeTestCase):
         with self.assertRaises(CrmApiException) as race:
             save_plan(current["id"], event.name, payload, current["modified"])
         self.assertEqual(race.exception.code, "VERSION_CONFLICT")
+
+    def test_manager_legacy_plan_creation_does_not_send_an_update_notice(self):
+        event = frappe.get_doc({
+            "doctype": "CRM Opportunity Probability History", "opportunity": self.opportunity["id"],
+            "from_level": "upside", "to_level": "pipeline", "reason": "Legacy reason",
+            "actor": self.sales, "changed_at": frappe.utils.now_datetime(),
+        }).insert(ignore_permissions=True)
+        frappe.set_user(self.manager)
+        result = save_plan(self.opportunity["id"], event.name, {
+            "plan": "First recorded plan", "recoveryModified": None,
+        }, self.opportunity["modified"])
+        self.assertEqual(len(result["history"]), 1)
+        self.assertEqual(result["history"][0]["kind"], "Created")
+        self.assertFalse(frappe.db.exists("CRM Notification Event", {
+            "source_doctype": "CRM Probability Recovery Revision", "source_name": result["history"][0]["id"],
+        }))
 
     def test_non_downgrades_cannot_get_a_plan_and_new_downgrades_keep_separate_plans(self):
         initial = self.opportunity["probabilityHistory"][0]

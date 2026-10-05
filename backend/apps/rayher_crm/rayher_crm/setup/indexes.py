@@ -17,9 +17,33 @@ LOSS_REVIEW_INDEX = "idx_crm_opportunity_loss_review"
 LOSS_REVIEW_REVISION_INDEX = "idx_crm_opportunity_loss_review_revision"
 WARNING_HANDLING_REVISION_INDEX = "idx_crm_warning_handling_revision"
 LEAD_CONVERTED_ACCOUNT_INDEX = "custom_crm_converted_account_index"
+NOTIFICATION_RECIPIENT_CREATED_INDEX = "idx_crm_notification_recipient_created"
+NOTIFICATION_RECIPIENT_UNREAD_CREATED_INDEX = "idx_crm_notification_recipient_unread_created"
+NOTIFICATION_SOURCE_INDEX = "idx_crm_notification_source"
+
+
+def install_notification_indexes() -> None:
+    if not frappe.db.table_exists("CRM Notification Event"):
+        return
+    frappe.db.add_index(
+        "CRM Notification Event",
+        ["recipient_user", "created_at", "name"],
+        NOTIFICATION_RECIPIENT_CREATED_INDEX,
+    )
+    frappe.db.add_index(
+        "CRM Notification Event",
+        ["recipient_user", "read_at", "created_at", "name"],
+        NOTIFICATION_RECIPIENT_UNREAD_CREATED_INDEX,
+    )
+    frappe.db.add_index(
+        "CRM Notification Event",
+        ["source_doctype", "source_name"],
+        NOTIFICATION_SOURCE_INDEX,
+    )
 
 
 def install_stage5f_indexes() -> None:
+    install_notification_indexes()
     if frappe.db.table_exists("File") and frappe.db.has_column("File", "content_hash"):
         ensure_file_content_hash_index()
     if frappe.db.table_exists("Lead") and frappe.db.has_column(

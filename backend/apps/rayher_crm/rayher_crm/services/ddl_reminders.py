@@ -10,7 +10,7 @@ import frappe
 from frappe.utils import getdate, today
 
 from rayher_crm.permissions.roles import resolve_crm_role
-from rayher_crm.services.notifications import active_crm_users, create_notification
+from rayher_crm.services.notifications import active_crm_users, notify_if_reachable
 
 
 REMINDER_DAYS = {15, 7}
@@ -79,7 +79,7 @@ def _send_source_reminder(
     for recipient in sorted(recipients):
         dedupe_key = hashlib.sha256("|".join((recipient, source_doctype, source_name, title, message)).encode("utf-8")).hexdigest()
         try:
-            create_notification(
+            notification = notify_if_reachable(
                 recipient=recipient,
                 category=category,
                 title=title,
@@ -89,7 +89,8 @@ def _send_source_reminder(
                 source_name=source_name,
                 dedupe_key=dedupe_key,
             )
-            created += 1
+            if notification is not None:
+                created += 1
         except (frappe.UniqueValidationError, frappe.DuplicateEntryError):
             continue
     return created

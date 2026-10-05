@@ -1296,7 +1296,8 @@ def conditions_for_doctype(
     if not role or not resolved_user:
         return "1=0"
     if doctype == "CRM Notification Event":
-        return f"`tabCRM Notification Event`.`recipient_user` = {frappe.db.escape(resolved_user)}"
+        from rayher_crm.permissions.notification_scope import notification_condition
+        return notification_condition(resolved_user, for_bound_query=for_bound_query)
     if doctype == "CRM Opportunity Stakeholder" and role == "Engineer":
         return "1=0"
     if doctype in OPPORTUNITY_SCOPED_CHILD_DOCTYPES:

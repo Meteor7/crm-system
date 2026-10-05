@@ -337,14 +337,14 @@ def _notify_managers_of_submission(visit) -> None:
     caller's savepoint so a failed save leaves no reminder behind. A Manager who saves
     the record is not reminded about their own submission.
     """
-    from rayher_crm.services.notifications import create_notification
+    from rayher_crm.services.notifications import notify_if_reachable
     from rayher_crm.services.quotations import _manager_users
 
     account_name = frappe.db.get_value("Customer", visit.account, "customer_name") or visit.account
     for manager in _manager_users():
         if manager == frappe.session.user:
             continue
-        create_notification(
+        notify_if_reachable(
             recipient=manager, category="Visit", title="Visit awaiting review",
             message=f"{account_name} · {visit.subject} was submitted for Manager review.",
             route=f"/visits?focus={visit.name}",

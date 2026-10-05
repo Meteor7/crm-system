@@ -31,7 +31,7 @@ from rayher_crm.services.file_security import (
     MalwareScanner,
     validate_and_scan,
 )
-from rayher_crm.services.notifications import active_crm_users, create_notification
+from rayher_crm.services.notifications import active_crm_users, create_notification, notify_if_reachable
 from rayher_crm.services.opportunity_stages import CUSTOMER_BUDGET_APPROVED
 from rayher_crm.services.sites import can_read_site_data
 
@@ -44,9 +44,10 @@ TIPRAY_PREVIEW_ERROR = (
 )
 
 
-def _notify(recipients: set[str], master, title: str, message: str) -> None:
+def _notify(recipients: set[str], master, title: str, message: str, *, informational: bool = False) -> None:
+    notify = notify_if_reachable if informational else create_notification
     for recipient in sorted(recipients - {frappe.session.user, None, ""}):
-        create_notification(
+        notify(
             recipient=recipient,
             category="RFQ",
             title=title,
@@ -90,6 +91,7 @@ def reopen_approved_rfq_for_stage_rollback(opportunity_id: str, reason: str) -> 
         master,
         "RFQ revision required after stage rollback",
         f"{master.name}: Opportunity stage was rolled back. Upload a revised RFQ and repeat technical approval.",
+        informational=True,
     )
 
 
@@ -386,7 +388,7 @@ def revise_rfq(name: Any, part: Mapping[str, Any], expected_modified: Any, scann
         _create_version(master, part, scanner)
         _notify(
             {master.engineer_owner}, master, "RFQ revision requires Engineer review",
-            f"{master.name}: Sales uploaded a revised RFQ version.",
+            f"{master.name}: Sales uploaded a revised RFQ version.", informational=True,
         )
     except Exception:
         frappe.db.rollback(save_point=savepoint)
@@ -416,6 +418,7 @@ def submit_engineer_comment(name: Any, comment: Any, expected_modified: Any) -> 
     _notify(
         set(active_crm_users("Manager")), master, "RFQ requires Manager approval",
         f"{master.name}: Engineer review is complete.",
+        informational=True,
     )
     master.reload()
     return _serialize_detail(master)
@@ -464,6 +467,7 @@ def review_rfq(name: Any, decision: Any, comment: Any, expected_modified: Any) -
             {master.sales_owner, master.engineer_owner}, master,
             f"RFQ {normalized}",
             manager_comment or f"{master.name} was {normalized.lower()} by Manager.",
+            informational=True,
         )
     except Exception:
         frappe.db.rollback(save_point=savepoint)

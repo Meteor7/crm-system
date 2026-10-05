@@ -29,3 +29,4 @@ rayher_crm.patches.v1_0.protect_contact_files
 rayher_crm.patches.v1_0.protect_visit_files
 rayher_crm.patches.v1_0.protect_controlled_document_files
 rayher_crm.patches.v1_0.protect_service_managed_files
+rayher_crm.patches.v1_0.add_notification_scope_indexes

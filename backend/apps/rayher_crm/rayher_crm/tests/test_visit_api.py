@@ -716,6 +716,7 @@ class TestVisitApi(FrappeTestCase):
 
     def test_review_endpoint_and_owner_reassignment_notify_the_owner(self):
         account, contact = self._records(self.sales, "Review")
+        frappe.db.set_value("Customer", account["id"], "custom_crm_visibility", "Public")
         visit = create_visit(self._input(account, contact, self.sales))
         frappe.set_user(self.manager)
         # Reassigning the owner through the edit command tells the new owner.

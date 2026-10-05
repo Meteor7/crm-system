@@ -11,7 +11,7 @@ from rayher_crm.permissions.roles import assert_capability, resolve_crm_role
 from rayher_crm.services.common import to_iso_timestamp
 from rayher_crm.services.concurrency import lock_document
 from rayher_crm.services.opportunity_stages import probability_level_rank
-from rayher_crm.services.notifications import active_crm_users, create_notification
+from rayher_crm.services.notifications import active_crm_users, notify_if_reachable
 from rayher_crm.permissions.scope import has_crm_permission
 
 
@@ -28,8 +28,8 @@ def is_downgrade(event) -> bool:
     return bool(event.from_level) and probability_level_rank(event.to_level) < probability_level_rank(event.from_level)
 
 
-def _append_revision(doc, kind: str) -> None:
-    frappe.get_doc({
+def _append_revision(doc, kind: str):
+    return frappe.get_doc({
         "doctype": "CRM Probability Recovery Revision", "recovery": doc.name,
         "opportunity": doc.opportunity, "kind": kind, "plan": doc.plan,
         "actor": frappe.session.user, "recorded_at": frappe.utils.now_datetime(),
@@ -103,7 +103,7 @@ def _lock_context(opportunity_id: str, event_id: str, expected_modified):
 
 
 def save_plan(opportunity_id: str, event_id: str, payload: dict, expected_modified) -> dict:
-    _, event = _lock_context(opportunity_id, event_id, expected_modified)
+    opportunity, event = _lock_context(opportunity_id, event_id, expected_modified)
     plan = plan_text(payload.get("plan"))
     # A competing legacy creation does not change the parent version. Use a current
     # read after the parent lock; the request may already have a REPEATABLE READ snapshot.
@@ -119,12 +119,22 @@ def save_plan(opportunity_id: str, event_id: str, payload: dict, expected_modifi
     savepoint = f"crm_recovery_{frappe.generate_hash(length=8)}"
     frappe.db.savepoint(savepoint)
     try:
+        revision = None
         if doc is None:
-            create_recovery(event, plan)
+            doc = create_recovery(event, plan)
         elif doc.plan != plan:
             doc.plan = plan
             doc.save(ignore_permissions=True)
-            _append_revision(doc, "PlanUpdated")
+            revision = _append_revision(doc, "PlanUpdated").name
+        if revision and resolve_crm_role() == "Manager" and opportunity.opportunity_owner != frappe.session.user:
+            notify_if_reachable(
+                recipient=opportunity.opportunity_owner, category="Opportunity",
+                title="Recovery plan updated by Manager",
+                message=f"{opportunity.title}: {plan}"[:1000],
+                route=f"/opportunities/{quote(opportunity.name, safe='')}?probabilityEvent={quote(event.name, safe='')}",
+                source_doctype="CRM Probability Recovery Revision", source_name=revision,
+                dedupe_key=sha256(f"recovery-plan:{revision}:{opportunity.opportunity_owner}".encode()).hexdigest(),
+            )
     except Exception:
         frappe.db.rollback(save_point=savepoint)
         raise
@@ -161,7 +171,7 @@ def notify_downgrade(opportunity, event) -> None:
     for recipient in active_crm_users("Manager"):
         if not has_crm_permission(opportunity, user=recipient, permission_type="read"):
             continue
-        create_notification(
+        notify_if_reachable(
             recipient=recipient, category="Opportunity", title="Opportunity probability downgraded",
             message=f"{opportunity.title}: {event.from_level} → {event.to_level}. {event.reason or ''}"[:1000],
             route=f"/opportunities/{quote(opportunity.name, safe='')}?probabilityEvent={quote(event.name, safe='')}",

@@ -17,7 +17,7 @@ from rayher_crm.services.bookings import (
 )
 from rayher_crm.services.common import optional_date, required_text
 from rayher_crm.services.money import as_decimal, decimal_string, optional_money_text
-from rayher_crm.services.notifications import create_notification
+from rayher_crm.services.notifications import create_notification, notify_if_reachable
 
 
 def booking_type_for(opportunity) -> str:
@@ -144,14 +144,15 @@ def confirm_pending_booking(booking, values: dict[str, Any], *, actual_po_date: 
     _record_confirmed_po_date(booking, actual_po_date)
     booking.status = "Confirmed"
     booking.save(ignore_permissions=True)
-    _notify_owner(booking, "Booking confirmed", f"{booking.equipment} is confirmed.")
+    _notify_owner(booking, "Booking confirmed", f"{booking.equipment} is confirmed.", informational=True)
     return booking
 
 
-def _notify_owner(booking, title: str, message: str) -> None:
+def _notify_owner(booking, title: str, message: str, *, informational: bool = False) -> None:
     if booking.booking_owner == frappe.session.user:
         return
-    create_notification(
+    notify = notify_if_reachable if informational else create_notification
+    notify(
         recipient=booking.booking_owner, category="Booking", title=title, message=message,
         route=f"/booking/{booking.name}", source_doctype="CRM Booking", source_name=booking.name,
     )

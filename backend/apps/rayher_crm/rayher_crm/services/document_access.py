@@ -10,7 +10,7 @@ from frappe.utils import now_datetime
 from rayher_crm.api.v1.errors import CrmApiException
 from rayher_crm.permissions.roles import assert_capability, resolve_crm_role
 from rayher_crm.services.common import required_text
-from rayher_crm.services.notifications import active_crm_users, create_notification
+from rayher_crm.services.notifications import active_crm_users, notify_if_reachable
 
 
 APPROVAL_DECISIONS = {
@@ -105,7 +105,7 @@ def create_request(version_id_value: Any, reason: Any) -> dict[str, Any]:
         for manager in active_crm_users("Manager"):
             if manager == requester:
                 continue
-            create_notification(
+            notify_if_reachable(
                 recipient=manager, category="Document",
                 title="Controlled document access requires approval",
                 message=f"{document.title}: {request_reason}",
@@ -156,7 +156,7 @@ def decide_request(request_id: Any, decision: Any) -> dict[str, Any]:
         document.decided_at = now_datetime()
         document.save(ignore_permissions=True)
         if document.requester != frappe.session.user:
-            create_notification(
+            notify_if_reachable(
                 recipient=document.requester, category="Document",
                 title=f"Controlled document access {status.lower()}",
                 message=f"{document.version_id}: your access request is now {status}.",

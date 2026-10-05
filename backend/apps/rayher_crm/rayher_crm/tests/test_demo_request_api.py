@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+from unittest.mock import patch
 
 import frappe
 from frappe.tests.utils import FrappeTestCase
@@ -145,6 +146,27 @@ class TestDemoRequestApi(FrappeTestCase):
             "saleType": "New Equipment", "subRegion": "East China", "currency": "CNY",
             "originalAmount": 200000, "amountCny": 200000, "qualificationConfirmed": True,
         })
+
+    def test_direct_create_submit_keeps_workflow_when_notice_is_unreachable(self):
+        frappe.set_user(self.sales)
+        with patch("rayher_crm.services.notifications.can_read_source", return_value=False):
+            request = create_demo_request(self._input(submit=True))
+        self.assertEqual(request["status"], "Engineer Review")
+        self.assertEqual(frappe.db.get_value("CRM Demo Request", request["id"], "status"), "Engineer Review")
+        self.assertFalse(frappe.db.exists("CRM Notification Event", {
+            "source_doctype": "CRM Demo Request", "source_name": request["id"],
+        }))
+
+    def test_direct_update_submit_keeps_workflow_when_notice_is_unreachable(self):
+        frappe.set_user(self.sales)
+        draft = create_demo_request(self._input())
+        with patch("rayher_crm.services.notifications.can_read_source", return_value=False):
+            request = update_demo_request(draft["id"], self._input(submit=True), draft["modified"])
+        self.assertEqual(request["status"], "Engineer Review")
+        self.assertEqual(frappe.db.get_value("CRM Demo Request", request["id"], "status"), "Engineer Review")
+        self.assertFalse(frappe.db.exists("CRM Notification Event", {
+            "source_doctype": "CRM Demo Request", "source_name": request["id"],
+        }))
 
     def test_create_draft_and_submit_are_server_owned_and_derive_contact(self):
         frappe.set_user(self.sales)
@@ -506,6 +528,24 @@ class TestDemoRequestApi(FrappeTestCase):
         with self.assertRaises(CrmApiException) as duplicate:
             transition_demo_request(request["id"], {"type": "manager_approve", "comment": "Again"})
         self.assertEqual(duplicate.exception.code, "REPORT_NOT_READY")
+
+    def test_transition_skips_a_recipient_who_lost_source_scope(self):
+        frappe.set_user(self.sales)
+        request = create_demo_request(self._input(submit=True))
+        frappe.set_user("Administrator")
+        frappe.db.set_value(
+            "Customer", self.account["id"],
+            {"custom_crm_owner": self.other_sales, "custom_crm_visibility": "Private"},
+        )
+        frappe.set_user(self.engineer)
+        returned = transition_demo_request(
+            request["id"], {"type": "engineer_return", "comment": "Please update the sample map"},
+        )["request"]
+        self.assertEqual(returned["status"], "Engineer Returned")
+        self.assertFalse(frappe.db.exists("CRM Notification Event", {
+            "source_name": request["id"], "recipient_user": self.sales,
+            "title": "Demo Request moved to Engineer Returned",
+        }))
 
     def test_invalid_transitions_and_required_review_fields_do_not_partially_write(self):
         frappe.set_user(self.sales)

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from unittest.mock import patch
 
 import frappe
 from frappe.tests.utils import FrappeTestCase
@@ -30,6 +31,7 @@ from rayher_crm.services.opportunities import (
     request_internal_validation,
     rollback_opportunity_stage,
     update_opportunity_stakeholder,
+    update_opportunity_action,
     update_strategy_opportunity,
 )
 from rayher_crm.services.sites import create_site
@@ -904,6 +906,20 @@ class TestOpportunityApi(FrappeTestCase):
         )
         self.assertEqual(rolled_back["stage"], "qualified_opportunity")
         self.assertEqual(frappe.db.get_value("CRM Demo Request", request.name, "status"), "Engineer Review")
+
+    def test_action_notices_do_not_block_create_or_update_when_unreachable(self):
+        account, site = self._account_site(self.sales, "ActionNotice")
+        opportunity = create_strategy_opportunity(self._input(account, site, self.sales))
+        frappe.set_user(self.manager)
+        payload = {"title": "Confirm scope", "owner": self.sales, "due": "2026-12-01", "status": "Open"}
+        with patch("rayher_crm.services.notifications.can_read_source", return_value=False):
+            action = create_opportunity_action(opportunity["id"], payload)
+            changed = update_opportunity_action(opportunity["id"], action["id"], {**payload, "status": "Done"})
+        self.assertEqual(changed["status"], "Done")
+        self.assertEqual(frappe.db.get_value("CRM Opportunity Action", action["id"], "status"), "Done")
+        self.assertFalse(frappe.db.exists("CRM Notification Event", {
+            "source_doctype": "CRM Opportunity Action", "source_name": action["id"],
+        }))
 
     def test_only_manager_can_delete_strategy_opportunity(self):
         account, site = self._account_site(self.other_sales, "Delete")

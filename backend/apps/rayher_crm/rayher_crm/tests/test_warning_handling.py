@@ -6,7 +6,7 @@ import frappe
 from frappe.tests.utils import FrappeTestCase
 
 from rayher_crm.api.v1.errors import CrmApiException
-from rayher_crm.services import cockpit, cockpit_settings, warning_handling
+from rayher_crm.services import cockpit, cockpit_settings, warning_handling, warning_notifications
 from rayher_crm.services.accounts import create_account
 from rayher_crm.services.opportunities import create_strategy_opportunity
 from rayher_crm.services.sites import create_site
@@ -295,7 +295,57 @@ class TestWarningHandling(FrappeTestCase):
                              (30, True, None, "before_history"))
         notices = frappe.get_all("CRM Notification Event", fields=["title", "source_doctype", "source_name"],
                                  filters={"recipient_user": self.manager, "route": f"/opportunities/{self.opportunity['id']}"})
-        self.assertEqual([(n.title, n.source_doctype, n.source_name) for n in notices], [("预警：第 6 阶段超期无 PO", None, None)])
+        self.assertEqual(
+            [(n.title, n.source_doctype, n.source_name) for n in notices],
+            [("预警：第 6 阶段超期无 PO", "CRM Opportunity", self.opportunity["id"])],
+        )
+
+    def test_deleting_the_opportunity_removes_its_before_history_stage6_notices(self):
+        from rayher_crm.services.opportunities import delete_strategy_opportunity
+
+        stage = frappe.db.get_value("CRM Opportunity", self.opportunity["id"], "stage")
+        self.addCleanup(frappe.db.set_value, "CRM Opportunity", self.opportunity["id"], "stage", stage, update_modified=False)
+        frappe.db.set_value("CRM Opportunity", self.opportunity["id"], "stage", "internal_validation", update_modified=False)
+        coverage = COVERAGE["crm_cockpit_history_complete_from"]
+        frappe.set_user("Administrator")
+        with patch.dict(frappe.conf, {"crm_cockpit_history_complete_from": {**coverage, "stage": "2030-02-11"}}):
+            send_warning_notifications()
+        filters = {"source_doctype": "CRM Opportunity", "source_name": self.opportunity["id"]}
+        notices = frappe.get_all("CRM Notification Event", filters=filters, pluck="name")
+        self.assertTrue(notices)
+        # The inbox copy is a Dynamic Link to its source, which would otherwise refuse the delete.
+        frappe.set_user(self.manager)
+        delete_strategy_opportunity(self.opportunity["id"])
+        self.assertFalse(frappe.db.exists("CRM Opportunity", self.opportunity["id"]))
+        self.assertEqual(frappe.db.count("CRM Notification Event", {"name": ["in", notices]}), 0)
+
+    def test_a_bad_source_is_rejected_even_for_a_recipient_who_would_be_skipped(self):
+        from rayher_crm.services.notifications import notify_if_reachable
+
+        notice = dict(recipient="nobody@example.invalid", category="Opportunity", title="t", message="m", route="/opportunities/x")
+        with self.assertRaises(CrmApiException) as raised:
+            notify_if_reachable(**notice, source_doctype="CRM Opportunity", source_name="CRM-OPP-DOES-NOT-EXIST")
+        self.assertEqual(raised.exception.code, "VALIDATION_ERROR")
+        with self.assertRaises(CrmApiException):
+            notify_if_reachable(**notice, source_doctype="User", source_name="Administrator")
+        # A well-formed notice to a recipient who no longer exists is the normal quiet skip.
+        self.assertIsNone(notify_if_reachable(**notice, source_doctype="CRM Opportunity", source_name=self.opportunity["id"]))
+
+    def test_a_warning_row_with_a_missing_source_is_logged_and_does_not_stop_the_batch(self):
+        recipient = self.manager
+        before = frappe.db.count("Error Log", {"method": "Warning notification skipped: invalid source"})
+        created = warning_notifications._notify(
+            [recipient], key="missing-source", category="Opportunity", title="t", message="m", route="/opportunities/x",
+            source_doctype="CRM Opportunity", source_name="CRM-OPP-DOES-NOT-EXIST",
+        )
+        self.assertEqual(created, 0)
+        self.assertEqual(frappe.db.count("Error Log", {"method": "Warning notification skipped: invalid source"}), before + 1)
+        # A recipient who lost access is still a quiet skip.
+        with patch.object(warning_notifications, "create_notification", side_effect=CrmApiException("SCOPE_DENIED", "gone")):
+            self.assertEqual(warning_notifications._notify(
+                [recipient], key="lost-access", category="Opportunity", title="t", message="m", route="/opportunities/x",
+                source_doctype="CRM Opportunity", source_name=self.opportunity["id"]), 0)
+        self.assertEqual(frappe.db.count("Error Log", {"method": "Warning notification skipped: invalid source"}), before + 1)
 
     def test_a_handled_stage6_deal_is_announced_again_when_it_reaches_a_raised_threshold(self):
         entry = self._to_stage6(31)
@@ -412,3 +462,136 @@ class TestWarningHandling(FrappeTestCase):
         acted = warning_handling.record_action({"warningType": "stage6_no_po", "sourceId": self.opportunity["id"], "sourceEvent": entry,
                                                 "actionTaken": "Quarterly budget", "followUpOn": "2031-03-13"}, None)
         self.assertEqual((acted["followUpOn"], acted["state"]), ("2031-03-13", "handled"))
+
+
+class TestWarningNotificationDeletionLock(FrappeTestCase):
+    def test_legacy_parent_locks_are_sorted_and_deduplicated(self):
+        with patch.object(
+            warning_notifications,
+            "_lock_current_opportunity",
+            side_effect=lambda name: name != "CRM-OPP-B",
+        ) as lock:
+            locked = warning_notifications._lock_current_opportunities(
+                ["CRM-OPP-C", "CRM-OPP-A", "CRM-OPP-C", "", None, "CRM-OPP-B"],
+            )
+        self.assertEqual(
+            [call.args[0] for call in lock.call_args_list],
+            ["CRM-OPP-A", "CRM-OPP-B", "CRM-OPP-C"],
+        )
+        self.assertEqual(locked, {"CRM-OPP-A", "CRM-OPP-C"})
+
+    def test_every_legacy_parent_is_locked_before_the_first_notification_insert(self):
+        self.assertTrue(frappe.local.site.endswith(".test"))
+        opportunity_id = f"CRM-OPP-ORDER-{frappe.generate_hash(length=10)}"
+        primary = frappe.local.db
+        connection = None
+        try:
+            frappe.db.sql(
+                "INSERT INTO `tabCRM Opportunity` "
+                "(`name`, `creation`, `modified`, `modified_by`, `owner`, `docstatus`, `idx`) "
+                "VALUES (%s, NOW(6), NOW(6), 'Administrator', 'Administrator', 0, 0)",
+                (opportunity_id,),
+            )
+            primary.commit()
+            connection = primary._get_connection()
+            today = frappe.utils.now_datetime().date().isoformat()
+            details = {
+                "lost": [{
+                    "id": opportunity_id, "eventId": "lost-before-stage6", "at": today,
+                    "reviewPending": True, "title": "Lock order", "customer": "Scope",
+                }],
+                "overdue": [],
+                "quotation_expiry": [],
+                "stage6_no_po": [{
+                    "id": opportunity_id, "daysInStage": 30, "daysAtLeast": True,
+                    "title": "Lock order", "customer": "Scope",
+                    "handling": {"sourceEvent": "before_history"},
+                }],
+            }
+            checked = False
+
+            def assert_parent_already_locked(*args, **kwargs):
+                nonlocal checked
+                del args, kwargs
+                if not checked:
+                    with connection.cursor() as cursor:
+                        cursor.execute("SET SESSION innodb_lock_wait_timeout = 1")
+                        with self.assertRaises(Exception) as waited:
+                            cursor.execute(
+                                "SELECT `name` FROM `tabCRM Opportunity` "
+                                "WHERE `name` = %s FOR UPDATE",
+                                (opportunity_id,),
+                            )
+                        self.assertEqual(waited.exception.args[0], 1205)
+                    connection.rollback()
+                    checked = True
+                return 0
+
+            with (
+                patch.object(warning_notifications, "warning_details", return_value=details),
+                patch.object(warning_notifications, "thresholds", return_value={
+                    "quote_expiry_days": (7, "test"), "stage6_no_po_days": (30, "test"),
+                }),
+                patch.object(warning_notifications, "active_crm_users", return_value={"manager"}),
+                patch.object(warning_notifications, "_can_read", return_value=True),
+                patch.object(warning_notifications, "_notify", side_effect=assert_parent_already_locked),
+            ):
+                warning_notifications.send_warning_notifications()
+            self.assertTrue(checked)
+        finally:
+            try:
+                if connection is not None:
+                    try:
+                        connection.rollback()
+                    finally:
+                        connection.close()
+            finally:
+                frappe.local.db = primary
+                primary.rollback()
+                frappe.db.sql("DELETE FROM `tabCRM Opportunity` WHERE `name` = %s", (opportunity_id,))
+                primary.commit()
+
+    def test_a_before_history_notice_takes_the_same_parent_lock_as_deletion(self):
+        # Both paths lock the Opportunity primary-key row first. This dedicated raw
+        # fixture keeps the required commit isolated from every business fixture.
+        self.assertTrue(frappe.local.site.endswith(".test"))
+        opportunity_id = f"CRM-OPP-LOCK-{frappe.generate_hash(length=10)}"
+        primary = frappe.local.db
+        connection = None
+        try:
+            frappe.db.sql(
+                "INSERT INTO `tabCRM Opportunity` "
+                "(`name`, `creation`, `modified`, `modified_by`, `owner`, `docstatus`, `idx`) "
+                "VALUES (%s, NOW(6), NOW(6), 'Administrator', 'Administrator', 0, 0)",
+                (opportunity_id,),
+            )
+            primary.commit()
+            connection = primary._get_connection()
+            self.assertTrue(warning_notifications._lock_current_opportunity(opportunity_id))
+            with connection.cursor() as cursor:
+                cursor.execute("SET SESSION innodb_lock_wait_timeout = 1")
+                with self.assertRaises(Exception) as waited:
+                    cursor.execute(
+                        "SELECT `name` FROM `tabCRM Opportunity` WHERE `name` = %s FOR UPDATE",
+                        (opportunity_id,),
+                    )
+                self.assertEqual(waited.exception.args[0], 1205)
+            primary.rollback()
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    "SELECT `name` FROM `tabCRM Opportunity` WHERE `name` = %s FOR UPDATE NOWAIT",
+                    (opportunity_id,),
+                )
+                self.assertEqual(cursor.fetchone()[0], opportunity_id)
+        finally:
+            try:
+                if connection is not None:
+                    try:
+                        connection.rollback()
+                    finally:
+                        connection.close()
+            finally:
+                frappe.local.db = primary
+                primary.rollback()
+                frappe.db.sql("DELETE FROM `tabCRM Opportunity` WHERE `name` = %s", (opportunity_id,))
+                primary.commit()

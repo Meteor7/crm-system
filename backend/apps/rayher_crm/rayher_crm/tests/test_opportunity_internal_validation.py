@@ -268,6 +268,35 @@ class TestOpportunityInternalValidation(FrappeTestCase):
         }, pending["modified"])
         self.assertEqual((received["stage"], received["internalValidation"]["status"]), ("po_received", "cancelled"))
 
+    def test_review_skips_a_requester_who_lost_account_access(self):
+        _, contact, quoted = self._quoted("IvTransferred")
+        requested = request_internal_validation(quoted["id"], self._request(contact), quoted["modified"])
+        frappe.set_user("Administrator")
+        account = frappe.db.get_value("CRM Opportunity", quoted["id"], "account")
+        frappe.db.set_value("Customer", account, {
+            "custom_crm_owner": self.other_sales, "custom_crm_visibility": "Private",
+        })
+        frappe.set_user(self.reviewer)
+        rejected = review_internal_validation(quoted["id"], {
+            "validationId": requested["internalValidation"]["id"], "decision": "rejected",
+            "comment": "Revisit with the new account owner",
+        }, requested["modified"])
+        self.assertEqual(rejected["internalValidation"]["status"], "rejected")
+        self.assertFalse(self._notified(self.sales, requested["internalValidation"]["id"], "Internal validation rejected"))
+
+    def test_review_still_rolls_back_a_real_notice_write_failure(self):
+        _, contact, quoted = self._quoted("IvNoticeFailure")
+        requested = request_internal_validation(quoted["id"], self._request(contact), quoted["modified"])
+        frappe.set_user(self.reviewer)
+        with patch("rayher_crm.services.notifications.create_notification", side_effect=RuntimeError("notice storage failed")):
+            with self.assertRaisesRegex(RuntimeError, "notice storage failed"):
+                review_internal_validation(quoted["id"], {
+                    "validationId": requested["internalValidation"]["id"], "decision": "rejected", "comment": "Try later",
+                }, requested["modified"])
+        current = get_strategy_opportunity(quoted["id"])
+        self.assertEqual(current["internalValidation"]["status"], "pending")
+        self.assertEqual(current["modified"], requested["modified"])
+
     def test_approval_revalidates_the_booking_draft(self):
         _, contact, quoted = self._quoted("IvStale")
         requested = request_internal_validation(quoted["id"], self._request(contact), quoted["modified"])

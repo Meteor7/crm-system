@@ -601,6 +601,26 @@ class TestEvaluationApi(FrappeTestCase):
         self.assertTrue({visit["id"], evaluation_id} <= set(remaining))
         self.assertFalse({due["id"], late["id"], opportunity_id} & set(remaining))
 
+    def test_deadline_skips_disabled_recipient_but_rolls_back_real_notification_failure(self):
+        evaluation_id = self.request["evaluationId"]
+        frappe.set_user(self.manager)
+        evaluation = get_evaluation(evaluation_id)
+        frappe.db.set_value("User", self.engineer, "enabled", 0)
+        try:
+            updated = set_evaluation_test_run_deadline(evaluation_id, {
+                "testRunDeadline": "2026-12-15", "expectedModified": evaluation["modified"],
+            })
+            self.assertEqual(updated["testRunDeadline"], "2026-12-15")
+        finally:
+            frappe.db.set_value("User", self.engineer, "enabled", 1)
+        with patch("rayher_crm.services.notifications.create_notification", side_effect=RuntimeError("write failed")):
+            with self.assertRaises(RuntimeError):
+                set_evaluation_test_run_deadline(evaluation_id, {
+                    "testRunDeadline": "2026-12-16", "expectedModified": updated["modified"],
+                })
+        current = get_evaluation(evaluation_id)
+        self.assertEqual((current["testRunDeadline"], current["modified"]), (updated["testRunDeadline"], updated["modified"]))
+
     def test_deadline_forward_completion_and_read_only_workflow_projection(self):
         evaluation_id = self.request["evaluationId"]
         frappe.set_user(self.manager)

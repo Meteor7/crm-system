@@ -222,6 +222,73 @@ class TestDemoReportApi(FrappeTestCase):
         stored = frappe.get_doc("File", frappe.db.get_value("CRM Demo Artifact", artifact["id"], "private_file"))
         self.assertTrue(stored.is_private)
 
+    def test_report_upload_archive_and_retest_skip_unreachable_recipients(self):
+        from rayher_crm.tests.test_contact_file_api import Scanner
+
+        for recipient in (self.sales, self.engineer):
+            for reason in ("disabled", "role_removed"):
+                for outcome in ("Accepted", "Testing"):
+                    with self.subTest(recipient=recipient, reason=reason, outcome=outcome):
+                        _, _, evaluation = self._source(f"Unreachable {reason} {outcome}")
+                        current = self._ready_for_upload(evaluation.name)
+                        before = frappe.db.count("CRM Notification Event", {
+                            "source_doctype": "CRM Evaluation", "source_name": evaluation.name,
+                            "recipient_user": recipient,
+                        })
+                        frappe.set_user("Administrator")
+                        user = frappe.get_doc("User", recipient)
+                        enabled, roles = user.enabled, [row.role for row in user.roles]
+                        if reason == "disabled":
+                            user.enabled = 0
+                        else:
+                            user.set("roles", [{"role": role} for role in roles if not role.startswith("CRM ")])
+                        user.save(ignore_permissions=True)
+                        frappe.clear_cache(user=recipient)
+                        try:
+                            # The Manager acts on the business record; the departed participant is
+                            # only a notification recipient, never the authenticated actor.
+                            frappe.set_user(self.manager)
+                            result = release_demo_test_report(evaluation.name,
+                                *report_pair("results.txt", "text/plain", f"capture=98.5;{evaluation.name}".encode()),
+                                scanner=Scanner(), expected_round=1)
+                            self.assertEqual(result["version"], 1)
+                            current = get_evaluation(evaluation.name)
+                            current = add_evaluation_run(evaluation.name, {
+                                "date": "2026-08-10", "lot": "LOT-UNREACHABLE", "wafers": 1,
+                                "capture": 96, "falsePositive": 1, "wph": 10, "summary": "Passed",
+                                "expectedModified": current["modified"],
+                            })
+                            for status in ("Internal Review", "Customer Review"):
+                                current = update_evaluation_status(evaluation.name,
+                                    {"status": status}, current["modified"])
+                            customer_report = upload_customer_report(evaluation.name, {
+                                "file_name": "customer.txt", "mime_type": "text/plain",
+                                "content": f"Customer feedback {evaluation.name}".encode(),
+                            }, scanner=Scanner(), expected_round=1)
+                            self.assertEqual(customer_report["version"], 1)
+                            current = get_evaluation(evaluation.name)
+                            final = update_evaluation_status(evaluation.name, {
+                                "status": outcome, "customerComment": "Reviewed with customer",
+                            }, current["modified"])
+                            self.assertEqual(final["status"], outcome)
+                            self.assertEqual(final["testRound"], 2 if outcome == "Testing" else 1)
+                            self.assertEqual(frappe.db.count("CRM Notification Event", {
+                                "source_doctype": "CRM Evaluation", "source_name": evaluation.name,
+                                "recipient_user": recipient,
+                            }), before)
+                            reachable = self.engineer if recipient == self.sales else self.sales
+                            self.assertTrue(frappe.db.exists("CRM Notification Event", {
+                                "source_doctype": "CRM Evaluation", "source_name": evaluation.name,
+                                "recipient_user": reachable, "title": "Customer Report uploaded",
+                            }))
+                        finally:
+                            frappe.set_user("Administrator")
+                            user.reload()
+                            user.enabled = enabled
+                            user.set("roles", [{"role": role} for role in roles])
+                            user.save(ignore_permissions=True)
+                            frappe.clear_cache(user=recipient)
+
     def test_tipray_report_is_stored_byte_for_byte(self):
         self._ready_for_upload(self.evaluation.name)
         encrypted = b"%TSD-Header-###%" + bytes(range(256))

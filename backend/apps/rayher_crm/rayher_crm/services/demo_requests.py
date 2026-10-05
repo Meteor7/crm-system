@@ -23,7 +23,7 @@ from rayher_crm.services.common import (
 )
 from rayher_crm.services.concurrency import lock_document
 from rayher_crm.services.contacts import _contact_account
-from rayher_crm.services.notifications import active_crm_users, create_notification
+from rayher_crm.services.notifications import active_crm_users, create_notification, notify_if_reachable
 from rayher_crm.services.opportunity_stages import DEMO_REQUEST_STAGES
 
 
@@ -348,7 +348,7 @@ def _apply_values(doc, values: dict[str, Any]) -> None:
 def _notify_engineer_review(doc, summary: str) -> None:
     if not doc.engineer_owner or doc.engineer_owner == frappe.session.user:
         return
-    create_notification(
+    notify_if_reachable(
         recipient=doc.engineer_owner,
         category="Demo",
         title="Demo Request requires engineering review",
@@ -515,7 +515,7 @@ def _notify_transition(doc, command_type: str, summary: str) -> None:
         "manager_approve": {doc.sales_owner, doc.engineer_owner},
     }[command_type] - {frappe.session.user, None, ""}
     for recipient in sorted(recipients):
-        create_notification(
+        notify_if_reachable(
             recipient=recipient,
             category="Demo",
             title=f"Demo Request moved to {doc.status}",

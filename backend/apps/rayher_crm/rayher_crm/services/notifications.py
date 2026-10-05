@@ -10,6 +10,7 @@ from frappe.utils import now_datetime
 from rayher_crm.api.v1.errors import CrmApiException
 from rayher_crm.permissions.roles import resolve_crm_role
 from rayher_crm.permissions.scope import conditions_for_doctype
+from rayher_crm.permissions.notification_scope import SOURCE_DOCTYPES, can_read_source
 from rayher_crm.services.common import normalize_pagination, to_iso_timestamp
 
 
@@ -86,6 +87,13 @@ def _serialize(row: Any) -> dict[str, Any]:
     }
 
 
+def _validate_source(source_doctype, source_name) -> None:
+    if source_doctype not in SOURCE_DOCTYPES or not isinstance(source_name, str) or not source_name:
+        raise CrmApiException("VALIDATION_ERROR", "A supported notification source is required.")
+    if not frappe.db.exists(source_doctype, source_name):
+        raise CrmApiException("VALIDATION_ERROR", "Notification source record was not found.")
+
+
 def create_notification(
     *,
     recipient: str,
@@ -108,12 +116,9 @@ def create_notification(
     normalized_route = _text(route, "route", 140)
     if not normalized_route.startswith("/") or normalized_route.startswith("//"):
         raise CrmApiException("VALIDATION_ERROR", "Notification route must be an internal path.")
-    if bool(source_doctype) != bool(source_name):
-        raise CrmApiException("VALIDATION_ERROR", "Notification source fields must be supplied together.")
-    if source_doctype and not frappe.db.exists("DocType", source_doctype):
-        raise CrmApiException("VALIDATION_ERROR", "Notification source DocType is invalid.")
-    if source_doctype and not frappe.db.exists(source_doctype, source_name):
-        raise CrmApiException("VALIDATION_ERROR", "Notification source record was not found.")
+    _validate_source(source_doctype, source_name)
+    if not can_read_source(source_doctype, source_name, recipient):
+        raise CrmApiException("SCOPE_DENIED", "Notification recipient cannot read its source.")
 
     event = frappe.get_doc({
         "doctype": "CRM Notification Event",
@@ -140,11 +145,16 @@ def notify_if_reachable(*, recipient: str | None, **fields: Any) -> dict[str, An
     action commits anyway. `create_notification` stays strict for callers that
     choose a recipient on purpose.
     """
+    # Malformed or unsupported source metadata is a caller bug: reject it before any recipient is
+    # skipped, so a disabled user can never hide it from the tests and the logs.
+    _validate_source(fields.get("source_doctype"), fields.get("source_name"))
     if not isinstance(recipient, str) or not recipient or not frappe.db.get_value("User", recipient, "enabled"):
         return None
     try:
         resolve_crm_role(recipient)
     except frappe.PermissionError:
+        return None
+    if not can_read_source(fields["source_doctype"], fields["source_name"], recipient):
         return None
     return create_notification(recipient=recipient, **fields)
 
@@ -157,7 +167,10 @@ def list_notifications(
     user = _authenticated_user()
     normalized_page, normalized_size, offset = normalize_pagination(page, page_size)
     unread = _boolean(unread_only, "unreadOnly")
-    where = [f"({conditions_for_doctype('CRM Notification Event', user)})", "`recipient_user` = %s"]
+    where = [
+        f"({conditions_for_doctype('CRM Notification Event', user, for_bound_query=True)})",
+        "`recipient_user` = %s",
+    ]
     values: list[Any] = [user]
     if unread:
         where.append("`read_at` IS NULL")
@@ -183,7 +196,8 @@ def _recipient_row(notification_id: str, user: str):
     rows = frappe.db.sql(
         "SELECT `name`, `category`, `title`, `message`, `route`, `recipient_user`, "
         "`actor`, `created_at`, `read_at` FROM `tabCRM Notification Event` "
-        "WHERE `name` = %s AND `recipient_user` = %s FOR UPDATE",
+        "WHERE `name` = %s AND `recipient_user` = %s AND ("
+        f"{conditions_for_doctype('CRM Notification Event', user, for_bound_query=True)}) FOR UPDATE",
         (notification_id, user), as_dict=True,
     )
     if not rows:
@@ -209,7 +223,8 @@ def mark_all_notifications_read() -> dict[str, Any]:
     read_at = now_datetime()
     frappe.db.sql(
         "UPDATE `tabCRM Notification Event` SET `read_at` = %s "
-        "WHERE `recipient_user` = %s AND `read_at` IS NULL",
+        "WHERE `recipient_user` = %s AND `read_at` IS NULL AND ("
+        f"{conditions_for_doctype('CRM Notification Event', user, for_bound_query=True)})",
         (read_at, user),
     )
     updated = int(frappe.db.sql("SELECT ROW_COUNT()")[0][0])
@@ -217,6 +232,6 @@ def mark_all_notifications_read() -> dict[str, Any]:
 
 
 __all__ = [
-    "active_crm_users", "create_notification", "list_notifications", "mark_notification_read",
-    "mark_all_notifications_read",
+    "active_crm_users", "create_notification", "notify_if_reachable", "list_notifications",
+    "mark_notification_read", "mark_all_notifications_read",
 ]

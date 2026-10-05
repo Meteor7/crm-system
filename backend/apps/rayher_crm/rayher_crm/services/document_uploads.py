@@ -15,7 +15,7 @@ from rayher_crm.api.v1.errors import CrmApiException
 from rayher_crm.permissions.roles import assert_capability, resolve_crm_role
 from rayher_crm.services.common import as_payload, optional_date, required_text, validate_choice
 from rayher_crm.services.file_security import MAX_FILE_BYTES, PDF_MIME, TIPRAY_HEADER, MalwareScanner, validate_and_scan
-from rayher_crm.services.notifications import active_crm_users, create_notification
+from rayher_crm.services.notifications import active_crm_users, create_notification, notify_if_reachable
 
 
 def _metadata(value: Any) -> dict[str, str]:
@@ -141,7 +141,7 @@ def submit_upload(input_value: Any, part: Mapping[str, Any], scanner: MalwareSca
             _publish(request)
         else:
             for manager in active_crm_users("Manager"):
-                create_notification(
+                notify_if_reachable(
                     recipient=manager, category="Document",
                     title="Controlled document upload requires approval",
                     message=f"{request.title}: {request.file_name}",
@@ -202,7 +202,7 @@ def decide_upload_request(request_id: Any, input_value: Any) -> dict[str, Any]:
             request.save(ignore_permissions=True)
             _audit(request.name, "Reject", "Allowed", reason)
             if request.submitted_by != frappe.session.user:
-                create_notification(
+                notify_if_reachable(
                     recipient=request.submitted_by, category="Document",
                     title="Controlled document upload rejected",
                     message=request.decision_reason,
@@ -212,7 +212,7 @@ def decide_upload_request(request_id: Any, input_value: Any) -> dict[str, Any]:
             if private_file and frappe.db.exists("File", private_file):
                 frappe.delete_doc("File", private_file, ignore_permissions=True, force=True)
         if decision == "approve" and request.submitted_by != frappe.session.user:
-            create_notification(
+            notify_if_reachable(
                 recipient=request.submitted_by, category="Document",
                 title="Controlled document upload published",
                 message=f"{request.title} is now Published.",

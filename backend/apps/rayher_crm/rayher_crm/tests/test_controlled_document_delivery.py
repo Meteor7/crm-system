@@ -202,7 +202,7 @@ class TestControlledDocumentDelivery(FrappeTestCase):
 
         frappe.set_user(self.manager)
         with patch(
-            "rayher_crm.services.document_access.create_notification",
+            "rayher_crm.services.notifications.create_notification",
             side_effect=RuntimeError("injected access notification failure"),
         ), self.assertRaisesRegex(RuntimeError, "injected access notification failure"):
             decide_request(requested["id"], "approve-watermarked")
@@ -226,6 +226,25 @@ class TestControlledDocumentDelivery(FrappeTestCase):
         frappe.set_user(self.sales)
         result = render_controlled_document(ACONCA_DOCUMENT_ID, "preview")
         self.assertEqual(result["mime_type"], "application/pdf")
+
+    def test_decision_skips_requester_after_crm_role_is_revoked(self):
+        requested = create_request(version_id(self.document), "Former CRM user")
+        frappe.set_user("Administrator")
+        frappe.db.delete("Has Role", {
+            "parent": self.sales, "parenttype": "User", "parentfield": "roles", "role": "CRM Sales",
+        })
+        frappe.clear_cache(user=self.sales)
+        try:
+            frappe.set_user(self.manager)
+            approved = decide_request(requested["id"], "approve-watermarked")
+            self.assertEqual(approved["status"], "Approved")
+            self.assertFalse(frappe.db.exists("CRM Notification Event", {
+                "source_name": requested["id"], "recipient_user": self.sales,
+            }))
+        finally:
+            frappe.set_user("Administrator")
+            frappe.get_doc("User", self.sales).add_roles("CRM Sales")
+            frappe.clear_cache(user=self.sales)
 
     def test_original_approval_downloads_verified_pptx(self):
         self.approval.db_set("delivery_mode", "Original")

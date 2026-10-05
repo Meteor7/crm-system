@@ -143,6 +143,41 @@ class TestDocumentUploads(FrappeTestCase):
         self.assertEqual((rejected["status"], rejected["decisionReason"]), ("Rejected", "Duplicate manual"))
         self.assertFalse(frappe.db.exists("File", private_file))
 
+    def test_decision_skips_disabled_submitter(self):
+        frappe.set_user(self.sales)
+        submitted = submit_upload(metadata(title="Former submitter"), pdf_part(), scanner=CleanScanner())
+        frappe.set_user("Administrator")
+        frappe.db.set_value("User", self.sales, "enabled", 0, update_modified=False)
+        frappe.clear_cache(user=self.sales)
+        try:
+            frappe.set_user(self.manager)
+            rejected = decide_upload_request(
+                submitted["id"], {"decision": "reject", "reason": "Superseded"},
+            )
+            self.assertEqual(rejected["status"], "Rejected")
+            self.assertFalse(frappe.db.exists("CRM Notification Event", {
+                "source_name": submitted["id"], "recipient_user": self.sales,
+            }))
+        finally:
+            frappe.set_user("Administrator")
+            frappe.db.set_value("User", self.sales, "enabled", 1, update_modified=False)
+            frappe.clear_cache(user=self.sales)
+
+    def test_decision_notification_storage_failure_rolls_back(self):
+        frappe.set_user(self.sales)
+        submitted = submit_upload(metadata(title="Notification rollback"), pdf_part(), scanner=CleanScanner())
+        private_file = frappe.db.get_value("CRM Document Upload Request", submitted["id"], "private_file")
+        frappe.set_user(self.manager)
+        with patch(
+            "rayher_crm.services.notifications.create_notification",
+            side_effect=RuntimeError("notification storage failed"),
+        ), self.assertRaisesRegex(RuntimeError, "notification storage failed"):
+            decide_upload_request(submitted["id"], {"decision": "reject", "reason": "Duplicate"})
+        request = frappe.get_doc("CRM Document Upload Request", submitted["id"])
+        self.assertEqual(request.status, "Pending")
+        self.assertEqual(request.private_file, private_file)
+        self.assertTrue(frappe.db.exists("File", private_file))
+
     def test_rejection_audit_failure_preserves_pending_request_and_file_content(self):
         frappe.set_user(self.sales)
         submitted = submit_upload(metadata(title="Audit rollback"), pdf_part("audit.pdf"), scanner=CleanScanner())

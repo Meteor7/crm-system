@@ -33,7 +33,7 @@ from rayher_crm.services.file_security import (
     MalwareScanner,
     validate_and_scan,
 )
-from rayher_crm.services.notifications import create_notification
+from rayher_crm.services.notifications import notify_if_reachable
 
 
 def _request_for_evaluation(evaluation):
@@ -63,7 +63,7 @@ def _marked_file_name(file_name: str, label: str) -> str:
 
 
 def _notification(recipient: str, evaluation, request, version: int) -> None:
-    create_notification(
+    notify_if_reachable(
         recipient=recipient,
         category="Evaluation",
         title="Test Report uploaded",
@@ -298,7 +298,7 @@ def upload_customer_report(
         _update_request_tracking(evaluation, summary)
         recipients = {request.sales_owner, evaluation.evaluation_owner} - {frappe.session.user}
         for recipient in sorted(recipients):
-            create_notification(
+            notify_if_reachable(
                 recipient=recipient,
                 category="Evaluation",
                 title="Customer Report uploaded",

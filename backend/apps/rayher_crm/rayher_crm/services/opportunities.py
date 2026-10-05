@@ -88,6 +88,8 @@ def delete_strategy_opportunity(name: str) -> dict[str, str]:
         # Rows written under a Quotation or a Booking (quotation warnings, booking history) lock that record
         # instead; while it links to the Opportunity, frappe.delete_doc below refuses the delete anyway.
         frappe.db.get_value("CRM Opportunity", name, "name", for_update=True)
+        # A direct-source legacy warning must not block parent deletion.
+        frappe.db.delete("CRM Notification Event", {"source_doctype": "CRM Opportunity", "source_name": name})
         # History and internal validation rows link to the Opportunity; remove them first or
         # the link check in frappe.delete_doc reports the Opportunity as still referenced.
         # The field history, stakeholders and actions belong to this Opportunity alone (the
@@ -99,9 +101,6 @@ def delete_strategy_opportunity(name: str) -> dict[str, str]:
             "CRM Opportunity Action",
         ):
             frappe.db.delete(doctype, {"opportunity": name})
-        # The notice of a Demo done waiting for the amount names the Opportunity itself. A notification
-        # cannot be deleted as a document and its link would refuse the delete below, so it is removed here.
-        frappe.db.delete("CRM Notification Event", {"source_doctype": "CRM Opportunity", "source_name": name})
         # Warnings handling names the Opportunity in a Data field, so it never blocks the delete; it goes too.
         # A locking read: the current rows, not this request's snapshot.
         handlings = [row[0] for row in frappe.db.sql(
@@ -1094,7 +1093,7 @@ def _notify_opportunity_users(
             resolve_crm_role(recipient)
         except frappe.PermissionError:
             continue
-        create_notification(
+        notify_if_reachable(
             recipient=recipient, category="Opportunity", title=title, message=message[:1000],
             route=f"/opportunities/{doc.name}", source_doctype=source_doctype, source_name=source_name,
         )
@@ -1654,7 +1653,7 @@ def create_opportunity_action(opportunity_id: str, payload: dict[str, Any]) -> d
         serialized = _serialize_action(doc)
         _append_history(opportunity_id, "actionCreated", "", serialized)
         if doc.action_owner != frappe.session.user:
-            create_notification(
+            notify_if_reachable(
                 recipient=doc.action_owner, category="Action",
                 title="Opportunity action assigned",
                 message=f"{doc.title} is due {doc.due}.",
@@ -1682,7 +1681,7 @@ def update_opportunity_action(opportunity_id: str, action_id: str, payload: dict
         after = _serialize_action(doc)
         _append_history(opportunity_id, "actionUpdated", before, after)
         if doc.action_owner != frappe.session.user:
-            create_notification(
+            notify_if_reachable(
                 recipient=doc.action_owner, category="Action",
                 title="Opportunity action updated",
                 message=f"{doc.title} is due {doc.due} and is {doc.status}.",

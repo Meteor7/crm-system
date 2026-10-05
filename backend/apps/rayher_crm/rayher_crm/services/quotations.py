@@ -14,13 +14,14 @@ import frappe
 from frappe.utils import add_months, getdate, now_datetime, today
 
 from rayher_crm.api.v1.errors import CrmApiException
+from rayher_crm.permissions.notification_scope import can_read_source
 from rayher_crm.permissions.roles import assert_capability, resolve_crm_role
 from rayher_crm.permissions.scope import conditions_for_doctype, has_crm_permission
 from rayher_crm.services.common import normalize_pagination, required_text, to_iso_timestamp
 from rayher_crm.services.concurrency import lock_document
 from rayher_crm.services.contacts import _contact_account
 from rayher_crm.services.money import decimal_string
-from rayher_crm.services.notifications import create_notification
+from rayher_crm.services.notifications import create_notification, notify_if_reachable
 from rayher_crm.services.quotation_rules import QuotationRuleError, calculate_totals, validate_payment_terms
 from rayher_crm.services.opportunity_stages import PUBLISHABLE_QUOTATION_STAGES
 from rayher_crm.services.sites import can_read_site_data
@@ -831,7 +832,10 @@ def submit_for_approval(name: str, expected_modified: str | None = None) -> dict
             raise CrmApiException("QUOTATION_APPROVAL_ALREADY_PENDING", "This quotation is already pending approval.")
         _apply_values(version, _validated_values(master, _version_payload(version), True))
         _register_version_catalog(version)
-        managers = [user for user in _manager_users() if user != frappe.session.user]
+        managers = [
+            user for user in _manager_users()
+            if user != frappe.session.user and can_read_source("CRM Quotation", master.name, user)
+        ]
         if not managers:
             raise CrmApiException("VALIDATION_ERROR", "No active CRM Manager is available to approve this quotation.")
         last_attempt = frappe.db.sql(
@@ -926,7 +930,7 @@ def review_approval(
             master.status = "Draft"
             master.save(ignore_permissions=True)
         if master.quotation_owner != frappe.session.user:
-            create_notification(
+            notify_if_reachable(
                 recipient=master.quotation_owner,
                 category="Quotation",
                 title=f"Quotation {master.ref_no} {decision.lower()}",

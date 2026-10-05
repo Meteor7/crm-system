@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from unittest.mock import patch
+
 import frappe
 from frappe.tests.utils import FrappeTestCase
 
@@ -312,7 +314,13 @@ class TestOpportunityPoConfirmation(FrappeTestCase):
         approved = self._approved_validation(quoted, contact)
         pending_id = approved["liveBooking"]["id"]
         frappe.set_user(self.manager)
+        # A new Booking owner needs Account access, while the original owner must
+        # retain Opportunity access so this test exercises its redacted summary.
+        account = frappe.db.get_value("CRM Booking", pending_id, "account")
+        frappe.db.set_value("Customer", account, "custom_crm_visibility", "Public")
         reassigned = update_booking(pending_id, {"owner": self.other_sales}, get_booking(pending_id)["modified"])
+        frappe.set_user(self.other_sales)
+        self.assertEqual(get_booking(pending_id)["owner"], self.other_sales)
 
         # A Sales user only reads Bookings assigned to them, so the Opportunity owner now gets a summary
         # without details and must not be able to confirm the approval draft over the other user's Booking.
@@ -338,6 +346,35 @@ class TestOpportunityPoConfirmation(FrappeTestCase):
         self.assertEqual(
             (received["stage"], received["liveBooking"]["status"], received["liveBooking"]["owner"]),
             ("po_received", "Confirmed", self.other_sales),
+        )
+
+    def test_confirmation_notification_storage_failure_rolls_back(self):
+        _, contact, quoted = self._quoted("PoNoticeRollback")
+        approved = self._approved_validation(quoted, contact)
+        pending_id = approved["liveBooking"]["id"]
+        frappe.set_user(self.manager)
+        account = frappe.db.get_value("CRM Booking", pending_id, "account")
+        frappe.db.set_value("Customer", account, "custom_crm_visibility", "Public")
+        reassigned = update_booking(
+            pending_id, {"owner": self.other_sales}, approved["liveBooking"]["modified"],
+        )
+        opportunity = get_strategy_opportunity(quoted["id"])
+        with patch(
+            "rayher_crm.services.notifications.create_notification",
+            side_effect=RuntimeError("notification storage failed"),
+        ), self.assertRaisesRegex(RuntimeError, "notification storage failed"):
+            confirm_po(quoted["id"], {
+                "booking": self._booking(contact, owner=self.other_sales),
+                "expectedBookingModified": reassigned["modified"],
+                "actualPoDate": self.po_date,
+            }, opportunity["modified"])
+        self.assertEqual(
+            frappe.db.get_value("CRM Booking", pending_id, "status"),
+            "Pending",
+        )
+        self.assertEqual(
+            frappe.db.get_value("CRM Opportunity", quoted["id"], "stage"),
+            "internal_validation",
         )
 
     def test_internal_validation_keeps_the_sale_type_after_its_booking_is_cancelled(self):
@@ -424,6 +461,8 @@ class TestOpportunityPoConfirmation(FrappeTestCase):
             self.assertEqual(stale.exception.code, "VERSION_CONFLICT")
 
         frappe.set_user(self.manager)
+        account = frappe.db.get_value("CRM Booking", pending_id, "account")
+        frappe.db.set_value("Customer", account, "custom_crm_visibility", "Public")
         reassigned = update_booking(pending_id, {"owner": self.other_sales}, edited["modified"])
         after_reassign = get_strategy_opportunity(quoted["id"])
         self.assertNotEqual(after_reassign["modified"], after_edit["modified"])

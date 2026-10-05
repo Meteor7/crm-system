@@ -6,6 +6,7 @@ from html import unescape
 from unittest.mock import patch
 
 import frappe
+from frappe.permissions import add_user_permission, remove_user_permission
 from frappe.tests.utils import FrappeTestCase
 from frappe.utils import random_string
 
@@ -341,6 +342,61 @@ class TestQuotationApi(FrappeTestCase):
         approval.decision_comment = "tampered"
         with self.assertRaises(frappe.ValidationError):
             approval.save(ignore_permissions=True)
+
+    def test_submission_skips_manager_without_current_quotation_scope(self):
+        saved, _ = self._ready_quotation()
+        restricted = self._user("crm-quotation-restricted-manager@example.invalid", "CRM Manager")
+        frappe.set_user(self.other_sales)
+        unrelated = create_account({
+            "name": f"Restricted Manager Account {random_string(6)}",
+            "shortName": "Restricted",
+            "segment": "Frontend",
+            "tier": "A",
+            "city": "Shanghai",
+            "region": "East China",
+            "owner": self.other_sales,
+        })
+        frappe.set_user("Administrator")
+        add_user_permission("Customer", unrelated["id"], restricted, ignore_permissions=True)
+        frappe.clear_cache(user=restricted)
+        try:
+            frappe.set_user(self.sales)
+            submitted = submit_for_approval(saved["quotation"]["id"], saved["version"]["modified"])
+            self.assertEqual(submitted["version"]["approvalStatus"], "Pending")
+            self.assertFalse(frappe.db.exists("CRM Notification Event", {
+                "source_doctype": "CRM Quotation",
+                "source_name": saved["quotation"]["id"],
+                "recipient_user": restricted,
+            }))
+            self.assertTrue(frappe.db.exists("CRM Notification Event", {
+                "source_doctype": "CRM Quotation",
+                "source_name": saved["quotation"]["id"],
+                "recipient_user": self.manager,
+            }))
+        finally:
+            frappe.set_user("Administrator")
+            remove_user_permission("Customer", unrelated["id"], restricted, ignore_permissions=True)
+            frappe.clear_cache(user=restricted)
+
+    def test_decision_skips_revoked_owner_but_real_notice_failure_rolls_back(self):
+        saved, _ = self._ready_quotation()
+        name = saved["quotation"]["id"]
+        submitted = submit_for_approval(name, saved["version"]["modified"])
+        frappe.set_user(self.manager)
+        with patch("rayher_crm.services.notifications.create_notification", side_effect=RuntimeError("notice write failed")):
+            with self.assertRaisesRegex(RuntimeError, "notice write failed"):
+                review_approval(name, "Rejected", "Revise terms", submitted["version"]["modified"])
+        self.assertEqual(get_quotation(name)["version"]["approvalStatus"], "Pending")
+        account = frappe.db.get_value("CRM Quotation", name, "account")
+        frappe.db.set_value("Customer", account, {
+            "custom_crm_owner": self.other_sales, "custom_crm_visibility": "Private",
+        })
+        result = review_approval(name, "Rejected", "Revise terms", submitted["version"]["modified"])
+        self.assertEqual(result["version"]["approvalStatus"], "Rejected")
+        self.assertFalse(frappe.db.exists("CRM Notification Event", {
+            "source_doctype": "CRM Quotation", "source_name": name, "recipient_user": self.sales,
+            "title": ["like", "%rejected"],
+        }))
 
     def test_approval_publish_failure_rolls_back_decision_and_file(self):
         saved, _ = self._ready_quotation()

@@ -30,6 +30,9 @@ from rayher_crm.services.notifications import active_crm_users, create_notificat
 
 
 NOTICE_DAYS = 3
+# create_notification refuses a recipient who is not an active CRM user (INVALID_OWNER) or who can no
+# longer read the source (SCOPE_DENIED): both are normal skips for a batch.
+RECIPIENT_UNREACHABLE_CODES = frozenset({"INVALID_OWNER", "SCOPE_DENIED"})
 
 
 def warning_details(now) -> dict:
@@ -83,9 +86,35 @@ def _notify(recipients, *, key: str, category: str, title: str, message: str, ro
             create_notification(recipient=recipient, category=category, title=title, message=message[:1000], route=route,
                                 source_doctype=source_doctype, source_name=source_name, dedupe_key=dedupe_key)
             created += 1
-        except (frappe.PermissionError, CrmApiException, frappe.UniqueValidationError, frappe.DuplicateEntryError):
+        except (frappe.PermissionError, frappe.UniqueValidationError, frappe.DuplicateEntryError):
             continue
+        except CrmApiException as exc:
+            if exc.code in RECIPIENT_UNREACHABLE_CODES:
+                continue
+            # Bad source metadata (a warning row whose source is gone, an unsupported source type) is a
+            # defect, not a reachability problem: keep it visible instead of reporting a clean run, and
+            # keep the other recipients and warnings of today's batch.
+            frappe.log_error(
+                title="Warning notification skipped: invalid source",
+                message=f"{exc.code}: {exc}\nrecipient={recipient} source={source_doctype}/{source_name} key={key}",
+            )
     return created
+
+
+def _lock_current_opportunities(names) -> set[str]:
+    """Lock every legacy notice parent before this transaction takes a series lock."""
+
+    opportunity_ids = tuple(sorted({name for name in names if name}))
+    return {name for name in opportunity_ids if _lock_current_opportunity(name)}
+
+
+def _lock_current_opportunity(name: str) -> bool:
+    """Serialize a legacy parent-sourced notice with Opportunity deletion."""
+
+    return bool(frappe.db.sql(
+        "SELECT `name` FROM `tabCRM Opportunity` WHERE `name` = %s FOR UPDATE",
+        (name,),
+    ))
 
 
 def send_warning_notifications() -> int:
@@ -95,6 +124,12 @@ def send_warning_notifications() -> int:
     days = {field: value for field, (value, _source) in thresholds().items()}
     since = now.date() - timedelta(days=NOTICE_DAYS)
     fresh = lambda kind, rows: [r for r in rows if (began(kind, r, days, now.date()) or date.min) >= since]
+    stage6_rows = fresh("stage6_no_po", details["stage6_no_po"])
+    before_history_ids = _lock_current_opportunities(
+        row["id"]
+        for row in stage6_rows
+        if ((row.get("handling") or {}).get("sourceEvent") or BEFORE_HISTORY) == BEFORE_HISTORY
+    )
     managers = active_crm_users("Manager")
     created = 0
 
@@ -120,15 +155,21 @@ def send_warning_notifications() -> int:
                            title="预警：报价即将到期", message=f"报价 {row['title']}（{row['customer']}）V{row.get('quotationVersionNo')} 将于 {row['validUntil']} 到期，还剩 {row['daysToExpiry']} 天。",
                            route=f"/quotations/{quote(row['id'], safe='')}",
                            source_doctype="CRM Quotation Version", source_name=row["quotationVersionId"])
-    for row in fresh("stage6_no_po", details["stage6_no_po"]):
+    for row in stage6_rows:
         handling = row.get("handling") or {}
         event = handling.get("sourceEvent") or BEFORE_HISTORY
+        # All before-history parents were locked in sorted order before any notice
+        # insert took the shared naming-series lock. This matches Opportunity writers'
+        # parent -> notification order and still serializes with deletion.
+        if event == BEFORE_HISTORY and row["id"] not in before_history_ids:
+            continue
         created += _notify(readers(managers, "CRM Opportunity", row["id"]),
                            key=f"stage6_no_po:{row['id']}:{event}:{handling.get('followUpOn') or ''}", category="Opportunity",
                            title="预警：第 6 阶段超期无 PO",
                            message=f"{row['title']}（{row['customer']}）已在第 6 阶段 {row['daysInStage']} 天{'以上' if row.get('daysAtLeast') else ''}，仍未收到 PO。",
                            route=f"/opportunities/{quote(row['id'], safe='')}",
-                           # The entry event, not the Opportunity: an inbox item must not block deleting it.
-                           source_doctype="CRM Opportunity Stage History" if event != BEFORE_HISTORY else None,
-                           source_name=event if event != BEFORE_HISTORY else None)
+                           # Legacy entries have no trusted history row. Anchor
+                           # their notice to the current parent, never an unscoped copy.
+                           source_doctype="CRM Opportunity Stage History" if event != BEFORE_HISTORY else "CRM Opportunity",
+                           source_name=event if event != BEFORE_HISTORY else row["id"])
     return created
