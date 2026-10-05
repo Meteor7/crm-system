@@ -94,6 +94,22 @@ def _validate_source(source_doctype, source_name) -> None:
         raise CrmApiException("VALIDATION_ERROR", "Notification source record was not found.")
 
 
+# The route is stored in a Data field.
+ROUTE_MAX_LENGTH = 140
+
+
+def record_route(list_route: str, record_id: str) -> str:
+    """Route of a record's own page, or of its list when the ID makes that route too long to store.
+
+    An Account or Contact ID is built from names and can be as long as the route field itself. A
+    notice follows an action that is otherwise valid; refusing the action because the link to the
+    record cannot be stored would be worse than a link to the list the record is in.
+    """
+
+    route = f"{list_route}/{record_id}"
+    return route if len(route) <= ROUTE_MAX_LENGTH else list_route
+
+
 def create_notification(
     *,
     recipient: str,
@@ -113,7 +129,7 @@ def create_notification(
     resolve_crm_role(recipient)
     if category not in CATEGORIES:
         raise CrmApiException("VALIDATION_ERROR", "Notification category is invalid.")
-    normalized_route = _text(route, "route", 140)
+    normalized_route = _text(route, "route", ROUTE_MAX_LENGTH)
     if not normalized_route.startswith("/") or normalized_route.startswith("//"):
         raise CrmApiException("VALIDATION_ERROR", "Notification route must be an internal path.")
     _validate_source(source_doctype, source_name)

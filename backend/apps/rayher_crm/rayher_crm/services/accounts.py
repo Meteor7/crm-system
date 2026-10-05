@@ -22,7 +22,7 @@ from rayher_crm.services.common import (
     validate_choice,
 )
 from rayher_crm.services.concurrency import lock_document
-from rayher_crm.services.notifications import create_notification
+from rayher_crm.services.notifications import create_notification, record_route
 from rayher_crm.services.opportunity_stages import OPEN_STAGES
 from rayher_crm.services.regions import collapse_region, list_regions, matching_region, register_region
 
@@ -292,7 +292,7 @@ def create_account(payload: dict[str, Any]) -> dict[str, Any]:
             create_notification(
                 recipient=doc.custom_crm_owner, category="Account",
                 title="Account assigned", message=f"You are now responsible for {doc.customer_name}.",
-                route=f"/accounts/{doc.name}", source_doctype="Customer", source_name=doc.name,
+                route=record_route("/accounts", doc.name), source_doctype="Customer", source_name=doc.name,
             )
     except Exception:
         frappe.db.rollback(save_point=savepoint)
@@ -343,7 +343,7 @@ def update_account(
             create_notification(
                 recipient=doc.custom_crm_owner, category="Account",
                 title="Account reassigned", message=f"You are now responsible for {doc.customer_name}.",
-                route=f"/accounts/{doc.name}", source_doctype="Customer", source_name=doc.name,
+                route=record_route("/accounts", doc.name), source_doctype="Customer", source_name=doc.name,
             )
         if failure_injector:
             failure_injector("after_account_update")

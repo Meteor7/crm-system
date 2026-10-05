@@ -5,8 +5,8 @@ from frappe.tests.utils import FrappeTestCase
 
 from rayher_crm.api.v1.errors import CrmApiException
 from rayher_crm.api.v1.leads import create_lead as create_lead_endpoint
-from rayher_crm.services.accounts import create_account
-from rayher_crm.services.contacts import create_contact
+from rayher_crm.services.accounts import create_account, get_account_360
+from rayher_crm.services.contacts import create_contact, get_contact
 from rayher_crm.services.leads import convert_lead, create_lead, delete_lead, get_lead, list_leads, update_lead
 from rayher_crm.services.opportunities import get_strategy_opportunity
 from rayher_crm.services.opportunity_stages import QUALIFIED_OPPORTUNITY
@@ -361,6 +361,113 @@ class TestLeadApi(FrappeTestCase):
             ],
             [("", "pipeline", self.manager)],
         )
+
+    def test_manager_conversion_gives_the_new_account_and_contact_to_the_chosen_owner(self):
+        frappe.set_user(self.manager)
+        lead = create_lead(self._input("Manager Converted Lead", self.sales))
+        conversion = self._conversion_input(
+            newAccount={**self._account_input("Manager Converted Account"), "owner": self.sales},
+            newSite=self._site_input("Manager Converted Site"),
+            newContact={**self._contact_input("placeholder", "Manager Converted Contact"), "owner": self.sales},
+        )
+
+        converted = convert_lead(lead["id"], conversion)
+
+        self.assertEqual(frappe.db.get_value("Customer", converted["accountId"], "custom_crm_owner"), self.sales)
+        self.assertEqual(frappe.db.get_value("Contact", converted["contactId"], "custom_crm_owner"), self.sales)
+        # The Sales user the Lead belongs to keeps it and reaches everything the conversion created.
+        frappe.set_user(self.sales)
+        self.assertEqual(get_lead(lead["id"])["status"], "Converted")
+        self.assertEqual(get_account_360(converted["accountId"])["account"]["owner"], self.sales)
+        self.assertEqual(get_contact(converted["contactId"])["contact"]["owner"], self.sales)
+        self.assertEqual(get_strategy_opportunity(converted["opportunityId"])["owner"], self.sales)
+
+    def test_manager_conversion_notifies_the_owner_even_when_the_record_id_is_too_long_for_a_route(self):
+        # Frappe names a Contact "<name>-<Account ID>". With a long Account ID the route to the Contact
+        # no longer fits the notification's route field; the conversion must not fail on that.
+        frappe.set_user(self.sales)
+        account = create_account(self._account_input("Lead Long Account " + "N" * 82))
+        site = create_site(account["id"], self._site_input("Lead Long Site"))
+        frappe.set_user(self.manager)
+        lead = create_lead(self._input("Manager Long Route Lead", self.sales))
+        contact_input = {**self._contact_input("placeholder", "Long Route Contact " + "C" * 11), "owner": self.sales}
+
+        converted = convert_lead(lead["id"], self._conversion_input(
+            accountId=account["id"], siteId=site["id"], newContact=contact_input,
+        ))
+
+        self.assertGreater(len(f"/contacts/{converted['contactId']}"), 140)
+        self.assertEqual(frappe.db.get_value("Contact", converted["contactId"], "custom_crm_owner"), self.sales)
+        notice = frappe.get_all(
+            "CRM Notification Event",
+            filters={"source_doctype": "Contact", "source_name": converted["contactId"], "recipient_user": self.sales},
+            fields=["title", "route"],
+        )
+        self.assertEqual([(row.title, row.route) for row in notice], [("Contact assigned", "/contacts")])
+        self.assertEqual(get_lead(lead["id"])["status"], "Converted")
+
+    def test_manager_conversion_that_fails_part_way_leaves_nothing_behind(self):
+        engineer = self._user("crm-lead-engineer@example.invalid", "CRM Engineer")
+        frappe.set_user(self.manager)
+        lead = create_lead(self._input("Manager Rollback Lead", self.sales))
+        counted = ("Customer", "Address", "Contact", "CRM Opportunity", "CRM Notification Event")
+        before = {doctype: frappe.db.count(doctype) for doctype in counted}
+
+        # The Account goes to Sales, which writes the Account and its notice; the Contact owner is then refused.
+        with self.assertRaises(CrmApiException) as invalid:
+            convert_lead(lead["id"], self._conversion_input(
+                newAccount={**self._account_input("Manager Rollback Account"), "owner": self.sales},
+                newSite=self._site_input("Manager Rollback Site"),
+                newContact={**self._contact_input("placeholder", "Manager Rollback Contact"), "owner": engineer},
+            ))
+
+        self.assertEqual(invalid.exception.code, "VALIDATION_ERROR")
+        self.assertEqual({doctype: frappe.db.count(doctype) for doctype in counted}, before)
+        self.assertEqual(get_lead(lead["id"])["status"], "New")
+
+    def test_manager_conversion_without_a_chosen_owner_keeps_the_records_with_the_manager(self):
+        frappe.set_user(self.manager)
+        lead = create_lead(self._input("Manager Own Conversion Lead", self.sales))
+        account_input = self._account_input("Manager Own Conversion Account")
+        contact_input = self._contact_input("placeholder", "Manager Own Conversion Contact")
+        del account_input["owner"], contact_input["owner"]
+
+        converted = convert_lead(lead["id"], self._conversion_input(
+            newAccount=account_input, newSite=self._site_input("Manager Own Conversion Site"), newContact=contact_input,
+        ))
+
+        self.assertEqual(frappe.db.get_value("Customer", converted["accountId"], "custom_crm_owner"), self.manager)
+        self.assertEqual(frappe.db.get_value("Contact", converted["contactId"], "custom_crm_owner"), self.manager)
+
+    def test_manager_conversion_refuses_an_owner_who_cannot_hold_records(self):
+        engineer = self._user("crm-lead-engineer@example.invalid", "CRM Engineer")
+        frappe.set_user(self.manager)
+        lead = create_lead(self._input("Manager Invalid Owner Lead", self.sales))
+        before = frappe.db.count("Customer")
+
+        with self.assertRaises(CrmApiException) as invalid:
+            convert_lead(lead["id"], self._conversion_input(
+                newAccount={**self._account_input("Manager Invalid Owner Account"), "owner": engineer},
+                newSite=self._site_input("Manager Invalid Owner Site"),
+                newContact=self._contact_input("placeholder", "Manager Invalid Owner Contact"),
+            ))
+
+        self.assertEqual(invalid.exception.code, "VALIDATION_ERROR")
+        self.assertEqual(frappe.db.count("Customer"), before)
+        self.assertEqual(get_lead(lead["id"])["status"], "New")
+
+    def test_sales_conversion_keeps_the_new_account_and_contact_with_the_converting_sales(self):
+        frappe.set_user(self.sales)
+        lead = create_lead(self._input("Sales Own Conversion Lead"))
+
+        converted = convert_lead(lead["id"], self._conversion_input(
+            newAccount={**self._account_input("Sales Own Conversion Account"), "owner": self.other_sales},
+            newSite=self._site_input("Sales Own Conversion Site"),
+            newContact={**self._contact_input("placeholder", "Sales Own Conversion Contact"), "owner": self.other_sales},
+        ))
+
+        self.assertEqual(frappe.db.get_value("Customer", converted["accountId"], "custom_crm_owner"), self.sales)
+        self.assertEqual(frappe.db.get_value("Contact", converted["contactId"], "custom_crm_owner"), self.sales)
 
     def test_conversion_needs_a_probability_level_before_it_writes_anything(self):
         frappe.set_user(self.sales)

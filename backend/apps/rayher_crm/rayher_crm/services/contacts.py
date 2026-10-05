@@ -21,7 +21,7 @@ from rayher_crm.services.common import (
     validate_choice,
 )
 from rayher_crm.services.concurrency import lock_document
-from rayher_crm.services.notifications import create_notification
+from rayher_crm.services.notifications import create_notification, record_route
 
 
 CONTACT_RELATIONSHIPS = {"Strong", "Developing", "Weak"}
@@ -246,7 +246,7 @@ def create_contact(payload: dict[str, Any]) -> dict[str, Any]:
             create_notification(
                 recipient=doc.custom_crm_owner, category="Contact",
                 title="Contact assigned", message=f"You are now responsible for {doc.first_name}.",
-                route=f"/contacts/{doc.name}", source_doctype="Contact", source_name=doc.name,
+                route=record_route("/contacts", doc.name), source_doctype="Contact", source_name=doc.name,
             )
     except Exception:
         frappe.db.rollback(save_point=savepoint)
@@ -271,7 +271,7 @@ def update_contact(name: str, payload: dict[str, Any], expected_modified: Any) -
             create_notification(
                 recipient=doc.custom_crm_owner, category="Contact",
                 title="Contact reassigned", message=f"You are now responsible for {doc.first_name}.",
-                route=f"/contacts/{doc.name}", source_doctype="Contact", source_name=doc.name,
+                route=record_route("/contacts", doc.name), source_doctype="Contact", source_name=doc.name,
             )
     except Exception:
         frappe.db.rollback(save_point=savepoint)

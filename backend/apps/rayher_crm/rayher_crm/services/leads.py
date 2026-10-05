@@ -10,7 +10,7 @@ import frappe
 from frappe.utils import validate_email_address
 
 from rayher_crm.api.v1.errors import CrmApiException
-from rayher_crm.permissions.roles import assert_capability
+from rayher_crm.permissions.roles import assert_capability, resolve_crm_role
 from rayher_crm.permissions.scope import conditions_for_doctype
 from rayher_crm.services.common import (
     delete_manager_scoped_document,
@@ -315,6 +315,19 @@ def _validate_conversion(payload: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _converted_record_owner(requested: Any) -> Any:
+    """Owner of an Account or Contact that a conversion creates.
+
+    A Sales user owns what their own conversion creates, whatever the request names. A Manager converts
+    for the Sales user the Lead belongs to, so the owner chosen in the form stands; create_account and
+    create_contact validate it.
+    """
+
+    if resolve_crm_role() == "Manager" and isinstance(requested, str) and requested.strip():
+        return requested
+    return frappe.session.user
+
+
 def convert_lead(
     name: str,
     payload: dict[str, Any],
@@ -349,7 +362,7 @@ def convert_lead(
             if not isinstance(new_account, dict):
                 raise CrmApiException("VALIDATION_ERROR", "accountId or newAccount is required.")
             account_payload = dict(new_account)
-            account_payload["owner"] = frappe.session.user
+            account_payload["owner"] = _converted_record_owner(account_payload.get("owner"))
             account_id = create_account(account_payload)["id"]
         if failure_injector:
             failure_injector("account")
@@ -383,7 +396,7 @@ def convert_lead(
             contact_payload = dict(new_contact)
             contact_payload["accountId"] = account_id
             contact_payload["siteId"] = site_id
-            contact_payload["owner"] = frappe.session.user
+            contact_payload["owner"] = _converted_record_owner(contact_payload.get("owner"))
             contact_id = create_contact(contact_payload)["id"]
         if failure_injector:
             failure_injector("contact")
