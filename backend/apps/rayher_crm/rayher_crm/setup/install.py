@@ -4,6 +4,7 @@ import frappe
 
 from rayher_crm.permissions.roles import install_roles
 from rayher_crm.permissions.scope import install_crm_doc_permissions
+from rayher_crm.permissions.registry import validate_permission_registry
 from rayher_crm.setup.custom_fields import install_crm_schema
 from rayher_crm.setup.controlled_documents import install_approved_controlled_documents
 from rayher_crm.setup.demo_report_cleanup import cleanup_external_demo_reports
@@ -44,6 +45,7 @@ def after_install() -> None:
     install_approved_controlled_documents()
     # A new site starts with the default territory tree; an existing one gets it from a patch, once.
     ensure_default_territories()
+    validate_permission_registry()
 
 
 def after_migrate() -> None:
@@ -58,3 +60,6 @@ def after_migrate() -> None:
     install_approved_controlled_documents()
     cleanup_external_demo_reports()
     sync_equipment_types()
+    # Also completes a fresh install whose final gate failed before its setup committed.
+    ensure_default_territories()
+    validate_permission_registry()

@@ -73,11 +73,18 @@ Compose 会幂等创建独立 site、安装 `rayher_crm`、设置 `ALLOW_TESTS=f
 
 ## 7. 上线验收 Gate
 
+对已经运行的站点，执行下面的 `migrate` 前先阻断外部流量或进入维护模式；不要在仍对用户提供服务时用 `exec` 运行迁移。若权限注册表校验或任一步迁移失败，保持流量阻断，修正原因并完整重跑 `migrate`。仅在迁移成功、权限与健康检查通过后恢复流量；不要为了让校验通过而提前提交部分权限修复。
+
 ```bash
-curl --fail --silent https://crm-staging.example.com/api/method/ping
 docker compose --env-file backend/.env.staging -f backend/compose.yaml exec -T backend \
   bench --site crm-staging.example.com migrate
 docker compose --env-file backend/.env.staging -f backend/compose.yaml ps
+```
+
+迁移与内部权限、健康检查完成并恢复流量后，再执行外部连通性检查：
+
+```bash
+curl --fail --silent https://crm-staging.example.com/api/method/ping
 ```
 
 还必须人工验收：

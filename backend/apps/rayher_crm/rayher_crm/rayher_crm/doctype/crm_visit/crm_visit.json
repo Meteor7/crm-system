@@ -34,9 +34,14 @@
   "naming_rule": "Expression",
   "owner": "Administrator",
   "permissions": [
-    {"read": 1, "role": "CRM Manager"},
-    {"read": 1, "role": "CRM Sales"},
-    {"read": 1, "role": "CRM Engineer"}
+    {
+      "read": 1,
+      "role": "CRM Manager"
+    },
+    {
+      "read": 1,
+      "role": "CRM Sales"
+    }
   ],
   "sort_field": "modified",
   "sort_order": "DESC",

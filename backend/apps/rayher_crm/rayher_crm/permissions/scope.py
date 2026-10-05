@@ -272,7 +272,10 @@ DOCPERMS_BY_DOCTYPE = {
     "CRM RFQ": AUDIT_DOCPERMS,
     "CRM RFQ Version": AUDIT_DOCPERMS,
 }
-PERMISSION_FIELDS = ("read", "write", "create", "delete", "report", "export", "print", "email", "share")
+PERMISSION_FIELDS = (
+    "select", "read", "write", "create", "delete", "submit", "cancel", "amend", "import",
+    "report", "export", "print", "email", "share",
+)
 ROLE_TO_SERVER_ROLE = {"Manager": "CRM Manager", "Sales": "CRM Sales", "Engineer": "CRM Engineer"}
 DOCTYPES_TO_VIEW_CAPABILITY = {
     "Customer": "account:view", "Address": "account:view", "Contact": "contact:view", "Lead": "requirement:view",
@@ -317,16 +320,25 @@ def _permissions_for_doctype(doctype: str, role: str) -> set[str]:
 def install_crm_doc_permissions() -> None:
     """Install explicit DocPerm rows so standard ERPNext roles do not mask CRM scope."""
 
-    # Address needs a non-owner read grant before DBQuery reaches its CRM row hook.
-    # Reconcile only the CRM rows; existing ERP and All permissions stay intact.
-    for doctype in (*SCOPED_DOCTYPES, "Address"):
+    doctypes = (*SCOPED_DOCTYPES, "Address", "CRM Account Engineer Assignment")
+    # Reject every unsafe policy before changing any DocPerm or DocShare row.
+    for doctype in doctypes:
         permissions = DOCPERMS_BY_DOCTYPE.get(doctype, ROLE_DOCPERMS)
         for role, allowed in permissions.items():
-            if allowed & MUTATING_PERMISSIONS:
+            if allowed & {"submit", "cancel", "amend", "import"} or (
+                allowed & MUTATING_PERMISSIONS
+                and (doctype, role) != ("CRM Account Engineer Assignment", "CRM Manager")
+            ):
                 raise ValueError(
                     f"{doctype} would let {role} change rows through the standard document API; "
                     "writes belong to the api/v1 services.",
                 )
+
+    # Address needs a non-owner read grant before DBQuery reaches its CRM row hook.
+    # Reconcile only the CRM rows; existing ERP and All permissions stay intact.
+    for doctype in doctypes:
+        permissions = DOCPERMS_BY_DOCTYPE.get(doctype, ROLE_DOCPERMS)
+        for role, allowed in permissions.items():
             if not frappe.db.exists(
                 "Custom DocPerm",
                 {"parent": doctype, "role": role, "permlevel": 0, "if_owner": 0},
