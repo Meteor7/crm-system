@@ -22,7 +22,7 @@ from rayher_crm.services.common import (
     validate_choice,
 )
 from rayher_crm.services.concurrency import lock_document
-from rayher_crm.services.contacts import _contact_account
+from rayher_crm.services.contacts import _contact_account, _require_contact
 from rayher_crm.services.notifications import notify_if_reachable
 
 
@@ -34,14 +34,24 @@ def delete_visit(name: str) -> dict[str, str]:
     return delete_manager_scoped_document("CRM Visit", name, "visit:write", "VISIT_NOT_FOUND")
 
 
-def _visit_owner(value: Any) -> str:
+def _reads_account(user: str, account: str) -> bool:
+    """Whether a Sales user reads the Account: their own, or a Public one (`_customer_condition`)."""
+    row = frappe.db.get_value("Customer", account, ["custom_crm_owner", "custom_crm_visibility"], as_dict=True)
+    return bool(row) and (row.custom_crm_owner == user or (row.custom_crm_visibility or "Private") == "Public")
+
+
+def _visit_owner(value: Any, account: str) -> str:
     owner = resolve_write_owner(value)
     if resolve_crm_role(owner) != "Sales":
         raise CrmApiException("INVALID_OWNER", "Visit owner must be an active CRM Sales user.")
+    # A Sales user reads a Visit only on an Account they read. Named on a Private Account of someone else, the
+    # owner would see neither the Visit nor the notice of it; only the Managers would.
+    if not _reads_account(owner, account):
+        raise CrmApiException("INVALID_OWNER", "The Visit owner cannot see this Account: it is Private and not theirs.")
     return owner
 
 
-def _action_owner(value: Any, *, required: bool = False) -> str:
+def _action_owner(value: Any, account: str, *, required: bool = False) -> str:
     owner = str(value or "").strip()
     if not owner:
         if required:
@@ -55,6 +65,8 @@ def _action_owner(value: Any, *, required: bool = False) -> str:
         raise CrmApiException("INVALID_OWNER", "Action owner must be an active CRM Sales user.") from exc
     if role != "Sales":
         raise CrmApiException("INVALID_OWNER", "Action owner must be an active CRM Sales user with Visit access.")
+    if not _reads_account(owner, account):
+        raise CrmApiException("INVALID_OWNER", "The action owner cannot see this Account: it is Private and not theirs.")
     return owner
 
 
@@ -69,8 +81,7 @@ def _validate_contact(contact_id: Any, account_id: str) -> str:
     normalized = str(contact_id or "").strip()
     if not normalized:
         return ""
-    if not frappe.db.exists("Contact", normalized):
-        raise CrmApiException("CONTACT_NOT_FOUND", "Contact was not found.")
+    _require_contact(normalized)
     if _contact_account(normalized) != account_id:
         raise CrmApiException("CONTACT_ACCOUNT_MISMATCH", "The contact belongs to another account.")
     if frappe.db.get_value("Contact", normalized, "custom_crm_status") != "Active":
@@ -206,7 +217,7 @@ def create_visit(payload: dict[str, Any]) -> dict[str, Any]:
         "account": account_id,
         "primary_contact": _validate_contact(payload.get("primaryContactId"), account_id),
         "opportunity": _validate_opportunity(payload.get("opportunityId"), account_id),
-        "visit_owner": _visit_owner(payload.get("owner")),
+        "visit_owner": _visit_owner(payload.get("owner"), account_id),
         "subject": required_text(payload, "subject"),
         "visit_date": _required_date(payload.get("date"), "date"),
         "visit_type": validate_choice(payload.get("type"), "type", VISIT_TYPES),
@@ -226,16 +237,18 @@ def _apply_edit(doc, command: dict[str, Any]) -> None:
         doc.visit_date = _required_date(command.get("date"), "date")
     if "visitType" in command:
         doc.visit_type = validate_choice(command.get("visitType"), "visitType", VISIT_TYPES)
-    if "owner" in command:
-        doc.visit_owner = _visit_owner(command.get("owner"))
+    # The form sends the owner it shows. One that stays is no hand-over and is not asked to read the Account
+    # again, so an Account that changed hands does not stop every edit of its Visits.
+    if "owner" in command and str(command.get("owner") or "").strip() != doc.visit_owner:
+        doc.visit_owner = _visit_owner(command.get("owner"), doc.account)
     if "objective" in command:
         doc.objective = required_text(command, "objective")
     if "outcome" in command:
         doc.outcome = str(command.get("outcome") or "").strip()
     if "nextAction" in command:
         doc.next_action = str(command.get("nextAction") or "").strip()
-    if "actionOwner" in command:
-        doc.action_owner = _action_owner(command.get("actionOwner"))
+    if "actionOwner" in command and str(command.get("actionOwner") or "").strip() != (doc.action_owner or ""):
+        doc.action_owner = _action_owner(command.get("actionOwner"), doc.account)
     if "due" in command:
         doc.due = optional_date(command.get("due"), "due")
 
@@ -249,8 +262,8 @@ def _apply_advance(doc, command: dict[str, Any]) -> None:
         doc.outcome = str(command.get("outcome") or "").strip()
     if "nextAction" in command:
         doc.next_action = str(command.get("nextAction") or "").strip()
-    if "actionOwner" in command:
-        doc.action_owner = _action_owner(command.get("actionOwner"))
+    if "actionOwner" in command and str(command.get("actionOwner") or "").strip() != (doc.action_owner or ""):
+        doc.action_owner = _action_owner(command.get("actionOwner"), doc.account)
     if "due" in command:
         doc.due = optional_date(command.get("due"), "due")
     if target == "Visited" and not doc.outcome:

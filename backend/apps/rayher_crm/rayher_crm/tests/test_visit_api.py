@@ -625,9 +625,13 @@ class TestVisitApi(FrappeTestCase):
         with self.assertRaises(CrmApiException) as forged:
             create_visit(self._input(account, contact, self.other_sales))
         self.assertEqual(forged.exception.code, "SCOPE_DENIED")
+        # A Contact of someone else's Private Account answers as one that does not exist, not as a mismatch.
         with self.assertRaises(CrmApiException) as mismatch:
             create_visit(self._input(account, foreign_contact, self.sales))
-        self.assertEqual(mismatch.exception.code, "CONFLICT")
+        self.assertEqual(
+            (mismatch.exception.code, mismatch.exception.public_message),
+            ("NOT_FOUND", "Contact was not found, or you have no access to it."),
+        )
 
         site = create_site(account["id"], {
             "name": "Core Fab", "city": "Shanghai", "type": "Fab",
@@ -716,6 +720,8 @@ class TestVisitApi(FrappeTestCase):
 
     def test_review_endpoint_and_owner_reassignment_notify_the_owner(self):
         account, contact = self._records(self.sales, "Review")
+
+        # A Visit is handed to a colleague on an Account they read: a Public one.
         frappe.db.set_value("Customer", account["id"], "custom_crm_visibility", "Public")
         visit = create_visit(self._input(account, contact, self.sales))
         frappe.set_user(self.manager)
@@ -1056,6 +1062,64 @@ class TestVisitApi(FrappeTestCase):
             frappe.db.count("CRM Notification Event", {"source_doctype": "CRM Visit", "source_name": visit["id"]}),
             before,
         )
+
+    def test_the_owner_and_the_action_owner_of_a_visit_must_see_its_account(self):
+        # A Sales user reads a Visit only on an Account they read. A Visit handed to a colleague on a Private
+        # Account would be out of reach of everyone but the Managers, so the hand-over is refused.
+        account, contact = self._records(self.sales, "Handover")
+        frappe.set_user(self.manager)
+        with self.assertRaises(CrmApiException) as created:
+            create_visit(self._input(account, contact, self.other_sales))
+        # INVALID_OWNER, which the public contract knows as VALIDATION_ERROR.
+        self.assertEqual(created.exception.code, "VALIDATION_ERROR")
+        self.assertEqual(
+            created.exception.public_message, "The Visit owner cannot see this Account: it is Private and not theirs.",
+        )
+        visit = create_visit(self._input(account, contact, self.sales))
+        for command in (
+            {"type": "edit", "owner": self.other_sales},
+            {"type": "edit", "nextAction": "Bring samples", "actionOwner": self.other_sales},
+            {"type": "advance", "status": "Visited", "outcome": "Met", "nextAction": "Bring samples", "actionOwner": self.other_sales},
+        ):
+            with self.assertRaises(CrmApiException) as refused:
+                update_visit(visit["id"], command, visit["modified"])
+            self.assertEqual(refused.exception.code, "VALIDATION_ERROR", command)
+        # The owner naming a colleague as the action owner is refused the same way.
+        frappe.set_user(self.sales)
+        with self.assertRaises(CrmApiException) as refused:
+            update_visit(
+                visit["id"], {"type": "edit", "nextAction": "Bring samples", "actionOwner": self.other_sales},
+                visit["modified"],
+            )
+        self.assertEqual(
+            refused.exception.public_message, "The action owner cannot see this Account: it is Private and not theirs.",
+        )
+        self.assertEqual(frappe.db.get_value("CRM Visit", visit["id"], "visit_owner"), self.sales)
+        self.assertFalse(frappe.db.get_value("CRM Visit", visit["id"], "action_owner"))
+
+        # The Account changes hands (to a Manager here) and the Visit's owner no longer reads it. The form sends
+        # the owner it shows: an owner that stays is no hand-over, so the Manager still edits the Visit; handing
+        # it on to someone who cannot see the Account is refused as before.
+        frappe.db.set_value("Customer", account["id"], "custom_crm_owner", self.manager, update_modified=False)
+        frappe.set_user(self.manager)
+        visit = update_visit(visit["id"], {"type": "edit", "subject": "Fab review (moved)", "owner": self.sales}, visit["modified"])
+        self.assertEqual(visit["owner"], self.sales)
+        with self.assertRaises(CrmApiException) as refused:
+            update_visit(visit["id"], {"type": "edit", "owner": self.other_sales}, visit["modified"])
+        self.assertEqual(refused.exception.code, "VALIDATION_ERROR")
+        frappe.db.set_value("Customer", account["id"], "custom_crm_owner", self.sales, update_modified=False)
+
+        # On a Public Account the colleague reads the Visit, so they may hold its action and then own it.
+        frappe.set_user("Administrator")
+        frappe.db.set_value("Customer", account["id"], "custom_crm_visibility", "Public")
+        frappe.set_user(self.manager)
+        visit = update_visit(
+            visit["id"], {"type": "edit", "nextAction": "Bring samples", "actionOwner": self.other_sales},
+            get_visit(visit["id"])["modified"],
+        )
+        visit = update_visit(visit["id"], {"type": "edit", "owner": self.other_sales}, visit["modified"])
+        frappe.set_user(self.other_sales)
+        self.assertEqual(get_visit(visit["id"])["owner"], self.other_sales)
 
     def _submitted_visit(self, suffix: str) -> dict:
         account, contact = self._records(self.sales, suffix)

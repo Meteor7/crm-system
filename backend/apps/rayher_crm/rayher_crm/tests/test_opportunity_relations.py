@@ -127,9 +127,13 @@ class TestOpportunityRelations(FrappeTestCase):
         with self.assertRaises(CrmApiException) as duplicate:
             create_opportunity_stakeholder(opportunity["id"], self._stakeholder_input(contact["id"]))
         self.assertEqual(duplicate.exception.code, "CONFLICT")
+        # A Contact of someone else's Private Account answers as one that does not exist.
         with self.assertRaises(CrmApiException) as mismatch:
             create_opportunity_stakeholder(opportunity["id"], self._stakeholder_input(foreign_contact["id"]))
-        self.assertEqual(mismatch.exception.code, "CONFLICT")
+        self.assertEqual(
+            (mismatch.exception.code, mismatch.exception.public_message),
+            ("NOT_FOUND", "Contact was not found, or you have no access to it."),
+        )
 
         frappe.set_user("Administrator")
         frappe.db.set_value("Contact", contact["id"], "custom_crm_status", "Left Company")

@@ -3,7 +3,7 @@ import { bookingTitle, systemValueLabel } from '@/features/shared/system-labels'
 import { personnelDisplayName } from '@/demo/personnel'
 import { computed, reactive, ref, watch } from 'vue'
 import { CalendarDays, Download, Factory, FileSignature, FlaskConical, MapPin, Target, Users } from '@lucide/vue'
-import type { CrmApi } from '@/api'
+import { CrmApiError, type CrmApi } from '@/api'
 import type { Account360Dto, Tone } from '@/types/crm'
 import { useAppStore } from '@/stores/app'
 import { mapRequestError, readRequestMeta, requestErrorMessage, type RequestMetaState } from '@/api/request-state'
@@ -25,7 +25,7 @@ const props = defineProps<{ accountId: string; apiClient: CrmApi }>()
 const emit = defineEmits<{ loaded: [detail: Account360Dto]; 'manage-sites': [] }>()
 const app = useAppStore()
 const { locale, t, message } = useI18n()
-const detail = ref<Account360Dto | null>(null), loading = ref(false), error = useLocaleMessage(), exportError = useLocaleMessage(), denied = ref(false), requestId = ref(''), meta = ref<RequestMetaState | null>(null)
+const detail = ref<Account360Dto | null>(null), loading = ref(false), error = useLocaleMessage(), exportError = useLocaleMessage(), denied = ref(false), notFound = ref(false), requestId = ref(''), meta = ref<RequestMetaState | null>(null)
 const canExport = computed(() => app.can('account:view'))
 const canWrite = computed(() => {
   if (!app.can('account:write') || !detail.value) return false
@@ -189,12 +189,16 @@ async function load() {
   if (!props.accountId) { detail.value = null; return }
   await app.loadBootstrap(props.apiClient)
   const sequence = ++loadSequence, accountId = props.accountId
-  detail.value = null; loading.value = true; error.value = ''; denied.value = false; requestId.value = ''; meta.value = null
+  detail.value = null; loading.value = true; error.value = ''; denied.value = false; notFound.value = false; requestId.value = ''; meta.value = null
   try {
     const result = await props.apiClient.getAccount360(accountId)
     if (sequence === loadSequence && accountId === props.accountId) { detail.value = result.data; meta.value = readRequestMeta(result); emit('loaded', result.data) }
   } catch (reason) {
-    if (sequence === loadSequence && accountId === props.accountId) { const mapped = mapRequestError(reason); error.value = mapped.localizedMessage ?? mapped.message; requestId.value = mapped.requestId; denied.value = mapped.denied }
+    if (sequence === loadSequence && accountId === props.accountId) {
+      const mapped = mapRequestError(reason); error.value = mapped.localizedMessage ?? mapped.message; requestId.value = mapped.requestId; denied.value = mapped.denied
+      // An Account that does not exist and one the user may not see answer the same (F1-12): one state, no retry.
+      notFound.value = reason instanceof CrmApiError && reason.code === 'NOT_FOUND'
+    }
   } finally { if (sequence === loadSequence && accountId === props.accountId) loading.value = false }
 }
 function exportReport() {
@@ -217,6 +221,7 @@ watch(selectedProject, resetSectionPages)
     <DataState v-if="!accountId" type="empty" :title="locale === 'en-US' ? 'Select an account' : '请选择客户'" :message="locale === 'en-US' ? 'Select an account from the list to view its complete profile.' : '从左侧客户列表选择后查看完整档案。'" />
     <DataState v-else-if="loading" type="loading" />
     <DataState v-else-if="denied" type="denied" :message="error" :request-id="requestId" />
+    <DataState v-else-if="notFound" type="denied" :title="t('state.unavailableTitle')" :message="error" :request-id="requestId" />
     <DataState v-else-if="error" type="error" :message="error" :request-id="requestId" @retry="load" />
     <template v-else-if="detail">
       <DataNotice v-if="meta?.stale" :message="meta.localizedMessage ?? meta.message" :request-id="meta.requestId" @refresh="load" />

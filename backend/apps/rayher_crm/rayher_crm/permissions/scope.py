@@ -1073,6 +1073,18 @@ def _role_for_query(user: str | None) -> str | None:
         return None
 
 
+def _submitted_for_engineer_review(request_table: str) -> str:
+    """A Demo Request that Sales have submitted for Engineer Review at least once.
+
+    The history keeps that submission when the request moves on, is returned, rejected or cancelled later.
+    """
+    return (
+        "EXISTS (SELECT 1 FROM `tabCRM Demo Request History` AS `crm_history` "
+        f"WHERE `crm_history`.`demo_request` = {request_table}.`name` "
+        "AND `crm_history`.`to_status` = 'Engineer Review')"
+    )
+
+
 def _customer_condition(table: str, role: str, escaped_user: str) -> str:
     if role == "Manager":
         return "1=1"
@@ -1390,11 +1402,7 @@ def conditions_for_doctype(
         )
     if doctype == "CRM Demo Artifact":
         escaped_user = frappe.db.escape(resolved_user)
-        submitted = (
-            "EXISTS (SELECT 1 FROM `tabCRM Demo Request History` AS `crm_history` "
-            "WHERE `crm_history`.`demo_request` = `crm_request`.`name` "
-            "AND `crm_history`.`to_status` = 'Engineer Review')"
-        )
+        submitted = _submitted_for_engineer_review("`crm_request`")
         if role == "Manager":
             role_scope = submitted
         elif role == "Sales":
@@ -1545,7 +1553,9 @@ def conditions_for_doctype(
                 escaped_user,
                 allow_unlinked=True,
             )
-        return owner_scope
+        # An Engineer reads a request once Sales have submitted it, as they read its artifacts. Until then it
+        # is a Sales draft, which names the Engineer without being theirs to see.
+        return f"{owner_scope} AND {_submitted_for_engineer_review('`tabCRM Demo Request`')}"
     if doctype == "CRM Evaluation":
         if role == "Engineer":
             return f"`tabCRM Evaluation`.`evaluation_owner` = {escaped_user}"

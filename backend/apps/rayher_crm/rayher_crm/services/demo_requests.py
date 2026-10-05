@@ -11,7 +11,7 @@ import frappe
 
 from rayher_crm.api.v1.errors import CrmApiException
 from rayher_crm.permissions.roles import assert_capability, resolve_crm_role
-from rayher_crm.permissions.scope import conditions_for_doctype
+from rayher_crm.permissions.scope import conditions_for_doctype, has_crm_permission
 from rayher_crm.services.accounts import _require_account
 from rayher_crm.services.common import (
     ensure_server_generated_id,
@@ -22,7 +22,7 @@ from rayher_crm.services.common import (
     to_iso_timestamp,
 )
 from rayher_crm.services.concurrency import lock_document
-from rayher_crm.services.contacts import _contact_account
+from rayher_crm.services.contacts import _contact_account, _require_contact
 from rayher_crm.services.notifications import active_crm_users, create_notification, notify_if_reachable
 from rayher_crm.services.opportunity_stages import DEMO_REQUEST_STAGES
 
@@ -77,8 +77,7 @@ def _contact_display(contact_id: str) -> str:
 
 
 def _validate_contact(contact_id: str, account_id: str) -> None:
-    if not frappe.db.exists("Contact", contact_id):
-        raise CrmApiException("CONTACT_NOT_FOUND", "Contact was not found.")
+    _require_contact(contact_id)
     if _contact_account(contact_id) != account_id:
         raise CrmApiException("CONTACT_ACCOUNT_MISMATCH", "The contact belongs to another account.")
     if frappe.db.get_value("Contact", contact_id, "custom_crm_status") != "Active":
@@ -288,7 +287,8 @@ def _require_demo_request(name: str):
     if not frappe.db.exists("CRM Demo Request", name):
         raise CrmApiException("DEMO_REQUEST_NOT_FOUND", "Demo Request was not found.")
     doc = frappe.get_doc("CRM Demo Request", name)
-    if not frappe.has_permission("CRM Demo Request", "read", doc=doc, user=frappe.session.user):
+    # The row condition alone, not frappe.has_permission, which would also honour a DocShare on the request.
+    if not has_crm_permission(doc, user=frappe.session.user, permission_type="read"):
         raise CrmApiException("SCOPE_DENIED", "The Demo Request is outside the current user scope.")
     return doc
 
@@ -514,6 +514,14 @@ def _serialize_evaluation(doc) -> dict[str, Any]:
     return serialize_evaluation(doc)
 
 
+def _submitted_once(request_id: str) -> bool:
+    """Whether Sales ever submitted the request for Engineer Review: from then on its Engineer reads it."""
+
+    return bool(frappe.db.exists(
+        "CRM Demo Request History", {"demo_request": request_id, "to_status": "Engineer Review"},
+    ))
+
+
 def _notify_transition(doc, command_type: str, summary: str) -> None:
     recipients = {
         "submit": {doc.engineer_owner},
@@ -523,6 +531,9 @@ def _notify_transition(doc, command_type: str, summary: str) -> None:
         "manager_reject": {doc.sales_owner, doc.engineer_owner},
         "manager_approve": {doc.sales_owner, doc.engineer_owner},
     }[command_type] - {frappe.session.user, None, ""}
+    # A draft cancelled before it was ever submitted was never the Engineer's to see: no notice of it either.
+    if command_type == "cancel" and not _submitted_once(doc.name):
+        recipients.discard(doc.engineer_owner)
     for recipient in sorted(recipients):
         notify_if_reachable(
             recipient=recipient,
@@ -745,9 +756,7 @@ def add_demo_comment(demo_request_id: str, payload: dict[str, Any]) -> dict[str,
     mentioned_people = []
     for mentioned_person in dict.fromkeys(mentioned_ids):
         mentioned_person = _active_crm_user(mentioned_person)
-        if not frappe.has_permission(
-            "CRM Demo Request", "read", doc=request, user=mentioned_person,
-        ):
+        if not has_crm_permission(request, user=mentioned_person, permission_type="read"):
             raise CrmApiException(
                 "INVALID_OWNER", "Mentioned user must have access to this Demo Request.",
             )

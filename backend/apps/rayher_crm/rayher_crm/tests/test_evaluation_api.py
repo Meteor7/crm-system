@@ -126,6 +126,12 @@ class TestEvaluationApi(FrappeTestCase):
             "estimated_completion_date": "2026-12-20", "technical_risk": "Contamination",
             "engineer_comment": "Feasible", "manager_decision": "Pending", "form_data": {},
         }).insert(ignore_permissions=True)
+        # Written in at Manager Approval, so the submission the Engineer reviewed is added by hand: an
+        # Engineer reads a request from its submission for Engineer Review on.
+        frappe.get_doc({
+            "doctype": "CRM Demo Request History", "demo_request": request.name, "at": frappe.utils.now_datetime(),
+            "actor": sales, "from_status": "Draft", "to_status": "Engineer Review", "comment": "Submitted",
+        }).insert(ignore_permissions=True)
         frappe.set_user(self.manager)
         approved = transition_demo_request(request.name, {"type": "manager_approve", "comment": "Approved"})
         return account.name, approved["request"]

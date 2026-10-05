@@ -214,13 +214,17 @@ def _validate_account_input(
     }
 
 
+ACCOUNT_NOT_FOUND_MESSAGE = "Account was not found, or you have no access to it."
+
+
 def _require_account(name: str):
-    if not frappe.db.exists("Customer", name):
-        raise CrmApiException("ACCOUNT_NOT_FOUND", "Account was not found.")
-    doc = frappe.get_doc("Customer", name)
-    if not frappe.has_permission("Customer", "read", doc=doc, user=frappe.session.user):
-        raise CrmApiException("SCOPE_DENIED", "The account is outside the current user scope.")
-    return doc
+    # One answer for an Account that does not exist and for a Private Account of someone else. The id of an
+    # Account is its name: two answers would let a Sales user list the company's Accounts by trying names.
+    if frappe.db.exists("Customer", name):
+        doc = frappe.get_doc("Customer", name)
+        if frappe.has_permission("Customer", "read", doc=doc, user=frappe.session.user):
+            return doc
+    raise CrmApiException("ACCOUNT_NOT_FOUND", ACCOUNT_NOT_FOUND_MESSAGE)
 
 
 def list_accounts(query: dict[str, Any]) -> tuple[list[dict[str, Any]], int, int, int]:
@@ -315,7 +319,7 @@ def update_account(
     values = _validate_account_input(payload, current.custom_crm_owner, current.custom_crm_visibility or "Private")
     doc = lock_document("Customer", name, expected_modified, "NOT_FOUND")
     if not frappe.has_permission("Customer", "read", doc=doc, user=frappe.session.user):
-        raise CrmApiException("SCOPE_DENIED", "The account is outside the current user scope.")
+        raise CrmApiException("ACCOUNT_NOT_FOUND", ACCOUNT_NOT_FOUND_MESSAGE)
     savepoint = f"crm_account_update_{frappe.generate_hash(length=8)}"
     previous_owner = doc.custom_crm_owner
     frappe.db.savepoint(savepoint)

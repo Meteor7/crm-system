@@ -366,7 +366,8 @@ class TestDemoRequestApi(FrappeTestCase):
     def test_links_form_dates_and_owner_ids_are_validated(self):
         frappe.set_user(self.sales)
         cases = [
-            (self._input(primaryContactId=self.foreign_contact["id"]), "CONFLICT"),
+            # A Contact of someone else's Private Account answers as one that does not exist.
+            (self._input(primaryContactId=self.foreign_contact["id"]), "NOT_FOUND"),
             (self._input(opportunityId=self.foreign_opportunity["id"]), "VALIDATION_ERROR"),
             (self._input(customerExpectedDate="2026-02-30"), "VALIDATION_ERROR"),
             (self._input(formData={**self._form(), "timing": "next quarter"}), "VALIDATION_ERROR"),
@@ -450,6 +451,11 @@ class TestDemoRequestApi(FrappeTestCase):
     def test_comments_are_scoped_server_owned_ordered_and_validate_mentions(self):
         frappe.set_user(self.sales)
         request = create_demo_request(self._input())
+        # A mentioned user must read the request, which its Engineer does once it is submitted.
+        with self.assertRaises(CrmApiException) as unsubmitted:
+            add_demo_comment(request["id"], {"body": "ping", "mentionedPersonIds": [self.engineer]})
+        self.assertIn("access to this Demo Request", unsubmitted.exception.public_message)
+        transition_demo_request(request["id"], {"type": "submit"})
         comment = add_demo_comment(request["id"], {
             "body": "  Please review  ",
             "mentionedPersonIds": [self.engineer, self.manager, self.engineer],
@@ -494,6 +500,77 @@ class TestDemoRequestApi(FrappeTestCase):
         with self.assertRaises(CrmApiException) as denied:
             list_demo_comments(request["id"])
         self.assertEqual(denied.exception.code, "SCOPE_DENIED")
+
+    def test_an_engineer_reads_a_demo_request_once_sales_have_submitted_it(self):
+        frappe.set_user(self.sales)
+        draft = create_demo_request(self._input())
+        cancelled = create_demo_request(self._input(
+            requirementId="REQ-CANCELLED-DRAFT", opportunityId=self._new_opportunity("Cancelled Draft")["id"],
+        ))
+        transition_demo_request(cancelled["id"], {"type": "cancel", "comment": "Not needed after all"})
+        # Both name the Engineer as the demo owner; neither was ever submitted to them, so the Engineer hears
+        # nothing of the cancellation either.
+        self.assertEqual(frappe.db.count("CRM Notification Event", {
+            "source_doctype": "CRM Demo Request", "source_name": cancelled["id"], "recipient_user": self.engineer,
+        }), 0)
+        frappe.set_user(self.engineer)
+        listed = {item["id"] for item in list_demo_requests({})[0]}
+        self.assertEqual(listed & {draft["id"], cancelled["id"]}, set())
+        for name in (draft["id"], cancelled["id"]):
+            with self.assertRaises(CrmApiException) as hidden:
+                get_demo_request(name)
+            self.assertEqual(hidden.exception.code, "SCOPE_DENIED", name)
+        self.assertFalse(frappe.has_permission("CRM Demo Request", "read", doc=draft["id"], user=self.engineer))
+
+        frappe.set_user(self.sales)
+        transition_demo_request(draft["id"], {"type": "submit"})
+        frappe.set_user(self.engineer)
+        self.assertEqual(get_demo_request(draft["id"])["status"], "Engineer Review")
+        self.assertIn(draft["id"], {item["id"] for item in list_demo_requests({})[0]})
+        # Returned to Sales, the request stays with the Engineer who reviewed it, and they hear of its end.
+        transition_demo_request(draft["id"], {"type": "engineer_return", "comment": "Need the wafer map"})
+        self.assertEqual(get_demo_request(draft["id"])["status"], "Engineer Returned")
+        frappe.set_user(self.sales)
+        transition_demo_request(draft["id"], {"type": "cancel", "comment": "Customer withdrew"})
+        self.assertEqual(frappe.db.count("CRM Notification Event", {
+            "source_doctype": "CRM Demo Request", "source_name": draft["id"], "recipient_user": self.engineer,
+            "title": "Demo Request moved to Cancelled",
+        }), 1)
+        frappe.set_user(self.engineer)
+        self.assertEqual(get_demo_request(draft["id"])["status"], "Cancelled")
+
+    def test_the_backfill_records_the_submission_of_requests_written_in_past_draft(self):
+        from rayher_crm.patches.v1_0.backfill_demo_request_submissions import execute
+
+        # Written in at Manager Approval, as the staging generator and a hand migration do: no submission entry.
+        frappe.set_user("Administrator")
+        written_in = frappe.get_doc({
+            "doctype": "CRM Demo Request", "account": self.account["id"], "primary_contact": self.contact["id"],
+            "opportunity": self.opportunity["id"], "sales_owner": self.sales, "created_by_user": self.sales,
+            "title": "Written in at approval", "objective": "Backfill", "requested_equipment": "Inspection 3000",
+            "sample_type": "Si", "sample_quantity": 1, "target_date": "2026-12-20",
+            "customer_expected_date": "2026-12-31", "priority": "High", "acceptance_criteria": "Capture above 95%",
+            "status": "Manager Approval", "engineer_owner": self.engineer, "form_data": {},
+        }).insert(ignore_permissions=True)
+        frappe.set_user(self.sales)
+        draft = create_demo_request(self._input(
+            requirementId="REQ-BACKFILL-DRAFT", opportunityId=self._new_opportunity("Backfill")["id"],
+        ))
+        frappe.set_user(self.engineer)
+        with self.assertRaises(CrmApiException):
+            get_demo_request(written_in.name)
+
+        frappe.set_user("Administrator")
+        execute()
+        execute()
+        self.assertEqual(frappe.db.count(
+            "CRM Demo Request History", {"demo_request": written_in.name, "to_status": "Engineer Review"},
+        ), 1)
+        self.assertEqual(frappe.db.count(
+            "CRM Demo Request History", {"demo_request": draft["id"], "to_status": "Engineer Review"},
+        ), 0)
+        frappe.set_user(self.engineer)
+        self.assertEqual(get_demo_request(written_in.name)["status"], "Manager Approval")
 
     def _engineer_approval(self, engineer: str | None = None) -> dict:
         return {

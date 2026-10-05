@@ -3,7 +3,7 @@ import { bookingTimelineTitle } from '@/features/shared/system-labels'
 import { computed, onMounted, ref, watch } from 'vue'
 import { ArrowLeft, BriefcaseBusiness, CalendarPlus, Edit3, GitMerge, Mail, Phone, Trash2, UserRound } from '@lucide/vue'
 import { RouterLink, useRoute, useRouter } from 'vue-router'
-import { api as defaultApi, type CrmApi } from '@/api'
+import { api as defaultApi, CrmApiError, type CrmApi } from '@/api'
 import { mapRequestError } from '@/api/request-state'
 import { useAppStore } from '@/stores/app'
 import type { AccountSummaryDto, ContactDetailDto, ContactSummaryDto, CreateContactInput, SiteDto, Tone } from '@/types/crm'
@@ -33,6 +33,7 @@ const sites = ref<Array<SiteDto & { accountId: string }>>([])
 const contacts = ref<ContactSummaryDto[]>([])
 const loading = ref(false)
 const denied = ref(false)
+const notFound = ref(false)
 const error = useLocaleMessage()
 const requestId = ref('')
 const editOpen = ref(false)
@@ -96,6 +97,7 @@ async function load() {
   const sequence = ++loadSequence
   loading.value = true
   denied.value = false
+  notFound.value = false
   error.value = ''
   referencesReady.value = false
   referencesError.value = ''
@@ -113,6 +115,8 @@ async function load() {
     error.value = mapped.localizedMessage ?? mapped.message
     requestId.value = mapped.requestId
     denied.value = mapped.denied
+    // A Contact that does not exist and one the user may not see answer the same (F1-12): one state, no retry.
+    notFound.value = reason instanceof CrmApiError && reason.code === 'NOT_FOUND'
   } finally {
     if (sequence === loadSequence) loading.value = false
   }
@@ -191,6 +195,7 @@ onMounted(async () => {
   <div class="contact-detail-page">
     <DataState v-if="loading && !detail" type="loading" />
     <DataState v-else-if="denied" type="denied" :message="error" :request-id="requestId" />
+    <DataState v-else-if="notFound" type="denied" :title="t('state.unavailableTitle')" :message="error" :request-id="requestId" />
     <DataState v-else-if="error || !detail" type="error" :message="error || t('detail.notFoundContact')" :request-id="requestId" @retry="load" />
     <template v-else>
       <RouterLink class="back-link detail-back-button" :to="{ name: 'contacts' }"><ArrowLeft :size="14" />{{ t('detail.backContacts') }}</RouterLink>

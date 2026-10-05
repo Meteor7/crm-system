@@ -6,6 +6,7 @@ import frappe
 from frappe.tests.utils import FrappeTestCase
 from frappe.utils import add_days, today
 
+from rayher_crm.services import ddl_reminders
 from rayher_crm.services.accounts import create_account
 from rayher_crm.services.contacts import create_contact
 from rayher_crm.services.ddl_reminders import send_ddl_reminders
@@ -167,6 +168,11 @@ class TestDdlReminders(FrappeTestCase):
             "engineer_owner": self.engineer,
             "form_data": "{}",
         }).insert(ignore_permissions=True)
+        # Submitted, as a request in Engineer Review has been: its Engineer reads it and hears of its deadline.
+        frappe.get_doc({
+            "doctype": "CRM Demo Request History", "demo_request": request.name, "at": frappe.utils.now_datetime(),
+            "actor": self.sales, "from_status": "Draft", "to_status": "Engineer Review", "comment": "Submitted",
+        }).insert(ignore_permissions=True)
         evaluation = frappe.get_doc({
             "doctype": "CRM Evaluation",
             "demo_request": request.name,
@@ -181,8 +187,31 @@ class TestDdlReminders(FrappeTestCase):
             "report_status": "Not Ready",
         }).insert(ignore_permissions=True)
 
+        # A draft naming the Engineer is Sales' own until they submit it: its deadline reaches Sales, not the Engineer.
+        draft = frappe.get_doc({
+            "doctype": "CRM Demo Request", "request_mode": "Self Test", "sales_owner": self.sales,
+            "created_by_user": self.sales, "title": "DDL Demo Request Draft", "objective": "Verify reminder delivery",
+            "requested_equipment": "Inspection Tool", "sample_type": "Wafer", "sample_quantity": 1,
+            "target_date": add_days(today(), 20), "customer_expected_date": add_days(today(), 15),
+            "priority": "Medium", "acceptance_criteria": "Reminder reaches the owner", "status": "Draft",
+            "engineer_owner": self.engineer, "form_data": "{}",
+        }).insert(ignore_permissions=True)
+
+        # The Engineer is among the people of every record's deadline here, as an RFQ of the Opportunity would
+        # make them: the draft still keeps its deadline from them.
+        related = ddl_reminders._related_users
+
+        def with_engineer(**kwargs):
+            return related(**kwargs) | {self.engineer}
+
         frappe.set_user("Administrator")
-        send_ddl_reminders()
+        with patch.object(ddl_reminders, "_related_users", side_effect=with_engineer):
+            send_ddl_reminders()
+        draft_recipients = set(frappe.get_all(
+            "CRM Notification Event", filters={"source_name": draft.name}, pluck="recipient_user",
+        ))
+        self.assertIn(self.sales, draft_recipients)
+        self.assertNotIn(self.engineer, draft_recipients)
         expected = {self.sales, self.engineer, self.manager}
         request_recipients = set(frappe.get_all(
             "CRM Notification Event", filters={"source_name": request.name}, pluck="recipient_user",

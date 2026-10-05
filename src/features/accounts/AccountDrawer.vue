@@ -3,7 +3,7 @@ import { personnelDisplayName } from '@/demo/personnel'
 import { computed, ref, watch } from 'vue'
 import { ElDrawer, ElTabPane, ElTabs } from 'element-plus'
 import { Building2, CalendarClock, ClipboardCheck, Factory, FileSignature, FlaskConical, MapPin, Users } from '@lucide/vue'
-import type { CrmApi } from '@/api'
+import { CrmApiError, type CrmApi } from '@/api'
 import type { Account360Dto } from '@/types/crm'
 import DataState from '@/design-system/DataState.vue'
 import DataNotice from '@/design-system/DataNotice.vue'
@@ -11,16 +11,18 @@ import StatusBadge from '@/design-system/StatusBadge.vue'
 import { mapRequestError, readRequestMeta, type RequestMetaState } from '@/api/request-state'
 import { formatDisplayDate, shanghaiDate } from '@/domain/time'
 import { formatMoney, moneyByCurrency } from '@/domain/money'
-import { useI18n } from '@/i18n'
+import { useI18n, useLocaleMessage } from '@/i18n'
 import { isOpenOpportunityStage } from '@/domain/opportunity-stages'
 
 const props = defineProps<{ modelValue: boolean; accountId: string; apiClient: CrmApi }>()
-const { locale } = useI18n()
+const { locale, t } = useI18n()
 const emit = defineEmits<{ 'update:modelValue': [value: boolean] }>()
 const detail = ref<Account360Dto | null>(null)
 const loading = ref(false)
-const error = ref('')
+// Resolved in the current locale when read, so that the text follows a language switch.
+const error = useLocaleMessage()
 const denied = ref(false)
+const notFound = ref(false)
 const requestId = ref('')
 const meta = ref<RequestMetaState | null>(null)
 const visible = computed({ get: () => props.modelValue, set: (value) => emit('update:modelValue', value) })
@@ -37,6 +39,7 @@ async function load() {
   loading.value = true
   error.value = ''
   denied.value = false
+  notFound.value = false
   requestId.value = ''
   meta.value = null
   try {
@@ -48,7 +51,9 @@ async function load() {
   } catch (reason) {
     if (sequence === loadSequence && accountId === props.accountId) {
       const mapped = mapRequestError(reason)
-      error.value = mapped.message
+      // An Account that does not exist and one the user may not see answer the same (F1-12): one state, no retry.
+      notFound.value = reason instanceof CrmApiError && reason.code === 'NOT_FOUND'
+      error.value = notFound.value && mapped.localizedMessage ? mapped.localizedMessage : mapped.message
       requestId.value = mapped.requestId
       denied.value = mapped.denied
     }
@@ -73,6 +78,7 @@ watch([() => props.modelValue, () => props.accountId], ([open]) => {
   <ElDrawer v-model="visible" size="min(760px, 94vw)" :with-header="false" :append-to-body="false" :lock-scroll="false" destroy-on-close class="account-drawer">
     <DataState v-if="loading" type="loading" />
     <DataState v-else-if="denied" type="denied" :message="error" :request-id="requestId" />
+    <DataState v-else-if="notFound" type="denied" :title="t('state.unavailableTitle')" :message="error" :request-id="requestId" />
     <DataState v-else-if="error" type="error" :message="error" :request-id="requestId" @retry="load" />
     <template v-else-if="detail">
       <DataNotice v-if="meta?.stale" :message="meta.message" :request-id="meta.requestId" @refresh="load" />

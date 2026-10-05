@@ -27,7 +27,7 @@ from rayher_crm.services.common import (
 from rayher_crm.services.bookings import validate_actual_po_date
 from rayher_crm.services.concurrency import lock_document
 from rayher_crm.services.sites import _require_site, can_read_site_data
-from rayher_crm.services.contacts import _contact_account
+from rayher_crm.services.contacts import _contact_account, _require_contact
 from rayher_crm.services.equipment import normalize_equipment, register_equipment
 from rayher_crm.services.money import (
     MoneyValidationError,
@@ -1578,9 +1578,7 @@ def _validate_stakeholder(
     opportunity, payload: dict[str, Any], stakeholder_id: str | None = None, *, stored_response_mode: str = "",
 ) -> dict[str, Any]:
     contact_id = required_text(payload, "contactId")
-    if not frappe.db.exists("Contact", contact_id):
-        raise CrmApiException("CONTACT_NOT_FOUND", "Contact was not found.")
-    contact = frappe.get_doc("Contact", contact_id)
+    contact = _require_contact(contact_id)
     if _contact_account(contact_id) != opportunity.account:
         raise CrmApiException("CONTACT_ACCOUNT_MISMATCH", "The contact belongs to another account.")
     if contact.custom_crm_status != "Active":

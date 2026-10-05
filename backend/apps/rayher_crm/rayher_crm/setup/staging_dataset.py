@@ -512,6 +512,11 @@ class Seeder:
             form_data=json.dumps(form, ensure_ascii=False), prepared_by=engineer, prepared_date=(requested + timedelta(days=2)).isoformat(),
             approved_by=self.managers[0], approved_date=(requested + timedelta(days=3)).isoformat(),
         ))
+        # Submitted the day after: an Engineer reads a request from its submission for Engineer Review on.
+        self.at(requested + timedelta(days=1), owner, lambda: self.insert(
+            "CRM Demo Request History", demo_request=request.name, at=self.clock.current, actor=owner,
+            from_status="Draft", to_status="Engineer Review", comment="Sales submitted for Engineer Review",
+        ))
         evaluation = self.at(requested + timedelta(days=3), self.managers[0], lambda: self.insert(
             "CRM Evaluation", account=account["id"], demo_request=request.name, title=request.title, status="Testing" if in_progress else "Accepted",
             evaluation_owner=engineer, planned_end=(requested + timedelta(days=24)).isoformat(), acceptance="Pending" if in_progress else "Accepted",

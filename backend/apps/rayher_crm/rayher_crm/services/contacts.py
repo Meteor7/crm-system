@@ -42,13 +42,17 @@ def _contact_account(name: str) -> str | None:
     )
 
 
+CONTACT_NOT_FOUND_MESSAGE = "Contact was not found, or you have no access to it."
+
+
 def _require_contact(name: str):
-    if not frappe.db.exists("Contact", name):
-        raise CrmApiException("CONTACT_NOT_FOUND", "Contact was not found.")
-    doc = frappe.get_doc("Contact", name)
-    if not has_crm_permission(doc, user=frappe.session.user, permission_type="read"):
-        raise CrmApiException("SCOPE_DENIED", "The contact is outside the current user scope.")
-    return doc
+    # One answer for a Contact that does not exist and for one of a Private Account of someone else, as for
+    # the Account itself: the id of a Contact carries the person's and the Account's names.
+    if frappe.db.exists("Contact", name):
+        doc = frappe.get_doc("Contact", name)
+        if has_crm_permission(doc, user=frappe.session.user, permission_type="read"):
+            return doc
+    raise CrmApiException("CONTACT_NOT_FOUND", CONTACT_NOT_FOUND_MESSAGE)
 
 
 def serialize_contact(doc) -> dict[str, Any]:
@@ -292,7 +296,7 @@ def update_contact(name: str, payload: dict[str, Any], expected_modified: Any) -
     values = _validated_contact(payload, name)
     doc = lock_document("Contact", name, expected_modified, "NOT_FOUND")
     if not has_crm_permission(doc, user=frappe.session.user, permission_type="read"):
-        raise CrmApiException("SCOPE_DENIED", "The contact is outside the current user scope.")
+        raise CrmApiException("CONTACT_NOT_FOUND", CONTACT_NOT_FOUND_MESSAGE)
     previous_owner = doc.custom_crm_owner
     savepoint = f"crm_contact_update_{frappe.generate_hash(length=8)}"
     frappe.db.savepoint(savepoint)

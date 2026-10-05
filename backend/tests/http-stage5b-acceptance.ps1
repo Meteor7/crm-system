@@ -265,9 +265,10 @@ try {
     } catch {
         $scopeStatus = [int]$_.Exception.Response.StatusCode
     }
-    if ($scopeStatus -ne 403) { throw "Expected HTTP 403 for foreign Account detail, got $scopeStatus." }
+    # A Private Account of someone else answers as one that does not exist.
+    if ($scopeStatus -ne 404) { throw "Expected HTTP 404 for foreign Account detail, got $scopeStatus." }
 
-    Write-Output 'Stage 5B authenticated HTTP acceptance passed: guest-401/create/list/update/409/scope-403/assignment-403/convert/sites.'
+    Write-Output 'Stage 5B authenticated HTTP acceptance passed: guest-401/create/list/update/409/scope-404/assignment-403/convert/sites.'
 } finally {
     $adminPassword = $null
     $salesPassword = $null

@@ -64,13 +64,27 @@ def _assert_site_read_scope(account_id: str) -> None:
         raise CrmApiException("SCOPE_DENIED", "Only the Account owner or a Manager may view sites.")
 
 
+SITE_NOT_FOUND_MESSAGE = "Site was not found, or you have no access to it."
+
+
+def _account_in_reach(account_id: str) -> bool:
+    try:
+        _require_account(account_id)
+    except CrmApiException:
+        return False
+    return True
+
+
 def _require_site(name: str, account_id: str | None = None):
-    if not frappe.db.exists("Address", name):
-        raise CrmApiException("SITE_NOT_FOUND", "Site was not found.")
-    linked_account = _site_account(name)
-    if not linked_account or (account_id and linked_account != account_id):
+    # One answer for a Site that does not exist, for one of an Account the user may not see, and for one of an
+    # Account whose Sites the user may not read (a Public Account of another Sales user): the id of a Site
+    # carries its name (F1-12, as for Accounts and Contacts), so the Site is told apart from a missing one only
+    # once the user may read it.
+    linked_account = _site_account(name) if frappe.db.exists("Address", name) else None
+    if not linked_account or not _account_in_reach(linked_account) or not can_read_site_data(linked_account):
+        raise CrmApiException("SITE_NOT_FOUND", SITE_NOT_FOUND_MESSAGE)
+    if account_id and linked_account != account_id:
         raise CrmApiException("SITE_ACCOUNT_MISMATCH", "The Site belongs to another Account.")
-    _assert_site_read_scope(linked_account)
     return frappe.get_doc("Address", name)
 
 

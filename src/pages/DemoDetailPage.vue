@@ -54,7 +54,9 @@ const mentionParticipants = computed(() => {
   if (!project.value) return []
   const participantIds = [
     project.value.salesOwner,
-    project.value.engineerOwner,
+    // A draft is Sales' own until they submit it: its Engineer cannot read it, so cannot be mentioned on it.
+    // A cancelled request may never have been submitted; the page cannot tell, so it offers no Engineer there.
+    ...(['Draft', 'Cancelled'].includes(project.value.status) ? [] : [project.value.engineerOwner]),
     ...project.value.approvals.map((item) => item.actor),
     ...PERSONNEL.filter((person) => person.role === 'Manager').map((person) => person.id),
   ].filter(Boolean)

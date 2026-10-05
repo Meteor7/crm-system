@@ -7,6 +7,7 @@ import { createMockApi } from '@/api/mock-adapter'
 import { evaluations } from '@/api/mock-data'
 import { CrmApiError } from '@/api'
 import AccountProfile from './AccountProfile.vue'
+import AccountDrawer from './AccountDrawer.vue'
 
 function deferred<T>() {
   let resolve!: (value: T) => void
@@ -203,5 +204,29 @@ it('translates loaded Account 360 stages without modifying its snapshot or refet
   expect(wrapper.get('.project-section').text()).not.toContain('Demo 完成')
   expect(read).toHaveBeenCalledTimes(1)
   expect(JSON.stringify(snapshot)).toBe(raw)
+  wrapper.unmount()
+})
+
+it('keeps the not-found text of the drawer in the language chosen after it was shown', async () => {
+  const apiClient = createMockApi({ latency: 0 })
+  vi.spyOn(apiClient, 'getAccount360').mockRejectedValue(
+    new CrmApiError('NOT_FOUND', 'Account was not found, or you have no access to it.', 'req_drawer_hidden', false),
+  )
+  setLocale('zh-CN')
+  const wrapper = mount(AccountDrawer, {
+    props: { modelValue: true, accountId: 'ACC-HIDDEN', apiClient },
+    global: { plugins: [createPinia()], stubs: { ElDrawer: { template: '<div><slot /></div>' } } },
+  })
+  await flushPromises()
+  expect(wrapper.text()).toContain('无法打开这条记录')
+  expect(wrapper.text()).toContain('找不到这个客户，或者你没有查看权限。')
+  expect(wrapper.text()).toContain('req_drawer_hidden')
+  expect(wrapper.findComponent({ name: 'DataState' }).find('button').exists()).toBe(false)
+
+  setLocale('en-US')
+  await flushPromises()
+  expect(wrapper.text()).toContain('This record cannot be opened')
+  expect(wrapper.text()).toContain('The account was not found, or you have no access to it.')
+  expect(wrapper.text()).not.toContain('找不到这个客户')
   wrapper.unmount()
 })

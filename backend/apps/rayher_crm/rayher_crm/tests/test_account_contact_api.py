@@ -204,9 +204,54 @@ class TestAccountContactApi(FrappeTestCase):
         with self.assertRaises(CrmApiException) as assignment:
             create_account(self._account_input("Assigned To Other Sales", self.other_sales))
         self.assertEqual(assignment.exception.code, "SCOPE_DENIED")
+        # A Private Account of someone else answers as an Account that does not exist: the id of an Account is
+        # its name, and two answers would let a Sales user list the company's Accounts by trying names. The
+        # same for its Contacts.
         with self.assertRaises(CrmApiException) as private:
             get_account_360(foreign["id"])
-        self.assertEqual(private.exception.code, "SCOPE_DENIED")
+        with self.assertRaises(CrmApiException) as missing:
+            get_account_360("No Such Account")
+        self.assertEqual(
+            (private.exception.code, private.exception.public_message),
+            ("NOT_FOUND", "Account was not found, or you have no access to it."),
+        )
+        self.assertEqual(
+            (missing.exception.code, missing.exception.public_message),
+            (private.exception.code, private.exception.public_message),
+        )
+        with self.assertRaises(CrmApiException) as private_contact:
+            get_contact(foreign_contact["id"])
+        with self.assertRaises(CrmApiException) as missing_contact:
+            get_contact("No Such Contact")
+        # The same where a Contact or a Site is named on another record: a Quotation's ATTN, a Site by its id.
+        from rayher_crm.services import quotations
+
+        with self.assertRaises(CrmApiException) as attn:
+            quotations._validate_contact(foreign_contact["id"], "Any Account")
+        self.assertEqual(
+            (attn.exception.code, attn.exception.public_message),
+            ("NOT_FOUND", "Contact was not found, or you have no access to it."),
+        )
+        with self.assertRaises(CrmApiException) as private_site:
+            _require_site(foreign_site["id"])
+        with self.assertRaises(CrmApiException) as missing_site:
+            _require_site("No Such Site-Other")
+        self.assertEqual(
+            (private_site.exception.code, private_site.exception.public_message),
+            ("NOT_FOUND", "Site was not found, or you have no access to it."),
+        )
+        self.assertEqual(
+            (missing_site.exception.code, missing_site.exception.public_message),
+            (private_site.exception.code, private_site.exception.public_message),
+        )
+        self.assertEqual(
+            (private_contact.exception.code, private_contact.exception.public_message),
+            ("NOT_FOUND", "Contact was not found, or you have no access to it."),
+        )
+        self.assertEqual(
+            (missing_contact.exception.code, missing_contact.exception.public_message),
+            (private_contact.exception.code, private_contact.exception.public_message),
+        )
 
         frappe.set_user(self.other_sales)
         public_input = self._account_input("Foreign Account")
@@ -217,13 +262,18 @@ class TestAccountContactApi(FrappeTestCase):
         detail = get_account_360(foreign["id"])
         self.assertEqual(detail["account"]["id"], foreign["id"])
         self.assertEqual(detail["sites"], [])
-        for site_reader in (
-            lambda: sites_for_account(foreign["id"]),
-            lambda: _require_site(foreign_site["id"], foreign["id"]),
-        ):
-            with self.assertRaises(CrmApiException) as site_denied:
-                site_reader()
-            self.assertEqual(site_denied.exception.code, "SCOPE_DENIED")
+        with self.assertRaises(CrmApiException) as site_denied:
+            sites_for_account(foreign["id"])
+        self.assertEqual(site_denied.exception.code, "SCOPE_DENIED")
+        # A Site of the Public Account, whose Sites are its owner's, answers as one that does not exist, named
+        # with its Account or without: its id carries its name.
+        for account in (foreign["id"], None):
+            with self.assertRaises(CrmApiException) as site_hidden:
+                _require_site(foreign_site["id"], account)
+            self.assertEqual(
+                (site_hidden.exception.code, site_hidden.exception.public_message),
+                ("NOT_FOUND", "Site was not found, or you have no access to it."),
+            )
         public_contact = get_contact(foreign_contact["id"])["contact"]
         self.assertEqual(public_contact["id"], foreign_contact["id"])
         self.assertNotIn("siteId", public_contact)

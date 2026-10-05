@@ -187,49 +187,55 @@ try {
         }
     } | Out-Null
     $visited = (Invoke-RestMethod -Uri "$BaseUrl/api/method/rayher_crm.api.v1.visits.get_visit?id=$([Uri]::EscapeDataString($created.Visit))" -WebSession $salesSession).message
+    # A Visit's action cannot be handed to a Sales user who does not read the Account: a Private Account refuses it.
+    $handoverStatus = 0
+    try {
+        Invoke-CrmPost $salesSession 'rayher_crm.api.v1.visits.update_visit' @{
+            id = $created.Visit; expectedModified = $visited.data.modified
+            command = @{ type = 'edit'; nextAction = 'Prepare plan'; actionOwner = $actionSalesEmail; due = '2026-08-25' }
+        } | Out-Null
+    } catch { $handoverStatus = [int]$_.Exception.Response.StatusCode }
+    if ($handoverStatus -ne 422) { throw "Expected HTTP 422 for a Visit action handed to a Sales user who cannot see the Private Account, got $handoverStatus." }
+    # Published, the Account is read by the assigned Sales user, and so are the Visit and the notification's target.
+    $accountInput.visibility = 'Public'
+    $published = Invoke-CrmPost $salesSession 'rayher_crm.api.v1.accounts.update_account' @{
+        id = $created.Account; input = $accountInput; expectedModified = $account.data.modified
+    }
     $minutes = Invoke-CrmPost $salesSession 'rayher_crm.api.v1.visits.update_visit' @{
         id = $created.Visit; expectedModified = $visited.data.modified
         command = @{ type = 'edit'; nextAction = 'Prepare plan'; actionOwner = $actionSalesEmail; due = '2026-08-25' }
     }
 
     $expectedVisitRoute = "/visits?focus=$($created.Visit)"
-    $privateNotifications = Invoke-RestMethod -Uri "$BaseUrl/api/method/rayher_crm.api.v1.notifications.list_notifications?page=1&pageSize=20" -WebSession $actionSalesSession
-    $privateAssignments = @($privateNotifications.message.data | Where-Object { $_.category -eq 'Visit' -and $_.title -eq 'Visit action assigned' -and $_.route -eq $expectedVisitRoute })
-    if ($privateAssignments.Count -ne 0) { throw 'Private Visit action assignment notified a recipient who could not read its source.' }
+    $actionSalesNotifications = Invoke-RestMethod -Uri "$BaseUrl/api/method/rayher_crm.api.v1.notifications.list_notifications?page=1&pageSize=20" -WebSession $actionSalesSession
+    $assigned = @($actionSalesNotifications.message.data | Where-Object { $_.category -eq 'Visit' -and $_.title -eq 'Visit action assigned' -and $_.route -eq $expectedVisitRoute })
+    if ($assigned.Count -ne 1) { throw 'Action Sales did not receive exactly one precisely routed Visit action notification.' }
+    if ($assigned[0].recipientId -ne $actionSalesEmail -or $assigned[0].actorId -ne $salesEmail -or $assigned[0].message -notlike '*Prepare plan*') { throw 'Visit action notification identity or business context is incorrect.' }
+    $actionOwnerVisit = (Invoke-RestMethod -Uri "$BaseUrl/api/method/rayher_crm.api.v1.visits.get_visit?id=$([Uri]::EscapeDataString($created.Visit))" -WebSession $actionSalesSession).message.data
+    if ($actionOwnerVisit.id -ne $created.Visit -or $actionOwnerVisit.actionOwner -ne $actionSalesEmail) { throw 'Visit action recipient could not open the precisely routed Visit.' }
+    $created.Notifications += $assigned[0].id
+    # Private again, the Account is out of the assigned Sales user's reach, and the Visit with it.
+    $accountInput.visibility = 'Private'
+    Invoke-CrmPost $salesSession 'rayher_crm.api.v1.accounts.update_account' @{
+        id = $created.Account; input = $accountInput; expectedModified = $published.data.modified
+    } | Out-Null
     $privateVisitStatus = 0
     try {
         Invoke-RestMethod -Uri "$BaseUrl/api/method/rayher_crm.api.v1.visits.get_visit?id=$([Uri]::EscapeDataString($created.Visit))" -WebSession $actionSalesSession | Out-Null
     } catch { $privateVisitStatus = [int]$_.Exception.Response.StatusCode }
     if ($privateVisitStatus -ne 403) { throw "Expected Private Account boundary HTTP 403 for a Visit action owner, got $privateVisitStatus." }
-    # Assignment cannot bypass a Private Account; publish this fixture before
-    # checking that the assigned Sales user can open the notification's target.
-    $accountInput.visibility = 'Public'
-    Invoke-CrmPost $salesSession 'rayher_crm.api.v1.accounts.update_account' @{
-        id = $created.Account; input = $accountInput; expectedModified = $account.data.modified
-    } | Out-Null
-    $publicAssignment = Invoke-CrmPost $salesSession 'rayher_crm.api.v1.visits.update_visit' @{
-        id = $created.Visit; expectedModified = $minutes.data.modified
-        command = @{ type = 'edit'; nextAction = 'Prepare plan after publish'; actionOwner = $actionSalesEmail; due = '2026-08-25' }
-    }
-    $actionSalesNotifications = Invoke-RestMethod -Uri "$BaseUrl/api/method/rayher_crm.api.v1.notifications.list_notifications?page=1&pageSize=20" -WebSession $actionSalesSession
-    $assigned = @($actionSalesNotifications.message.data | Where-Object { $_.category -eq 'Visit' -and $_.title -eq 'Visit action assigned' -and $_.route -eq $expectedVisitRoute })
-    if ($assigned.Count -ne 1) { throw 'Action Sales did not receive exactly one precisely routed Visit action notification after gaining source access.' }
-    if ($assigned[0].recipientId -ne $actionSalesEmail -or $assigned[0].actorId -ne $salesEmail -or $assigned[0].message -notlike '*Prepare plan after publish*') { throw 'Visit action notification identity or business context is incorrect.' }
-    $actionOwnerVisit = (Invoke-RestMethod -Uri "$BaseUrl/api/method/rayher_crm.api.v1.visits.get_visit?id=$([Uri]::EscapeDataString($created.Visit))" -WebSession $actionSalesSession).message.data
-    if ($actionOwnerVisit.id -ne $created.Visit -or $actionOwnerVisit.actionOwner -ne $actionSalesEmail) { throw 'Visit action recipient could not open the precisely routed Visit.' }
-    $created.Notifications += $assigned[0].id
 
     $reviewStatus = 0
     try {
         Invoke-CrmPost $salesSession 'rayher_crm.api.v1.visits.update_visit' @{
-            id = $created.Visit; expectedModified = $publicAssignment.data.modified
+            id = $created.Visit; expectedModified = $minutes.data.modified
             command = @{ type = 'advance'; status = 'Manager Reviewed' }
         } | Out-Null
     } catch { $reviewStatus = [int]$_.Exception.Response.StatusCode }
     if ($reviewStatus -ne 403) { throw "Expected Sales Manager Review HTTP 403, got $reviewStatus." }
 
     $reviewed = Invoke-CrmPost $managerSession 'rayher_crm.api.v1.visits.update_visit' @{
-        id = $created.Visit; expectedModified = $publicAssignment.data.modified
+        id = $created.Visit; expectedModified = $minutes.data.modified
         command = @{ type = 'advance'; status = 'Manager Reviewed' }
     }
     if ($reviewed.data.status -ne 'Manager Reviewed') { throw 'Manager Review did not persist.' }

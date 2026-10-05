@@ -19,7 +19,8 @@ from rayher_crm.permissions.roles import assert_capability, resolve_crm_role
 from rayher_crm.permissions.scope import conditions_for_doctype, has_crm_permission
 from rayher_crm.services.common import normalize_pagination, required_text, to_iso_timestamp
 from rayher_crm.services.concurrency import lock_document
-from rayher_crm.services.contacts import _contact_account
+from rayher_crm.services.accounts import _require_account
+from rayher_crm.services.contacts import _contact_account, _require_contact
 from rayher_crm.services.money import decimal_string
 from rayher_crm.services.notifications import create_notification, notify_if_reachable
 from rayher_crm.services.quotation_rules import QuotationRuleError, calculate_totals, validate_payment_terms
@@ -215,8 +216,8 @@ def _require_opportunity(name: str):
 
 
 def _validate_contact(contact_id: str, account: str) -> None:
-    if not contact_id or not frappe.db.exists("Contact", contact_id):
-        raise CrmApiException("CONTACT_NOT_FOUND", "ATTN contact was not found.")
+    # A Contact of someone else's Private Account answers as one that does not exist (F1-12).
+    _require_contact(contact_id or "")
     if _contact_account(contact_id) != account:
         raise CrmApiException("CONTACT_ACCOUNT_MISMATCH", "ATTN must belong to the quotation customer.")
     if frappe.db.get_value("Contact", contact_id, "custom_crm_status") != "Active":
@@ -228,10 +229,11 @@ def _validate_address(address_id: str, account: str) -> None:
         account,
         "Only the Account owner or a Manager may use quotation addresses.",
     )
-    if not address_id or not frappe.db.exists("Address", address_id):
+    # An address of another Account answers as one that does not exist: the id of an address carries a name.
+    if not address_id or not frappe.db.exists(
+        "Dynamic Link", {"parent": address_id, "parenttype": "Address", "link_doctype": "Customer", "link_name": account},
+    ):
         raise CrmApiException("ADDRESS_NOT_FOUND", "Quotation address was not found.")
-    if not frappe.db.exists("Dynamic Link", {"parent": address_id, "parenttype": "Address", "link_doctype": "Customer", "link_name": account}):
-        raise CrmApiException("ADDRESS_ACCOUNT_MISMATCH", "Address must belong to the quotation customer.")
 
 
 def _snapshot(account: str, contact_id: str = "", address_id: str = "") -> dict[str, str]:
@@ -488,11 +490,7 @@ def create_quotation(payload: dict[str, Any]) -> dict[str, Any]:
     if opportunity and frappe.db.exists("CRM Quotation", {"opportunity": opportunity.name}):
         raise CrmApiException("QUOTATION_ALREADY_EXISTS", "This Opportunity already has a Quotation.")
     account = opportunity.account if opportunity else required_text(payload, "accountId")
-    if not frappe.db.exists("Customer", account):
-        raise CrmApiException("ACCOUNT_NOT_FOUND", "Account was not found.")
-    account_doc = frappe.get_doc("Customer", account)
-    if not frappe.has_permission("Customer", "read", doc=account_doc, user=frappe.session.user):
-        raise CrmApiException("SCOPE_DENIED", "The account is outside the current user scope.")
+    account_doc = _require_account(account)
     _assert_quotation_address_scope(
         account,
         "Only the Account owner or a Manager may create quotations containing Site/Address data.",

@@ -139,6 +139,22 @@ describe('Demo detail page', () => {
     expect(wrapper.findAll('[data-parallel-lane]')).toHaveLength(2)
   })
 
+  it.each(['Draft', 'Cancelled'])('offers no Engineer to mention on a %s request, which the Engineer may not read', async (status) => {
+    const router = createAppRouter()
+    await router.push({ name: 'demo-detail', params: { demoId: 'DR-105' }, query: { tab: 'comment', from: 'demo-workflow' } })
+    await router.isReady()
+    const base = createMockApi({ latency: 0, role: 'Manager' })
+    const project = (await base.getDemoWorkflow('DR-105')).data
+    // Never submitted, so nobody has approved anything of it yet.
+    const apiClient = Object.assign(base, { getDemoWorkflow: vi.fn().mockResolvedValue({ data: { ...project, status, approvals: [] }, warnings: [] }) })
+    const wrapper = mount(DemoDetailPage, { props: { apiClient }, global: { plugins: [createPinia(), router] } })
+    await flushPromises()
+
+    const picker = wrapper.get('.mention-picker')
+    expect(picker.find(`input[value="${project.engineerOwner}"]`).exists()).toBe(false)
+    expect(picker.find(`input[value="${project.salesOwner}"]`).exists()).toBe(true)
+  })
+
   it('publishes a persistent Comment from the current user', async () => {
     const { wrapper, router, apiClient } = await mountPage('comment')
 

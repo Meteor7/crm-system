@@ -1,6 +1,6 @@
 import { createPinia } from 'pinia'
 import { flushPromises, mount } from '@vue/test-utils'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { createMockApi } from '@/api/mock-adapter'
 import { CrmApiError, type CrmApi } from '@/api'
 import { useAppStore } from '@/stores/app'
@@ -430,5 +430,23 @@ describe('Contacts pages', () => {
     await router.push('/stakeholders')
     await router.isReady()
     expect(router.currentRoute.value.path).toBe('/contacts')
+  })
+})
+
+describe('a Contact the user cannot open', () => {
+  it('shows the one state with the sentence and the request id, and no retry', async () => {
+    const { api, pinia, router } = await pageContext()
+    vi.spyOn(api, 'getContact').mockRejectedValue(
+      new CrmApiError('NOT_FOUND', 'Contact was not found, or you have no access to it.', 'req_contact_hidden', false),
+    )
+    await router.push('/contacts/CON-HIDDEN')
+    const wrapper = mount(ContactDetailPage, { props: { apiClient: api }, global: { plugins: [pinia, router] } })
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('无法打开这条记录')
+    expect(wrapper.text()).toContain('找不到这个联系人，或者你没有查看权限。')
+    expect(wrapper.text()).toContain('req_contact_hidden')
+    expect(wrapper.findComponent({ name: 'DataState' }).find('button').exists()).toBe(false)
+    wrapper.unmount()
   })
 })

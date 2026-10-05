@@ -250,16 +250,25 @@ class TestCrmScope(FrappeTestCase):
 
     def _create_demo_request(
         self, customer: str, contact: str, opportunity: str, sales_owner: str, engineer_owner: str,
+        *, submitted: bool = True,
     ) -> str:
-        return frappe.get_doc({
+        name = frappe.get_doc({
             "doctype": "CRM Demo Request", "account": customer, "primary_contact": contact,
             "opportunity": opportunity, "sales_owner": sales_owner, "created_by_user": sales_owner,
             "title": "Scope Demo Request", "objective": "Validate row scope",
             "requested_equipment": "Inspection", "sample_type": "Wafer", "sample_quantity": 1,
             "target_date": "2026-12-31", "customer_expected_date": "2026-12-31",
-            "priority": "Medium", "acceptance_criteria": "Scope is enforced", "status": "Draft",
+            "priority": "Medium", "acceptance_criteria": "Scope is enforced",
+            "status": "Engineer Review" if submitted else "Draft",
             "engineer_owner": engineer_owner, "form_data": {},
         }).insert(ignore_permissions=True).name
+        if submitted:
+            # Submitted once: its Engineer reads it from then on.
+            frappe.get_doc({
+                "doctype": "CRM Demo Request History", "demo_request": name, "at": frappe.utils.now_datetime(),
+                "actor": sales_owner, "from_status": "Draft", "to_status": "Engineer Review", "comment": "Submitted",
+            }).insert(ignore_permissions=True)
+        return name
 
     def _create_evaluation(self, customer: str, demo_request: str, owner: str) -> str:
         return frappe.get_doc({
@@ -1095,6 +1104,14 @@ class TestCrmScope(FrappeTestCase):
             "`tabCRM Demo Request`.`engineer_owner`",
             conditions_for_doctype("CRM Demo Request", self.engineer),
         )
+        self.assertIn("`tabCRM Demo Request History`", conditions_for_doctype("CRM Demo Request", self.engineer))
+        # A draft names its Engineer but has not been submitted to them: Sales read it, the Engineer does not.
+        draft = self._create_demo_request(
+            self.owned_customer, self.owned_contact, self.owned_opportunity, self.sales, self.engineer,
+            submitted=False,
+        )
+        self.assertIn(draft, self._visible_names("CRM Demo Request", self.sales))
+        self.assertNotIn(draft, self._visible_names("CRM Demo Request", self.engineer))
         self.assertIn(self.owned_demo_request, self._visible_names("CRM Demo Request", self.sales))
         self.assertNotIn(self.foreign_demo_request, self._visible_names("CRM Demo Request", self.sales))
         self.assertIn(self.owned_demo_request, self._visible_names("CRM Demo Request", self.engineer))
@@ -1839,6 +1856,8 @@ class TestCrmScope(FrappeTestCase):
         foreign["CRM Status Attachment"] = (
             status_attachment.name, "file_name", "legacy-secret.txt",
         )
+        # The Demo Request itself: a share of someone else's request used to open it, draft or not.
+        foreign["CRM Demo Request"] = (self.foreign_demo_request, "title", "Scope Demo Request")
         legacy_shares = {
             doctype: self._insert_legacy_share(doctype, row[0], self.sales)
             for doctype, row in foreign.items()

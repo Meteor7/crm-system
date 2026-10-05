@@ -79,6 +79,12 @@ it.each([
   ['PERMISSION_DENIED', 'Only the Opportunity owner can set the probability level.', 'Only the Opportunity owner can set the success probability.', '只有商机负责人可以设置成功概率。'],
   ['PERMISSION_DENIED', 'Managers cannot review their own internal validation.', 'their own internal validation', '不能审批自己提交的'],
   ['INTERNAL_VALIDATION_NOT_FOUND', 'Internal validation was not found.', 'Internal validation was not found.', '未找到该内部生产审批申请'],
+  ['INVALID_OWNER', 'The Visit owner cannot see this Account: it is Private and not theirs.', 'visit owner cannot see this account', '拜访负责人看不到这个客户'],
+  ['INVALID_OWNER', 'The action owner cannot see this Account: it is Private and not theirs.', 'action owner cannot see this account', '行动负责人看不到这个客户'],
+  ['INVALID_OWNER', 'Mentioned user must have access to this Demo Request.', 'can read this Demo Request can be mentioned', '只能 @ 能看到这条 Demo Request 的人'],
+  ['ACCOUNT_NOT_FOUND', 'Account was not found, or you have no access to it.', 'account was not found, or you have no access', '找不到这个客户，或者你没有查看权限'],
+  ['CONTACT_NOT_FOUND', 'Contact was not found, or you have no access to it.', 'contact was not found, or you have no access', '找不到这个联系人，或者你没有查看权限'],
+  ['SITE_NOT_FOUND', 'Site was not found, or you have no access to it.', 'site was not found, or you have no access', '找不到这个厂区，或者你没有查看权限'],
 ])('localizes known %s feedback "%s" while retaining raw diagnostic metadata', (code, message, english, chinese) => {
   const error = new CrmApiError(code, message, 'req_original', false, { field: '原始字段错误' })
   const mapped = mapRequestError(error)

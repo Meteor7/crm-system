@@ -791,9 +791,13 @@ class TestOpportunityApi(FrappeTestCase):
         with self.assertRaises(CrmApiException) as forged:
             create_strategy_opportunity(self._input(account, site, self.other_sales))
         self.assertEqual(forged.exception.code, "SCOPE_DENIED")
+        # The Site of someone else's Private Account answers as one that does not exist (F1-12).
         with self.assertRaises(CrmApiException) as mismatch:
             create_strategy_opportunity(self._input(account, other_site, self.sales))
-        self.assertEqual(mismatch.exception.code, "CONFLICT")
+        self.assertEqual(
+            (mismatch.exception.code, mismatch.exception.public_message),
+            ("NOT_FOUND", "Site was not found, or you have no access to it."),
+        )
 
         owned = create_strategy_opportunity(self._input(account, site, self.sales))
         frappe.set_user(self.other_sales)
@@ -844,9 +848,10 @@ class TestOpportunityApi(FrappeTestCase):
             "search": site["id"], "page": 1, "pageSize": 20,
         })[0]
         self.assertNotIn(opportunity["id"], {row["id"] for row in hidden_site_search})
+        # The Site the Opportunity keeps is one the owner may not read: it answers as a missing one.
         with self.assertRaises(CrmApiException) as site_write:
             update_strategy_opportunity(opportunity["id"], {"title": "Cannot retain a hidden Site"}, detail["modified"])
-        self.assertEqual(site_write.exception.code, "SCOPE_DENIED")
+        self.assertEqual(site_write.exception.code, "NOT_FOUND")
 
     def test_validation_rejects_invalid_money_date_ranges_and_enums(self):
         account, site = self._account_site(self.sales, "Validation")

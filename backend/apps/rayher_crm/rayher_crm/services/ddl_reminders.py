@@ -126,7 +126,7 @@ def send_ddl_reminders() -> int:
     for request in frappe.get_all(
         "CRM Demo Request",
         filters={"status": ["not in", ["Converted", "Cancelled"]]},
-        fields=["name", "customer_expected_date", "sales_owner", "engineer_owner", "account", "opportunity"],
+        fields=["name", "status", "customer_expected_date", "sales_owner", "engineer_owner", "account", "opportunity"],
     ):
         recipients = _related_users(
             account_id=request.account,
@@ -134,6 +134,10 @@ def send_ddl_reminders() -> int:
             explicit=[request.sales_owner, request.engineer_owner],
             managers=managers,
         )
+        # A draft is Sales' own until they submit it: its Engineer neither reads it nor hears of its deadline,
+        # whatever else of the Opportunity (an RFQ, say) names them.
+        if request.status == "Draft":
+            recipients.discard(request.engineer_owner)
         created += _send_source_reminder(
             source_doctype="CRM Demo Request",
             source_name=request.name,

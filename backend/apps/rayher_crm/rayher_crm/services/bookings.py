@@ -23,7 +23,7 @@ from rayher_crm.services.common import (
 )
 from rayher_crm.services.concurrency import lock_document
 from rayher_crm.services.notifications import create_notification
-from rayher_crm.services.contacts import _contact_account
+from rayher_crm.services.contacts import _contact_account, _require_contact
 from rayher_crm.services.money import (
     MoneyValidationError,
     as_decimal,
@@ -126,8 +126,7 @@ def _booking_owner(value: Any) -> str:
 
 
 def _validate_contact(contact_id: str, account_id: str) -> None:
-    if not frappe.db.exists("Contact", contact_id):
-        raise CrmApiException("CONTACT_NOT_FOUND", "Contact was not found.")
+    _require_contact(contact_id)
     if _contact_account(contact_id) != account_id:
         raise CrmApiException("CONTACT_ACCOUNT_MISMATCH", "The contact belongs to another account.")
     if frappe.db.get_value("Contact", contact_id, "custom_crm_status") != "Active":

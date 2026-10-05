@@ -72,6 +72,10 @@ const FIXED_MESSAGES: Partial<Record<string, Record<string, CopyPair>>> = {
     "A Contact cannot be added to this Account: the Account's name is too long.": ["A Contact cannot be added to this Account: the Account's name is too long.", '无法在这个客户下新建联系人：客户名称过长。'],
     'Confirmed order currency is fixed': ['The currency of a confirmed order is fixed.', '已确认订单的币种不可修改。'],
     'Opportunity Booking requires a source Opportunity.': ['An Opportunity Booking requires a source Opportunity.', '商机来源的 Booking 必须关联来源商机。'],
+    // A Sales user reads a Visit only on an Account they read (services/visits.py).
+    'The Visit owner cannot see this Account: it is Private and not theirs.': ['The visit owner cannot see this account: it is private and belongs to someone else. Choose the account owner, or make the account public first.', '拜访负责人看不到这个客户：客户是私有的，负责人不是他。请选客户负责人，或先把客户改为公开。'],
+    'The action owner cannot see this Account: it is Private and not theirs.': ['The action owner cannot see this account: it is private and belongs to someone else. Choose the account owner, or make the account public first.', '行动负责人看不到这个客户：客户是私有的，负责人不是他。请选客户负责人，或先把客户改为公开。'],
+    'Mentioned user must have access to this Demo Request.': ['Only someone who can read this Demo Request can be mentioned.', '只能 @ 能看到这条 Demo Request 的人。'],
   },
   CONFLICT: {
     'Account and sale type cannot change while the Opportunity has a live Booking.': ['The account and sale type cannot change while the Opportunity has a live Booking.', '商机存在未取消的 Booking 时，不能修改客户或销售类型。'],
@@ -90,6 +94,10 @@ const FIXED_MESSAGES: Partial<Record<string, Record<string, CopyPair>>> = {
   },
   NOT_FOUND: {
     'Internal validation was not found.': ['Internal validation was not found.', '未找到该内部生产审批申请。'],
+    // One answer for a record that does not exist and for one the user may not see (services/accounts.py, contacts.py).
+    'Account was not found, or you have no access to it.': ['The account was not found, or you have no access to it.', '找不到这个客户，或者你没有查看权限。'],
+    'Contact was not found, or you have no access to it.': ['The contact was not found, or you have no access to it.', '找不到这个联系人，或者你没有查看权限。'],
+    'Site was not found, or you have no access to it.': ['The site was not found, or you have no access to it.', '找不到这个厂区，或者你没有查看权限。'],
   },
   SCOPE_DENIED: {
     'Sales users can only assign records to themselves.': ['A Sales user can assign records only to themselves. Choose yourself as the owner.', '销售只能把记录分配给自己，请把负责人选为本人。'],

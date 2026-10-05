@@ -185,9 +185,13 @@ class TestBookingApi(FrappeTestCase):
         with self.assertRaises(CrmApiException) as forged:
             create_booking(self._input(account, contact, None, self.other_sales))
         self.assertEqual(forged.exception.code, "SCOPE_DENIED")
+        # A Contact of someone else's Private Account answers as one that does not exist.
         with self.assertRaises(CrmApiException) as mismatch:
             create_booking(self._input(account, foreign_contact, None, self.sales))
-        self.assertEqual(mismatch.exception.code, "CONFLICT")
+        self.assertEqual(
+            (mismatch.exception.code, mismatch.exception.public_message),
+            ("NOT_FOUND", "Contact was not found, or you have no access to it."),
+        )
 
         created = get_booking(won["liveBooking"]["id"])
         frappe.set_user(self.other_sales)

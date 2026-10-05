@@ -315,9 +315,13 @@ class TestInstalledToolApi(FrappeTestCase):
         _, valid_site, _, booking = self._booking(self.sales, "Validation")
         _, foreign_site, _, _ = self._booking(self.other_sales, "Foreign")
         frappe.set_user(self.sales)
+        # The Site of someone else's Private Account answers as one that does not exist (F1-12).
         with self.assertRaises(CrmApiException) as mismatch:
             convert_booking_to_installed_tool(booking["id"], self._input(foreign_site, "MISMATCH"), booking["modified"])
-        self.assertEqual(mismatch.exception.code, "CONFLICT")
+        self.assertEqual(
+            (mismatch.exception.code, mismatch.exception.public_message),
+            ("NOT_FOUND", "Site was not found, or you have no access to it."),
+        )
         with self.assertRaises(CrmApiException) as invalid_engineer:
             convert_booking_to_installed_tool(
                 booking["id"], self._input(valid_site, "BAD-ENGINEER", engineer=self.sales), booking["modified"]
