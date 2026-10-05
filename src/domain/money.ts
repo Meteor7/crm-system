@@ -48,8 +48,26 @@ export function unknownAmountCount(rows: ReadonlyArray<{ amount: DecimalAmount |
  * reads as complete: "CNY 100.00 · 1 条未填金额".
  */
 export function formatKnownTotals<T extends { currency: string; amount: DecimalAmount | '' }>(rows: T[], unknownLabel: (count: number) => string) {
-  const unknown = unknownAmountCount(rows)
-  return [...moneyByCurrency(rows).map((item) => formatMoney(item.amount, item.currency)), ...(unknown ? [unknownLabel(unknown)] : [])].join(' · ')
+  return formatSummedTotals(moneyByCurrency(rows), unknownAmountCount(rows), unknownLabel)
+}
+
+/** formatKnownTotals for totals that are already added up, as the server's stage summary carries them. */
+export function formatSummedTotals(
+  totals: ReadonlyArray<{ currency: string; amount: DecimalAmount }>,
+  unknown: number,
+  unknownLabel: (count: number) => string,
+) {
+  const known = [...totals].sort((left, right) => left.currency.localeCompare(right.currency))
+  return [...known.map((item) => formatTotal(item.amount, item.currency)), ...(unknown ? [unknownLabel(unknown)] : [])].join(' · ')
+}
+
+/**
+ * formatMoney for a total. A total over every matching record can be larger than any single amount may
+ * be, so it is not held to DECIMAL(20,2): it is grouped as it stands and never throws while rendering.
+ */
+function formatTotal(value: DecimalAmount, currency: string): string {
+  const [whole, fraction = ''] = value.split('.')
+  return `${currency.toUpperCase()} ${whole.replace(/\B(?=(\d{3})+(?!\d))/g, ',')}.${fraction.padEnd(2, '0')}`
 }
 
 /** An amount not entered yet ('') shows as a dash, never as 0 or an error; pages usually say so in words instead. */

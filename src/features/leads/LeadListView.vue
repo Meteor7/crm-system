@@ -10,6 +10,7 @@ import type { CreateLeadInput, LeadDto, LeadSource, LeadStatus, Tone } from '@/t
 import DataState from '@/design-system/DataState.vue'
 import FilterBar from '@/features/shared/FilterBar.vue'
 import PaginationControls from '@/features/shared/PaginationControls.vue'
+import { ownerFilterOptions } from '@/features/shared/owner-filter'
 import StatusBadge from '@/design-system/StatusBadge.vue'
 import LeadEditorModal from './LeadEditorModal.vue'
 import { formatDisplayDate } from '@/domain/time'
@@ -36,7 +37,7 @@ const editing = ref<LeadDto | null>(null)
 const busy = ref(false)
 const editorError = useLocaleMessage()
 const canWrite = computed(() => app.can('deal:write'))
-const owners = computed(() => [...new Set(rows.value.map((lead) => lead.owner))].sort())
+const owners = computed(() => ownerFilterOptions(app.bootstrap?.user, rows.value.map((lead) => lead.owner), owner.value))
 let sequence = 0
 
 function statusTone(value: LeadStatus): Tone {

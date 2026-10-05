@@ -108,6 +108,7 @@ import type {
   UpdateOpportunityStakeholderInput,
   StrategyOpportunityDto,
   StrategyOpportunityListQuery,
+  StrategyOpportunityPageData,
   TransitionInstalledToolInput,
   UpdateInstalledToolInput,
   UpdateStrategyOpportunityInput,
@@ -291,7 +292,7 @@ export interface CrmApi {
   reviewRfq(id: string, input: ReviewRfqInput, expectedModified: string): Promise<ApiResponse<RfqDetailDto>>
   previewRfqFile(id: string, versionId?: string): Promise<BinaryDownload>
   downloadRfqFile(id: string, versionId?: string): Promise<BinaryDownload>
-  listStrategyOpportunities(query?: StrategyOpportunityListQuery): Promise<ApiResponse<PageData<StrategyOpportunityDto>>>
+  listStrategyOpportunities(query?: StrategyOpportunityListQuery): Promise<ApiResponse<StrategyOpportunityPageData>>
   /** Equipment type options: the five presets, then custom types in the order they were added. */
   listEquipmentTypes(): Promise<ApiResponse<string[]>>
   getStrategyOpportunity(id: string): Promise<ApiResponse<StrategyOpportunityDto>>

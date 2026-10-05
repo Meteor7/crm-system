@@ -19,12 +19,13 @@ import DataState from '@/design-system/DataState.vue'
 import StatusBadge from '@/design-system/StatusBadge.vue'
 import PaginationControls from '@/features/shared/PaginationControls.vue'
 import { readAllPages } from '@/features/shared/read-all-pages'
+import { ownerFilterOptions } from '@/features/shared/owner-filter'
 import { sitesByAccountId } from '@/features/accounts/account-sites'
 import OpportunityEditorModal from './OpportunityEditorModal.vue'
 import { useAppStore } from '@/stores/app'
 import type { AccountSummaryDto, SiteDto } from '@/types/crm'
-import type { CreateStrategyOpportunityInput, OpportunityProbabilityLevelFilter, StrategyOpportunityDto } from '@/types/workspaces'
-import { formatKnownTotals, formatMoney } from '@/domain/money'
+import type { CreateStrategyOpportunityInput, OpportunityProbabilityLevelFilter, OpportunityStageSummaryDto, StrategyOpportunityDto, StrategyOpportunityListQuery } from '@/types/workspaces'
+import { formatKnownTotals, formatMoney, formatSummedTotals } from '@/domain/money'
 import { EQUIPMENT_PRESETS } from '@/domain/equipment'
 import { loadEquipmentTypes } from '@/features/opportunities/equipment-types'
 import { useI18n, useLocaleMessage } from '@/i18n'
@@ -35,6 +36,11 @@ const route = useRoute()
 const router = useRouter()
 const { t, locale } = useI18n()
 const rows = ref<StrategyOpportunityDto[]>([])
+// What rows holds: the page the list shows, or every matching Opportunity, which the board shows as cards.
+const rowsScope = ref<'page' | 'all'>('page')
+// Count and totals per stage of everything the filters match, as the server added them up in one request.
+// The board shows these. Adding up the cards instead would mix pages fetched at different moments.
+const stageSummary = ref<Map<string, OpportunityStageSummaryDto> | null>(null)
 const total = ref(0)
 const page = ref(typeof route.query.page === 'string' && Number(route.query.page) > 0 ? Number(route.query.page) : 1)
 const pageSize = ref(typeof route.query.pageSize === 'string' && [10, 12, 25, 50].includes(Number(route.query.pageSize)) ? Number(route.query.pageSize) : 12)
@@ -49,13 +55,15 @@ const modalError = useLocaleMessage()
 const editorOpen = ref(false)
 const equipmentTypes = ref<string[]>([...EQUIPMENT_PRESETS])
 watch(editorOpen, (open) => { if (open) void loadEquipmentTypes(props.apiClient).then((types) => { equipmentTypes.value = types }) })
-const layout = ref<'list' | 'board'>('list')
+// The layout is kept in the address like the filters: the shell mounts the page anew whenever the address changes.
+const layout = ref<'list' | 'board'>(normalizeLayout(route.query.layout))
+const wantedScope = computed(() => layout.value === 'board' ? 'all' : 'page')
 const stage = ref(normalizeStageFilter(route.query.status))
 const probabilityLevel = ref<OpportunityProbabilityLevelFilter>(normalizeOpportunityProbabilityLevelFilter(route.query.probabilityLevel))
 const owner = ref(typeof route.query.owner === 'string' ? route.query.owner : 'All')
 let sequence = 0
 const canWrite = computed(() => app.can('deal:write'))
-const owners = computed(() => [...new Set(rows.value.map((item) => item.owner))].sort())
+const owners = computed(() => ownerFilterOptions(app.bootstrap?.user, rows.value.map((item) => item.owner), owner.value))
 const requestedAccountId = computed(() => typeof route.query.accountId === 'string' ? route.query.accountId : '')
 const requestedOpportunityId = computed(() => typeof route.query.opportunityId === 'string' ? route.query.opportunityId : '')
 const opportunityAccounts = computed(() => {
@@ -79,6 +87,9 @@ const visibleBoardRows = computed(() => Object.fromEntries(
 function loadMoreStage(stageName: (typeof OPPORTUNITY_STAGES)[number]) { boardLimits.value[stageName] += 5 }
 function resetBoardLimits() { OPPORTUNITY_STAGES.forEach((item) => { boardLimits.value[item] = 5 }) }
 
+function normalizeLayout(value: unknown): 'list' | 'board' {
+  return value === 'board' ? 'board' : 'list'
+}
 // A bookmarked link may still carry a retired stage name; it falls back to all stages.
 function normalizeStageFilter(value: unknown): string {
   return isOpportunityStage(value) ? value : 'All'
@@ -86,42 +97,75 @@ function normalizeStageFilter(value: unknown): string {
 function stageLabel(value: string) {
   return opportunityStageLabel(value, locale.value)
 }
+// A server without the summary leaves the board to count the cards it has read.
+function stageCount(stageName: (typeof OPPORTUNITY_STAGES)[number]) {
+  return stageSummary.value ? stageSummary.value.get(stageName)?.count ?? 0 : boardRows.value[stageName].length
+}
 // Known amounts only, with how many are not entered yet, so a partial total never reads as complete.
-function stageMoney(items: StrategyOpportunityDto[]) {
-  return formatKnownTotals(items, (count) => t('opportunities.unknownAmountCount', { count }))
+function stageMoney(stageName: (typeof OPPORTUNITY_STAGES)[number]) {
+  const unknownLabel = (count: number) => t('opportunities.unknownAmountCount', { count })
+  if (!stageSummary.value) return formatKnownTotals(boardRows.value[stageName], unknownLabel)
+  const summary = stageSummary.value.get(stageName)
+  return summary ? formatSummedTotals(summary.totals, summary.unknownAmountCount, unknownLabel) : ''
+}
+// Everything the board shows: the stage summary and the first cards come in one request, which is one
+// moment. Further pages only add cards; a row that moved between two of them is shown once.
+async function readBoard(filters: StrategyOpportunityListQuery) {
+  const first = await props.apiClient.listStrategyOpportunities({ ...filters, page: 1, pageSize: 200, stageSummary: true })
+  const cards = new Map(first.data.items.map((item) => [item.id, item]))
+  const matching = first.meta?.total ?? first.data.items.length
+  let received = first.data.items.length
+  for (let nextPage = 2; received < matching; nextPage += 1) {
+    const next = await props.apiClient.listStrategyOpportunities({ ...filters, page: nextPage, pageSize: 200 })
+    if (!next.data.items.length) break
+    next.data.items.forEach((item) => cards.set(item.id, item))
+    received += next.data.items.length
+  }
+  return { items: [...cards.values()], total: matching, stageSummary: first.data.stageSummary ?? null }
 }
 function amountText(value: StrategyOpportunityDto['amount'], currency: string) {
   return value ? formatMoney(value, currency) : t('oppEditor.amountPending')
 }
+let restoringRoute = false
+// One reload for the three filters together, not one for each of them.
 function resetFilters() {
-  page.value = 1
+  restoringRoute = true
   stage.value = 'All'
   probabilityLevel.value = 'All'
   owner.value = 'All'
+  restoringRoute = false
+  reloadFromFirstPage()
 }
-let restoringRoute = false
-function syncUrl() { if (!restoringRoute) void router.replace({ query: { ...route.query, page: String(page.value), pageSize: String(pageSize.value), status: stage.value === 'All' ? undefined : stage.value, probabilityLevel: probabilityLevel.value === 'All' ? undefined : probabilityLevel.value, owner: owner.value === 'All' ? undefined : owner.value } }) }
+// `create` opened the editor once, when the page was reached; kept in the address it would open it again on every remount.
+function syncUrl() { if (!restoringRoute) void router.replace({ query: { ...route.query, create: undefined, page: String(page.value), pageSize: String(pageSize.value), status: stage.value === 'All' ? undefined : stage.value, probabilityLevel: probabilityLevel.value === 'All' ? undefined : probabilityLevel.value, owner: owner.value === 'All' ? undefined : owner.value, layout: layout.value === 'board' ? 'board' : undefined } }) }
 function goPage(target: number) { page.value = target; syncUrl(); void load() }
 function changePageSize(value: number) { pageSize.value = value; page.value = 1; syncUrl(); void load() }
 function reloadFromFirstPage() { if (restoringRoute) return; page.value = 1; resetBoardLimits(); syncUrl(); void load() }
+function changeLayout() { if (restoringRoute) return; resetBoardLimits(); syncUrl(); void load() }
 async function load() {
   const current = ++sequence
   loading.value = true
   denied.value = false
   error.value = ''
+  const scope = wantedScope.value
+  const contactId = typeof route.query.contactId === 'string' ? route.query.contactId : ''
+  const filters = { status: stage.value, probabilityLevel: probabilityLevel.value, owner: owner.value, accountId: requestedAccountId.value, contactId, opportunityId: requestedOpportunityId.value }
   try {
     const [opportunityResult, accountRows] = await Promise.all([
-      props.apiClient.listStrategyOpportunities({ page: page.value, pageSize: pageSize.value, status: stage.value, probabilityLevel: probabilityLevel.value, owner: owner.value, accountId: requestedAccountId.value, contactId: typeof route.query.contactId === 'string' ? route.query.contactId : '', opportunityId: requestedOpportunityId.value }),
+      scope === 'all'
+        ? readBoard(filters)
+        : props.apiClient.listStrategyOpportunities({ ...filters, page: page.value, pageSize: pageSize.value }).then((result) => ({ items: result.data.items, total: result.meta?.total, stageSummary: null })),
       readAllPages((currentPage, currentPageSize) => props.apiClient.listAccounts({ page: currentPage, pageSize: currentPageSize })),
     ])
     if (current !== sequence) return
-    const contactId = typeof route.query.contactId === 'string' ? route.query.contactId : ''
     rows.value = requestedOpportunityId.value
-      ? opportunityResult.data.items.filter((item) => item.id === requestedOpportunityId.value)
+      ? opportunityResult.items.filter((item) => item.id === requestedOpportunityId.value)
       : contactId
-        ? opportunityResult.data.items.filter((item) => item.stakeholders.some((person) => person.contactId === contactId))
-        : opportunityResult.data.items
-    total.value = opportunityResult.meta?.total ?? rows.value.length
+        ? opportunityResult.items.filter((item) => item.stakeholders.some((person) => person.contactId === contactId))
+        : opportunityResult.items
+    rowsScope.value = scope
+    stageSummary.value = opportunityResult.stageSummary && new Map(opportunityResult.stageSummary.map((item) => [item.stage, item]))
+    total.value = opportunityResult.total ?? rows.value.length
     accounts.value = accountRows
     if (app.can('contact:view')) {
       const sites = await props.apiClient.listAccountSites()
@@ -160,13 +204,15 @@ onMounted(async () => {
   if (route.query.create === '1' && canWrite.value) editorOpen.value = true
 })
 watch([stage, probabilityLevel, owner], reloadFromFirstPage, { flush: 'sync' })
-watch(() => [route.query.page, route.query.pageSize, route.query.status, route.query.probabilityLevel, route.query.owner], ([nextPage, nextSize, nextStage, nextLevel, nextOwner]) => {
+watch(layout, changeLayout, { flush: 'sync' })
+watch(() => [route.query.page, route.query.pageSize, route.query.status, route.query.probabilityLevel, route.query.owner, route.query.layout], ([nextPage, nextSize, nextStage, nextLevel, nextOwner, nextLayout]) => {
   const restoredPage = typeof nextPage === 'string' && Number(nextPage) > 0 ? Number(nextPage) : 1
   const restoredSize = typeof nextSize === 'string' && [10, 12, 25, 50].includes(Number(nextSize)) ? Number(nextSize) : 12
   const values = [normalizeStageFilter(nextStage), typeof nextOwner === 'string' ? nextOwner : 'All']
   const restoredLevel = normalizeOpportunityProbabilityLevelFilter(nextLevel)
-  if (restoredPage === page.value && restoredSize === pageSize.value && values[0] === stage.value && restoredLevel === probabilityLevel.value && values[1] === owner.value) return
-  restoringRoute = true; page.value = restoredPage; pageSize.value = restoredSize; stage.value = values[0]!; probabilityLevel.value = restoredLevel; owner.value = values[1]!; restoringRoute = false; resetBoardLimits(); void load()
+  const restoredLayout = normalizeLayout(nextLayout)
+  if (restoredPage === page.value && restoredSize === pageSize.value && values[0] === stage.value && restoredLevel === probabilityLevel.value && values[1] === owner.value && restoredLayout === layout.value) return
+  restoringRoute = true; page.value = restoredPage; pageSize.value = restoredSize; stage.value = values[0]!; probabilityLevel.value = restoredLevel; owner.value = values[1]!; layout.value = restoredLayout; restoringRoute = false; resetBoardLimits(); void load()
 })
 </script>
 
@@ -177,7 +223,7 @@ watch(() => [route.query.page, route.query.pageSize, route.query.status, route.q
       <div>
         <span>OPPORTUNITIES</span>
         <h2>{{ t('opportunities.recentlyViewed') }}</h2>
-        <p>{{ t('opportunities.countHint', { count: rows.length }) }}</p>
+        <p>{{ t('opportunities.countHint', { count: total }) }}</p>
       </div>
       <button v-if="canWrite" class="primary-button" type="button" data-testid="new-opportunity" @click="editorOpen = true"><Plus :size="14" />{{ t('opportunities.new') }}</button>
     </header>
@@ -191,12 +237,12 @@ watch(() => [route.query.page, route.query.pageSize, route.query.status, route.q
         <button type="button" data-opportunity-layout="list" :class="{ active: layout === 'list' }" :aria-label="t('opportunities.listView')" @click="layout = 'list'"><List :size="14" />{{ t('opportunities.list') }}</button>
         <button type="button" data-opportunity-layout="board" :class="{ active: layout === 'board' }" :aria-label="t('opportunities.boardView')" @click="layout = 'board'"><Kanban :size="14" />{{ t('opportunities.board') }}</button>
       </div>
-      <span>{{ visibleRows.length }} / {{ rows.length }}</span>
+      <span data-testid="opportunity-shown-count">{{ visibleRows.length }} / {{ total }}</span>
       <button type="button" @click="resetFilters">{{ t('opportunities.reset') }}</button>
     </div>
 
     <div class="opportunity-table-card">
-      <DataState v-if="loading && !rows.length" type="loading" />
+      <DataState v-if="loading && (!rows.length || layout === 'board' || rowsScope !== wantedScope)" type="loading" />
       <DataState v-else-if="denied" type="denied" :message="error" :request-id="requestId" />
       <DataState v-else-if="error" type="error" :message="error" :request-id="requestId" @retry="load" />
       <DataState v-else-if="!visibleRows.length" type="empty" :title="t('opportunities.emptyTitle')" :message="t('opportunities.emptyMessage')" />
@@ -223,8 +269,8 @@ watch(() => [route.query.page, route.query.pageSize, route.query.status, route.q
         <div class="opportunity-board">
           <section v-for="stageName in OPPORTUNITY_STAGES" :key="stageName" class="opportunity-board-column" :data-opportunity-stage="stageName">
             <header>
-              <div><strong>{{ stageLabel(stageName) }}<small v-if="stageName === OPTIONAL_OPPORTUNITY_STAGE" class="optional-stage-marker" data-stage-marker="optional">{{ t('detail.optionalStage') }}</small></strong><span>{{ t('opportunities.count', { count: boardRows[stageName].length }) }}</span></div>
-              <em>{{ stageMoney(boardRows[stageName]) }}</em>
+              <div><strong>{{ stageLabel(stageName) }}<small v-if="stageName === OPTIONAL_OPPORTUNITY_STAGE" class="optional-stage-marker" data-stage-marker="optional">{{ t('detail.optionalStage') }}</small></strong><span>{{ t('opportunities.count', { count: stageCount(stageName) }) }}</span></div>
+              <em>{{ stageMoney(stageName) }}</em>
             </header>
             <div class="opportunity-board-cards">
               <article v-for="item in visibleBoardRows[stageName]" :key="item.id" class="opportunity-board-card" :data-opportunity-id="item.id">

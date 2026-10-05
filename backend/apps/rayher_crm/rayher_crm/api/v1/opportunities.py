@@ -23,7 +23,11 @@ def list_equipment_types(**query) -> dict:
 @api_endpoint
 def list_strategy_opportunities(**query) -> dict:
     items, total, page, page_size = opportunities.list_strategy_opportunities(query)
-    return success_response({"items": items}, page=page, pageSize=page_size, total=total)
+    data: dict[str, Any] = {"items": items}
+    # Asked for by the board: read in the same request as the page, so both describe the same moment.
+    if str(query.get("stageSummary") or "").strip().lower() in {"1", "true"}:
+        data["stageSummary"] = opportunities.opportunity_stage_summary(query)
+    return success_response(data, page=page, pageSize=page_size, total=total)
 
 
 @frappe.whitelist(methods=["GET"])

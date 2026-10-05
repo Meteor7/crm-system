@@ -439,6 +439,21 @@ describe('Frappe JSON transport', () => {
     })
   })
 
+  it('asks the Opportunity list for its stage summary in the same request and returns it with the page', async () => {
+    const stageSummary = [{ stage: 'demo_done', count: 25, unknownAmountCount: 0, totals: [{ currency: 'CNY', amount: '25000.00' }] }]
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ message: {
+      data: { items: [], stageSummary }, meta: { requestId: 'req_board', page: 1, pageSize: 200, total: 25 }, warnings: [],
+    } }))
+
+    const result = await createFrappeApi({ fetchImpl: fetchMock }).listStrategyOpportunities({ page: 1, pageSize: 200, status: 'All', stageSummary: true })
+
+    const [url] = fetchMock.mock.calls[0] as [string, RequestInit]
+    expect(url.startsWith('/api/method/rayher_crm.api.v1.opportunities.list_strategy_opportunities?')).toBe(true)
+    expect(Object.fromEntries(new URLSearchParams(url.split('?')[1]))).toEqual({ page: '1', pageSize: '200', status: 'All', stageSummary: 'true' })
+    expect(result.data.stageSummary).toEqual(stageSummary)
+    expect(result.meta?.total).toBe(25)
+  })
+
   it('normalizes fetch failures without exposing implementation errors', async () => {
     const fetchMock = vi.fn().mockRejectedValue(new TypeError('Failed to fetch'))
     const promise = createFrappeApi({ fetchImpl: fetchMock }).getBootstrap()

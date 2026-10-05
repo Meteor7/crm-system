@@ -134,6 +134,23 @@ export interface SaveProbabilityRecoveryInput {
 
 export interface StrategyOpportunityListQuery extends ListQuery {
   probabilityLevel?: OpportunityProbabilityLevelFilter
+  /** Also return count and totals per stage of everything the query matches, read in the same request as the page. */
+  stageSummary?: boolean
+}
+
+/** Count and totals of one stage over every Opportunity a list query matches, whatever page is shown. */
+export interface OpportunityStageSummaryDto {
+  stage: string
+  count: number
+  /** How many of them have no amount entered yet; the totals leave these out. */
+  unknownAmountCount: number
+  totals: Array<{ currency: string; amount: DecimalAmount }>
+}
+
+export interface StrategyOpportunityPageData {
+  items: StrategyOpportunityDto[]
+  /** Present when the query asked for it. */
+  stageSummary?: OpportunityStageSummaryDto[]
 }
 
 export interface CreateStrategyOpportunityInput {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { addMoney, formatKnownTotals, formatMoney, moneyByCurrency, unknownAmountCount } from './money'
+import { addMoney, formatKnownTotals, formatMoney, formatSummedTotals, moneyByCurrency, unknownAmountCount } from './money'
 
 describe('exact money contract', () => {
   it('adds decimal strings without IEEE-754 precision loss', () => {
@@ -40,5 +40,16 @@ describe('exact money contract', () => {
     expect(formatKnownTotals(rows, (count) => `${count} 条未填金额`)).toBe('CNY 100.00 · 2 条未填金额')
     expect(formatKnownTotals([{ currency: 'CNY', amount: '' }], (count) => `${count} 条未填金额`)).toBe('1 条未填金额')
     expect(formatKnownTotals([{ currency: 'CNY', amount: '100.00' }], () => 'never shown')).toBe('CNY 100.00')
+    // Totals that are already added up read the same: by currency, then the amounts not entered.
+    const unknownLabel = (count: number) => `${count} 条未填金额`
+    expect(formatSummedTotals([{ currency: 'USD', amount: '50.00' }, { currency: 'CNY', amount: '202000.00' }], 3, unknownLabel)).toBe('CNY 202,000.00 · USD 50.00 · 3 条未填金额')
+    expect(formatSummedTotals([], 2, unknownLabel)).toBe('2 条未填金额')
+    expect(formatSummedTotals([], 0, unknownLabel)).toBe('')
+  })
+
+  it('formats a total that is larger than any single amount may be', () => {
+    // Thirteen amounts of 80,000,000,000,000,000.00 each fit DECIMAL(20,2); what the server adds up does not.
+    expect(() => formatMoney('1040000000000000000.00', 'CNY')).toThrow('DECIMAL(20,2)')
+    expect(formatSummedTotals([{ currency: 'CNY', amount: '1040000000000000000.00' }], 0, () => 'never shown')).toBe('CNY 1,040,000,000,000,000,000.00')
   })
 })

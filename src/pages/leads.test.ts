@@ -44,6 +44,37 @@ describe('Leads pages', () => {
     expect(router.currentRoute.value.path).toBe('/leads/LEAD-001')
   })
 
+  it('keeps every owner in the Lead owner filter after one is chosen', async () => {
+    const { api, pinia, router } = await pageContext()
+    const leads = (await api.listLeads({ page: 1, pageSize: 50 })).data.items
+    const chosen = leads[0]!.owner
+    await router.push('/leads')
+    const wrapper = mount(LeadListView, { props: { apiClient: api }, global: { plugins: [pinia, router] } })
+    await flushPromises()
+    const ownerValues = () => wrapper.get('[aria-label="负责人"]').findAll('option').map((option) => option.attributes('value'))
+    const before = ownerValues()
+    expect(before.length).toBeGreaterThan(2)
+    expect(before).toContain(chosen)
+
+    await wrapper.get('[aria-label="负责人"]').setValue(chosen)
+    await flushPromises()
+
+    expect(wrapper.findAll('[data-lead-id]')).toHaveLength(leads.filter((lead) => lead.owner === chosen).length)
+    expect(ownerValues()).toEqual(before)
+  })
+
+  it('offers a Sales user only themselves as Lead owner, since they see no one else\'s Leads', async () => {
+    const { pinia, router } = await pageContext()
+    const api = createMockApi({ latency: 0, role: 'Sales' })
+    const user = (await api.getBootstrap()).data.user
+    useAppStore(pinia).bootstrap = (await api.getBootstrap()).data
+    await router.push('/leads')
+    const wrapper = mount(LeadListView, { props: { apiClient: api }, global: { plugins: [pinia, router] } })
+    await flushPromises()
+
+    expect(wrapper.get('[aria-label="负责人"]').findAll('option').map((option) => option.attributes('value'))).toEqual(['All', user.id])
+  })
+
   it('shows a newly created Lead even when the previous filters would hide it', async () => {
     const { api, pinia, router } = await pageContext()
     await router.push('/leads')

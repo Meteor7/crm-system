@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Mapping
 from decimal import Decimal
 from typing import Any
 
@@ -603,20 +604,11 @@ def _require_opportunity(name: str, for_update: bool = False):
     return doc
 
 
-def list_strategy_opportunities(query: dict[str, Any] | None = None):
-    assert_capability("deal:view")
+def _list_filters(query: Mapping[str, Any]) -> tuple[str, list[Any]]:
+    """WHERE clause and values of the Opportunity list: the caller's scope and the query's filters."""
+
     where_parts = [f"({conditions_for_doctype('CRM Opportunity')})"]
     values: list[Any] = []
-    where = where_parts[0]
-    if query is None:
-        rows = frappe.db.sql(
-            f"SELECT `name` FROM `tabCRM Opportunity` WHERE {where} ORDER BY `modified` DESC, `name` DESC",
-            as_dict=True,
-        )
-        recoveries = plans_for_opportunities([row.name for row in rows])
-        reviews = reviews_for_opportunities([row.name for row in rows])
-        return [serialize_opportunity(frappe.get_doc("CRM Opportunity", row.name), recoveries, reviews) for row in rows]
-    page, page_size, offset = normalize_pagination(query.get("page"), query.get("pageSize"))
     search = str(query.get("search") or "").strip()
     if search:
         pattern = f"%{search}%"
@@ -651,7 +643,22 @@ def list_strategy_opportunities(query: dict[str, Any] | None = None):
     if opportunity_id:
         where_parts.append("`name` = %s")
         values.append(opportunity_id)
-    where = " AND ".join(where_parts)
+    return " AND ".join(where_parts), values
+
+
+def list_strategy_opportunities(query: dict[str, Any] | None = None):
+    assert_capability("deal:view")
+    if query is None:
+        where = f"({conditions_for_doctype('CRM Opportunity')})"
+        rows = frappe.db.sql(
+            f"SELECT `name` FROM `tabCRM Opportunity` WHERE {where} ORDER BY `modified` DESC, `name` DESC",
+            as_dict=True,
+        )
+        recoveries = plans_for_opportunities([row.name for row in rows])
+        reviews = reviews_for_opportunities([row.name for row in rows])
+        return [serialize_opportunity(frappe.get_doc("CRM Opportunity", row.name), recoveries, reviews) for row in rows]
+    page, page_size, offset = normalize_pagination(query.get("page"), query.get("pageSize"))
+    where, values = _list_filters(query)
     total = int(frappe.db.sql(f"SELECT COUNT(*) FROM `tabCRM Opportunity` WHERE {where}", tuple(values))[0][0])
     rows = frappe.db.sql(
         f"SELECT `name` FROM `tabCRM Opportunity` WHERE {where} ORDER BY `modified` DESC, `name` DESC LIMIT %s OFFSET %s",
@@ -660,6 +667,40 @@ def list_strategy_opportunities(query: dict[str, Any] | None = None):
     recoveries = plans_for_opportunities([row.name for row in rows])
     reviews = reviews_for_opportunities([row.name for row in rows])
     return [serialize_opportunity(frappe.get_doc("CRM Opportunity", row.name), recoveries, reviews) for row in rows], total, page, page_size
+
+
+def opportunity_stage_summary(query: Mapping[str, Any]) -> list[dict[str, Any]]:
+    """Count and totals per stage of every Opportunity the list query matches, whatever page is shown.
+
+    The board of the Opportunities page shows these. They are computed here, in one statement, so that
+    they describe one moment: a browser that adds up pages fetched one after the other can count a
+    record twice or miss it when something changes in between.
+
+    A stage's totals are per currency and cover the amounts that have been entered; an amount of zero
+    is one nobody has entered yet and is counted in unknownAmountCount instead, as on the list.
+    """
+
+    assert_capability("deal:view")
+    where, values = _list_filters(query)
+    rows = frappe.db.sql(
+        "SELECT `stage`, UPPER(TRIM(COALESCE(`currency`, ''))) AS `currency`, COUNT(*) AS `count`, "
+        "SUM(CASE WHEN COALESCE(`amount`, 0) = 0 THEN 1 ELSE 0 END) AS `unknown`, "
+        "CAST(SUM(COALESCE(`amount`, 0)) AS CHAR) AS `amount` "
+        f"FROM `tabCRM Opportunity` WHERE {where} GROUP BY `stage`, UPPER(TRIM(COALESCE(`currency`, '')))",
+        tuple(values), as_dict=True,
+    )
+    stages: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        stage = stages.setdefault(row.stage, {"stage": row.stage, "count": 0, "unknownAmountCount": 0, "totals": []})
+        stage["count"] += int(row["count"])
+        stage["unknownAmountCount"] += int(row.unknown or 0)
+        if int(row["count"]) > int(row.unknown or 0):
+            stage["totals"].append({"currency": row.currency, "amount": format(Decimal(row.amount).quantize(Decimal("0.01")), ".2f")})
+    for stage in stages.values():
+        stage["totals"].sort(key=lambda total: total["currency"])
+    return [stages[name] for name in OPPORTUNITY_STAGES if name in stages] + [
+        stages[name] for name in sorted(stages) if name not in OPPORTUNITY_STAGES
+    ]
 
 
 def get_strategy_opportunity(name: str) -> dict[str, Any]:

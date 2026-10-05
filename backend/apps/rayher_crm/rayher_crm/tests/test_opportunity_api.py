@@ -28,6 +28,7 @@ from rayher_crm.services.opportunities import (
     get_strategy_opportunity,
     list_strategy_opportunities,
     mark_opportunity_lost,
+    opportunity_stage_summary,
     request_internal_validation,
     rollback_opportunity_stage,
     update_opportunity_stakeholder,
@@ -340,6 +341,76 @@ class TestOpportunityApi(FrappeTestCase):
             advanced["id"], {"currency": "USD", "amountCny": "2150"}, advanced["modified"],
         )
         self.assertEqual((converted["currency"], converted["amount"], converted["amountCny"]), ("USD", "300.00", "2150.00"))
+
+    def test_stage_summary_counts_and_totals_every_matching_opportunity_whatever_the_page(self):
+        account, site = self._account_site(self.sales, "Summary")
+        priced = create_strategy_opportunity(self._input(
+            account, site, self.sales, title="Summary CNY", amount="100.50", originalAmount="100.50", amountCny="100.50",
+        ))
+        create_strategy_opportunity(self._input(
+            account, site, self.sales, title="Summary CNY two", amount="0.25", originalAmount="0.25", amountCny="0.25",
+        ))
+        create_strategy_opportunity(self._input(
+            account, site, self.sales, title="Summary USD", currency="USD", amount="50.00", originalAmount="50.00", amountCny="360.00",
+        ))
+        create_strategy_opportunity(self._input(
+            account, site, self.sales, title="Summary unpriced", amount="", originalAmount="", amountCny="",
+        ))
+        self.assertEqual(self._demo_done(priced)["stage"], "demo_done")
+        query = {"accountId": account["id"]}
+        expected = [
+            {
+                "stage": "qualified_opportunity", "count": 3, "unknownAmountCount": 1,
+                "totals": [{"currency": "CNY", "amount": "0.25"}, {"currency": "USD", "amount": "50.00"}],
+            },
+            {"stage": "demo_done", "count": 1, "unknownAmountCount": 0, "totals": [{"currency": "CNY", "amount": "100.50"}]},
+        ]
+
+        self.assertEqual(opportunity_stage_summary(query), expected)
+        # The page asked for does not narrow it: it covers everything the list matches.
+        self.assertEqual(opportunity_stage_summary({**query, "page": 3, "pageSize": 1}), expected)
+        self.assertEqual(
+            sum(stage["count"] for stage in expected),
+            list_strategy_opportunities({**query, "page": 1, "pageSize": 1})[1],
+        )
+        # The list's filters narrow it like they narrow the list.
+        self.assertEqual(opportunity_stage_summary({**query, "status": "demo_done"}), expected[1:])
+        self.assertEqual(
+            opportunity_stage_summary({**query, "search": "Summary USD"}),
+            [{"stage": "qualified_opportunity", "count": 1, "unknownAmountCount": 0, "totals": [{"currency": "USD", "amount": "50.00"}]}],
+        )
+        self.assertEqual(opportunity_stage_summary({**query, "owner": self.other_sales}), [])
+
+        # The endpoint returns it with the page, in the same request, only when asked. The browser sends "true".
+        for asked in ("true", "1"):
+            with_summary = list_strategy_opportunities_endpoint(accountId=account["id"], page=1, pageSize=1, stageSummary=asked)
+            self.assertEqual(with_summary["data"]["stageSummary"], expected)
+            self.assertEqual((len(with_summary["data"]["items"]), with_summary["meta"]["total"]), (1, 4))
+        for not_asked in ({}, {"stageSummary": "false"}, {"stageSummary": "0"}, {"stageSummary": ""}):
+            answer = list_strategy_opportunities_endpoint(accountId=account["id"], page=1, pageSize=1, **not_asked)
+            self.assertNotIn("stageSummary", answer["data"])
+
+        # It follows the caller's scope: the Account is private to its owner.
+        frappe.set_user(self.other_sales)
+        self.assertEqual(opportunity_stage_summary(query), [])
+        frappe.set_user(self.engineer)
+        self.assertEqual(opportunity_stage_summary(query), [])
+        frappe.set_user(self.manager)
+        self.assertEqual(opportunity_stage_summary(query), expected)
+
+    def test_stage_summary_total_may_exceed_what_a_single_amount_can_be(self):
+        account, site = self._account_site(self.sales, "Summary large")
+        for title in ("Summary large one", "Summary large two"):
+            create_strategy_opportunity(self._input(
+                account, site, self.sales, title=title,
+                amount="600000000000000000.00", originalAmount="600000000000000000.00", amountCny="600000000000000000.00",
+            ))
+
+        # Each amount fits DECIMAL(20,2); their sum does not, and is still returned exactly.
+        self.assertEqual(opportunity_stage_summary({"accountId": account["id"]}), [{
+            "stage": "qualified_opportunity", "count": 2, "unknownAmountCount": 0,
+            "totals": [{"currency": "CNY", "amount": "1200000000000000000.00"}],
+        }])
 
     def test_create_list_update_history_and_account_360(self):
         account, site = self._account_site(self.sales, "Core")
