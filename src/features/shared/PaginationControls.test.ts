@@ -24,5 +24,15 @@ describe('PaginationControls', () => {
     expect(wrapper.get('[aria-label="每页数量"]').findAll('option').map((item) => item.text())).toEqual(['10', '12', '25', '50'])
     await wrapper.get('[aria-label="每页数量"]').setValue('25')
     expect(wrapper.emitted('page-size-change')).toEqual([[25]])
+    // The size the list opened with is still offered once a larger one is taken.
+    await wrapper.setProps({ pageSize: 25 })
+    expect(wrapper.get('[aria-label="每页数量"]').findAll('option').map((item) => item.text())).toEqual(['10', '12', '25', '50'])
+  })
+
+  it('offers the size the list opened with when mounted at a larger one', () => {
+    // The holder of the list names that size: the pager may be mounted only once a view is longer than a page
+    // again, at the size taken in the meantime.
+    const wrapper = mount(PaginationControls, { props: { page: 1, pageSize: 25, total: 80, openingPageSize: 6 } })
+    expect(wrapper.get('[aria-label="每页数量"]').findAll('option').map((item) => item.text())).toEqual(['6', '10', '25', '50'])
   })
 })

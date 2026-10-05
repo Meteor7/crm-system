@@ -12,8 +12,7 @@ import DataNotice from '@/design-system/DataNotice.vue'
 import DemoRequestModal from '@/features/demo-requests/DemoRequestModal.vue'
 import DemoRequestWorkspaceNav, { type DemoRequestView } from '@/features/demo-requests/DemoRequestWorkspaceNav.vue'
 import DemoRequestWorkspace from '@/features/demo-requests/DemoRequestWorkspace.vue'
-import PaginationControls from '@/features/shared/PaginationControls.vue'
-import { readAllPages } from '@/features/shared/read-all-pages'
+import { readAllPages, readAllPagesWithFirst } from '@/features/shared/read-all-pages'
 import ContactModal from '@/features/contacts/ContactModal.vue'
 import { generateDemoRequestDocxArtifact } from '@/features/demo-requests/demo-request-docx'
 import { useI18n, useLocaleMessage, localeMessage, type LocaleMessage } from '@/i18n'
@@ -24,8 +23,6 @@ const route = useRoute()
 const router = useRouter()
 const { t, locale, message } = useI18n()
 const rows = ref<DemoRequestDto[]>([]), accounts = ref<AccountSummaryDto[]>([]), loading = ref(false), error = useLocaleMessage(), requestId = ref(''), denied = ref(false), meta = ref<RequestMetaState | null>(null)
-const total = ref(0), page = ref(1)
-const pageSize = ref(10)
 const actionError = useLocaleMessage(), actionRequestId = ref('')
 const processing = ref(''), modalMode = ref<'create'|'edit'|'engineer'|'manager'|''>(''), selected = ref<DemoRequestDto | null>(null)
 const activeView = ref<DemoRequestView>('overview')
@@ -57,18 +54,17 @@ async function load() {
   const current = ++sequence; loading.value = true; error.value = ''; denied.value = false; meta.value = null
   try {
     const contactId = typeof route.query.contactId === 'string' ? route.query.contactId : ''
+    // Everything still in progress, in one read: the workspace sorts it into its views and pages each of them.
     const [requests, accountRows, contactRows] = await Promise.all([
-      props.apiClient.listDemoRequests({ accountId: 'All', owner: 'All', status: 'All', contactId, page: page.value, pageSize: pageSize.value }),
+      readAllPagesWithFirst((requestPage, requestPageSize) => props.apiClient.listDemoRequests({ accountId: 'All', owner: 'All', status: 'All', inProgress: '1', contactId, page: requestPage, pageSize: requestPageSize })),
       readAllPages((referencePage, referencePageSize) => props.apiClient.listAccounts({ page: referencePage, pageSize: referencePageSize })),
       app.can('contact:view') ? readAllPages((referencePage, referencePageSize) => props.apiClient.listContacts({ page: referencePage, pageSize: referencePageSize })) : Promise.resolve(null),
     ])
     if (current !== sequence) return
-    rows.value = requests.data.items; total.value = requests.meta?.total ?? rows.value.length; accounts.value = accountRows; contacts.value = contactRows ?? []; meta.value = readRequestMeta(requests)
+    rows.value = requests.items; accounts.value = accountRows; contacts.value = contactRows ?? []; meta.value = readRequestMeta(requests.first)
   } catch (reason) { if (current !== sequence) return; const mapped = mapRequestError(reason); error.value = mapped.localizedMessage ?? mapped.message; requestId.value = mapped.requestId; denied.value = mapped.denied; if (mapped.denied) rows.value = [] }
   finally { if (current === sequence) loading.value = false }
 }
-function goPage(target: number) { page.value = target; void load() }
-function changePageSize(value: number) { pageSize.value = value; page.value = 1; void load() }
 function open(mode: 'create'|'edit'|'engineer'|'manager', request: DemoRequestDto | null = null) { modalMode.value = mode; selected.value = request }
 function openDetail(request: DemoRequestDto) {
   router.push({ name: 'demo-detail', params: { demoId: request.id }, query: { from: 'demo-requests' } })
@@ -103,7 +99,8 @@ async function submitModal(payload: CreateDemoRequestInput | DemoRequestCommand)
   clearActionError()
   try {
     if (modalMode.value === 'create') {
-      await props.apiClient.createDemoRequest(payload as CreateDemoRequestInput)
+      // The new request becomes the selected one, so the workspace shows the page it is on.
+      selectedRequestId.value = (await props.apiClient.createDemoRequest(payload as CreateDemoRequestInput)).data.id
     } else if (modalMode.value === 'edit') {
       await props.apiClient.updateDemoRequest(selected.value!.id, payload as CreateDemoRequestInput, selected.value!.modified)
     } else {
@@ -174,7 +171,7 @@ onBeforeUnmount(clearPreparedDownload)
 
 <template>
   <div>
-    <PageHeader :eyebrow="currentViewCopy.eyebrow" :title="currentViewCopy.title" :description="currentViewCopy.description"><button v-if="canCreate" class="primary-button" type="button" @click="open('create')"><Plus :size="15" />{{ t('demoRequests.new') }}</button></PageHeader>
+    <PageHeader :eyebrow="currentViewCopy.eyebrow" :title="currentViewCopy.title" :description="currentViewCopy.description"><button v-if="canCreate" class="primary-button" type="button" data-testid="new-demo-request" @click="open('create')"><Plus :size="15" />{{ t('demoRequests.new') }}</button></PageHeader>
     <DataNotice v-if="meta?.stale" :message="meta.localizedMessage ?? meta.message" :request-id="meta.requestId" @refresh="load" />
     <div v-if="actionError" class="api-error" data-api-error role="alert"><span>{{ actionError }}</span><small v-if="actionRequestId">Request ID · {{ actionRequestId }}</small></div>
     <DemoRequestWorkspaceNav v-if="!denied" v-model="activeView" />
@@ -207,7 +204,6 @@ onBeforeUnmount(clearPreparedDownload)
       @manager="open('manager', $event)"
       @download="downloadRequest"
     />
-    <PaginationControls v-if="!denied && !error && total > pageSize" :page="page" :page-size="pageSize" :total="total" @change="goPage" @page-size-change="changePageSize" />
     <DemoRequestModal v-if="modalMode" :mode="modalMode" :request="selected" :accounts="accounts" :contacts="contacts" :selected-contact-id="modalContactId" :current-sales-contact="app.bootstrap?.user.id || ''" :busy="Boolean(processing)" :api-client="props.apiClient" @close="modalMode = ''" @create-contact="openContact" @submit="submitModal" />
     <ContactModal v-if="contactModal" :accounts="accounts" :sites="[]" :contacts="contacts" :fixed-account-id="contactAccountId" @close="contactModal = false" @submit="saveContact" />
   </div>

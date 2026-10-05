@@ -2,11 +2,15 @@
 import { computed } from 'vue'
 import { useI18n } from '@/i18n'
 
-const props = defineProps<{ page: number; pageSize: number; total: number }>()
+// `openingPageSize` is the size the list opened with, from the holder of the list: a pager mounted only while
+// the list is longer than a page may first see a larger size, taken before a shorter view unmounted it.
+const props = withDefaults(defineProps<{ page: number; pageSize: number; total: number; openingPageSize?: number }>(), { openingPageSize: 0 })
 const emit = defineEmits<{ change: [page: number]; 'page-size-change': [pageSize: number] }>()
 const { t, locale } = useI18n()
 const totalPages = computed(() => Math.max(1, Math.ceil(props.total / props.pageSize)))
-const pageSizeOptions = computed(() => [...new Set([props.pageSize, 10, 25, 50])].sort((left, right) => left - right))
+// The size the list opened with stays on offer, so a larger one can be taken back.
+const openingPageSize = props.openingPageSize || props.pageSize
+const pageSizeOptions = computed(() => [...new Set([openingPageSize, props.pageSize, 10, 25, 50])].sort((left, right) => left - right))
 function move(target: number) {
   if (target >= 1 && target <= totalPages.value && target !== props.page) emit('change', target)
 }

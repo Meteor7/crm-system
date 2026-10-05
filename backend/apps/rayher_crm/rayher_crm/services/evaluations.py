@@ -210,6 +210,12 @@ def list_evaluations(query: dict[str, Any]) -> tuple[list[dict[str, Any]], int, 
         if value and value != "All":
             where.append(f"`{column}` = %s")
             values.append(value)
+    if str(query.get("inProgress") or "").strip().lower() in {"1", "true"}:
+        # The Demo Test workspace works on Demos that are not decided yet. Asking for those here keeps
+        # the pages and the total about them, where a page filtered afterwards came up short.
+        terminal = sorted(TERMINAL_STATUSES)
+        where.append(f"`status` NOT IN ({', '.join(['%s'] * len(terminal))})")
+        values.extend(terminal)
     search = str(query.get("search") or "").strip()
     if search:
         pattern = f"%{search}%"

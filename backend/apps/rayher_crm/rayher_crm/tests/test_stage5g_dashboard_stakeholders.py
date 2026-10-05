@@ -105,6 +105,22 @@ class TestStage5GDashboardStakeholders(FrappeTestCase):
         self.assertEqual(result["process"]["visitsByStatus"], [{"label": "Planned", "count": 1}])
         self.assertEqual(result["bookingByMonth"][0]["label"], booking_date[:7])
         self.assertNotIn("Hidden Open", {item["title"] for item in result["weeklyActions"]})
+        # The actions that are coming up are all listed, however many are overdue: with six overdue ones,
+        # the first five of all open actions would hold nothing else.
+        today = frappe.utils.getdate(result["asOf"][:10])
+        for index in range(5):
+            create_opportunity_action(opened["id"], {
+                "title": f"Overdue action {index}", "owner": self.sales, "due": "2026-08-02", "status": "Open",
+            })
+        upcoming = [(f"Due in {days}", frappe.utils.add_days(today, days).isoformat()) for days in (0, 3, 16, 40)]
+        for title, due in upcoming:
+            create_opportunity_action(opened["id"], {"title": title, "owner": self.sales, "due": due, "status": "Open"})
+        create_opportunity_action(opened["id"], {
+            "title": "Done already", "owner": self.sales, "due": frappe.utils.add_days(today, 2).isoformat(), "status": "Done",
+        })
+        result = get_dashboard({"range": "month", "segment": "Frontend"})
+        self.assertEqual(result["kpis"]["overdueActions"], 6)
+        self.assertEqual([(item["title"], item["due"]) for item in result["weeklyActions"]], upcoming)
         with self.assertRaises(CrmApiException):
             get_dashboard({"range": "decade"})
 

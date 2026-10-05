@@ -28,6 +28,8 @@ from rayher_crm.services.opportunity_stages import DEMO_REQUEST_STAGES
 
 
 EDITABLE_STATUSES = {"Draft", "Engineer Returned", "Manager Rejected"}
+# A Demo Request is finished once it has become a Demo or was cancelled; before that it is in progress.
+FINISHED_STATUSES = ("Converted", "Cancelled")
 FORM_REQUIRED_FIELDS = (
     "industry", "salesContact", "demoOwner", "sizeShape", "material", "specificRequest",
     "detectMeasure", "expectedResults", "otherTools", "primaryTool", "timing",
@@ -304,6 +306,11 @@ def list_demo_requests(query: dict[str, Any]) -> tuple[list[dict[str, Any]], int
         if value and value != "All":
             where.append(f"`{column}` = %s")
             values.append(value)
+    if str(query.get("inProgress") or "").strip().lower() in {"1", "true"}:
+        # The Demo Request workspace works on what is still to be done. Asking for that here keeps the
+        # pages and the total about those records, where a page filtered afterwards came up short.
+        where.append(f"`status` NOT IN ({', '.join(['%s'] * len(FINISHED_STATUSES))})")
+        values.extend(FINISHED_STATUSES)
     search = str(query.get("search") or "").strip()
     if search:
         pattern = f"%{search}%"

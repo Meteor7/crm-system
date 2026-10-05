@@ -300,6 +300,13 @@ class TestEvaluationApi(FrappeTestCase):
             "accountId": self.account, "page": 1, "pageSize": 10,
         })
         self.assertEqual((len(items), total, page, page_size), (1, 1, 1, 10))
+        # Asked for what is in progress, the list leaves out a Demo that was accepted or rejected.
+        for status, in_progress in (("Accepted", 0), ("Rejected", 0), ("Testing", 1), ("Customer Review", 1), ("Requested", 1)):
+            frappe.db.set_value("CRM Evaluation", evaluation_id, "status", status, update_modified=False)
+            for flag in ("1", "true"):
+                self.assertEqual(list_evaluations({"accountId": self.account, "inProgress": flag})[1], in_progress)
+            self.assertEqual(list_evaluations({"accountId": self.account, "inProgress": "0"})[1], 1)
+            self.assertEqual(list_evaluations({"accountId": self.account})[1], 1)
         current = get_evaluation(evaluation_id)
         self.assertEqual(current["status"], "Requested")
         before_modified = frappe.db.get_value("CRM Evaluation", evaluation_id, "modified")

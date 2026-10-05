@@ -168,9 +168,13 @@ def get_dashboard(query: dict[str, Any]) -> dict[str, Any]:
         {"label": label, "currency": currency, "amount": _money(value["amount"]), "count": int(value["count"])}
         for (label, currency), value in sorted(booking_months.items())
     ]
+    # What is coming up: the open actions due today or later, soonest first. The reminders that show
+    # them leave out the past, so the first five of all open actions were no use once five were overdue;
+    # those are counted in overdueActions.
     weekly_actions = sorted(
-        (item for item in actions if item["status"] == "Open"), key=lambda item: (item["due"], item["id"]),
-    )[:5]
+        (item for item in actions if item["status"] == "Open" and item["due"] >= today),
+        key=lambda item: (item["due"], item["id"]),
+    )
     return {
         "asOf": as_of,
         "kpis": {

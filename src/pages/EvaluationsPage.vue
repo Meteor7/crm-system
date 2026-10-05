@@ -12,7 +12,7 @@ import DataState from '@/design-system/DataState.vue'
 import DataNotice from '@/design-system/DataNotice.vue'
 import EvaluationWorkspaceNav, { type EvaluationView } from '@/features/evaluations/EvaluationWorkspaceNav.vue'
 import EvaluationWorkspace from '@/features/evaluations/EvaluationWorkspace.vue'
-import PaginationControls from '@/features/shared/PaginationControls.vue'
+import { readAllPagesWithFirst } from '@/features/shared/read-all-pages'
 import TestDeadlineModal from '@/features/evaluations/TestDeadlineModal.vue'
 import TestRunModal from '@/features/evaluations/TestRunModal.vue'
 import TestRunActionModal from '@/features/evaluations/TestRunActionModal.vue'
@@ -32,8 +32,6 @@ const { t, locale } = useI18n()
 const route = useRoute()
 const router = useRouter()
 const rows = ref<EvaluationDto[]>([])
-const total = ref(0), page = ref(1)
-const pageSize = ref(6)
 const loading = ref(false)
 const denied = ref(false)
 const error = useLocaleMessage()
@@ -96,14 +94,14 @@ async function load() {
   meta.value = null
   try {
     const focusId = focusedEvaluationId.value
+    // Everything still in progress, in one read: the workspace sorts it into its views and pages each of them.
     const [result, focusResult] = await Promise.all([
-      props.apiClient.listEvaluations({ page: page.value, pageSize: pageSize.value }),
+      readAllPagesWithFirst((evaluationPage, evaluationPageSize) => props.apiClient.listEvaluations({ inProgress: '1', page: evaluationPage, pageSize: evaluationPageSize })),
       focusId ? props.apiClient.getEvaluation(focusId) : Promise.resolve(null),
     ])
     if (current !== sequence) return
-    rows.value = result.data.items
-    total.value = result.meta?.total ?? rows.value.length
-    meta.value = readRequestMeta(result)
+    rows.value = result.items
+    meta.value = readRequestMeta(result.first)
     if (focusResult && !rows.value.some((item) => item.id === focusResult.data.id)) rows.value.push(focusResult.data)
     const focus = rows.value.find((item) => item.id === focusId)
     if (focus) {
@@ -123,8 +121,6 @@ async function load() {
     if (current === sequence) loading.value = false
   }
 }
-function goPage(target: number) { page.value = target; void load() }
-function changePageSize(value: number) { pageSize.value = value; page.value = 1; void load() }
 
 watch(focusedEvaluationId, () => { void load() })
 
@@ -501,7 +497,6 @@ onMounted(async () => {
       @terminate="openTerminate"
       @customer-change="clearWarnings"
     />
-    <PaginationControls v-if="!denied && !error && total > pageSize" :page="page" :page-size="pageSize" :total="total" @change="goPage" @page-size-change="changePageSize" />
 
     <TestDeadlineModal
       v-if="deadlineTarget"

@@ -5,6 +5,8 @@ import { computed, ref } from 'vue'
 import { Ban, CheckCircle2, Download, ExternalLink, Pencil } from '@lucide/vue'
 import type { DemoRequestDto, Tone } from '@/types/crm'
 import StatusBadge from '@/design-system/StatusBadge.vue'
+import PaginationControls from '@/features/shared/PaginationControls.vue'
+import { usePagedSelection } from '@/features/shared/paged-selection'
 import type { DemoRequestView } from './DemoRequestWorkspaceNav.vue'
 import { useI18n } from '@/i18n'
 
@@ -44,7 +46,15 @@ const stageRows = computed(() => props.view === 'sales'
 const scopedRows = computed(() => {
   return stageRows.value.filter((item) => sales.value === 'All' || item.salesOwner === sales.value)
 })
-const selected = computed(() => scopedRows.value.find((item) => item.id === props.selectedId) ?? scopedRows.value[0] ?? null)
+// `requests` is everything in progress. A view is paged here, after it is filtered, so every page is full and
+// the count is the view's own.
+const { page, pageSize, openingPageSize, pagedRows, selected, paged, turnTo } = usePagedSelection({
+  rows: scopedRows,
+  selectedId: () => props.selectedId,
+  narrowedBy: () => `${props.view}\n${sales.value}`,
+  pageSize: 10,
+  select: (id) => emit('select', id),
+})
 
 const statusLabel: Record<DemoRequestDto['status'], string> = {
   Draft: '草稿',
@@ -98,7 +108,7 @@ const editable = computed(() => Boolean(selected.value && ['Draft', 'Engineer Re
           </thead>
           <tbody>
             <tr
-              v-for="item in scopedRows"
+              v-for="item in pagedRows"
               :key="item.id"
               :class="{ selected: selected?.id === item.id }"
               :data-demo-request="item.id"
@@ -125,6 +135,7 @@ const editable = computed(() => Boolean(selected.value && ['Draft', 'Engineer Re
           </tbody>
         </table>
         <p v-if="!scopedRows.length" class="workspace-empty">{{ locale === 'en-US' ? 'No Demo Requests in this view' : '当前分类暂无 Demo Request' }}</p>
+        <PaginationControls v-if="paged" :page="page" :page-size="pageSize" :opening-page-size="openingPageSize" :total="scopedRows.length" @change="turnTo" @page-size-change="pageSize = $event" />
       </div>
     </div>
 

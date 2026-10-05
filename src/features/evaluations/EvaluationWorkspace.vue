@@ -8,6 +8,8 @@ import type { TestRunAction } from './test-run-actions'
 import { canRetestEvaluation, canTerminateEvaluation, evaluationGroup, evaluationPreparationStatus, evaluationStatusOptions, hasCompletedTestRun, isEvaluationPreparationComplete, isTerminatedDemo } from '@/domain/evaluations'
 import { formatDisplayDate } from '@/domain/time'
 import StatusBadge from '@/design-system/StatusBadge.vue'
+import PaginationControls from '@/features/shared/PaginationControls.vue'
+import { usePagedSelection } from '@/features/shared/paged-selection'
 import type { EvaluationView } from './EvaluationWorkspaceNav.vue'
 import { useI18n } from '@/i18n'
 
@@ -65,7 +67,15 @@ const stageRows = computed(() => {
 const scopedRows = computed(() => {
   return stageRows.value.filter((item) => accountId.value === 'All' || item.accountId === accountId.value)
 })
-const selected = computed(() => scopedRows.value.find((item) => item.id === props.selectedId) ?? scopedRows.value[0] ?? null)
+// `evaluations` is everything in progress. A view is paged here, after it is filtered, so every page is full and
+// the count is the view's own.
+const { page, pageSize, openingPageSize, pagedRows, selected, paged, turnTo } = usePagedSelection({
+  rows: scopedRows,
+  selectedId: () => props.selectedId,
+  narrowedBy: () => `${props.view}\n${accountId.value}`,
+  pageSize: 6,
+  select: (id) => emit('select', id),
+})
 const nextStatus = computed(() => selected.value
   ? evaluationStatusOptions(selected.value.status).find((status) => status !== selected.value!.status && status !== 'Rejected')
   : undefined)
@@ -159,7 +169,7 @@ watch(accountId, () => emit('customer-change'))
           </thead>
           <tbody>
             <tr
-              v-for="item in scopedRows"
+              v-for="item in pagedRows"
               :key="item.id"
               :class="{ selected: selected?.id === item.id }"
               :data-evaluation="item.id"
@@ -185,6 +195,7 @@ watch(accountId, () => emit('customer-change'))
           </tbody>
         </table>
         <p v-if="!scopedRows.length" class="empty-copy">{{ locale === 'en-US' ? 'No Demo Tests in this view' : '当前分类暂无 Demo Test' }}</p>
+        <PaginationControls v-if="paged" :page="page" :page-size="pageSize" :opening-page-size="openingPageSize" :total="scopedRows.length" @change="turnTo" @page-size-change="pageSize = $event" />
       </div>
       <TestRunList v-if="selected" :evaluation="selected" :can-write="canWrite" :busy="Boolean(processing)" @action="(run, action) => emit('manage-run', selected!, run, action)" />
     </div>

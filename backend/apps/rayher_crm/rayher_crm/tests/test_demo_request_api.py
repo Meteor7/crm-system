@@ -397,6 +397,16 @@ class TestDemoRequestApi(FrappeTestCase):
             "accountId": self.account["id"], "page": 1, "pageSize": 1,
         })
         self.assertEqual((len(items), total, page, page_size), (1, 2, 1, 1))
+        # Asked for what is in progress, the list leaves out a request that became a Demo or was cancelled,
+        # and counts and pages only the rest.
+        for status, expected in (("Converted", [first["id"]]), ("Cancelled", [first["id"]]), ("Engineer Review", [second["id"], first["id"]])):
+            frappe.db.set_value("CRM Demo Request", second["id"], "status", status, update_modified=False)
+            for flag in ("1", "true"):
+                items, total, _page, _page_size = list_demo_requests({"accountId": self.account["id"], "inProgress": flag, "page": 1, "pageSize": 1})
+                self.assertEqual(([item["id"] for item in items], total), (expected[:1], len(expected)))
+            self.assertEqual(list_demo_requests({"accountId": self.account["id"], "inProgress": "0"})[1], 2)
+            self.assertEqual(list_demo_requests({"accountId": self.account["id"]})[1], 2)
+        frappe.db.set_value("CRM Demo Request", second["id"], "status", "Draft", update_modified=False)
         self.assertEqual(get_demo_request(first["id"])["id"], first["id"])
         self.assertEqual(frappe.db.get_value("CRM Demo Request", first["id"], "modified"), before)
 

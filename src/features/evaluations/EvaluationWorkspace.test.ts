@@ -6,6 +6,94 @@ import type { EvaluationDto } from '@/types/crm'
 import EvaluationWorkspace from './EvaluationWorkspace.vue'
 
 describe('EvaluationWorkspace', () => {
+  it('pages each view on its own, counts the whole view and keeps the selected record on show', async () => {
+    // Everything in progress: 8 being tested for one Account, 6 being prepared for another.
+    const base = evaluations.find((item) => item.id === 'EVAL-103')!
+    const make = (index: number, status: EvaluationDto['status'], accountId: string): EvaluationDto =>
+      ({ ...base, id: `EVAL-P${String(index).padStart(2, '0')}`, status, accountId, accountName: `Account ${accountId}` })
+    const rows = [
+      ...Array.from({ length: 8 }, (_, index) => make(index, 'Testing', 'A')),
+      ...Array.from({ length: 6 }, (_, index) => make(10 + index, 'Requested', 'B')),
+    ]
+    // The page above holds the selected record and takes the one the workspace hands up, as EvaluationsPage does.
+    const wrapper = mount(EvaluationWorkspace, {
+      props: { view: 'overview', evaluations: rows, selectedId: rows[0].id, canWrite: true, onSelect: (id: string) => { void wrapper.setProps({ selectedId: id }) } },
+    })
+    const shown = () => wrapper.findAll('[data-evaluation]').map((row) => row.attributes('data-evaluation'))
+    const onShow = () => wrapper.get('tr.selected').attributes('data-evaluation')
+    const held = () => wrapper.props('selectedId')
+    const count = () => wrapper.get('.row-count').text()
+    const pager = () => wrapper.find('.pagination-controls')
+    const next = async () => { await pager().get('[data-page-next]').trigger('click'); await flushPromises() }
+    const ids = (list: EvaluationDto[]) => list.map((item) => item.id)
+
+    expect(shown()).toEqual(ids(rows.slice(0, 6)))
+    expect(count()).toMatch(/· 14$/)
+    expect(pager().get('small').text()).toContain('14')
+    // Turning the page puts its first record on show, and that record is handed up as the selected one.
+    await next()
+    expect(shown()).toEqual(ids(rows.slice(6, 12)))
+    expect([onShow(), held()]).toEqual([rows[6].id, rows[6].id])
+    await next()
+    expect(shown()).toEqual(ids(rows.slice(12)))
+    expect([onShow(), held()]).toEqual([rows[12].id, rows[12].id])
+
+    // A view that does not hold the selected record starts on its first page, is full, and counts its own records.
+    await wrapper.setProps({ view: 'execution' })
+    expect(shown()).toEqual(ids(rows.slice(0, 6)))
+    expect(count()).toMatch(/· 8$/)
+    await next()
+    expect(shown()).toEqual(ids(rows.slice(6, 8)))
+    await wrapper.setProps({ view: 'preparation' })
+    expect(shown()).toEqual(ids(rows.slice(8)))
+    expect(count()).toMatch(/· 6$/)
+    expect(pager().exists()).toBe(false)
+    // A view that holds the selected record shows the page it is on.
+    await wrapper.setProps({ view: 'overview' })
+    expect(shown()).toEqual(ids(rows.slice(6, 12)))
+    expect(onShow()).toBe(rows[6].id)
+
+    // The Account filter lists every Account in progress, not only those of the page shown.
+    const account = wrapper.get<HTMLSelectElement>('select[aria-label="Evaluation 客户"]')
+    expect(account.findAll('option').map((option) => option.text())).toEqual(['全部客户', 'Account A', 'Account B'])
+    await account.setValue('B')
+    expect(shown()).toEqual(ids(rows.slice(8)))
+    expect(count()).toMatch(/· 6$/)
+    await account.setValue('All')
+    expect(shown()).toEqual(ids(rows.slice(6, 12)))
+
+    // The size the list opened with stays on offer, also after a view too short for a pager, which unmounts it.
+    const perPage = () => pager().get<HTMLSelectElement>('select[aria-label="每页数量"]')
+    await perPage().setValue('25')
+    expect(shown()).toEqual(ids(rows))
+    await wrapper.setProps({ view: 'preparation' })
+    expect(pager().exists()).toBe(false)
+    await wrapper.setProps({ view: 'overview' })
+    expect(perPage().findAll('option').map((option) => option.text())).toEqual(['6', '10', '25', '50'])
+    await perPage().setValue('6')
+    expect(shown()).toEqual(ids(rows.slice(6, 12)))
+
+    // A record selected from outside is brought into view on its page.
+    await wrapper.setProps({ selectedId: rows[13].id })
+    expect(shown()).toEqual(ids(rows.slice(12)))
+    expect(onShow()).toBe(rows[13].id)
+
+    // Setting its DDL saves it, and the list read again has it at the top: it stays the selected record, on
+    // the first page now, where the page used to stay on the last one and select what was left there.
+    const first = [rows[13], ...rows.slice(0, 13)]
+    await wrapper.setProps({ evaluations: first.map((item) => ({ ...item })) }); await flushPromises()
+    expect(shown()).toEqual(ids(first.slice(0, 6)))
+    expect(onShow()).toBe(rows[13].id)
+    // The same for a record the user turned to without choosing it: a report uploaded for it moves it to the
+    // top, and it is still the one on show there, not the one chosen earlier.
+    await next()
+    expect(onShow()).toBe(first[6].id)
+    const second = [first[6], ...first.filter((item) => item !== first[6])]
+    await wrapper.setProps({ evaluations: second.map((item) => ({ ...item })) }); await flushPromises()
+    expect(shown()).toEqual(ids(second.slice(0, 6)))
+    expect([onShow(), held()]).toEqual([first[6].id, first[6].id])
+  })
+
   it('emits terminate with the selected evaluation when clicked', async () => {
     const testingEvaluation = evaluations.find((item) => item.id === 'EVAL-103')!
     const wrapper = mount(EvaluationWorkspace, {

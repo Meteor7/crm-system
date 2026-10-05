@@ -80,6 +80,8 @@ export interface ListQuery {
   source?: string
   /** '1' lists Confirmed and Completed Bookings whose actual PO date is missing. */
   actualPoDateMissing?: string
+  /** '1' lists only what is still in progress: Demo Requests not Converted or Cancelled, Demo Tests not Accepted or Rejected. */
+  inProgress?: string
   page?: number
   pageSize?: number
 }
