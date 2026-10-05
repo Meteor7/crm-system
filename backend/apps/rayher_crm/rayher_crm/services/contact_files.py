@@ -11,7 +11,7 @@ from frappe.utils import now_datetime
 from rayher_crm.services.private_file_lifecycle import save_private_file as save_file
 
 from rayher_crm.api.v1.errors import CrmApiException
-from rayher_crm.permissions.roles import assert_capability
+from rayher_crm.permissions.roles import assert_capability, resolve_crm_role
 from rayher_crm.permissions.scope import conditions_for_doctype
 from rayher_crm.services.contacts import _contact_account, _require_contact
 from rayher_crm.services.accounts import _require_account
@@ -69,7 +69,7 @@ def upload_contact_files(contact_id: str, uploads: Sequence[Mapping[str, Any]], 
     if not account:
         raise CrmApiException("CONTACT_ACCOUNT_MISMATCH", "Contact has no canonical account.")
     account_doc = _require_account(account)
-    if frappe.session.user != account_doc.custom_crm_owner and not frappe.has_role("CRM Manager"):
+    if resolve_crm_role() != "Manager" and account_doc.custom_crm_owner != frappe.session.user:
         raise CrmApiException("SCOPE_DENIED", "Only the Account owner or a Manager may upload files.")
     if not uploads or len(uploads) > MAX_FILES_PER_REQUEST:
         raise CrmApiException("VALIDATION_ERROR", "Upload must contain between 1 and 10 files.")

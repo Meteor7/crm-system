@@ -11,7 +11,7 @@ from pypdf import PdfWriter
 
 from rayher_crm.api.v1.contact_files import _read_uploads
 from rayher_crm.api.v1.errors import CrmApiException
-from rayher_crm.services.accounts import create_account
+from rayher_crm.services.accounts import create_account, update_account
 from rayher_crm.services.contact_files import (
     MAX_FILE_BYTES,
     MAX_FILES_PER_REQUEST,
@@ -65,6 +65,8 @@ class TestContactFileApi(FrappeTestCase):
         self.original_user = frappe.session.user
         frappe.set_user("Administrator")
         self.sales = self._user("crm-contact-file-sales@example.invalid", "CRM Sales")
+        self.other_sales = self._user("crm-contact-file-other-sales@example.invalid", "CRM Sales")
+        self.manager = self._user("crm-contact-file-manager@example.invalid", "CRM Manager")
         self.unassigned_engineer = self._user("crm-contact-file-engineer@example.invalid", "CRM Engineer")
         frappe.set_user(self.sales)
         self.account = create_account(self._account_input("Contact File Account"))
@@ -524,6 +526,26 @@ class TestContactFileApi(FrappeTestCase):
             finally:
                 frappe.db.delete("File", {"name": alias.name})
         frappe.db.delete("DocShare", {"name": share.name})
+
+    def test_manager_uploads_to_a_contact_of_an_account_owned_by_sales(self):
+        frappe.set_user(self.manager)
+        uploaded = upload_contact_files(self.contact["id"], [pdf()], scanner=Scanner())
+
+        self.assertEqual(len(uploaded), 1)
+        self.assertEqual(frappe.db.get_value("CRM Contact File", uploaded[0]["id"], "uploaded_by"), self.manager)
+
+    def test_sales_who_does_not_own_the_account_cannot_upload(self):
+        public_input = self._account_input("Contact File Account")
+        public_input["visibility"] = "Public"
+        update_account(self.account["id"], public_input, self.account["modified"])
+
+        frappe.set_user(self.other_sales)
+        with self.assertRaises(CrmApiException) as raised:
+            upload_contact_files(self.contact["id"], [pdf()], scanner=Scanner())
+
+        self.assertEqual(raised.exception.code, "SCOPE_DENIED")
+        self.assertEqual(raised.exception.public_message, "Only the Account owner or a Manager may upload files.")
+        self.assertEqual(frappe.db.count("CRM Contact File", {"contact": self.contact["id"]}), 0)
 
     def test_spoofed_oversized_too_many_and_malicious_files_are_rejected(self):
         with self.assertRaises(CrmApiException) as spoofed:
