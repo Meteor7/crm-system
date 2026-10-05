@@ -60,6 +60,14 @@ const FIXED_MESSAGES: Partial<Record<string, Record<string, CopyPair>>> = {
     "The CNY amount changes only through a Manager's correction.": ["The amount in CNY changes only through a Manager's correction.", '人民币金额只能由经理更正。'],
     'region must be an English region name.': ['Enter a custom region in English, for example Northeast China.', '自定义区域请用英文填写，例如 Northeast China。'],
     'subRegion is not a known region.': ['Choose one of the account regions.', '请选择已有的客户区域。'],
+    // Values the server's own checks refuse on save (api/v1/errors.py input_error) and files it cannot store.
+    'The phone number is not valid: use at most 20 characters from digits, spaces and + - ( ) , . # *.': ['The phone number is not valid. Use at most 20 characters: digits, spaces and + - ( ) , . # *. Write an extension as 021-62881234-801.', '电话号码格式不被接受：最多 20 个字符，只能用数字、空格和 + - ( ) , . # *。分机请写成 021-62881234-801。'],
+    'The email address is not valid.': ['The email address is not valid.', '邮箱地址格式不正确。'],
+    'The name cannot contain < or >.': ['The name cannot contain < or >.', '名称不能包含 < 或 >。'],
+    'A value is too long.': ['One of the values is too long. Shorten it and try again.', '有一项内容过长，请缩短后重试。'],
+    'The PDF file could not be read.': ['The PDF file could not be read. It may be damaged: export it again and retry.', 'PDF 文件无法读取，可能已损坏，请重新导出后再上传。'],
+    'The PDF contains scripts and cannot be uploaded.': ['The PDF contains scripts and cannot be uploaded.', 'PDF 中含有脚本，不能上传。'],
+    "A Contact cannot be added to this Account: the Account's name is too long.": ["A Contact cannot be added to this Account: the Account's name is too long.", '无法在这个客户下新建联系人：客户名称过长。'],
     'Confirmed order currency is fixed': ['The currency of a confirmed order is fixed.', '已确认订单的币种不可修改。'],
     'Opportunity Booking requires a source Opportunity.': ['An Opportunity Booking requires a source Opportunity.', '商机来源的 Booking 必须关联来源商机。'],
   },
@@ -92,6 +100,23 @@ const UNAVAILABLE_ACTIONS: Record<string, CopyPair> = {
   'Marking the Opportunity lost': ['Marking the Opportunity lost', '标记丢单'],
 }
 
+// "<label> is too long: at most <n> characters." names the field by the label of its column. The fields
+// users reach most are given the names their forms use; any other keeps its label.
+const TOO_LONG_FIELDS: Record<string, CopyPair> = {
+  'Customer Name': ['The customer name', '客户全称'],
+  'CRM Short Name': ['The short name', '客户简称'],
+  'CRM City': ['The city', '城市'],
+  'CRM Region': ['The region', '区域'],
+  'First Name': ['The name', '姓名'],
+  Designation: ['The title', '职位'],
+  Department: ['The department', '部门'],
+  'Email Address': ['The email address', '邮箱'],
+  'Address Title': ['The site name', '厂区名称'],
+  'City/Town': ['The city', '城市'],
+  'Requested Equipment': ['The primary tool', '主要设备'],
+  'Sample Type': ['The material (substrate)', '材料（基底）'],
+}
+
 const stageLabels = (stage: string) => [opportunityStageLabel(stage, 'en-US'), opportunityStageLabel(stage, 'zh-CN')] as const
 
 export function generatedErrorMessage(code: string, message: string) {
@@ -108,6 +133,20 @@ export function generatedErrorMessage(code: string, message: string) {
     if (reopen && isOpportunityStage(reopen[1])) {
       const [english, chinese] = stageLabels(reopen[1])
       return localeMessage(`A lost Opportunity can only reopen at ${english} or an earlier stage.`, `丢单商机只能重新打开到${chinese}或更早的阶段。`)
+    }
+  }
+  if (code === 'VALIDATION_ERROR') {
+    const contactName = /^name is too long: at most (\d+) characters for a Contact of this Account\.$/.exec(message)
+    if (contactName) {
+      return localeMessage(
+        `The name is too long: a Contact of this Account can have at most ${contactName[1]} characters.`,
+        `姓名过长：这个客户下的联系人姓名最多 ${contactName[1]} 个字符。`,
+      )
+    }
+    const tooLong = /^(.+) is too long: at most (\d+) characters\.$/.exec(message)
+    if (tooLong) {
+      const [english, chinese] = TOO_LONG_FIELDS[tooLong[1]] ?? [`"${tooLong[1]}"`, `“${tooLong[1]}”`]
+      return localeMessage(`${english} is too long: at most ${tooLong[2]} characters.`, `${chinese}过长：最多 ${tooLong[2]} 个字符。`)
     }
   }
   if (code === 'CONFLICT') {

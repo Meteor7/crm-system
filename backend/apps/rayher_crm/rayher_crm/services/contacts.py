@@ -6,6 +6,7 @@ from collections.abc import Callable
 from typing import Any
 
 import frappe
+from frappe.model.naming import append_number_if_name_exists
 
 from rayher_crm.api.v1.errors import CrmApiException
 from rayher_crm.permissions.roles import assert_capability, capabilities_for_user, resolve_crm_role
@@ -121,11 +122,42 @@ def _validate_reporting_line(contact_id: str | None, account_id: str, parent_id:
         current = frappe.get_doc("Contact", next_name) if next_name else None
 
 
+DOCUMENT_NAME_LENGTH = 140
+
+
+def _assert_new_contact_name_fits(name: str, account_id: str) -> None:
+    """Refuse a name whose Contact Frappe could not name.
+
+    Frappe names a new Contact "<name>-<Account>" and appends a number when that name is taken, and
+    a document name holds 140 characters. The column of the name alone holds 140 too, so a name
+    that fits its column can still be one the database refuses. The limit named here is what fits
+    next to this Account's name, with the number if this name needs one.
+    """
+
+    document_name = append_number_if_name_exists("Contact", f"{name}-{account_id.strip()}")
+    longest = len(name) - (len(document_name) - DOCUMENT_NAME_LENGTH)
+    if longest >= len(name):
+        return
+    if longest < 1:
+        raise CrmApiException(
+            "VALIDATION_ERROR",
+            "A Contact cannot be added to this Account: the Account's name is too long.",
+            field_errors={"accountId": "Too long"},
+        )
+    raise CrmApiException(
+        "VALIDATION_ERROR",
+        f"name is too long: at most {longest} characters for a Contact of this Account.",
+        field_errors={"name": "Too long"},
+    )
+
+
 def _validated_contact(payload: dict[str, Any], contact_id: str | None = None) -> dict[str, Any]:
     account_id = required_text(payload, "accountId")
     account = _require_account(account_id)
     if resolve_crm_role() == "Sales" and account.custom_crm_owner != frappe.session.user:
         raise CrmApiException("SCOPE_DENIED", "Only the Account owner or a Manager may edit contacts.")
+    if contact_id is None and str(payload.get("name") or "").strip():
+        _assert_new_contact_name_fits(str(payload["name"]).strip(), account_id)
     site_id = payload.get("siteId") or None
     if site_id:
         from rayher_crm.services.sites import _require_site

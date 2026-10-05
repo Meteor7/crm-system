@@ -197,7 +197,9 @@ def _validate_input(payload: dict[str, Any]) -> dict[str, Any]:
         "engineer_owner": engineer_owner,
         "form_data": form,
         "customer_expected_date": customer_expected_date,
-        "title": f"{account.customer_name if account else 'Self Test'} - {form['primaryTool']} Demo",
+        # A label the service puts together: cut to its column, so that a long tool name is refused
+        # as the field the user typed (requested_equipment) and not as this one.
+        "title": f"{account.customer_name if account else 'Self Test'} - {form['primaryTool']} Demo"[:140],
         "objective": form["detectMeasure"],
         "requested_equipment": form["primaryTool"],
         "sample_type": form["material"],

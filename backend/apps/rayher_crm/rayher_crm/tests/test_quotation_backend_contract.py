@@ -74,8 +74,9 @@ class TestQuotationBackendContract(unittest.TestCase):
 
     def test_unexpected_api_errors_roll_back_partial_writes(self):
         source = (ROOT / "api" / "v1" / "errors.py").read_text(encoding="utf-8")
-        generic_handler = source.split("        except Exception:", 1)[1]
-        self.assertIn("frappe.db.rollback()", generic_handler)
+        generic_handler = source.split("        except Exception as failure:", 1)[1]
+        # The rollback comes first: before the failure is looked at, logged or answered.
+        self.assertTrue(generic_handler.lstrip().startswith("frappe.db.rollback()"))
 
     def test_new_formal_version_supersedes_every_previous_formal_outcome(self):
         source = (ROOT / "services" / "quotations.py").read_text(encoding="utf-8")

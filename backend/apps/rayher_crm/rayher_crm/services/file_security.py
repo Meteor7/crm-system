@@ -164,6 +164,28 @@ def detect_mime(content: bytes, file_name: str | None = None) -> str | None:
     return None
 
 
+PDF_UNREADABLE_MESSAGE = "The PDF file could not be read."
+PDF_SCRIPT_MESSAGE = "The PDF contains scripts and cannot be uploaded."
+
+
+def _assert_storable_pdf(content: bytes) -> None:
+    """Refuse a PDF that Frappe would refuse when the file is saved.
+
+    File.check_content opens every PDF to look for scripts. A PDF it cannot open raises from inside
+    the save, and one that carries a script is refused there; both reached the user as a server
+    failure. The same check runs here first, so each gets a message of its own.
+    """
+
+    from frappe.utils.pdf import pdf_contains_js
+
+    try:
+        scripted = pdf_contains_js(content)
+    except Exception as error:
+        raise CrmApiException("VALIDATION_ERROR", PDF_UNREADABLE_MESSAGE) from error
+    if scripted:
+        raise CrmApiException("VALIDATION_ERROR", PDF_SCRIPT_MESSAGE)
+
+
 def validate_and_scan(file_name: str, claimed_mime: str, content: bytes, scanner: MalwareScanner | None = None) -> str:
     if not isinstance(content, bytes) or not content:
         raise CrmApiException("VALIDATION_ERROR", "File content is required.")
@@ -189,6 +211,9 @@ def validate_and_scan(file_name: str, claimed_mime: str, content: bytes, scanner
     allowed_extensions = {".jpg", ".jpeg"} if actual_mime == JPEG_MIME else {EXTENSION_FOR_MIME[actual_mime]}
     if extension not in allowed_extensions or claimed_mime != actual_mime:
         raise CrmApiException("VALIDATION_ERROR", "File extension or MIME does not match its content.")
+    # A Tipray-encrypted file is opaque: there is no PDF here to open.
+    if actual_mime == PDF_MIME and not content.startswith(TIPRAY_HEADER):
+        _assert_storable_pdf(content)
 
     try:
         clean = (scanner or ClamdScanner()).scan(content)

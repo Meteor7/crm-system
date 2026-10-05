@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from collections.abc import Mapping
 from functools import wraps
 from typing import Any
@@ -122,6 +123,71 @@ HTTP_STATUS_BY_CODE = {
 }
 
 
+PHONE_NUMBER_MESSAGE = "The phone number is not valid: use at most 20 characters from digits, spaces and + - ( ) , . # *."
+EMAIL_ADDRESS_MESSAGE = "The email address is not valid."
+NAME_CHARACTERS_MESSAGE = "The name cannot contain < or >."
+VALUE_TOO_LONG_MESSAGE = "A value is too long."
+_NUMBER_FIELD_TYPES = frozenset({"Int", "Long Int", "Float", "Currency", "Percent", "Check", "Rating", "Duration"})
+
+
+def _raising_frame_locals(error: BaseException, function_name: str) -> Mapping[str, Any]:
+    """Local variables of the innermost `function_name` call on the way to where `error` was raised."""
+
+    found: Mapping[str, Any] = {}
+    traceback = error.__traceback__
+    while traceback is not None:
+        if traceback.tb_frame.f_code.co_name == function_name:
+            found = traceback.tb_frame.f_locals
+        traceback = traceback.tb_next
+    return found
+
+
+def input_error(error: BaseException) -> CrmApiException | None:
+    """The public error for a value that Frappe refused on save, or None when `error` is anything else.
+
+    The services check what the CRM itself defines. Frappe then checks every document once more when
+    it is saved: the length of each column, the Phone and Email formats of the standard fields, the
+    characters a document name may contain. Such a refusal is about what the user typed, so it is
+    answered like any other validation error, with a message that says what to change, and not as a
+    server failure the user is invited to retry.
+
+    Frappe words its own message in the language of the session and repeats the refused value in
+    it, so the field and the limit are read from the frame that raised, not from that text.
+    """
+
+    if is_too_long(error) and not isinstance(error, frappe.CharacterLengthExceededError):
+        # The database refused a value Frappe does not measure, such as a document name.
+        return CrmApiException("VALIDATION_ERROR", VALUE_TOO_LONG_MESSAGE)
+    if isinstance(error, frappe.CharacterLengthExceededError):
+        raised = _raising_frame_locals(error, "throw_length_exceeded_error")
+        field, limit = raised.get("df"), raised.get("max_length")
+        label = getattr(field, "label", None)
+        if (
+            isinstance(label, str) and label.strip() and isinstance(limit, int)
+            and getattr(field, "fieldtype", None) not in _NUMBER_FIELD_TYPES
+        ):
+            return CrmApiException("VALIDATION_ERROR", f"{label.strip()} is too long: at most {limit} characters.")
+        return CrmApiException("VALIDATION_ERROR", VALUE_TOO_LONG_MESSAGE)
+    if isinstance(error, frappe.InvalidPhoneNumberError):
+        return CrmApiException("VALIDATION_ERROR", PHONE_NUMBER_MESSAGE)
+    if isinstance(error, frappe.InvalidEmailAddressError):
+        return CrmApiException("VALIDATION_ERROR", EMAIL_ADDRESS_MESSAGE)
+    if isinstance(error, frappe.NameError) and not isinstance(error, frappe.DuplicateEntryError):
+        # NameError has other causes that are the server's own; only this one is the user's input.
+        name = _raising_frame_locals(error, "validate_name").get("name")
+        if isinstance(name, str) and re.search("[<>]", name):
+            return CrmApiException("VALIDATION_ERROR", NAME_CHARACTERS_MESSAGE)
+    return None
+
+
+def is_too_long(error: BaseException) -> bool:
+    """Whether `error` says a value does not fit: Frappe's own check, or the database's."""
+
+    if isinstance(error, frappe.CharacterLengthExceededError):
+        return True
+    return isinstance(error, frappe.db.DataError) and frappe.db.is_data_too_long(error)
+
+
 def api_endpoint(function):
     """Convert service exceptions to a stable public payload at the HTTP edge."""
 
@@ -149,8 +215,16 @@ def api_endpoint(function):
             error = CrmApiException(code, message)
             frappe.local.response["http_status_code"] = HTTP_STATUS_BY_CODE[code]
             return error_response(error)
-        except Exception:
+        except Exception as failure:
             frappe.db.rollback()
+            refused = input_error(failure)
+            if refused:
+                if is_too_long(failure):
+                    # The value may be one a service put together and not one the user typed, and
+                    # then the service is what has to change: keep it where a developer looks.
+                    frappe.log_error(title="Rayher CRM value too long on save")
+                frappe.local.response["http_status_code"] = HTTP_STATUS_BY_CODE[refused.code]
+                return error_response(refused)
             frappe.log_error(title="Rayher CRM API failure")
             error = CrmApiException("INTERNAL_ERROR", "The request could not be completed.", retryable=True)
             frappe.local.response["http_status_code"] = 500

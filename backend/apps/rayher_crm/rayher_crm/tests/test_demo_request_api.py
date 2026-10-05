@@ -309,6 +309,24 @@ class TestDemoRequestApi(FrappeTestCase):
             self.assertEqual(blocked.exception.code, "INVALID_TRANSITION")
             self.assertEqual(frappe.db.count("CRM Demo Request", {"opportunity": opportunity["id"]}), 0)
 
+    def test_a_long_tool_name_does_not_overflow_the_title_the_service_puts_together(self):
+        frappe.set_user(self.sales)
+        payload = self._input(requestMode="Self Test")
+        payload.pop("opportunityId")
+        payload.pop("primaryContactId")
+        payload["formData"]["industry"] = ""
+        # "Self Test - " and " Demo" around a tool name of 130 make 147: more than the title's column.
+        payload["formData"]["primaryTool"] = "T" * 130
+        request = create_demo_request(payload)
+        stored = frappe.db.get_value("CRM Demo Request", request["id"], ["title", "requested_equipment"])
+        self.assertEqual(stored, (("Self Test - " + "T" * 130 + " Demo")[:140], "T" * 130))
+
+        # A tool name that is itself too long is refused as that field, not as the title.
+        payload["formData"]["primaryTool"] = "T" * 141
+        with self.assertRaises(frappe.CharacterLengthExceededError) as refused:
+            create_demo_request(payload)
+        self.assertIn("Requested Equipment", str(refused.exception))
+
     def test_self_test_requires_no_opportunity_and_preserves_opportunity_stages(self):
         frappe.set_user(self.sales)
         before_stages = frappe.get_all(
