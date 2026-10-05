@@ -204,17 +204,25 @@ describe('P1 business workspace', () => {
     const apiClient = createMockApi({ latency: 0, role: 'Manager', userName: '演示经理01' })
     const version = (await apiClient.getInstalledTool('TOOL-001')).data.modified!
     const updateInstalledTool = vi.spyOn(apiClient, 'updateInstalledTool')
+    // The editor offers the Sites read with the Tool; the double carries none, so the test gives it the Tool's.
+    const detail = apiClient.getInstalledTool.bind(apiClient)
+    vi.spyOn(apiClient, 'getInstalledTool').mockImplementation(async (id) => {
+      const result = await detail(id)
+      return { ...result, data: { ...result.data, sites: [{ id: result.data.siteId, name: 'Fab 1', city: '上海' }] } }
+    })
     const wrapper = mount(InstalledToolsPage, { props: { apiClient } })
     await flushPromises()
     await wrapper.get('[data-installed-tool-surface="detail"]').trigger('click')
     await flushPromises()
 
     await wrapper.get('[data-testid="edit-installed-tool"]').trigger('click')
+    await flushPromises()
     expect(wrapper.get('[role="dialog"]').attributes('aria-label')).toBe('编辑 Installed Tool 主数据')
     expect(wrapper.get('select[aria-label="负责工程师"]').attributes('disabled')).toBeUndefined()
     await wrapper.get('input[aria-label="现场位置"]').setValue('Boss Updated Bay')
     await wrapper.get('select[aria-label="负责工程师"]').setValue('person053@crm.example.invalid')
-    await wrapper.get('[role="dialog"] form').trigger('submit')
+    expect(wrapper.find('.form-error').exists()).toBe(false)
+    await wrapper.get('[data-modal-submit]').trigger('submit')
     await flushPromises()
 
     expect(updateInstalledTool).toHaveBeenCalledWith('TOOL-001', expect.any(Object), version)

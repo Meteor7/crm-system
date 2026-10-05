@@ -24,7 +24,9 @@ const props = withDefaults(defineProps<{
   detail?: InstalledToolDetailDto | null
   detailLoading?: boolean
   detailError?: string
-}>(), { detail: null, detailLoading: false, detailError: '' })
+  /** The page is reading the Tool again for the editor: the editor's button waits. */
+  busy?: boolean
+}>(), { detail: null, detailLoading: false, detailError: '', busy: false })
 
 const emit = defineEmits<{
   select: [item: InstalledToolDto]
@@ -115,7 +117,7 @@ watch(resolvedDetail, (detail) => {
                 <button v-if="resolvedDetail.canOperate && !resolvedDetail.lifecycleCompleted" class="primary-button" type="button" data-testid="advance-installed-tool" @click="emit('advance')"><CheckCircle2 :size="13" />{{ t('installed.completeStage', { stage: currentStage }) }}</button>
                 <button v-if="resolvedDetail.canOperate" class="secondary-button" type="button" data-testid="add-installed-tool-version" @click="emit('version')"><History :size="13" />{{ t('installed.addVersion') }}</button>
                 <button v-if="resolvedDetail.canOperate" class="secondary-button" type="button" data-testid="add-installed-tool-service" @click="emit('service')"><Wrench :size="13" />{{ t('installed.addService') }}</button>
-                <button v-if="resolvedDetail.canOperate" class="secondary-button" type="button" data-testid="edit-installed-tool" @click="emit('edit')"><Pencil :size="13" />{{ t('installed.editMaster') }}</button>
+                <button v-if="resolvedDetail.canOperate" class="secondary-button" type="button" data-testid="edit-installed-tool" :disabled="busy" @click="emit('edit')"><Pencil :size="13" />{{ t('installed.editMaster') }}</button>
               </div>
             </header>
             <div class="record-summary hero-summary">

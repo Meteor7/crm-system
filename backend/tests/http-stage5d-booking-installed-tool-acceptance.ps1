@@ -143,6 +143,12 @@ try {
     if ($boardStage.label -ne 'FAT' -or $completedMilestones -ne 0) { throw 'Installed Tool board stage/progress projection is incorrect.' }
     $toolInput = @{siteId=$tool.siteId;serial=$tool.serial;model=$tool.model;location=$tool.location;engineerOwner=$tool.engineerOwner;operatingSystem=$tool.operatingSystem;warrantyStart=$tool.warrantyStart;warrantyEnd=$tool.warrantyEnd;serviceContract=$tool.serviceContract;pmCycle=$tool.pmCycle;ownershipType=$tool.ownershipType;salesOrder=$tool.salesOrder;contract=$tool.contract}
     $engineerUpdated = Invoke-CrmPost $engineerSession 'rayher_crm.api.v1.installed_tools.update_installed_tool' @{id=$created.Tool;input=$toolInput;expectedModified=$tool.modified}
+    # F1-02: the Engineer, not assigned to the Account, reads the Account's Sites with the Tool, and the Account 360 not at all.
+    $engineerTool = (Invoke-RestMethod -Uri "$BaseUrl/api/method/rayher_crm.api.v1.installed_tools.get_installed_tool?id=$([Uri]::EscapeDataString($created.Tool))" -WebSession $engineerSession).message.data
+    if ($created.Site -notin @($engineerTool.sites | ForEach-Object { $_.id })) { throw 'Engineer did not receive the Account Sites with the Installed Tool.' }
+    $account360Status = 0
+    try { Invoke-RestMethod -Uri "$BaseUrl/api/method/rayher_crm.api.v1.accounts.get_account_360?id=$([Uri]::EscapeDataString($created.Account))" -WebSession $engineerSession | Out-Null } catch { $account360Status = [int]$_.Exception.Response.StatusCode }
+    if ($account360Status -ne 404) { throw "Expected the Engineer's hidden Account 360 to answer HTTP 404, got $account360Status." }
     $reassignInput = $toolInput.Clone(); $reassignInput.engineerOwner = $created.OtherEngineer
     $reassignStatus = 0
     try { Invoke-CrmPost $engineerSession 'rayher_crm.api.v1.installed_tools.update_installed_tool' @{id=$created.Tool;input=$reassignInput;expectedModified=$engineerUpdated.data.modified} | Out-Null } catch { $reassignStatus = [int]$_.Exception.Response.StatusCode }

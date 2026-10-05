@@ -230,6 +230,8 @@ export function createMockApi(options: {
       lifecycleHistory: clone(lifecycleHistory),
       versionHistory: clone(installedToolVersionHistory.get(tool.id) ?? []),
       serviceHistory: clone(installedToolServiceHistory.get(tool.id) ?? []),
+      // A type stub only: a test that needs the Sites of the Tool's Account provides them itself.
+      sites: [],
       lifecycleCompleted: lifecycleHistory.some((row) => row.toStage === 'Completed')
         || Boolean(tool.milestones.length && tool.milestones.every((row) => row.state === 'Done')),
       canOperate: role === 'Manager' || (role === 'Engineer' && tool.engineerOwner === userId),

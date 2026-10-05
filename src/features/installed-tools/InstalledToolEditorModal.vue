@@ -10,7 +10,7 @@ import type { InstalledToolDto, UpdateInstalledToolInput } from '@/types/workspa
 import { useI18n } from '@/i18n'
 
 type EngineerOption = { id: string; name: string; role: string }
-const props = defineProps<{ tool: InstalledToolDto; sites: SiteDto[]; engineers: EngineerOption[]; canReassign: boolean; busy?: boolean; error?: string }>()
+const props = defineProps<{ tool: InstalledToolDto; sites: Array<Pick<SiteDto, 'id' | 'name' | 'city'>>; engineers: EngineerOption[]; canReassign: boolean; busy?: boolean; error?: string }>()
 const emit = defineEmits<{ close: []; submit: [value: UpdateInstalledToolInput] }>()
 const { locale, t } = useI18n()
 const copy = (english: string, chinese: string) => locale.value === 'en-US' ? english : chinese

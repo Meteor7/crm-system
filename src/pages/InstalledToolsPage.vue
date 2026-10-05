@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { CheckCircle2, Cpu, RotateCcw } from '@lucide/vue'
+import { AlertTriangle, CheckCircle2, Cpu, RotateCcw } from '@lucide/vue'
 import { api as defaultApi } from '@/api'
 import type { CrmApi } from '@/api'
 import { mapRequestError } from '@/api/request-state'
@@ -13,7 +13,7 @@ import InstalledToolServiceModal from '@/features/installed-tools/InstalledToolS
 import InstalledToolTransitionModal from '@/features/installed-tools/InstalledToolTransitionModal.vue'
 import InstalledToolVersionModal from '@/features/installed-tools/InstalledToolVersionModal.vue'
 import PaginationControls from '@/features/shared/PaginationControls.vue'
-import type { BootstrapDto, SiteDto } from '@/types/crm'
+import type { BootstrapDto } from '@/types/crm'
 import type {
   AddInstalledToolServiceRecordInput,
   AddInstalledToolVersionRecordInput,
@@ -59,16 +59,25 @@ const loading = ref(true)
 const error = useLocaleMessage()
 const requestId = ref('')
 const notice = useLocaleMessage()
+// Why the editor did not open: the Tool could not be read again. Shown as a toast, the editor being closed.
+const editorError = useLocaleMessage()
+// The Tool whose detail is being read for the editor; its button waits, the other Tools' do not.
+const editorOpeningTool = ref('')
+let editorErrorTimer = 0
 const bootstrap = ref<BootstrapDto | null>(null)
 const detail = ref<InstalledToolDetailDto | null>(null)
 const detailLoading = ref(false)
 const detailError = useLocaleMessage()
 const detailRequestId = ref('')
 let detailSequence = 0
+// Bumped by every click on the editor and by every other dialog opened or closed: an answer to an older state
+// is dropped. `editorReads` counts the reads alone, for the button's waiting state.
+let editorSequence = 0
+let editorReads = 0
 const activeModal = ref<ModalKind>('')
 const actionBusy = ref(false)
 const actionError = useLocaleMessage()
-const editorSites = ref<SiteDto[]>([])
+const editorSites = ref<InstalledToolDetailDto['sites']>([])
 let filterTimer: ReturnType<typeof setTimeout> | undefined
 
 function matchesFilters(item: InstalledToolDto) {
@@ -217,6 +226,7 @@ function resetFilters() {
 }
 function closeModal() {
   if (actionBusy.value) return
+  editorSequence += 1
   activeModal.value = ''
   actionError.value = ''
 }
@@ -225,31 +235,53 @@ function requireOperableDetail() {
 }
 function openTransition() {
   if (!requireOperableDetail() || detail.value?.lifecycleCompleted) return
+  editorSequence += 1
   actionError.value = ''
   activeModal.value = 'transition'
 }
 function openVersion() {
   if (!requireOperableDetail()) return
+  editorSequence += 1
   actionError.value = ''
   activeModal.value = 'version'
 }
 function openService() {
   if (!requireOperableDetail()) return
+  editorSequence += 1
   actionError.value = ''
   activeModal.value = 'service'
 }
 
 async function openEditor() {
   const current = requireOperableDetail()
-  if (!current) return
+  if (!current || actionBusy.value || editorOpeningTool.value === current.id) return
   actionError.value = ''
-  editorSites.value = []
-  activeModal.value = 'editor'
+  editorError.value = ''
+  // The Tool is read again before the editor opens, so that the editor offers the Sites and the version of
+  // this moment, and what the user types from then on is not written over by a late answer. The answer is
+  // taken only if nothing happened meanwhile: no other click on the editor, no other dialog opened or closed,
+  // and the very Tool detail still shown (the object, not the id: a reload or a save replaces it). The Account
+  // 360 is not asked for the Sites: an Engineer cannot read it (it carries the Account's Visits, which an
+  // Engineer may not read), and the editor was left without Sites.
+  const sequence = ++editorSequence
+  const read = ++editorReads
+  editorOpeningTool.value = current.id
   try {
-    editorSites.value = (await props.apiClient.getAccount360(current.accountId)).data.sites
+    const fresh = await props.apiClient.getInstalledTool(current.id)
+    if (sequence !== editorSequence || activeModal.value !== '' || detail.value !== current) return
+    // The detail on show takes the fresh fields in place: the same object, so what the archive has unfolded
+    // stays unfolded, and the editor saves against the fresh version.
+    Object.assign(current, fresh.data)
+    editorSites.value = fresh.data.sites
+    activeModal.value = 'editor'
   } catch (reason) {
-    const mapped = mapRequestError(reason)
-    actionError.value = requestErrorText(reason)
+    if (sequence !== editorSequence || activeModal.value !== '' || detail.value !== current) return
+    notice.value = ''
+    editorError.value = requestErrorText(reason)
+    window.clearTimeout(editorErrorTimer)
+    editorErrorTimer = window.setTimeout(() => { editorError.value = '' }, 6000)
+  } finally {
+    if (read === editorReads) editorOpeningTool.value = ''
   }
 }
 
@@ -400,6 +432,7 @@ onMounted(async () => {
           :detail="detail"
           :detail-loading="detailLoading"
           :detail-error="formattedDetailError"
+          :busy="actionBusy || editorOpeningTool === selectedId"
           @select="selectArchive"
           @edit="openEditor"
           @advance="openTransition"
@@ -449,6 +482,7 @@ onMounted(async () => {
       @submit="addService"
     />
     <transition name="toast"><div v-if="notice" class="demo-toast"><CheckCircle2 :size="15" />{{ notice }}</div></transition>
+    <transition name="toast"><div v-if="editorError" class="demo-toast" role="alert" data-editor-error><AlertTriangle :size="15" />{{ editorError }}</div></transition>
   </div>
 </template>
 

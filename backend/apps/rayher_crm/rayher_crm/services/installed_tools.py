@@ -21,7 +21,7 @@ from rayher_crm.services.bookings import (
 from rayher_crm.services.common import normalize_pagination, required_text, to_iso_timestamp
 from rayher_crm.services.concurrency import lock_document
 from rayher_crm.services.notifications import create_notification
-from rayher_crm.services.sites import _require_site, _site_account, can_read_site_data
+from rayher_crm.services.sites import _require_site, _site_account, can_read_site_data, sites_of_account
 
 
 def _engineer_owner(value: Any) -> str:
@@ -287,6 +287,14 @@ def get_installed_tool(name: str) -> dict[str, Any]:
         or bool(result["milestones"] and all(row.get("state") == "Done" for row in result["milestones"])),
         "canOperate": _can_operate_installed_tool(doc),
         "canReassign": resolve_crm_role() == "Manager",
+        # The Sites of the Account, for the editor of the Tool: id, name and city, what the choice is made by. An
+        # Engineer reads the Tool and its Site, but not the Account 360 (it carries the Account's Visits, which an
+        # Engineer may not read), so the editor cannot ask it for the Sites; the Sites' kind, process and status
+        # stay with the Account.
+        "sites": [
+            {"id": site["id"], "name": site["name"], "city": site["city"]}
+            for site in (sites_of_account(doc.account) if can_read_site_data(doc.account) else [])
+        ],
     })
     return result
 

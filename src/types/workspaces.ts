@@ -8,7 +8,7 @@ import type {
   OpportunityStageHistoryEvent,
   OpportunityStageHistorySource,
 } from '@/domain/opportunity-stages'
-import type { BookingDto, DemoHealthDto, DemoLifecycleStage, DemoTrackingDto, ListQuery } from './crm'
+import type { BookingDto, DemoHealthDto, DemoLifecycleStage, DemoTrackingDto, ListQuery, SiteDto } from './crm'
 
 /** Success probability levels from lowest to highest. Only the Opportunity owner sets one; a level carries no percentage. */
 export const OPPORTUNITY_PROBABILITY_LEVELS = ['low_probability', 'pipeline', 'upside', 'committed'] as const
@@ -604,6 +604,8 @@ export interface InstalledToolDetailDto extends InstalledToolDto {
   lifecycleCompleted: boolean
   canOperate: boolean
   canReassign: boolean
+  /** The Sites of the Account, for the editor, as the choice is made: id, name and city. Empty for a reader who may not see the Tool's Site. */
+  sites: Array<Pick<SiteDto, 'id' | 'name' | 'city'>>
 }
 
 export type InstalledToolVersionChangeType = 'Software' | 'Firmware' | 'Operating System' | 'Configuration'

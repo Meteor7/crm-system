@@ -13,7 +13,7 @@ from rayher_crm.api.v1.installed_tools import (
     get_installed_tool as get_installed_tool_endpoint,
     transition_installed_tool as transition_installed_tool_endpoint,
 )
-from rayher_crm.services.accounts import create_account
+from rayher_crm.services.accounts import create_account, get_account_360
 from rayher_crm.services.bookings import get_booking
 from rayher_crm.services.contacts import create_contact
 from rayher_crm.patches.v1_0.migrate_installed_tool_lifecycle import execute as migrate_installed_tool_lifecycle
@@ -193,10 +193,25 @@ class TestInstalledToolApi(FrappeTestCase):
         self.assertFalse(sales_detail["canOperate"])
         self.assertFalse(sales_detail["canReassign"])
 
+        # A second Site of the Account, which the Tool is not at.
+        frappe.set_user(self.sales)
+        second_site = create_site(tool["accountId"], {
+            "name": f"Detail Second Site {frappe.generate_hash(length=6)}", "city": "Suzhou", "type": "Fab",
+            "process": "Frontend", "status": "量产",
+        })
         frappe.set_user(self.engineer)
         engineer_detail = get_installed_tool(tool["id"])
         self.assertTrue(engineer_detail["canOperate"])
         self.assertFalse(engineer_detail["canReassign"])
+        # Every Site of the Account comes with the Tool, as id, name and city: the Engineer, not assigned to the
+        # Account, reads no Account 360.
+        self.assertEqual(
+            sorted(row["id"] for row in engineer_detail["sites"]), sorted([site["id"], second_site["id"]]),
+        )
+        self.assertEqual({tuple(sorted(row)) for row in engineer_detail["sites"]}, {("city", "id", "name")})
+        with self.assertRaises(CrmApiException) as denied:
+            get_account_360(tool["accountId"])
+        self.assertEqual(denied.exception.code, "NOT_FOUND")
         self.assertEqual([row["id"] for row in engineer_detail["lifecycleHistory"]], [newer.name, older.name])
         self.assertEqual(engineer_detail["versionHistory"][0]["id"], version.name)
         self.assertEqual(engineer_detail["serviceHistory"][0]["id"], service.name)
@@ -224,7 +239,7 @@ class TestInstalledToolApi(FrappeTestCase):
         self.assertEqual(response["warnings"], [])
         self.assertRegex(response["meta"]["requestId"], r"^req_[0-9a-f]{24}$")
         self.assertEqual(
-            set(("lifecycleHistory", "versionHistory", "serviceHistory", "canOperate", "canReassign")) - set(response["data"]),
+            set(("lifecycleHistory", "versionHistory", "serviceHistory", "canOperate", "canReassign", "sites")) - set(response["data"]),
             set(),
         )
     def test_conversion_is_atomic_server_named_and_creates_no_erp_documents(self):
@@ -292,6 +307,8 @@ class TestInstalledToolApi(FrappeTestCase):
         frappe.set_user(self.other_sales)
         detail = get_installed_tool(tool_id)
         self.assertEqual((detail["siteId"], detail["site"], detail["location"]), ("", "", ""))
+        # The Sites of the Account are redacted with the Tool's own.
+        self.assertEqual(detail["sites"], [])
         self.assertFalse(
             frappe.has_permission("CRM Installed Tool", "read", doc=tool_id, user=self.other_sales),
         )
@@ -305,6 +322,7 @@ class TestInstalledToolApi(FrappeTestCase):
         frappe.set_user(self.engineer)
         engineer_detail = get_installed_tool(tool_id)
         self.assertEqual((engineer_detail["siteId"], engineer_detail["site"]), (site["id"], site["name"]))
+        self.assertEqual([row["id"] for row in engineer_detail["sites"]], [site["id"]])
 
     def test_conversion_validates_status_site_engineer_and_generates_unique_serial(self):
         _, site, _, pending = self._booking(self.sales, "Pending", status="Pending")

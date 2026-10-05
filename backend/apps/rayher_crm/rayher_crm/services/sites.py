@@ -95,8 +95,18 @@ def _assert_site_write_scope(account_id: str) -> None:
 
 def sites_for_account(account_id: str) -> list[dict[str, Any]]:
     _assert_site_read_scope(account_id)
-    names = frappe.db.sql(
-        """SELECT `address`.`name`
+    return sites_of_account(account_id)
+
+
+def sites_of_account(account_id: str) -> list[dict[str, Any]]:
+    """The Sites of an Account, newest first, for a caller whose right to read them is established.
+
+    One statement: the Tool detail reads this whenever a Tool is opened, and again before its editor.
+    """
+
+    rows = frappe.db.sql(
+        """SELECT `address`.`name`, `address`.`address_title`, `address`.`city`, `address`.`custom_crm_site_type`,
+               `address`.`custom_crm_process`, `address`.`custom_crm_status`
         FROM `tabAddress` AS `address`
         INNER JOIN `tabDynamic Link` AS `link` ON `link`.`parent` = `address`.`name`
         WHERE `link`.`parenttype` = 'Address' AND `link`.`parentfield` = 'links'
@@ -105,7 +115,7 @@ def sites_for_account(account_id: str) -> list[dict[str, Any]]:
         (account_id,),
         as_dict=True,
     )
-    return [serialize_site(frappe.get_doc("Address", row.name)) for row in names]
+    return [serialize_site(row) for row in rows]
 
 
 def list_account_sites() -> list[dict[str, Any]]:
