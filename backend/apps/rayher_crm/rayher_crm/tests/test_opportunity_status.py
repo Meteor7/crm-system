@@ -187,14 +187,14 @@ class TestOpportunityStatus(FrappeTestCase):
             b"Customer requirements confirmed",
         )
 
-    def test_removing_a_deduplicated_attachment_spares_the_other_record(self):
+    def test_removing_an_equal_attachment_spares_the_other_record(self):
         shared = b"Shared status attachment " + frappe.generate_hash(length=10).encode()
         first = self.save("First", files=[self.upload("shared.txt", shared)])
         second = self.save("Second", files=[self.upload("shared.txt", shared)])
         first_id, second_id = first["files"][0]["id"], second["files"][0]["id"]
-        # Frappe de-duplicates equal bytes onto a single physical path; the test is
-        # meaningless unless that actually happened here.
-        self.assertEqual(self.blob_path(first_id), self.blob_path(second_id))
+        # CRM service uploads keep independent paths even for equal bytes, so
+        # one delivery boundary can never acquire another boundary's policy.
+        self.assertNotEqual(self.blob_path(first_id), self.blob_path(second_id))
         self.save(
             "First without the attachment", recordId=first["id"],
             expectedModified=first["modified"], retainedFileIds=[],

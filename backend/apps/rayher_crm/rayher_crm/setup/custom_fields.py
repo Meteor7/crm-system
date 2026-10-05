@@ -11,6 +11,9 @@ from rayher_crm.services.regions import REGION_PRESETS, options_text
 
 
 CRM_CUSTOM_FIELDS = {
+    "File": [
+        {"fieldname": "custom_crm_service_upload", "label": "CRM Service Upload", "fieldtype": "Check", "default": "0", "read_only": 1, "hidden": 1},
+    ],
     "Customer": [
         {"fieldname": "custom_crm_owner", "label": "CRM Owner", "fieldtype": "Link", "options": "User", "insert_after": "customer_name"},
         {"fieldname": "custom_crm_short_name", "label": "CRM Short Name", "fieldtype": "Data", "insert_after": "custom_crm_owner"},

@@ -12,6 +12,9 @@ from frappe.core.doctype.file.utils import get_content_hash
 from frappe.utils.image import strip_exif_data
 
 
+_DELETE_TOKEN = object()
+
+
 def _session_id():
     """Identify the MariaDB session, so a silent reconnect invalidates our locks.
 
@@ -183,7 +186,9 @@ def _confirm(names: set[str], file_url: str) -> bool:
     return False
 
 
-def _has_live_reference(file_url: str, exclude: str | None = None) -> bool:
+def _has_live_reference(
+    file_url: str, exclude: str | None = None, content_hash: str | None = None,
+) -> bool:
     """True when some File row still points at this physical path.
 
     Equal content can occupy different paths after concurrent uploads, so only a
@@ -197,7 +202,52 @@ def _has_live_reference(file_url: str, exclude: str | None = None) -> bool:
     """
     if _confirm(_local_reference_names(file_url, exclude), file_url):
         return True
-    return _confirm(_committed_reference_names(file_url, exclude), file_url)
+    if _confirm(_committed_reference_names(file_url, exclude), file_url):
+        return True
+    if not content_hash:
+        return False
+
+    # A supported same-site absolute URL can name the same local path with a
+    # different stored string. Core's hash check treats it as shared, and the
+    # row-delete override must do the same before upgrading thumbnail-only
+    # cleanup to a full unlink. This locking read is current under REPEATABLE
+    # READ and stays indexed; the content advisory lock prevents new candidates
+    # from committing while the canonical comparison runs.
+    from rayher_crm.patches.v1_0.add_file_content_hash_index import INDEX_NAME
+    from rayher_crm.services.managed_file_access import canonical_local_reference
+
+    try:
+        reference = canonical_local_reference(file_url=file_url, is_private=True)
+    except (frappe.ValidationError, frappe.PermissionError, ValueError):
+        frappe.clear_last_message()
+        return False
+    if not reference:
+        return False
+    params: list[str] = [content_hash]
+    exclude_clause = ""
+    if exclude is not None:
+        exclude_clause = " AND name!=%s"
+        params.append(exclude)
+    rows = frappe.db.sql(
+        f"SELECT name, file_url, file_name, is_private FROM `tabFile` "
+        f"FORCE INDEX ({INDEX_NAME}) WHERE content_hash=%s{exclude_clause} "
+        "ORDER BY name FOR UPDATE",
+        tuple(params),
+        as_dict=True,
+    )
+    for row in rows:
+        try:
+            candidate_reference = canonical_local_reference(
+                file_url=row.file_url,
+                file_name=row.file_name,
+                is_private=row.is_private,
+            )
+        except (frappe.ValidationError, frappe.PermissionError, ValueError):
+            frappe.clear_last_message()
+            continue
+        if candidate_reference == reference:
+            return True
+    return False
 
 
 def _unlink_private_file(path: str) -> None:
@@ -239,7 +289,7 @@ def discard_rolled_back_blob(path: str | None, file_url: str | None, content_has
         # blob, so leaving the bytes in place is the safe outcome.
         if not _lock_content(content_hash, required=False):
             return
-        if _has_live_reference(file_url):
+        if _has_live_reference(file_url, content_hash=content_hash):
             return
         if not _blob_matches_path(path, content_hash):
             # The path already holds a different, newly uploaded file.
@@ -252,9 +302,32 @@ def discard_rolled_back_blob(path: str | None, file_url: str | None, content_has
 
 
 def protect_private_upload(doc, method=None) -> None:
-    if not doc.is_private or doc.is_folder or doc.is_remote_file or not doc.content_hash:
+    if doc.flags.get("crm_private_upload_finalized"):
         return
+    from rayher_crm.services.managed_file_access import (
+        canonical_local_reference,
+        isolate_reused_upload_blob,
+        protect_file_write,
+        restore_service_file_name,
+    )
+    protect_file_write(doc, method)
+    if not doc.is_private or doc.is_folder or not doc.content_hash:
+        return
+    # Core can de-duplicate a local upload onto a same-site absolute URL and
+    # then report it as ``is_remote_file``. The still-present upload content
+    # proves this is an upload that must pass the local alias guard.
+    if doc.is_remote_file:
+        local_reference = canonical_local_reference(
+            file_url=doc.file_url, file_name=doc.file_name, is_private=doc.is_private,
+        )
+        if not local_reference or not doc.get("content"):
+            return
     _lock_content(doc.content_hash)
+    # Core de-duplicates globally before this doc-event. A CRM service upload
+    # must never inherit a URL owned by an ordinary file or another delivery
+    # boundary. The content lock makes the committed alias set stable while the
+    # new independent path is written.
+    isolate_reused_upload_blob(doc)
     # File.before_insert has already resolved/reused the blob. Cleanup may have
     # won the lock meanwhile: recreate uploaded bytes, or reject a stale copy.
     if not _blob_matches(doc):
@@ -262,6 +335,10 @@ def protect_private_upload(doc, method=None) -> None:
             doc.save_file(content=doc._content, ignore_existing_file_check=True)
         else:
             frappe.throw("The source attachment was removed. Please upload the file again.")
+    # Service storage uses a random physical basename to avoid same-name races.
+    # Keep that URL while presenting and persisting the user-supplied name.
+    restore_service_file_name(doc)
+    doc.flags.crm_private_upload_finalized = True
 
 
 def delete_file_content(doc, only_thumbnail=False) -> None:
@@ -279,7 +356,7 @@ def delete_file_content(doc, only_thumbnail=False) -> None:
         return
     # Inserts of this same content hold the advisory lock until commit/rollback,
     # so no new reference can appear between this check and the unlink below.
-    if _has_live_reference(doc.file_url, doc.name):
+    if _has_live_reference(doc.file_url, doc.name, doc.content_hash):
         # The thumbnail stays too: Frappe derives its path from `file_url`, which
         # the surviving row shares, so removing it here would blank that row's
         # preview. Frappe's own `_delete_file_on_disk` makes the same trade.
@@ -291,16 +368,48 @@ def delete_file_content(doc, only_thumbnail=False) -> None:
         "SELECT name FROM tabFile WHERE name=%s FOR UPDATE", (doc.name,),
     ):
         only_thumbnail = False
+    # Core treats every equal content hash as a shared physical blob and asks
+    # hooks to remove only the thumbnail. Service uploads can now have equal
+    # hashes at independent URLs, so an explicit row deletion must remove its
+    # own unreferenced body as well.
+    if only_thumbnail and doc.flags.get("crm_delete_token") is _DELETE_TOKEN:
+        only_thumbnail = False
     # A removed path may already belong to a different newly uploaded file.
     if _blob_matches(doc):
         doc.delete_file_from_filesystem(only_thumbnail=only_thumbnail)
 
 
-def save_private_file(file_name, content, doctype, name, is_private=1):
+def authorize_file_delete(doc) -> None:
+    doc.flags.crm_delete_token = _DELETE_TOKEN
+
+
+def _service_storage_name(file_name: str) -> str:
+    """Return a collision-resistant physical basename, preserving its suffix."""
+    path = Path(file_name)
+    extension = path.suffix
+    marker = "-" + frappe.generate_hash(length=32)
+    # File.file_name is a 140-character Data field. Upload validators already
+    # enforce the logical limit; trim only the private storage stem.
+    stem = path.name[:-len(extension)] if extension else path.name
+    maximum_stem = max(1, 140 - len(marker) - len(extension))
+    return f"{stem[:maximum_stem]}{marker}{extension}"
+
+
+def save_private_file(file_name, content, doctype, name, is_private=1, *, attached_to_field=None):
     # Keep the original bytes available if cleanup removes a deduplicated blob
     # before File.before_insert acquires the content lock.
-    return frappe.get_doc({
-        "doctype": "File", "file_name": file_name, "content": content,
+    from rayher_crm.services.managed_file_access import authorize_service_upload
+    upload_content = content.encode() if isinstance(content, str) else bytes(content)
+    # Acquire this before core's global hash lookup. That lookup otherwise races
+    # a delete or a second upload before the post-controller doc-event can split
+    # an incompatible URL.
+    _lock_content(_stored_content_hash(file_name, upload_content))
+    storage_file_name = _service_storage_name(file_name)
+    doc = frappe.get_doc({
+        "doctype": "File", "file_name": storage_file_name, "content": upload_content,
         "attached_to_doctype": doctype, "attached_to_name": name,
+        "attached_to_field": attached_to_field,
         "is_private": is_private,
-    }).insert(ignore_permissions=True)
+    })
+    authorize_service_upload(doc, upload_content, file_name)
+    return doc.insert(ignore_permissions=True)

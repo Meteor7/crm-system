@@ -3,6 +3,8 @@ rayher_crm.patches.v1_0.prepare_installed_tool_date_fields
 rayher_crm.patches.v1_0.dedupe_equipment_types
 
 [post_model_sync]
+rayher_crm.patches.v1_0.add_file_upload_provenance
+rayher_crm.patches.v1_0.add_file_content_hash_index
 rayher_crm.patches.v1_0.backfill_legacy_account_ownership
 rayher_crm.patches.v1_0.migrate_installed_tool_lifecycle
 rayher_crm.patches.v1_0.normalize_quotation_reference_numbers
@@ -23,3 +25,7 @@ rayher_crm.patches.v1_0.backfill_opportunity_cny_amount
 rayher_crm.patches.v1_0.sync_cny_opportunity_amounts
 rayher_crm.patches.v1_0.backfill_opportunity_loss_reviews
 rayher_crm.patches.v1_0.seed_sales_territories
+rayher_crm.patches.v1_0.protect_contact_files
+rayher_crm.patches.v1_0.protect_visit_files
+rayher_crm.patches.v1_0.protect_controlled_document_files
+rayher_crm.patches.v1_0.protect_service_managed_files

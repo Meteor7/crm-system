@@ -4,7 +4,6 @@ import os
 
 import frappe
 from frappe.tests.utils import FrappeTestCase
-from frappe.utils.file_manager import save_file
 
 from rayher_crm.api.v1.errors import CrmApiException
 from rayher_crm.services.demo_artifacts import download_demo_artifact, insert_service_artifact
@@ -16,6 +15,7 @@ from rayher_crm.services.evaluations import (
 )
 from rayher_crm.services.opportunities import create_strategy_opportunity
 from rayher_crm.services.opportunity_stages import DEMO_DONE, QUALIFIED_OPPORTUNITY
+from rayher_crm.services.private_file_lifecycle import save_private_file
 from rayher_crm.services.sites import create_site
 
 
@@ -119,8 +119,8 @@ class TestDemoReportApi(FrappeTestCase):
 
     def _legacy_report(self, evaluation, version: int):
         content = b"legacy external report"
-        file_doc = save_file(
-            f"legacy-{version}.txt", content, "CRM Evaluation", evaluation.name, is_private=1,
+        file_doc = save_private_file(
+            f"legacy-{version}.txt", content, "CRM Evaluation", evaluation.name,
         )
         artifact = insert_service_artifact({
             "demo_request": evaluation.demo_request,

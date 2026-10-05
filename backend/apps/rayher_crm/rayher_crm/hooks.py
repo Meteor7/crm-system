@@ -8,6 +8,8 @@ app_version = "0.1.0"
 
 required_apps = ["erpnext"]
 
+override_doctype_class = {"File": "rayher_crm.overrides.file.ManagedFile"}
+
 after_install = "rayher_crm.setup.install.after_install"
 after_migrate = "rayher_crm.setup.install.after_migrate"
 before_tests = "rayher_crm.tests.safety.before_tests"
@@ -28,6 +30,7 @@ permission_query_conditions = {
     "Party Account": "rayher_crm.permissions.scope.scoped_child_query",
     "Sales Team": "rayher_crm.permissions.scope.scoped_child_query",
     "Portal User": "rayher_crm.permissions.scope.scoped_child_query",
+    "File": "rayher_crm.services.managed_file_access.file_query",
     "Customer": "rayher_crm.permissions.scope.customer_query",
     "Address": "rayher_crm.permissions.scope.address_query",
     "Contact": "rayher_crm.permissions.scope.contact_query",
@@ -80,6 +83,7 @@ permission_query_conditions = {
 }
 
 has_permission = {
+    "File": "rayher_crm.services.managed_file_access.file_permission",
     "Customer": "rayher_crm.permissions.scope.has_crm_permission",
     "Address": "rayher_crm.permissions.scope.has_address_permission",
     "Contact": "rayher_crm.permissions.scope.has_site_bearing_permission",
@@ -127,7 +131,10 @@ delete_file_data_content = "rayher_crm.services.private_file_lifecycle.delete_fi
 
 doc_events = {
     "DocShare": {
-        "validate": "rayher_crm.permissions.scope.prevent_scoped_docshare",
+        "validate": [
+            "rayher_crm.permissions.scope.prevent_scoped_docshare",
+            "rayher_crm.services.managed_file_access.protect_share",
+        ],
     },
     "Address": {
         # Native deletion is guarded by has_address_permission("delete");
@@ -156,6 +163,7 @@ doc_events = {
     },
     "File": {
         "before_insert": "rayher_crm.services.private_file_lifecycle.protect_private_upload",
+        "before_validate": "rayher_crm.services.managed_file_access.protect_file_write",
     },
 }
 

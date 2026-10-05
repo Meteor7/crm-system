@@ -273,6 +273,8 @@ def download_demo_artifact(artifact_id: str) -> dict[str, Any]:
     if file_doc is None or not _file_belongs_to_artifact(file_doc, meta):
         _audit(artifact_id, meta.account, "Denied", "file not owned by artifact")
         raise CrmApiException("PERMISSION_DENIED", "The Demo Artifact file does not belong to this record.")
+    from rayher_crm.services.managed_file_access import authorize_restricted_file_read
+    authorize_restricted_file_read(file_doc)
     content = file_doc.get_content()
     if isinstance(content, str):
         content = content.encode()

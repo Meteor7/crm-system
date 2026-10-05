@@ -8,6 +8,9 @@ from rayher_crm.patches.v1_0.remove_stage5b_schema_test_residue import execute a
 
 
 EXPECTED_FIELDS = {
+    "File": {
+        "custom_crm_service_upload": ("Check", None),
+    },
     "Customer": {
         "custom_crm_owner": ("Link", "User"),
         "custom_crm_short_name": ("Data", None),

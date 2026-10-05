@@ -483,7 +483,10 @@ def _verified_file(version, fieldname: str, hash_field: str) -> bytes:
     file_id = getattr(version, fieldname)
     if not file_id or not frappe.db.exists("File", file_id):
         raise CrmApiException("NOT_FOUND", "RFQ file is unavailable.")
-    content = frappe.get_doc("File", file_id).get_content()
+    file_doc = frappe.get_doc("File", file_id)
+    from rayher_crm.services.managed_file_access import authorize_restricted_file_read
+    authorize_restricted_file_read(file_doc)
+    content = file_doc.get_content()
     if isinstance(content, str):
         content = content.encode()
     if hashlib.sha256(content).hexdigest() != getattr(version, hash_field):

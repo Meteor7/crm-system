@@ -763,7 +763,7 @@ def render_quotation_pdf(master, version) -> bytes:
 def _release_pdf(master, version, pdf_content: bytes) -> str:
     from rayher_crm.services.private_file_lifecycle import save_private_file as save_file
     filename = f"{master.ref_no}-V{int(version.version_no)}.pdf"
-    return save_file(filename, pdf_content, "CRM Quotation Version", version.name, is_private=1).file_url
+    return save_file(filename, pdf_content, "CRM Quotation Version", version.name, is_private=1, attached_to_field="pdf_file").file_url
 
 
 def _publish_locked(master, version, approval_status: str) -> None:
@@ -1030,4 +1030,6 @@ def get_pdf_file(name: str, version_id: str | None = None) -> tuple[str, bytes]:
     file_name = frappe.db.get_value("File", {"file_url": version.pdf_file}, "name")
     if not file_name: raise CrmApiException("QUOTATION_PDF_NOT_FOUND", "Published quotation PDF was not found.")
     file_doc = frappe.get_doc("File", file_name)
+    from rayher_crm.services.managed_file_access import authorize_restricted_file_read
+    authorize_restricted_file_read(file_doc)
     return f"{master.ref_no}-V{int(version.version_no)}.pdf", file_doc.get_content()

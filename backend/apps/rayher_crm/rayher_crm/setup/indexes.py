@@ -4,6 +4,9 @@ from __future__ import annotations
 
 import frappe
 
+from rayher_crm.patches.v1_0.add_file_content_hash_index import (
+    ensure_index as ensure_file_content_hash_index,
+)
 
 ARTIFACT_INDEX = "unique_evaluation_artifact_version"
 QUOTATION_VERSION_INDEX = "uq_crm_quotation_version_number"
@@ -17,6 +20,8 @@ LEAD_CONVERTED_ACCOUNT_INDEX = "custom_crm_converted_account_index"
 
 
 def install_stage5f_indexes() -> None:
+    if frappe.db.table_exists("File") and frappe.db.has_column("File", "content_hash"):
+        ensure_file_content_hash_index()
     if frappe.db.table_exists("Lead") and frappe.db.has_column(
         "Lead", "custom_crm_converted_account",
     ):

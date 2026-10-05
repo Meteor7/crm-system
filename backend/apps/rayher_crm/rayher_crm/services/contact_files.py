@@ -90,7 +90,7 @@ def upload_contact_files(contact_id: str, uploads: Sequence[Mapping[str, Any]], 
                 "size_bytes": len(content), "content_hash": hashlib.sha256(content).hexdigest(),
                 "uploaded_by": frappe.session.user, "uploaded_at": now_datetime(), "deleted": 0,
             }).insert(ignore_permissions=True)
-            frappe.db.set_value("File", file_doc.name, {"attached_to_doctype": "CRM Contact File", "attached_to_name": meta.name, "attached_to_field": None}, update_modified=False)
+            frappe.db.set_value("File", file_doc.name, {"attached_to_doctype": "CRM Contact File", "attached_to_name": meta.name, "attached_to_field": None, "owner": "Administrator"}, update_modified=False)
             meta.reload()
             result.append(_serialize(meta))
     except Exception:
@@ -136,6 +136,10 @@ def download_contact_file(file_id: str) -> dict[str, Any]:
         _audit(file_id, meta.account, "Denied", "scope denied")
         raise CrmApiException("SCOPE_DENIED", "The file is outside the current user scope.")
     file_doc = frappe.get_doc("File", meta.private_file)
+    from rayher_crm.services.managed_file_access import contact_file_matches
+    if not contact_file_matches(file_doc, meta):
+        _audit(file_id, meta.account, "Denied", "invalid file association")
+        raise CrmApiException("CONTACT_FILE_NOT_FOUND", "Contact file was not found.")
     content = file_doc.get_content()
     if isinstance(content, str):
         content = content.encode()

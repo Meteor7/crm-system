@@ -129,6 +129,7 @@ class TestDocumentUploads(FrappeTestCase):
         self.assertEqual(document.file_name, "protected-manual.pdf")
         self.assertFalse(document.preview_file)
         self.assertTrue(stored_file.file_name.endswith(".bin"))
+        frappe.set_user("Administrator")
         self.assertEqual(stored_file.get_content(), content)
 
     def test_rejection_requires_reason_and_removes_the_private_file(self):
@@ -146,6 +147,7 @@ class TestDocumentUploads(FrappeTestCase):
         frappe.set_user(self.sales)
         submitted = submit_upload(metadata(title="Audit rollback"), pdf_part("audit.pdf"), scanner=CleanScanner())
         private_file = frappe.db.get_value("CRM Document Upload Request", submitted["id"], "private_file")
+        frappe.set_user("Administrator")
         original_content = frappe.get_doc("File", private_file).get_content()
 
         frappe.set_user(self.manager)
@@ -156,4 +158,5 @@ class TestDocumentUploads(FrappeTestCase):
         request = frappe.get_doc("CRM Document Upload Request", submitted["id"])
         self.assertEqual(request.status, "Pending")
         self.assertEqual(request.private_file, private_file)
+        frappe.set_user("Administrator")
         self.assertEqual(frappe.get_doc("File", private_file).get_content(), original_content)

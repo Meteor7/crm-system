@@ -193,7 +193,7 @@ def get_record(visit_id: str) -> dict[str, Any] | None:
 
 
 def list_attachments(visit_id: str) -> list[dict[str, Any]]:
-    rows = frappe.get_all("File", filters={"attached_to_doctype": "CRM Visit", "attached_to_name": visit_id, "is_private": 1}, fields=["name", "file_name", "file_type", "file_size", "creation", "owner"], order_by="creation desc")
+    rows = frappe.get_all("File", filters={"attached_to_doctype": "CRM Visit", "attached_to_name": visit_id, "is_private": 1, "custom_crm_service_upload": 1}, fields=["name", "file_name", "file_type", "file_size", "creation", "owner"], order_by="creation desc")
     return [{"id": row.name, "visitId": visit_id, "fileName": row.file_name, "mimeType": mimetypes.guess_type(row.file_name)[0] or "application/octet-stream", "size": int(row.file_size or 0), "uploadedAt": to_iso_timestamp(row.creation), "uploadedBy": row.owner} for row in rows]
 
 
@@ -357,7 +357,7 @@ def download(file_id: str) -> dict[str, Any]:
     if not frappe.db.exists("File", file_id):
         raise CrmApiException("NOT_FOUND", "Meeting attachment was not found.")
     file_doc = frappe.get_doc("File", file_id)
-    if file_doc.attached_to_doctype != "CRM Visit" or not file_doc.attached_to_name:
+    if file_doc.attached_to_doctype != "CRM Visit" or not file_doc.attached_to_name or not file_doc.is_private or not file_doc.get("custom_crm_service_upload"):
         raise CrmApiException("NOT_FOUND", "Meeting attachment was not found.")
     from rayher_crm.services.visits import _require_visit
     _require_visit(file_doc.attached_to_name)

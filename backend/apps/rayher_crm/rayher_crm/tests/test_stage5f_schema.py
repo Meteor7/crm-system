@@ -82,6 +82,40 @@ class TestStage5FSchema(FrappeTestCase):
         indexes = {row.index_name: row.columns for row in rows}
         self.assertEqual(indexes.get("unique_evaluation_artifact_version"), "evaluation,artifact_type,artifact_version,visibility")
 
+    def test_file_content_hash_index_survives_file_schema_sync(self):
+        from frappe.database.mariadb.schema import MariaDBTable
+        from rayher_crm.patches.v1_0 import add_file_content_hash_index
+        from rayher_crm.setup.indexes import install_stage5f_indexes
+
+        # Fresh installs and migrations create the index with these flags set,
+        # when core add_index does not declare it on the DocField.
+        for entry_point, flag in (
+            (install_stage5f_indexes, "in_install"),
+            (add_file_content_hash_index.execute, "in_migrate"),
+        ):
+            with self.subTest(entry_point=entry_point.__module__):
+                frappe.db.delete("Property Setter", {
+                    "doc_type": "File", "field_name": "content_hash", "property": "search_index",
+                })
+                frappe.clear_cache(doctype="File")
+                previous = frappe.flags.get(flag)
+                frappe.flags[flag] = True
+                try:
+                    entry_point()
+                finally:
+                    frappe.flags[flag] = previous
+                self.assertTrue(frappe.db.has_index("tabFile", add_file_content_hash_index.INDEX_NAME))
+                # frappe.db.updatedb("File") runs this plan after any Custom
+                # Field, Customize Form or core File DocType change. Build it
+                # without executing DDL.
+                table = MariaDBTable("File")
+                table.setup_table_columns()
+                for column in table.columns.values():
+                    column.build_for_alter_table(table.current_columns.get(column.fieldname.lower()))
+                self.assertNotIn("content_hash", {column.fieldname for column in table.drop_index})
+                self.assertEqual(f"{table.columns['content_hash'].fieldname}_index",
+                    add_file_content_hash_index.INDEX_NAME)
+
     def test_stage5f_scope_is_fail_closed_and_recipient_specific(self):
         sales = "stage5f-schema-sales@example.invalid"
         manager = "stage5f-schema-manager@example.invalid"

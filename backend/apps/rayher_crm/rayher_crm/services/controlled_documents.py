@@ -123,6 +123,8 @@ def _verified_file(
             "file association invalid",
             CrmApiException("NOT_FOUND", "The controlled document is unavailable."),
         )
+    from rayher_crm.services.managed_file_access import authorize_controlled_file_read
+    authorize_controlled_file_read(file_doc)
     content = file_doc.get_content()
     if isinstance(content, str):
         content = content.encode()

@@ -1445,6 +1445,23 @@ def conditions_for_doctype(
                     escaped_user,
                 )
             return owner_scope
+    if doctype == "CRM Contact File":
+        escaped_user = frappe.db.escape(resolved_user)
+        customer_scope = (
+            f"`crm_customer`.`custom_crm_owner` = {escaped_user}"
+            if role == "Sales"
+            else _customer_condition("`crm_customer`", role, escaped_user)
+        )
+        return (
+            "`tabCRM Contact File`.`deleted` = 0 AND EXISTS ("
+            "SELECT 1 FROM `tabContact` AS c "
+            "JOIN `tabDynamic Link` AS l ON l.parent=c.name AND l.parenttype='Contact' "
+            "AND l.parentfield='links' AND l.link_doctype='Customer' "
+            "JOIN `tabCustomer` AS `crm_customer` ON `crm_customer`.name=l.link_name "
+            "WHERE c.name=`tabCRM Contact File`.`contact` "
+            "AND `crm_customer`.name=`tabCRM Contact File`.`account` "
+            f"AND ({customer_scope}))"
+        )
     if role == "Manager":
         return "1=1"
 
@@ -1552,18 +1569,6 @@ def conditions_for_doctype(
             "WHERE `tabCRM Status Attachment`.`deleted` = 0 "
             "AND `tabCRM Opportunity`.`name` = `tabCRM Status Attachment`.`opportunity` "
             f"AND ({opportunity_scope}))"
-        )
-    if doctype == "CRM Contact File":
-        table = f"`tab{doctype}`"
-        customer_scope = (
-            f"`crm_customer`.`custom_crm_owner` = {escaped_user}"
-            if role == "Sales"
-            else _customer_condition("`crm_customer`", role, escaped_user)
-        )
-        live_scope = f"{table}.`deleted` = 0 AND " if doctype == "CRM Contact File" else ""
-        return (
-            "EXISTS (SELECT 1 FROM `tabCustomer` AS `crm_customer` "
-            f"WHERE {live_scope}`crm_customer`.`name` = {table}.`account` AND ({customer_scope}))"
         )
     if role == "Sales":
         return _sales_child_condition(

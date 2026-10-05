@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any
 
 import frappe
-from frappe.utils.file_manager import save_file
+from rayher_crm.services.private_file_lifecycle import save_private_file as save_file
 
 
 LEGACY_MUSHI_DOCUMENT_ID = "DOC-MUSHI-OVERVIEW"

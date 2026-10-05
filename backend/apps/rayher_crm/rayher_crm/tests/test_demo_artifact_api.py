@@ -17,6 +17,7 @@ from rayher_crm.services.demo_artifacts import (
 )
 from rayher_crm.services.opportunities import create_strategy_opportunity
 from rayher_crm.services.opportunity_stages import QUALIFIED_OPPORTUNITY
+from rayher_crm.services.private_file_lifecycle import save_private_file
 from rayher_crm.services.sites import create_site
 
 
@@ -336,7 +337,7 @@ class TestDemoArtifactApi(FrappeTestCase):
 
     def test_report_artifacts_cannot_be_created_through_the_standard_document_api(self):
         frappe.set_user("Administrator")
-        file_doc = save_file("forged.txt", b"forged", "CRM Evaluation", self.evaluation.name, is_private=1)
+        file_doc = save_private_file("forged.txt", b"forged", "CRM Evaluation", self.evaluation.name)
         before = frappe.db.count("CRM Demo Artifact", {"demo_request": self.submitted.name})
 
         # No CRM role holds create on the DocType: posting to /api/resource/CRM Demo Artifact
@@ -357,8 +358,8 @@ class TestDemoArtifactApi(FrappeTestCase):
 
     def test_download_refuses_a_file_owned_by_another_record(self):
         frappe.set_user("Administrator")
-        foreign_file = save_file(
-            "other-customer.txt", b"secret", "CRM Demo Request", self.foreign_request.name, is_private=1,
+        foreign_file = save_private_file(
+            "other-customer.txt", b"secret", "CRM Demo Request", self.foreign_request.name,
         )
         forged = insert_service_artifact(self._report_values(foreign_file.name))
 
@@ -372,7 +373,7 @@ class TestDemoArtifactApi(FrappeTestCase):
 
         # A file attached to the artifact's own Evaluation is still served.
         frappe.set_user("Administrator")
-        own_file = save_file("own-report.txt", b"own report", "CRM Evaluation", self.evaluation.name, is_private=1)
+        own_file = save_private_file("own-report.txt", b"own report", "CRM Evaluation", self.evaluation.name)
         own = insert_service_artifact(self._report_values(own_file.name, artifact_version=100))
         frappe.set_user(self.manager)
         self.assertEqual(download_demo_artifact(own.name)["content"], b"own report")
@@ -382,7 +383,7 @@ class TestDemoArtifactApi(FrappeTestCase):
 
         frappe.set_user("Administrator")
         # The current shape: the upload service re-points the File at its artifact.
-        current = save_file("current.txt", b"current report", "CRM Evaluation", self.evaluation.name, is_private=1)
+        current = save_private_file("current.txt", b"current report", "CRM Evaluation", self.evaluation.name)
         current_artifact = insert_service_artifact(self._report_values(current.name, artifact_version=200))
         frappe.db.set_value("File", current.name, {
             "attached_to_doctype": "CRM Demo Artifact", "attached_to_name": current_artifact.name,
@@ -390,7 +391,7 @@ class TestDemoArtifactApi(FrappeTestCase):
         # The legacy shape: still attached to the Evaluation, which
         # `_file_belongs_to_artifact` keeps serving -- so it needs the same
         # treatment, and sweeping `attached_to_doctype` alone would skip it.
-        legacy = save_file("legacy.txt", b"legacy report", "CRM Evaluation", self.evaluation.name, is_private=1)
+        legacy = save_private_file("legacy.txt", b"legacy report", "CRM Evaluation", self.evaluation.name)
         insert_service_artifact(self._report_values(legacy.name, artifact_version=201))
         unrelated = save_file("unrelated.txt", b"nothing to do with artifacts", None, None, is_private=1)
         for name in (current.name, legacy.name, unrelated.name):

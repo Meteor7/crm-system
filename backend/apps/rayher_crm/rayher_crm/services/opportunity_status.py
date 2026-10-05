@@ -289,6 +289,8 @@ def download_file(opportunity_id: str, record_id: str, file_id: str) -> dict:
         file_doc = frappe.get_doc("File", meta.private_file)
         if not file_doc.is_private:
             raise CrmApiException("NOT_FOUND", "Status attachment was not found.")
+        from rayher_crm.services.managed_file_access import authorize_restricted_file_read
+        authorize_restricted_file_read(file_doc)
         content = file_doc.get_content()
     except CrmApiException as error:
         _audit_download(file_id, account, "Denied", error.code)

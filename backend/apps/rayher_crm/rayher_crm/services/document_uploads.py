@@ -101,7 +101,7 @@ def _publish(request) -> None:
     }).insert(ignore_permissions=True)
     frappe.db.set_value("File", request.private_file, {
         "attached_to_doctype": "CRM Controlled Document", "attached_to_name": document.name,
-        "attached_to_field": None,
+        "attached_to_field": None, "owner": "Administrator",
     }, update_modified=False)
     request.status = "Published"
     request.published_document = document.name
