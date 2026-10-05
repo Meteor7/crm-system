@@ -7,7 +7,7 @@ import { requestErrorMessage } from '@/api/request-state'
 import { useAppStore } from '@/stores/app'
 import { localeMessage, useI18n, useLocaleMessage } from '@/i18n'
 import { detailRoute, labels, metricText } from '@/features/cockpit/presentation'
-import { cockpitRoute, pickScope, shanghaiDate, type CockpitContext } from '@/features/cockpit/scope'
+import { cockpitRoute, dateWithin, EARLIEST_COCKPIT_DATE, endsBeforeEarliest, pickScope, shanghaiDate, showableAnchor, type CockpitContext } from '@/features/cockpit/scope'
 import WarningNextStep from '@/features/cockpit/WarningNextStep.vue'
 import RegionSelect from '@/features/cockpit/RegionSelect.vue'
 import type { CockpitSettings, CockpitSettingsInput, Metric, PeriodKind, ReviewQuery, ReviewRow, WarningHandling, WarningsDto } from '@/features/cockpit/types'
@@ -24,9 +24,13 @@ const fmt = (value: Metric) => metricText(value, locale.value)
 const periods: PeriodKind[] = ['week', 'month', 'quarter', 'year']
 // Opened from Review with its period and filters; the backend validates every value.
 const initial = (key: string) => typeof route.query[key] === 'string' ? (route.query[key] as string).trim() : ''
+// A date from a link is taken only if this page can show its period; otherwise the page opens on its default
+// period.
+const linkedPeriod: PeriodKind = periods.includes(initial('period') as PeriodKind) ? initial('period') as PeriodKind : 'week'
+const linkedAnchor = showableAnchor(linkedPeriod, initial('anchor'), shanghaiDate())
 const query = reactive<ReviewQuery>({
-  period: periods.includes(initial('period') as PeriodKind) ? initial('period') as PeriodKind : 'week',
-  ...(initial('anchor') ? { anchor: initial('anchor') } : {}),
+  period: linkedPeriod,
+  ...(linkedAnchor ? { anchor: linkedAnchor } : {}),
   sales: initial('sales'), market: initial('market'), region: initial('region'), equipment: initial('equipment'),
 })
 const data = ref<WarningsDto | null>(null)
@@ -182,6 +186,28 @@ async function load(quiet = false, saved = true) {
 function step(next: boolean) {
   if (data.value) query.anchor = next ? data.value.period.nextAnchor : data.value.period.previousAnchor
 }
+// The date asked for stays when the kind of period changes, unless the new kind cannot show it: the week that
+// reaches into 2000 starts in 1999, and the month, quarter and year of that day end before 2000.
+function changePeriod(period: PeriodKind) {
+  if (query.anchor && endsBeforeEarliest(period, query.anchor)) query.anchor = EARLIEST_COCKPIT_DATE
+  query.period = period
+}
+// What the date field holds while it is being edited. The field is bound to it from the moment it takes the
+// focus until it is left, so a response that arrives in the middle of a date redraws the page without putting
+// the date on show back into the field. That holds for an empty field too: typing a year into it changes
+// nothing a script can see until the date is whole.
+const dateDraft = ref<string | null>(null)
+// The date field asks for a period only when it holds a whole date that this page can show: not before
+// EARLIEST_COCKPIT_DATE and not after today. A year typed digit by digit passes through the years 2, 20 and
+// 202, and a cleared field is empty; none of those is a request.
+function pickAnchor(event: Event) {
+  const picked = dateWithin((event.target as HTMLInputElement).value, EARLIEST_COCKPIT_DATE, shanghaiDate())
+  if (picked) query.anchor = picked
+}
+// On leaving the field, a date that was not taken gives way to the one on show.
+function showAnchor(event: Event) { dateDraft.value = null; (event.target as HTMLInputElement).value = shownAnchor.value }
+// The period before the earliest one the cockpit shows (the one that reaches into 2000) cannot be asked for.
+const atEarliestPeriod = computed(() => Boolean(data.value) && data.value!.period.start <= EARLIEST_COCKPIT_DATE)
 
 // Focus follows the inline editors: into the text when one opens, back to the row's button once a save or cancel
 // settles (buttons stay disabled while a save reloads), or to a fallback when the row moved.
@@ -471,7 +497,7 @@ onBeforeUnmount(() => { revision++ })
         <label><span class="filter-name">{{ copy('Sales', '销售') }}</span><select v-model="query.sales" :disabled="loading || busy" aria-label="Sales"><option value="">{{ copy('All sales', '全部销售') }}</option><option v-for="person in filterOptions.sales" :key="person.id" :value="person.id">{{ person.name }}</option></select></label>
         <label><span class="filter-name">{{ copy('Market', '市场') }}</span><select v-model="query.market" :disabled="loading || busy" aria-label="Market"><option value="">{{ copy('All markets', '全部市场') }}</option><option v-for="market in filterOptions.markets" :key="market" :value="market">{{ market }}</option></select></label>
         <label><span class="filter-name">{{ copy('Equipment', '设备') }}</span><select v-model="query.equipment" :disabled="loading || busy" aria-label="Equipment"><option value="">{{ copy('All equipment', '全部设备') }}</option><option v-for="equipment in filterOptions.equipment ?? []" :key="equipment" :value="equipment">{{ equipment }}</option></select></label>
-        <div class="period-controls"><div class="segmented" :aria-label="copy('Period', '统计周期')"><button v-for="period in periods" :key="period" :aria-pressed="query.period === period" :class="{ active: query.period === period }" :disabled="loading || busy" @click="query.period = period">{{ label(period) }}</button></div><button :disabled="loading || busy || !data" :aria-label="copy('Previous period', '上一期')" @click="step(false)"><ChevronLeft :size="16" /></button><input :value="query.anchor || data?.period.start" @change="query.anchor = ($event.target as HTMLInputElement).value" type="date" :aria-label="copy('Reference date', '参考日期')" :disabled="loading || busy" /><button :disabled="loading || busy || !data?.period.hasNext" :aria-label="copy('Next period', '下一期')" @click="step(true)"><ChevronRight :size="16" /></button></div>
+        <div class="period-controls"><div class="segmented" :aria-label="copy('Period', '统计周期')"><button v-for="period in periods" :key="period" :aria-pressed="query.period === period" :class="{ active: query.period === period }" :disabled="loading || busy" @click="changePeriod(period)">{{ label(period) }}</button></div><button :disabled="loading || busy || !data || atEarliestPeriod" :aria-label="copy('Previous period', '上一期')" @click="step(false)"><ChevronLeft :size="16" /></button><input :value="dateDraft ?? shownAnchor" :min="EARLIEST_COCKPIT_DATE" :max="shanghaiDate()" type="date" :aria-label="copy('Reference date', '参考日期')" :disabled="busy" @focus="dateDraft = ($event.target as HTMLInputElement).value" @input="dateDraft = ($event.target as HTMLInputElement).value" @change="pickAnchor" @blur="showAnchor" /><button :disabled="loading || busy || !data?.period.hasNext" :aria-label="copy('Next period', '下一期')" @click="step(true)"><ChevronRight :size="16" /></button></div>
       </nav>
     </div>
     <div v-if="loading" class="review-state" role="status">{{ copy('Loading warnings…', '正在读取预警数据…') }}</div>

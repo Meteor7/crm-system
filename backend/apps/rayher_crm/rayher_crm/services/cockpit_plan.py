@@ -9,7 +9,7 @@ from __future__ import annotations
 from datetime import date, timedelta
 from decimal import Decimal
 
-from rayher_crm.services.cockpit_metrics import bounds, in_region, insufficient, iso, metric, number, stamp
+from rayher_crm.services.cockpit_metrics import bounds, in_region, insufficient, iso, metric, number, stamp, supported_bounds
 from rayher_crm.services.equipment_names import equipment_key
 from rayher_crm.services.opportunity_stages import OPEN_STAGES, PROBABILITY_LEVELS
 
@@ -21,7 +21,7 @@ PLAN_EVALUATION_STATUSES = ("Scheduled", "Testing")
 
 def plan_period(query):
     kind = query.get("period") or "week"
-    start, end = bounds(kind, date.fromisoformat(query["anchor"]))
+    start, end = supported_bounds(kind, date.fromisoformat(query["anchor"]))
     previous_start, _ = bounds(kind, start - timedelta(days=1))
     return {"kind": kind, "start": start, "end": end - timedelta(days=1),
             "previousAnchor": previous_start.isoformat(), "nextAnchor": end.isoformat()}

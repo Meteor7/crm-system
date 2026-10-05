@@ -131,17 +131,92 @@ describe('Warnings page', () => {
     blank.unmount()
   })
 
+  it('asks for a period only when the date field or the link holds a whole date it can show', async () => {
+    // Noon on 2026-10-04 in Shanghai.
+    vi.useFakeTimers({ toFake: ['Date'] }); vi.setSystemTime(new Date('2026-10-04T04:00:00Z'))
+    try {
+      const api = createMockApi({ role: 'Manager', latency: 0 })
+      const getWarnings = vi.fn(async () => ({ data: warningsFixture(), warnings: [], meta }))
+      api.getWarnings = getWarnings
+      const router = createAppRouter()
+      // The date of this link is in the future: it is not sent, and the rest of the link is kept.
+      await router.push('/warnings?period=month&anchor=2026-12-01&market=Frontend'); await router.isReady()
+      const wrapper = mount(WarningsPage, { props: { apiClient: api }, global: { plugins: [createPinia(), router] } })
+      await flushPromises()
+      expect(getWarnings).toHaveBeenCalledTimes(1)
+      expect(getWarnings).toHaveBeenCalledWith({ period: 'month', sales: '', market: 'Frontend', region: '', equipment: '' })
+      expect(wrapper.find('.review-state.error').exists()).toBe(false)
+
+      const field = wrapper.get<HTMLInputElement>('input[type="date"]')
+      expect([field.attributes('min'), field.attributes('max')]).toEqual(['2000-01-01', '2026-10-04'])
+      getWarnings.mockClear()
+      // The year typed digit by digit, a cleared field, a date in the future: nothing is asked for.
+      for (const value of ['0002-09-21', '0202-09-21', '', '2026-10-05']) {
+        field.element.value = value
+        await field.trigger('change')
+      }
+      await flushPromises()
+      expect(getWarnings).not.toHaveBeenCalled()
+      await field.trigger('blur')
+      expect(field.element.value).toBe(warningsFixture().period.start)
+
+      // A whole date in range is asked for, and the field stays usable while it loads.
+      let finish!: () => void
+      getWarnings.mockImplementationOnce(() => new Promise((resolve) => { finish = () => resolve({ data: warningsFixture(), warnings: [], meta }) }))
+      field.element.value = '2025-09-21'
+      await field.trigger('input'); await field.trigger('change')
+      expect(getWarnings).toHaveBeenCalledTimes(1)
+      expect(getWarnings.mock.calls[0]).toEqual([{ period: 'month', anchor: '2025-09-21', sales: '', market: 'Frontend', region: '', equipment: '' }])
+      expect(field.attributes('disabled')).toBeUndefined()
+      // What is typed while that load is pending stays in the field when its answer redraws the page.
+      field.element.value = '0002-09-21'
+      await field.trigger('input'); await field.trigger('change')
+      finish(); await flushPromises()
+      expect(getWarnings).toHaveBeenCalledTimes(1)
+      expect(field.element.value).toBe('0002-09-21')
+      await field.trigger('blur')
+      expect(field.element.value).toBe('2025-09-21')
+      wrapper.unmount()
+    } finally { vi.useRealTimers() }
+  })
+
+  it('opens the earliest week from a link, stops stepping back there and gives way to 2000 for another kind of period', async () => {
+    const earliest = warningsFixture()
+    earliest.period = { ...earliest.period, start: '1999-12-27', end: '2000-01-02', previousAnchor: '1999-12-20', nextAnchor: '2000-01-03' }
+    const api = createMockApi({ role: 'Manager', latency: 0 })
+    const getWarnings = vi.fn(async () => ({ data: earliest, warnings: [], meta }))
+    api.getWarnings = getWarnings
+    const router = createAppRouter()
+    // The link Review makes on the week that reaches into 2000.
+    await router.push('/warnings?period=week&anchor=1999-12-27'); await router.isReady()
+    const wrapper = mount(WarningsPage, { props: { apiClient: api }, global: { plugins: [createPinia(), router] } })
+    await flushPromises()
+    expect(getWarnings).toHaveBeenLastCalledWith({ period: 'week', anchor: '1999-12-27', sales: '', market: '', region: '', equipment: '' })
+    expect(wrapper.find('.review-state.error').exists()).toBe(false)
+    expect(wrapper.get('button[aria-label="上一期"]').attributes('disabled')).toBeDefined()
+    expect(wrapper.get('button[aria-label="下一期"]').attributes('disabled')).toBeUndefined()
+
+    await wrapper.findAll('.period-controls .segmented button')[1].trigger('click')
+    await flushPromises()
+    expect(getWarnings).toHaveBeenLastCalledWith({ period: 'month', anchor: '2000-01-01', sales: '', market: '', region: '', equipment: '' })
+    wrapper.unmount()
+  })
+
   it('hands Plan the next period and Opportunities this period with the same scope, on the Shanghai calendar', async () => {
     const api = createMockApi({ role: 'Manager', latency: 0 })
     api.getWarnings = vi.fn(async () => ({ data: warningsFixture(), warnings: [], meta }))
     const router = createAppRouter()
-    await router.push('/warnings?period=month&anchor=2026-12-10&sales=alice&region=East+China'); await router.isReady()
-    const scoped = mount(WarningsPage, { props: { apiClient: api }, global: { plugins: [createPinia(), router] } })
-    await flushPromises()
-    expect(api.getWarnings).toHaveBeenNthCalledWith(1, { period: 'month', anchor: '2026-12-10', sales: 'alice', market: '', region: 'East China', equipment: '' })
-    expect(scoped.get('.review-controls a[href^="/plan"]').attributes('href')).toBe('/plan?period=month&anchor=2027-01-01&reviewAnchor=2026-12-10&sales=alice&region=East+China')
-    expect(scoped.get('.review-controls a[href^="/opportunity-board"]').attributes('href')).toBe('/opportunity-board?period=month&reviewAnchor=2026-12-10&sales=alice&region=East+China')
-    scoped.unmount()
+    // The date of the link is taken only when it is not in the future: the clock stands after it.
+    vi.useFakeTimers({ toFake: ['Date'] }); vi.setSystemTime(new Date('2026-12-15T04:00:00Z'))
+    try {
+      await router.push('/warnings?period=month&anchor=2026-12-10&sales=alice&region=East+China'); await router.isReady()
+      const scoped = mount(WarningsPage, { props: { apiClient: api }, global: { plugins: [createPinia(), router] } })
+      await flushPromises()
+      expect(api.getWarnings).toHaveBeenNthCalledWith(1, { period: 'month', anchor: '2026-12-10', sales: 'alice', market: '', region: 'East China', equipment: '' })
+      expect(scoped.get('.review-controls a[href^="/plan"]').attributes('href')).toBe('/plan?period=month&anchor=2027-01-01&reviewAnchor=2026-12-10&sales=alice&region=East+China')
+      expect(scoped.get('.review-controls a[href^="/opportunity-board"]').attributes('href')).toBe('/opportunity-board?period=month&reviewAnchor=2026-12-10&sales=alice&region=East+China')
+      scoped.unmount()
+    } finally { vi.useRealTimers() }
     // Without an anchor and before (or without) data, this page shows today's Shanghai period: 16:30 UTC on Sep 30 is Oct 1 there.
     vi.useFakeTimers({ toFake: ['Date'] }); vi.setSystemTime(new Date('2026-09-30T16:30:00Z'))
     try {

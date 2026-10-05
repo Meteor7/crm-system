@@ -165,6 +165,38 @@ class TestCockpitApi(FrappeTestCase):
                 cockpit.get_plan_details({"period": "week", "anchor": "2026-09-21", "metric": "leads"})
             self.assertEqual(error.exception.code, "VALIDATION_ERROR")
 
+    def test_a_period_before_2000_is_refused_as_invalid_and_does_not_fail_half_way(self):
+        # A year still being typed into the date field arrives as 0002; the reads behind a period
+        # look back up to 24 months and cannot do that from the first years of the calendar.
+        reads = (
+            cockpit.get_review, cockpit.get_warnings, cockpit.get_plan,
+            lambda query: cockpit.get_details({**query, "metric": "visits"}),
+            lambda query: cockpit.get_plan_details({**query, "metric": "all"}),
+        )
+        with patch.object(cockpit, "resolve_crm_role", return_value="Manager"):
+            # 1999-12-20 is in the last week, month, quarter and year that end before 2000.
+            for anchor in ("0001-01-01", "0002-09-21", "0020-09-21", "1999-12-20"):
+                for period in ("week", "month", "quarter", "year"):
+                    query = {"period": period, "anchor": anchor}
+                    for read in reads:
+                        with self.subTest(anchor=anchor, period=period, read=getattr(read, "__name__", "details")):
+                            with self.assertRaises(CrmApiException) as error:
+                                read(query)
+                            self.assertEqual(error.exception.code, "VALIDATION_ERROR")
+
+            # The earliest period is the one that reaches into 2000. Its own first day lies in 1999,
+            # and that is the date the pages ask its details with: every date of it is taken.
+            first_week = {"start": "1999-12-27", "end": "2000-01-02", "previousAnchor": "1999-12-20", "nextAnchor": "2000-01-03"}
+            for anchor in ("1999-12-27", "1999-12-31", "2000-01-01", "2000-01-02"):
+                query = {"period": "week", "anchor": anchor}
+                with self.subTest(anchor=anchor):
+                    self.assertEqual(cockpit.get_plan(query)["period"], {"kind": "week", **first_week})
+                    self.assertEqual(cockpit.get_review(query)["period"]["start"][:10], "1999-12-27")
+                    for read in reads:
+                        read(query)
+            for period, start in (("month", "2000-01-01"), ("quarter", "2000-01-01"), ("year", "2000-01-01")):
+                self.assertEqual(cockpit.get_plan({"period": period, "anchor": "2000-01-01"})["period"]["start"], start)
+
     def test_plan_resolves_engineer_assignees_in_bulk_without_making_them_sales(self):
         engineer = "cockpit-engineer@example.invalid"
         if not frappe.db.exists("User", engineer):

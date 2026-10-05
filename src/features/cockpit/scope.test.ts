@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import { nextPeriodStart } from './presentation'
 import {
-  cockpitRoute, defaultReviewAnchor, fromBoardScope, nextPeriodAfter, periodStartOf, planStart, previousPeriodBefore,
-  readCockpitQuery, reviewAnchorForPlan, shanghaiDate, toBoardScope, type CockpitContext,
+  cockpitRoute, dateWithin, defaultReviewAnchor, EARLIEST_COCKPIT_DATE, endsBeforeEarliest, fromBoardScope, LATEST_PLAN_DATE, nextPeriodAfter, periodStartOf, planStart, previousPeriodBefore,
+  readCockpitQuery, reviewAnchorForPlan, shanghaiDate, showableAnchor, toBoardScope, type CockpitContext,
 } from './scope'
 
 const scope = { sales: 'alice', region: 'East China', market: 'Frontend', equipment: 'Kibo 4895C' }
@@ -132,6 +132,59 @@ describe('Cockpit navigation context', () => {
     expect(planStart(readCockpitQuery({ anchor: '2026-02-30' }), NOW)).toEqual({ period: 'week', anchor: '2026-10-05' })
     expect(planStart(readCockpitQuery({ anchor: 'next' }), NOW)).toEqual({ period: 'week', anchor: '2026-10-05' })
     expect(planStart(readCockpitQuery({ anchor: 'next', reviewAnchor: '2026-09-21' }), NOW)).toEqual({ period: 'week', anchor: '2026-09-28' })
+  })
+
+  it('takes a date for a request only when it is a whole date inside the bounds', () => {
+    const within = (value: string) => dateWithin(value, EARLIEST_COCKPIT_DATE, '2026-10-04')
+    expect(['2000-01-01', '2025-09-21', '2026-10-04'].map(within)).toEqual(['2000-01-01', '2025-09-21', '2026-10-04'])
+    // A year still being typed, a cleared field, a date past the upper bound, and what is not a date at all.
+    expect(['0002-09-21', '0020-09-21', '0202-09-21', '1999-12-31', '', '2026-10-05', '2026-02-30', 'next'].map(within)).toEqual(Array(8).fill(''))
+  })
+
+  it('hands Review the earliest period itself when Plan shows it, since there is none before it', () => {
+    // Plan on the week that reaches into 2000, opened with a date of that week or with its first day.
+    for (const planAnchor of ['2000-01-01', '1999-12-27']) {
+      expect(reviewAnchorForPlan('week', planAnchor, '', NOW)).toBe('1999-12-27')
+      // A retained Review date of the week before is not handed back either: that week is refused.
+      expect(reviewAnchorForPlan('week', planAnchor, '1999-12-20', NOW)).toBe('1999-12-27')
+    }
+    for (const kind of ['month', 'quarter', 'year'] as const) expect(reviewAnchorForPlan(kind, '2000-01-01', '', NOW)).toBe('2000-01-01')
+    // What it hands over is a date the other pages take.
+    expect(showableAnchor('week', reviewAnchorForPlan('week', '2000-01-01', '', NOW), shanghaiDate(NOW))).toBe('1999-12-27')
+    // One period later the period before it exists, and is handed over as before.
+    expect(reviewAnchorForPlan('week', '2000-01-03', '', NOW)).toBe('1999-12-27')
+    expect(reviewAnchorForPlan('month', '2000-02-10', '', NOW)).toBe('2000-01-01')
+    // A cleared Plan date keeps a retained Review date only when its period can be shown.
+    expect(reviewAnchorForPlan('week', '', '1999-12-20', NOW)).toBe('')
+    expect(reviewAnchorForPlan('week', '', '1999-12-27', NOW)).toBe('1999-12-27')
+  })
+
+  it('takes the date of a link when its period reaches into 2000, as the backend does', () => {
+    // The week that reaches into 2000 starts on 1999-12-27: each of its days is taken as a week, and none of
+    // the days of 1999 as a month, quarter or year, which end before 2000.
+    for (const day of ['1999-12-27', '1999-12-31', '2000-01-01', '2000-01-02']) expect(showableAnchor('week', day, '2026-10-04')).toBe(day)
+    for (const kind of ['month', 'quarter', 'year'] as const) {
+      expect(showableAnchor(kind, '1999-12-27', '2026-10-04')).toBe('')
+      expect(endsBeforeEarliest(kind, '1999-12-27')).toBe(true)
+      expect(showableAnchor(kind, '2000-01-01', '2026-10-04')).toBe('2000-01-01')
+    }
+    expect(endsBeforeEarliest('week', '1999-12-27')).toBe(false)
+    expect(endsBeforeEarliest('week', '1999-12-26')).toBe(true)
+    // What is not a date, lies after the latest date, or is a year still being typed is not taken.
+    expect(['', 'next', '2026-02-30', '2026-10-05', '0002-09-21', '1999-12-26'].map((value) => showableAnchor('week', value, '2026-10-04'))).toEqual(Array(6).fill(''))
+  })
+
+  it('opens Plan on its derived period when the date of the link is out of range', () => {
+    for (const anchor of ['0002-09-21', '1999-12-26', '2100-01-01', '9999-01-01']) {
+      expect(planStart(readCockpitQuery({ anchor }), NOW)).toEqual({ period: 'week', anchor: '2026-10-05' })
+      expect(planStart(readCockpitQuery({ reviewAnchor: anchor }), NOW)).toEqual({ period: 'week', anchor: '2026-10-05' })
+    }
+    expect(planStart(readCockpitQuery({ anchor: LATEST_PLAN_DATE }), NOW)).toEqual({ period: 'week', anchor: LATEST_PLAN_DATE })
+    // The first day of the earliest week is a date of 1999; Review hands it over as it shows it.
+    expect(planStart(readCockpitQuery({ anchor: '1999-12-27' }), NOW)).toEqual({ period: 'week', anchor: '1999-12-27' })
+    expect(planStart(readCockpitQuery({ reviewAnchor: '1999-12-27' }), NOW)).toEqual({ period: 'week', anchor: '2000-01-03' })
+    // As a month that day lies in a period that ends before 2000: Plan opens on the month after today.
+    expect(planStart(readCockpitQuery({ period: 'month', anchor: '1999-12-27' }), NOW)).toEqual({ period: 'month', anchor: nextPeriodAfter('month', shanghaiDate(NOW)) })
   })
 
   it('leaves out empty scope and unknown periods and anchors', () => {

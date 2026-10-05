@@ -2,6 +2,7 @@ import { flushPromises, mount } from '@vue/test-utils'
 import { createPinia } from 'pinia'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { createMockApi } from '@/api/mock-adapter'
+import { CrmApiError } from '@/api/contracts'
 import { createAppRouter } from '@/app/router'
 import { useAppStore } from '@/stores/app'
 import { planFixture, planDetailsFixture } from '@/features/cockpit/plan.fixture'
@@ -174,6 +175,98 @@ describe('Plan business interface', () => {
     await vi.waitFor(() => expect(router.currentRoute.value.path).toBe('/calendar'))
     wrapper.unmount()
   })
+  it('asks for a period only when the date field or the link holds a whole date in range', async () => {
+    const { wrapper, api } = await setup()
+    const getPlan = vi.mocked(api.getPlan)
+    const field = wrapper.get<HTMLInputElement>('input[type="date"]')
+    const shown = field.element.value
+    expect([field.attributes('min'), field.attributes('max')]).toEqual(['2000-01-01', '2099-12-31'])
+    getPlan.mockClear()
+    // A cleared field, the year typed digit by digit, a mistyped year: nothing is asked for and nothing fails.
+    for (const value of ['', '0002-09-21', '0202-09-21', '9999-01-01']) {
+      field.element.value = value
+      await field.trigger('change')
+    }
+    await flushPromises()
+    expect(getPlan).not.toHaveBeenCalled()
+    expect(wrapper.find('.error-banner').exists()).toBe(false)
+    await field.trigger('blur')
+    expect(field.element.value).toBe(shown)
+    // Plan looks ahead: a date years from now is asked for.
+    let finish!: () => void
+    getPlan.mockImplementationOnce(() => new Promise((resolve) => { finish = () => resolve(response(planFixture())) }))
+    field.element.value = '2031-05-05'
+    await field.trigger('input'); await field.trigger('change')
+    expect(getPlan).toHaveBeenCalledTimes(1)
+    expect(getPlan.mock.calls[0][0]).toMatchObject({ anchor: '2031-05-05' })
+    // What is typed while that load is pending stays in the field when its answer redraws the page.
+    field.element.value = '0002-05-05'
+    await field.trigger('input'); await field.trigger('change')
+    finish(); await flushPromises()
+    expect(getPlan).toHaveBeenCalledTimes(1)
+    expect(field.element.value).toBe('0002-05-05')
+    await field.trigger('blur')
+    expect(field.element.value).toBe('2031-05-05')
+
+    // The period that reaches into 2000 is the earliest: there is no stepping back from it.
+    expect(wrapper.get('button[aria-label="上一周期"]').attributes('disabled')).toBeUndefined()
+    const earliest = planFixture()
+    earliest.period = { ...earliest.period, start: '1999-12-27', end: '2000-01-02', previousAnchor: '1999-12-20', nextAnchor: '2000-01-03' }
+    getPlan.mockResolvedValueOnce(response(earliest))
+    field.element.value = '2000-01-01'
+    await field.trigger('input'); await field.trigger('change'); await field.trigger('blur')
+    await flushPromises()
+    expect(wrapper.get('button[aria-label="上一周期"]').attributes('disabled')).toBeDefined()
+    expect(wrapper.get('button[aria-label="下一周期"]').attributes('disabled')).toBeUndefined()
+    // The details of that period are asked with its first day, which lies in 1999.
+    expect(vi.mocked(api.getPlanDetails).mock.calls.at(-1)![0]).toMatchObject({ anchor: '1999-12-27' })
+    // Review and Warnings are handed that earliest period, not the one before it, which they could not show.
+    expect(wrapper.get('a[href^="/dashboard"]').attributes('href')).toBe('/dashboard?period=week&anchor=1999-12-27')
+    expect(wrapper.get('a[href^="/warnings"]').attributes('href')).toBe('/warnings?period=week&anchor=1999-12-27')
+    wrapper.unmount()
+
+    // A link with a date out of range opens on the period after today, like a link without a date.
+    const fresh = await setup()
+    const defaultAnchor = vi.mocked(fresh.api.getPlan).mock.calls[0][0].anchor
+    fresh.wrapper.unmount()
+    for (const anchor of ['0002-09-21', '1999-12-26', '9999-01-01']) {
+      const linked = createMockApi({ role: 'Manager', latency: 0 })
+      linked.getPlan = vi.fn(async () => response(planFixture()))
+      linked.getPlanDetails = vi.fn(async () => response(planDetailsFixture()))
+      const router = createAppRouter()
+      await router.push(`/plan?period=week&anchor=${anchor}`); await router.isReady()
+      const opened = mount(PlanPage, { props: { apiClient: linked }, global: { plugins: [createPinia(), router] } })
+      await flushPromises()
+      expect(vi.mocked(linked.getPlan).mock.calls[0][0]).toMatchObject({ period: 'week', anchor: defaultAnchor })
+      opened.unmount()
+    }
+    // The first day of the week that reaches into 2000 is a date of 1999, and is taken.
+    const earliestLink = createMockApi({ role: 'Manager', latency: 0 })
+    earliestLink.getPlan = vi.fn(async () => response(planFixture()))
+    earliestLink.getPlanDetails = vi.fn(async () => response(planDetailsFixture()))
+    const earliestRouter = createAppRouter()
+    await earliestRouter.push('/plan?period=week&anchor=1999-12-27'); await earliestRouter.isReady()
+    const earliestPage = mount(PlanPage, { props: { apiClient: earliestLink }, global: { plugins: [createPinia(), earliestRouter] } })
+    await flushPromises()
+    expect(vi.mocked(earliestLink.getPlan).mock.calls[0][0]).toMatchObject({ period: 'week', anchor: '1999-12-27' })
+    earliestPage.unmount()
+  })
+
+  it('suggests a server without Plan only when the failure is not about the period asked for', async () => {
+    const { wrapper, api } = await setup()
+    const hint = '若当前服务器尚未启用 Plan'
+    vi.mocked(api.getPlan).mockRejectedValueOnce(new CrmApiError('VALIDATION_ERROR', 'Invalid Plan period or anchor.', 'req-plan', false))
+    await wrapper.get('button[aria-label="刷新"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.get('.error-banner').text()).toContain('无法显示这个周期，请重新选择日期。')
+    expect(wrapper.get('.error-banner').text()).not.toContain(hint)
+    vi.mocked(api.getPlan).mockRejectedValueOnce(new CrmApiError('INTERNAL_ERROR', 'The request could not be completed.', 'req-plan', true))
+    await wrapper.get('.error-banner button').trigger('click')
+    await flushPromises()
+    expect(wrapper.get('.error-banner').text()).toContain(hint)
+    wrapper.unmount()
+  })
+
   it('does not replace the latest filter results with a stale response', async () => {
     const { wrapper, api } = await setup()
     let resolve!: (value: Awaited<ReturnType<typeof api.getPlan>>) => void

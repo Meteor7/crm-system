@@ -2,13 +2,13 @@
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ChevronLeft, ChevronRight, RefreshCw } from '@lucide/vue'
-import { api as defaultApi, type CrmApi } from '@/api'
+import { api as defaultApi, CrmApiError, type CrmApi } from '@/api'
 import { requestErrorMessage } from '@/api/request-state'
 import { useAppStore } from '@/stores/app'
 import { useI18n, useLocaleMessage } from '@/i18n'
 import { labels, metricText, nextPeriodStart } from '@/features/cockpit/presentation'
 import RegionSelect from '@/features/cockpit/RegionSelect.vue'
-import { cockpitRoute, pickScope, planStart, readCockpitQuery, reviewAnchorForPlan, type CockpitContext } from '@/features/cockpit/scope'
+import { cockpitRoute, dateWithin, EARLIEST_COCKPIT_DATE, LATEST_PLAN_DATE, pickScope, planStart, readCockpitQuery, reviewAnchorForPlan, type CockpitContext } from '@/features/cockpit/scope'
 import type { Metric, PeriodKind, ReviewDto } from '@/features/cockpit/types'
 import type { PlanDto, PlanDetails, PlanItem, PlanKind, PlanMetric, PlanMoney, PlanQuery } from '@/features/cockpit/plan-types'
 
@@ -37,6 +37,8 @@ const data = ref<PlanDto | null>(null), items = ref<PlanDetails | null>(null)
 const filters = ref<ReviewDto['filters']>({ sales: [], markets: [], regions: [], regionReady: false, equipment: [] })
 const loading = ref(false), itemLoading = ref(false)
 const error = useLocaleMessage(), itemError = useLocaleMessage()
+// A request the server refused as invalid is about the period asked for, not about a server without Plan.
+const errorIsInvalidRequest = ref(false)
 const metric = ref<Exclude<PlanMetric, 'overdue'>>('all'), groupBy = ref<'day' | 'sales' | 'market'>('day')
 const page = ref(1)
 const agendaRoot = ref<HTMLElement | null>(null)
@@ -108,7 +110,7 @@ async function loadItems() {
 }
 async function load() {
   const id = ++revision
-  detailRevision++; data.value = null; items.value = null; error.value = ''; itemError.value = ''; itemLoading.value = false
+  detailRevision++; data.value = null; items.value = null; error.value = ''; errorIsInvalidRequest.value = false; itemError.value = ''; itemLoading.value = false
   if (!manager.value) { loading.value = false; return }
   loading.value = true
   try {
@@ -116,13 +118,30 @@ async function load() {
     if (id !== revision || !manager.value) return
     data.value = response.data; filters.value = response.data.filters; page.value = 1
     void loadItems()
-  } catch (reason) { if (id === revision) error.value = requestErrorMessage(reason) }
+  } catch (reason) {
+    if (id === revision) { error.value = requestErrorMessage(reason); errorIsInvalidRequest.value = reason instanceof CrmApiError && reason.code === 'VALIDATION_ERROR' }
+  }
   finally { if (id === revision) loading.value = false }
 }
 function selectPeriod(value: PeriodKind) {
   if (query.period === value) return
   query.period = value; query.anchor = nextPeriodStart(value)
 }
+// The date field asks for a period only when it holds a whole date in range. A year typed digit by digit
+// passes through the years 2, 20 and 202, and a cleared field is empty; none of those is a request.
+function pickAnchor(event: Event) {
+  const picked = dateWithin((event.target as HTMLInputElement).value, EARLIEST_COCKPIT_DATE, LATEST_PLAN_DATE)
+  if (picked) query.anchor = picked
+}
+// On leaving the field, a date that was not taken gives way to the one on show.
+function showAnchor(event: Event) { dateDraft.value = null; (event.target as HTMLInputElement).value = query.anchor }
+// What the date field holds while it is being edited. The field is bound to it from the moment it takes the
+// focus until it is left, so a response that arrives in the middle of a date redraws the page without putting
+// the date on show back into the field. That holds for an empty field too: typing a year into it changes
+// nothing a script can see until the date is whole.
+const dateDraft = ref<string | null>(null)
+// The period before the earliest one the cockpit shows (the one that reaches into 2000) cannot be asked for.
+const atEarliestPeriod = computed(() => Boolean(data.value) && data.value!.period.start <= EARLIEST_COCKPIT_DATE)
 function resetFilters() { query.region = ''; query.sales = ''; query.market = ''; query.equipment = '' }
 function selectMetric(value: Exclude<PlanMetric, 'overdue'>) { metric.value = value; page.value = 1; void loadItems() }
 function changePage(value: number) { page.value = value; void loadItems() }
@@ -152,10 +171,10 @@ onBeforeUnmount(() => { revision++; detailRevision++; cardObserver?.disconnect()
       <label><span class="filter-name">{{ copy('Market', '市场') }}</span><select v-model="query.market" aria-label="Market"><option value="">{{ copy('All markets', '全部市场') }}</option><option v-for="market in filters.markets" :key="market" :value="market">{{ market }}</option></select></label>
       <label><span class="filter-name">{{ copy('Equipment', '设备') }}</span><select v-model="query.equipment" aria-label="Equipment"><option value="">{{ copy('All equipment', '全部设备') }}</option><option v-for="equipment in filters.equipment ?? []" :key="equipment" :value="equipment">{{ equipment }}</option></select></label>
       <button type="button" class="filter-reset" data-testid="plan-filter-reset" :disabled="!query.region && !query.sales && !query.market && !query.equipment" @click="resetFilters">{{ copy('Reset filters', '重置筛选') }}</button>
-      <div class="period-controls"><div class="segmented"><button v-for="period in periods" :key="period" :aria-pressed="query.period === period" @click="selectPeriod(period)">{{ label(period) }}</button></div><button :disabled="!data || loading" :aria-label="copy('Previous period', '上一周期')" @click="query.anchor = data!.period.previousAnchor"><ChevronLeft :size="15" /></button><input v-model="query.anchor" type="date" :aria-label="copy('Period date', '周期日期')" /><button :disabled="!data || loading" :aria-label="copy('Next period', '下一周期')" @click="query.anchor = data!.period.nextAnchor"><ChevronRight :size="15" /></button><button :disabled="loading" :aria-label="copy('Refresh', '刷新')" @click="load"><RefreshCw :size="14" /></button></div>
+      <div class="period-controls"><div class="segmented"><button v-for="period in periods" :key="period" :aria-pressed="query.period === period" @click="selectPeriod(period)">{{ label(period) }}</button></div><button :disabled="!data || loading || atEarliestPeriod" :aria-label="copy('Previous period', '上一周期')" @click="query.anchor = data!.period.previousAnchor"><ChevronLeft :size="15" /></button><input :value="dateDraft ?? query.anchor" :min="EARLIEST_COCKPIT_DATE" :max="LATEST_PLAN_DATE" type="date" :aria-label="copy('Period date', '周期日期')" @focus="dateDraft = ($event.target as HTMLInputElement).value" @input="dateDraft = ($event.target as HTMLInputElement).value" @change="pickAnchor" @blur="showAnchor" /><button :disabled="!data || loading" :aria-label="copy('Next period', '下一周期')" @click="query.anchor = data!.period.nextAnchor"><ChevronRight :size="15" /></button><button :disabled="loading" :aria-label="copy('Refresh', '刷新')" @click="load"><RefreshCw :size="14" /></button></div>
     </nav>
     </div>
-    <div v-if="error" class="error-banner" role="alert"><strong>{{ copy('Plan could not be loaded', '暂时无法读取计划') }}</strong><p>{{ error }}</p><p>{{ copy('If Plan has not been enabled on this server, its business APIs need to be deployed first.', '若当前服务器尚未启用 Plan，需要先部署对应业务接口。') }}</p><button @click="load">{{ copy('Retry', '重试') }}</button></div>
+    <div v-if="error" class="error-banner" role="alert"><strong>{{ copy('Plan could not be loaded', '暂时无法读取计划') }}</strong><p>{{ error }}</p><p v-if="!errorIsInvalidRequest">{{ copy('If Plan has not been enabled on this server, its business APIs need to be deployed first.', '若当前服务器尚未启用 Plan，需要先部署对应业务接口。') }}</p><button @click="load">{{ copy('Retry', '重试') }}</button></div>
     <section class="plan-kpis" :aria-label="copy('Period summary', '周期概览')">
       <button v-for="kind in kinds" :key="kind" :class="['kpi', kind, { selected: metric === kind }]" :disabled="!data || loading" :aria-pressed="metric === kind" @click="selectMetric(kind)">
         <span>{{ kindLabel(kind) }}</span><strong :class="{ unavailable: data?.summary[kind].state !== 'ready' }">{{ loading ? '…' : fmt(data?.summary[kind]) }}</strong>

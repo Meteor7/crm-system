@@ -35,7 +35,7 @@
 
 类型定义：`src/features/cockpit/plan-types.ts`。最小一致样例：`src/features/cockpit/plan.fixture.ts`（仅测试/预览，不进入运行时）。可调整契约，但请同步前端，不要独立采用另一套字段名。
 
-- `period`: week / month / quarter / year。`anchor`: YYYY-MM-DD，必填且允许未来日期。服务端返回周期 start/end（均为业务日期，含首尾）、previousAnchor/nextAnchor。周一至周日，上海时区。
+- `period`: week / month / quarter / year。`anchor`: YYYY-MM-DD，必填且允许未来日期；所在周期在 2000-01-01 之前结束的日期返回 `VALIDATION_ERROR`。服务端返回周期 start/end（均为业务日期，含首尾）、previousAnchor/nextAnchor。周一至周日，上海时区。
 - 默认打开下周；查询的是“当前数据库里的排期”，不是历史快照。`asOf` 是本次读取时间（带时区的时间戳），不是所选周期的结束时间。
 - `sales` 为用户 ID；空字符串表示全部。`region`、`market` 是存储值，不是翻译标签；空字符串表示全部。
 - 沿用 cockpit Manager 权限，后端必须校验身份、权限和各业务源的数据范围。前端隐藏不能替代后端鉴权。

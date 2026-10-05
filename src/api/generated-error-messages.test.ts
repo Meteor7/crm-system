@@ -6,6 +6,8 @@ import { resolveLocaleMessage, setLocale } from '@/i18n'
 afterEach(() => setLocale('zh-CN'))
 
 it.each([
+  ['VALIDATION_ERROR', 'Invalid Review period or anchor.', 'Choose another date.', '请重新选择日期。'],
+  ['VALIDATION_ERROR', 'Invalid Plan period or anchor.', 'Choose another date.', '请重新选择日期。'],
   ['INVALID_TRANSITION', 'RFQ can only be created when the Opportunity is at customer_budget_approved.', 'Customer budget approved', '客户预算批准阶段'],
   ['INVALID_TRANSITION', 'Demo Request can only be created for an Opportunity in qualified_opportunity or demo_done.', 'Qualified opportunity or Demo done', '合格商机或 Demo 完成'],
   ['INVALID_TRANSITION', 'New Opportunity must start at qualified_opportunity.', 'Qualified opportunity', '合格商机阶段'],

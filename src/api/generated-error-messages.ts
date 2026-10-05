@@ -26,6 +26,8 @@ const FIXED_MESSAGES: Partial<Record<string, Record<string, CopyPair>>> = {
     'Only a Confirmed or Completed Booking has a CNY amount to record.': ['Only a Confirmed or Completed Booking has an amount in CNY to record.', '只有已确认或已完成的订单需要补录人民币金额。'],
   },
   VALIDATION_ERROR: {
+    'Invalid Review period or anchor.': ['This period cannot be shown. Choose another date.', '无法显示这个周期，请重新选择日期。'],
+    'Invalid Plan period or anchor.': ['This period cannot be shown. Choose another date.', '无法显示这个周期，请重新选择日期。'],
     'Lost Reason is required for a lost Opportunity.': ['A lost reason is required for a lost Opportunity.', '丢单商机必须填写丢单原因。'],
     'probabilityLevel cannot be cleared once the demo is done.': ['The success probability cannot be cleared once the demo is done.', 'Demo 完成后不能清空成功概率。'],
     'Confirm the customer need and the budget owner before creating the Opportunity.': ['Confirm the customer need and the budget owner before creating the Opportunity.', '请先确认客户需求与预算负责人，再创建商机。'],

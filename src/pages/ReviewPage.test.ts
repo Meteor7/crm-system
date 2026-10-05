@@ -30,6 +30,148 @@ async function setup(role: UserRole = 'Manager') {
   return { wrapper, api, router, app: useAppStore(pinia) }
 }
 describe('Manager Review', () => {
+  it('asks for a period only when the date field holds a whole date it can show', async () => {
+    // Noon on 2026-10-04 in Shanghai.
+    vi.useFakeTimers({ toFake: ['Date'] }); vi.setSystemTime(new Date('2026-10-04T04:00:00Z'))
+    try {
+      const { wrapper, api } = await setup()
+      const getReview = vi.mocked(api.getReview)
+      const field = wrapper.get<HTMLInputElement>('input[type="date"]')
+      expect([field.attributes('min'), field.attributes('max')]).toEqual(['2000-01-01', '2026-10-04'])
+      expect(field.element.value).toBe(reviewFixture().period.start)
+      getReview.mockClear()
+
+      // The year typed digit by digit, a cleared field, a date in the future: nothing is asked for.
+      for (const value of ['0002-09-21', '0020-09-21', '0202-09-21', '', '2026-10-05', '2026-12-01']) {
+        field.element.value = value
+        await field.trigger('change')
+      }
+      await flushPromises()
+      expect(getReview).not.toHaveBeenCalled()
+      expect(wrapper.find('.review-state.error').exists()).toBe(false)
+      // Leaving the field puts the date on show back.
+      await field.trigger('blur')
+      expect(field.element.value).toBe(reviewFixture().period.start)
+
+      // A whole date in range is asked for, and the field stays usable while it loads: disabling it took the
+      // focus away after the first digit.
+      let finish!: () => void
+      getReview.mockImplementationOnce(() => new Promise((resolve) => {
+        finish = () => resolve({ data: reviewFixture(), warnings: [], meta: { requestId: 'review-test', generatedAt: '' } })
+      }))
+      field.element.value = '2025-09-21'
+      await field.trigger('input'); await field.trigger('change')
+      expect(getReview).toHaveBeenCalledTimes(1)
+      expect(getReview.mock.calls[0][0]).toMatchObject({ period: 'week', anchor: '2025-09-21' })
+      expect(field.attributes('disabled')).toBeUndefined()
+      expect(field.element.value).toBe('2025-09-21')
+      // The user types on while that load is pending. Its answer redraws the page and must leave what is being
+      // typed in the field; leaving the field then puts the date on show back.
+      await field.trigger('focus')
+      field.element.value = '0002-09-21'
+      await field.trigger('input'); await field.trigger('change')
+      finish(); await flushPromises()
+      expect(getReview).toHaveBeenCalledTimes(1)
+      expect(field.element.value).toBe('0002-09-21')
+      await field.trigger('blur')
+      expect(field.element.value).toBe('2025-09-21')
+      // Today itself is the last date taken.
+      field.element.value = '2026-10-04'
+      await field.trigger('change')
+      expect(getReview.mock.calls.at(-1)![0]).toMatchObject({ anchor: '2026-10-04' })
+      wrapper.unmount()
+    } finally { vi.useRealTimers() }
+  })
+
+  it('keeps the earliest week through its links and gives way to 2000 when the kind of period changes', async () => {
+    const earliest = reviewFixture()
+    earliest.period = { ...earliest.period, start: '1999-12-27', end: '2000-01-02', previousAnchor: '1999-12-20', nextAnchor: '2000-01-03', hasNext: true }
+    const api = createMockApi({ role: 'Manager', latency: 0 })
+    const getReview = vi.fn(async () => ({ data: earliest, warnings: [], meta: { requestId: 'review-test', generatedAt: '' } }))
+    api.getReview = getReview
+    const router = createAppRouter()
+    // The first day of the week that reaches into 2000, as "previous period" and the other cockpit pages give it.
+    await router.push('/dashboard?period=week&anchor=1999-12-27'); await router.isReady()
+    const wrapper = mount(ReviewPage, { props: { apiClient: api }, global: { plugins: [createPinia(), router] } })
+    await flushPromises()
+    expect(getReview).toHaveBeenLastCalledWith({ period: 'week', anchor: '1999-12-27', sales: '', market: '', region: '', equipment: '' })
+    expect(wrapper.find('.review-state.error').exists()).toBe(false)
+    // Warnings and Plan are handed that same week.
+    expect(wrapper.get('a[href^="/warnings"]').attributes('href')).toBe('/warnings?period=week&anchor=1999-12-27')
+    expect(wrapper.get('a[href^="/plan"]').attributes('href')).toBe('/plan?period=week&anchor=2000-01-03&reviewAnchor=1999-12-27')
+
+    // As a month, 1999-12-27 lies in a period that ends before 2000: the month of 2000-01-01 is asked for.
+    await wrapper.findAll('.period-controls .segmented button')[1].trigger('click')
+    await flushPromises()
+    expect(getReview).toHaveBeenLastCalledWith({ period: 'month', anchor: '2000-01-01', sales: '', market: '', region: '', equipment: '' })
+    wrapper.unmount()
+
+    // A link that names that day as a month is opened on the default period.
+    await router.push('/dashboard?period=month&anchor=1999-12-27')
+    const asMonth = mount(ReviewPage, { props: { apiClient: api }, global: { plugins: [createPinia(), router] } })
+    await flushPromises()
+    expect(getReview).toHaveBeenLastCalledWith({ period: 'month', sales: '', market: '', region: '', equipment: '' })
+    asMonth.unmount()
+  })
+
+  it('leaves the date field as the user has it when the page loads behind it', async () => {
+    // Opened without a date: the field is empty until the first answer. The user is already in it, and has typed
+    // part of a date, which changes nothing a script can see.
+    const api = createMockApi({ role: 'Manager', latency: 0 })
+    let finish!: () => void
+    api.getReview = vi.fn(() => new Promise<Awaited<ReturnType<typeof api.getReview>>>((resolve) => {
+      finish = () => resolve({ data: reviewFixture(), warnings: [], meta: { requestId: 'review-test', generatedAt: '' } })
+    }))
+    const router = createAppRouter()
+    await router.push('/dashboard'); await router.isReady()
+    const wrapper = mount(ReviewPage, { props: { apiClient: api }, global: { plugins: [createPinia(), router] } })
+    await flushPromises()
+    const field = wrapper.get<HTMLInputElement>('input[type="date"]')
+    expect(field.element.value).toBe('')
+    await field.trigger('focus')
+    finish(); await flushPromises()
+    expect(field.element.value).toBe('')
+    // Leaving the field shows the date of the period that was loaded.
+    await field.trigger('blur')
+    expect(field.element.value).toBe(reviewFixture().period.start)
+    wrapper.unmount()
+  })
+
+  it('does not step back from the earliest period it can show', async () => {
+    const earliest = reviewFixture()
+    earliest.period = { ...earliest.period, start: '1999-12-27', end: '2000-01-02', previousAnchor: '1999-12-20', nextAnchor: '2000-01-03', hasNext: true }
+    const { wrapper, api } = await setup()
+    expect(wrapper.get('button[aria-label="上一期"]').attributes('disabled')).toBeUndefined()
+    vi.mocked(api.getReview).mockResolvedValue({ data: earliest, warnings: [], meta: { requestId: 'review-test', generatedAt: '' } })
+    const field = wrapper.get<HTMLInputElement>('input[type="date"]')
+    field.element.value = '2000-01-01'
+    await field.trigger('input'); await field.trigger('change'); await field.trigger('blur')
+    await flushPromises()
+    expect(field.element.value).toBe('2000-01-01')
+    expect(wrapper.get('button[aria-label="上一期"]').attributes('disabled')).toBeDefined()
+    expect(wrapper.get('button[aria-label="下一期"]').attributes('disabled')).toBeUndefined()
+    wrapper.unmount()
+  })
+
+  it('opens on its default period when a link carries a date it cannot show', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] }); vi.setSystemTime(new Date('2026-10-04T04:00:00Z'))
+    try {
+      for (const anchor of ['2026-12-01', '0002-09-21', '2026-13-40', 'next']) {
+        const api = createMockApi({ role: 'Manager', latency: 0 })
+        api.getReview = vi.fn(async () => ({ data: reviewFixture(), warnings: [], meta: { requestId: 'review-test', generatedAt: '' } }))
+        const router = createAppRouter()
+        await router.push(`/dashboard?period=month&anchor=${anchor}&market=Frontend`); await router.isReady()
+        const wrapper = mount(ReviewPage, { props: { apiClient: api }, global: { plugins: [createPinia(), router] } })
+        await flushPromises()
+        // No anchor is sent: the server answers with its default period, and the rest of the link is kept.
+        expect(api.getReview).toHaveBeenCalledTimes(1)
+        expect(api.getReview).toHaveBeenCalledWith({ period: 'month', sales: '', market: 'Frontend', region: '', equipment: '' })
+        expect(wrapper.find('.review-state.error').exists()).toBe(false)
+        wrapper.unmount()
+      }
+    } finally { vi.useRealTimers() }
+  })
+
   it('opens with the period and filters Warnings hands back, and ignores values it does not know', async () => {
     const api = createMockApi({ role: 'Manager', latency: 0 })
     api.getReview = vi.fn(async () => ({ data: reviewFixture(), warnings: [], meta: { requestId: 'review-test', generatedAt: '' } }))
@@ -120,6 +262,7 @@ describe('Manager Review', () => {
       // Task 5: Warnings stays reachable and opens on its own default.
       expect(wrapper.get('a[href^="/warnings"]').attributes('href')).toBe('/warnings?period=week')
       // An ISO week that spans the new year leads to the first Plan week of the next year.
+      vi.setSystemTime(new Date('2026-12-30T04:00:00Z'))
       await router.push('/dashboard?anchor=2026-12-28&region=East+China')
       const boundary = mount(ReviewPage, { props: { apiClient: api }, global: { plugins: [createPinia(), router] } })
       await flushPromises()

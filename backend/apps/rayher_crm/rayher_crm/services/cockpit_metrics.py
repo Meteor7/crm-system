@@ -49,11 +49,28 @@ def bounds(kind, anchor):
     raise ValueError("Invalid period")
 
 
+# The earliest period the cockpit shows is the one that reaches into 2000. The CRM holds nothing that
+# old, and the reads behind a period look back up to 24 months, which the calendar cannot do from its
+# first years: a year that is still being typed into a date field ("0002") must be refused, not fail
+# half-way. The bound is on the period and not on the date asked for, so that every date of a period
+# that is shown asks for that period again: the week that reaches into 2000 starts in 1999.
+EARLIEST_PERIOD_END = date(2000, 1, 1)
+
+
+def supported_bounds(kind, anchor):
+    """bounds(), refusing a period that ends before 2000."""
+
+    start, end = bounds(kind, anchor)
+    if end <= EARLIEST_PERIOD_END:
+        raise ValueError("Periods before 2000 are not supported")
+    return start, end
+
+
 def period(query, now):
     now = stamp(now)
     kind = query.get("period") or "week"
     anchor = date.fromisoformat(query["anchor"]) if query.get("anchor") else now.date() - timedelta(days=now.weekday() + 7)
-    start, end = bounds(kind, anchor)
+    start, end = supported_bounds(kind, anchor)
     start, end = stamp(start), stamp(end)
     if start > now:
         raise ValueError("Future periods are not supported")

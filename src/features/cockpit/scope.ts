@@ -28,6 +28,17 @@ function parseDay(value: string): Date | null {
 const dayText = (date: Date) => date.toISOString().slice(0, 10)
 export const isBusinessDate = (value: string) => parseDay(value) !== null
 
+// The earliest date the cockpit asks for. The backend refuses a period that ends before it, and a year that is
+// still being typed into a date field reads as year 2, 20 or 202: none of those may become a request. The
+// period that contains this date is the earliest one shown; a week may start a few days before it.
+export const EARLIEST_COCKPIT_DATE = '2000-01-01'
+// Plan looks ahead. This only keeps a mistyped year out.
+export const LATEST_PLAN_DATE = '2099-12-31'
+// A whole business date between the two bounds; '' for anything else: a cleared field, a year half typed, a date
+// outside the bounds.
+export const dateWithin = (value: string, earliest: string, latest: string) =>
+  isBusinessDate(value) && value >= earliest && value <= latest ? value : ''
+
 // Today on the Shanghai calendar: at 17:00 UTC it is already tomorrow there.
 export function shanghaiDate(now = new Date()): string {
   const parts = Object.fromEntries(new Intl.DateTimeFormat('en-US', { timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit' })
@@ -57,6 +68,15 @@ function shiftPeriod(period: PeriodKind, value: string, step: 1 | -1): string {
 export const nextPeriodAfter = (period: PeriodKind, value: string) => shiftPeriod(period, value, 1)
 export const previousPeriodBefore = (period: PeriodKind, value: string) => shiftPeriod(period, value, -1)
 
+// Whether the period of `kind` around a business date ends before EARLIEST_COCKPIT_DATE: the backend refuses it.
+// The bound is on the period, so a date in 1999 can still be shown: the week that reaches into 2000 starts on
+// 1999-12-27. The month of that same date ends before 2000.
+export const endsBeforeEarliest = (kind: PeriodKind, value: string) => nextPeriodAfter(kind, value) <= EARLIEST_COCKPIT_DATE
+// A date carried by a link or by a period button that the cockpit can show as a period of `kind`: a whole
+// business date, not later than `latest`, whose period the backend takes. '' for anything else.
+export const showableAnchor = (kind: PeriodKind, value: string, latest: string) =>
+  isBusinessDate(value) && value <= latest && !endsBeforeEarliest(kind, value) ? value : ''
+
 // What Review shows without an anchor (backend: Monday of last week, whatever the granularity).
 export function defaultReviewAnchor(now = new Date()): string {
   return previousPeriodBefore('week', shanghaiDate(now))
@@ -82,8 +102,9 @@ export type CockpitQuery = ReturnType<typeof readCockpitQuery>
 // otherwise the period after the Review anchor, or after today (Shanghai) without any context.
 export function planStart(incoming: CockpitQuery, now = new Date()): { period: PeriodKind; anchor: string } {
   const period = incoming.period ?? 'week'
-  const anchor = isBusinessDate(incoming.anchor) ? incoming.anchor
-    : isBusinessDate(incoming.reviewAnchor) ? nextPeriodAfter(period, incoming.reviewAnchor) : nextPeriodAfter(period, shanghaiDate(now))
+  const linked = showableAnchor(period, incoming.anchor, LATEST_PLAN_DATE)
+  const review = showableAnchor(period, incoming.reviewAnchor, LATEST_PLAN_DATE)
+  const anchor = linked || nextPeriodAfter(period, review || shanghaiDate(now))
   return { period, anchor }
 }
 // The Review period that belongs to the Plan period on show: the originating Review anchor while Plan still shows
@@ -93,10 +114,13 @@ export function reviewAnchorForPlan(period: PeriodKind, planAnchor: string, reta
   const current = periodStartOf(period, shanghaiDate(now))
   const planPeriod = periodStartOf(period, planAnchor)
   // Plan's date is unusable (a cleared field): keep the originating Review anchor only if that period has started.
-  if (!planPeriod) return isBusinessDate(retained) && periodStartOf(period, retained) <= current ? retained : ''
+  if (!planPeriod) return isBusinessDate(retained) && periodStartOf(period, retained) <= current && !endsBeforeEarliest(period, retained) ? retained : ''
   const belonging = isBusinessDate(retained) && nextPeriodAfter(period, retained) === planPeriod ? retained : previousPeriodBefore(period, planPeriod)
   // Only a period that really has not started is cut back; a date inside the current period stays as it was.
-  return periodStartOf(period, belonging) > current ? current : belonging
+  const review = periodStartOf(period, belonging) > current ? current : belonging
+  // Plan on the earliest period the cockpit shows has no period before it: Review and Warnings get that
+  // earliest period itself, where the one before it would be refused and they would open on today's.
+  return endsBeforeEarliest(period, review) ? planPeriod : review
 }
 
 export function cockpitRoute(page: CockpitPage, context: CockpitContext): CockpitRoute {
