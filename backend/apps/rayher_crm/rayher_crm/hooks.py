@@ -17,10 +17,27 @@ after_request = [
     "rayher_crm.api.v1.controlled_documents.apply_delivery_headers",
 ]
 
+override_whitelisted_methods = {
+    "frappe.desk.search.search_link": "rayher_crm.api.search.search_link",
+    "frappe.desk.search.search_widget": "rayher_crm.api.search.search_widget",
+}
+
 permission_query_conditions = {
+    "Allowed To Transact With": "rayher_crm.permissions.scope.scoped_child_query",
+    "Customer Credit Limit": "rayher_crm.permissions.scope.scoped_child_query",
+    "Party Account": "rayher_crm.permissions.scope.scoped_child_query",
+    "Sales Team": "rayher_crm.permissions.scope.scoped_child_query",
+    "Portal User": "rayher_crm.permissions.scope.scoped_child_query",
     "Customer": "rayher_crm.permissions.scope.customer_query",
     "Address": "rayher_crm.permissions.scope.address_query",
     "Contact": "rayher_crm.permissions.scope.contact_query",
+    "Contact Email": "rayher_crm.permissions.scope.scoped_child_query",
+    "Contact Phone": "rayher_crm.permissions.scope.scoped_child_query",
+    "Dynamic Link": "rayher_crm.permissions.scope.scoped_child_query",
+    "Event Participants": "rayher_crm.permissions.scope.scoped_child_query",
+    "Event Notifications": "rayher_crm.permissions.scope.scoped_child_query",
+    "Communication Link": "rayher_crm.permissions.scope.scoped_child_query",
+    "CRM Note": "rayher_crm.permissions.scope.scoped_child_query",
     "Lead": "rayher_crm.permissions.scope.lead_query",
     "CRM Opportunity": "rayher_crm.permissions.scope.opportunity_query",
     "CRM Opportunity Probability History": "rayher_crm.permissions.scope.opportunity_probability_history_query",
@@ -55,6 +72,8 @@ permission_query_conditions = {
     "CRM Visit Meeting Record": "rayher_crm.permissions.scope.visit_meeting_record_query",
     "CRM Quotation": "rayher_crm.permissions.scope.quotation_query",
     "CRM Quotation Version": "rayher_crm.permissions.scope.quotation_version_query",
+    "CRM Quotation Item": "rayher_crm.permissions.scope.scoped_child_query",
+    "CRM Quotation Payment Term": "rayher_crm.permissions.scope.scoped_child_query",
     "CRM Quotation Approval": "rayher_crm.permissions.scope.quotation_approval_query",
     "CRM RFQ": "rayher_crm.permissions.scope.rfq_query",
     "CRM RFQ Version": "rayher_crm.permissions.scope.rfq_version_query",
@@ -104,15 +123,6 @@ has_permission = {
 }
 
 
-
-# Desk link search turns ignore_user_permissions=1 into get_list(ignore_permissions=True), which
-# skips every permission_query_conditions hook above. These wrappers drop the flag for the
-# DocTypes that have one.
-override_whitelisted_methods = {
-    "frappe.desk.search.search_link": "rayher_crm.permissions.search.search_link",
-    "frappe.desk.search.search_widget": "rayher_crm.permissions.search.search_widget",
-}
-
 delete_file_data_content = "rayher_crm.services.private_file_lifecycle.delete_file_content"
 
 doc_events = {
@@ -120,10 +130,29 @@ doc_events = {
         "validate": "rayher_crm.permissions.scope.prevent_scoped_docshare",
     },
     "Address": {
+        # Native deletion is guarded by has_address_permission("delete");
+        # Frappe 15 raises no before_delete event.
         "before_save": "rayher_crm.permissions.scope.revoke_address_shares_entering_crm",
+        "before_rename": "rayher_crm.permissions.scope.protect_standard_crm_merge",
     },
     "Customer": {
         "before_save": "rayher_crm.permissions.scope.revoke_customer_address_shares_entering_crm",
+        "before_rename": "rayher_crm.permissions.scope.protect_standard_crm_merge",
+    },
+    "Customer Group": {
+        "before_rename": "rayher_crm.permissions.scope.protect_crm_customer_group_name",
+    },
+    "Contact": {
+        "before_save": "rayher_crm.permissions.scope.revoke_contact_shares_entering_crm",
+        "before_rename": "rayher_crm.permissions.scope.protect_standard_crm_merge",
+    },
+    "Lead": {
+        "before_save": "rayher_crm.permissions.scope.revoke_lead_shares_entering_crm",
+        "before_rename": "rayher_crm.permissions.scope.protect_standard_crm_merge",
+    },
+    "User": {
+        "before_save": "rayher_crm.permissions.scope.revoke_shares_when_user_enters_crm",
+        "after_rename": "rayher_crm.permissions.scope.reconcile_shares_after_user_rename",
     },
     "File": {
         "before_insert": "rayher_crm.services.private_file_lifecycle.protect_private_upload",

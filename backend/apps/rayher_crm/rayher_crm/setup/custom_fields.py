@@ -44,7 +44,7 @@ CRM_CUSTOM_FIELDS = {
         {"fieldname": "custom_crm_first_contact_note", "label": "CRM First Contact Note", "fieldtype": "Small Text", "insert_after": "custom_crm_interest"},
         {"fieldname": "custom_crm_next_action", "label": "CRM Next Action", "fieldtype": "Data", "insert_after": "custom_crm_first_contact_note"},
         {"fieldname": "custom_crm_next_action_due", "label": "CRM Next Action Due", "fieldtype": "Date", "insert_after": "custom_crm_next_action"},
-        {"fieldname": "custom_crm_converted_account", "label": "CRM Converted Account", "fieldtype": "Link", "options": "Customer", "insert_after": "custom_crm_next_action_due", "read_only": 1},
+        {"fieldname": "custom_crm_converted_account", "label": "CRM Converted Account", "fieldtype": "Link", "options": "Customer", "insert_after": "custom_crm_next_action_due", "read_only": 1, "search_index": 1},
         {"fieldname": "custom_crm_converted_contact", "label": "CRM Converted Contact", "fieldtype": "Link", "options": "Contact", "insert_after": "custom_crm_converted_account", "read_only": 1},
         {"fieldname": "custom_crm_converted_opportunity", "label": "CRM Converted Opportunity", "fieldtype": "Link", "options": "CRM Opportunity", "insert_after": "custom_crm_converted_contact", "read_only": 1},
         {"fieldname": "custom_crm_converted_at", "label": "CRM Converted At", "fieldtype": "Datetime", "insert_after": "custom_crm_converted_opportunity", "read_only": 1},

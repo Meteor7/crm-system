@@ -13,9 +13,16 @@ STAGE_REACHED_INDEX = "idx_crm_opportunity_stage_reached"
 LOSS_REVIEW_INDEX = "idx_crm_opportunity_loss_review"
 LOSS_REVIEW_REVISION_INDEX = "idx_crm_opportunity_loss_review_revision"
 WARNING_HANDLING_REVISION_INDEX = "idx_crm_warning_handling_revision"
+LEAD_CONVERTED_ACCOUNT_INDEX = "custom_crm_converted_account_index"
 
 
 def install_stage5f_indexes() -> None:
+    if frappe.db.table_exists("Lead") and frappe.db.has_column(
+        "Lead", "custom_crm_converted_account",
+    ):
+        frappe.db.add_index(
+            "Lead", ["custom_crm_converted_account"], LEAD_CONVERTED_ACCOUNT_INDEX,
+        )
     if frappe.db.table_exists("CRM Demo Artifact"):
         rows = frappe.db.sql(
             """SELECT GROUP_CONCAT(`COLUMN_NAME` ORDER BY `SEQ_IN_INDEX`) AS columns
