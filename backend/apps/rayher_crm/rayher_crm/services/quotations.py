@@ -379,10 +379,20 @@ def _serialized_validity_months(doc) -> int:
     return 1
 
 
+def _effective_status(version) -> str:
+    """A version's status as of today: a Published one past its validity is Expired, whether or not the daily job
+    (`expire_quotations`) has recorded it yet. The pages, the list's filter and the detail read this, so that the
+    list's "Expired" badge, its filter and the detail say the same thing all day."""
+
+    if version.status == "Published" and version.valid_until and getdate(version.valid_until) < getdate(today()):
+        return "Expired"
+    return version.status
+
+
 def _serialize_version(doc) -> dict[str, Any]:
     can_read_address = can_read_site_data(doc.account)
     return {
-        "id": doc.name, "version": int(doc.version_no or 0), "quotationType": doc.quotation_type or "Device", "status": doc.status, "modified": to_iso_timestamp(doc.modified),
+        "id": doc.name, "version": int(doc.version_no or 0), "quotationType": doc.quotation_type or "Device", "status": _effective_status(doc), "modified": to_iso_timestamp(doc.modified),
         "approvalStatus": doc.approval_status or "Not Submitted", "currentApprovalId": doc.current_approval or "",
         "refNo": doc.ref_no, "opportunityId": doc.opportunity or "", "accountId": doc.account, "owner": doc.quotation_owner,
         "primaryContactId": doc.primary_contact or "", "addressId": (doc.address or "") if can_read_address else "", "addressRestricted": not can_read_address, "customerName": doc.customer_name_snapshot or "",
@@ -414,7 +424,7 @@ def _serialize_approval(doc) -> dict[str, Any]:
 
 def _serialize_master(master) -> dict[str, Any]:
     version = frappe.get_doc("CRM Quotation Version", master.current_version) if master.current_version else None
-    status = "Expired" if version and version.status == "Published" and version.valid_until and getdate(version.valid_until) < getdate(today()) else master.status
+    status = "Expired" if version and _effective_status(version) == "Expired" else master.status
     return {
         "id": master.name, "refNo": master.ref_no, "quotationType": master.quotation_type or "Device", "opportunityId": master.opportunity or "",
         "opportunityTitle": (frappe.db.get_value("CRM Opportunity", master.opportunity, "title") or master.opportunity) if master.opportunity else "Others",
@@ -434,7 +444,20 @@ def list_quotations(query: dict[str, Any]) -> tuple[list[dict[str, Any]], int, i
     if opportunity_id:
         clauses.append("`opportunity` = %s"); values.append(opportunity_id)
     status = _text(query, "status")
-    if status and status != "All": clauses.append("`status` = %s"); values.append(status)
+    if status and status != "All":
+        # As the rows answer it (`_effective_status`): a Published Quotation past its validity is Expired today,
+        # whether or not the daily job has recorded it.
+        past_validity = (
+            "EXISTS (SELECT 1 FROM `tabCRM Quotation Version` AS `current_version` "
+            "WHERE `current_version`.`name` = `tabCRM Quotation`.`current_version` "
+            "AND `current_version`.`status` = 'Published' AND `current_version`.`valid_until` < %s)"
+        )
+        if status == "Expired":
+            clauses.append(f"(`status` = 'Expired' OR (`status` = 'Published' AND {past_validity}))"); values.append(today())
+        elif status == "Published":
+            clauses.append(f"(`status` = 'Published' AND NOT {past_validity})"); values.append(today())
+        else:
+            clauses.append("`status` = %s"); values.append(status)
     quotation_type = _text(query, "quotationType")
     if quotation_type and quotation_type != "All":
         if quotation_type not in QUOTATION_TYPES:

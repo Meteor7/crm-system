@@ -931,6 +931,44 @@ class TestQuotationApi(FrappeTestCase):
         self.assertEqual(version.status, "Accepted")
         self.assertEqual(master.status, "Accepted")
 
+    def test_a_published_quotation_past_its_validity_is_expired_before_the_daily_job_records_it(self):
+        saved, _ = self._ready_quotation()
+        published = self._publish(saved["quotation"]["id"], saved["version"]["modified"])
+        quote_id, version_id = published["quotation"]["id"], published["version"]["id"]
+        frappe.db.set_value("CRM Quotation Version", version_id, {
+            "published_at": "2026-09-01 10:00:00", "valid_until": "2020-01-01",
+        }, update_modified=False)
+        frappe.clear_document_cache("CRM Quotation Version", version_id)
+
+        def listed(status: str) -> set[str]:
+            return {row["id"] for row in list_quotations({"status": status, "page": 1, "pageSize": 50})[0]}
+
+        # The daily job has not run: the stored status is still Published, and the list, its filter and the
+        # detail all say Expired.
+        self.assertEqual(frappe.db.get_value("CRM Quotation Version", version_id, "status"), "Published")
+        detail = get_quotation(quote_id)
+        self.assertEqual((detail["quotation"]["status"], detail["version"]["status"]), ("Expired", "Expired"))
+        self.assertEqual(detail["versions"][0]["status"], "Expired")
+        self.assertIn(quote_id, listed("Expired"))
+        self.assertNotIn(quote_id, listed("Published"))
+        self.assertEqual(next(row["status"] for row in list_quotations({"status": "Expired", "page": 1, "pageSize": 50})[0] if row["id"] == quote_id), "Expired")
+
+        # The job records it: nothing the pages read changes.
+        self.assertGreaterEqual(expire_quotations(), 1)
+        self.assertEqual(frappe.db.get_value("CRM Quotation Version", version_id, "status"), "Expired")
+        detail = get_quotation(quote_id)
+        self.assertEqual((detail["quotation"]["status"], detail["version"]["status"]), ("Expired", "Expired"))
+        self.assertIn(quote_id, listed("Expired"))
+        self.assertNotIn(quote_id, listed("Published"))
+
+        # A Published Quotation within its validity is Published everywhere.
+        saved, _ = self._ready_quotation()
+        published = self._publish(saved["quotation"]["id"], saved["version"]["modified"])
+        current = get_quotation(published["quotation"]["id"])
+        self.assertEqual((current["quotation"]["status"], current["version"]["status"]), ("Published", "Published"))
+        self.assertIn(published["quotation"]["id"], listed("Published"))
+        self.assertNotIn(published["quotation"]["id"], listed("Expired"))
+
     def test_reference_migration_plan_is_deterministic_per_initial_date(self):
         from rayher_crm.patches.v1_0.normalize_quotation_reference_numbers import plan_reference_updates
         rows = [
