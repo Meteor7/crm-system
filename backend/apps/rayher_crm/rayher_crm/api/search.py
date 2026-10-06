@@ -8,6 +8,9 @@ from frappe.model.db_query import DatabaseQuery
 
 
 _WAREHOUSE_ADDRESS_QUERY = "erpnext.controllers.queries.get_warehouse_address"
+# Current Frappe 15 reads a non-positive page_length as link validation and caps it at
+# frappe.desk.search.PAGE_LENGTH_FOR_LINK_VALIDATION; the pinned release predates that name.
+_LINK_VALIDATION_PAGE_LENGTH = 25_000
 
 
 def _address_link_rows(
@@ -17,11 +20,15 @@ def _address_link_rows(
 
     filters = list(filters)
     filters.extend([["Address", "disabled", "=", 0], ["Address", "name", "like", f"%{txt}%"]])
+    page_length = frappe.utils.cint(page_length)
+    if page_length <= 0:
+        # DatabaseQuery drops the LIMIT clause for 0 and MariaDB refuses a negative one.
+        page_length = _LINK_VALIDATION_PAGE_LENGTH
     with address_link_query_scope(warehouse_lookup=warehouse_lookup):
         return frappe.get_list(
             "Address", fields=["name"], filters=filters, distinct=True,
             order_by="name", limit_start=frappe.utils.cint(start),
-            limit_page_length=frappe.utils.cint(page_length),
+            limit_page_length=page_length,
             reference_doctype=reference_doctype, ignore_permissions=False,
             as_list=not as_dict,
         )

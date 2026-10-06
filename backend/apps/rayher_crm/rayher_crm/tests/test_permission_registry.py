@@ -243,6 +243,53 @@ class TestPermissionRegistry(FrappeTestCase):
                 with self.assertRaisesRegex(ValueError, f"Effective site hook differs.*{hook_name}"):
                     registry.validate_permission_registry()
 
+    def test_a_later_app_cannot_migrate_after_the_permission_gate(self):
+        # Frappe runs after_migrate app by app in installed order and nothing follows it, so a
+        # later app's hook could change permissions once this gate has already passed.
+        installed_apps, site_hooks = frappe.get_installed_apps, frappe.get_hooks
+
+        def with_later_app(**kwargs):
+            # frappe.get_hooks loads every app on the bench through the keyword form of this call.
+            return installed_apps(**kwargs) if kwargs else [*installed_apps(), "later_app"]
+
+        def later_app_hooks(migrate_hooks):
+            def get_hooks(hook=None, default="_KEEP_DEFAULT_LIST", app_name=None):
+                if app_name == "later_app":
+                    return migrate_hooks if hook == "after_migrate" else []
+                return site_hooks(hook, default, app_name)
+
+            return get_hooks
+
+        with patch.object(frappe, "get_installed_apps", with_later_app):
+            with patch.object(frappe, "get_hooks", later_app_hooks(["later_app.setup.after_migrate"])):
+                with self.assertRaisesRegex(ValueError, "Effective site hook differs.*after_migrate.*later_app"):
+                    registry.validate_permission_registry()
+            # A later app that runs nothing after the migration stays an ordinary installation.
+            with patch.object(frappe, "get_hooks", later_app_hooks([])):
+                registry.validate_permission_registry()
+
+    def test_a_property_setter_cannot_swap_a_child_table_behind_the_gate(self):
+        # Frappe attaches the child type of the effective field, which a Property Setter can
+        # change while the stored DocField row still names the registered one.
+        parent, items, terms = "CRM Quotation Version", "CRM Quotation Item", "CRM Quotation Payment Term"
+        self.assertEqual(registry.installed_child_relationships(items), {(parent, "items")})
+        setter = frappe.get_doc({
+            "doctype": "Property Setter", "doctype_or_field": "DocField", "doc_type": parent,
+            "field_name": "items", "property": "options", "property_type": "Small Text", "value": terms,
+        })
+        try:
+            setter.insert()
+            self.assertEqual(registry.installed_child_relationships(items), set())
+            self.assertEqual(
+                registry.installed_child_relationships(terms), {(parent, "items"), (parent, "payment_terms")},
+            )
+            with self.assertRaisesRegex(ValueError, "Installed child relationships differ.*crm_owned"):
+                registry.validate_permission_registry()
+        finally:
+            frappe.db.delete("Property Setter", {"name": setter.name})
+            frappe.clear_cache(doctype=parent)
+        registry.validate_permission_registry()
+
     def test_permission_query_scripts_require_explicit_review(self):
         path = "frappe.core.doctype.server_script.server_script_utils.get_server_script_map"
         for doctype in ("CRM Visit", "File", "Contact"):

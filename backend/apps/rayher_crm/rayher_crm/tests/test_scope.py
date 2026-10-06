@@ -2246,6 +2246,34 @@ class TestCrmScope(FrappeTestCase):
                 with self.assertRaises(frappe.PermissionError):
                     client_get("Address", address.name)
 
+    def test_address_link_search_caps_a_page_length_that_sets_no_limit(self):
+        # Frappe's link validation asks with page_length=0, for which DatabaseQuery drops the
+        # LIMIT clause; a negative value is not a LIMIT that MariaDB accepts.
+        frappe.set_user("Administrator")
+        address = frappe.get_doc({
+            "doctype": "Address", "address_title": "Unpaged ERP Address",
+            "address_type": "Other", "address_line1": "ERP Paging Fixture",
+            "city": "Shanghai", "country": "China",
+        }).insert(ignore_permissions=True)
+        user = self._create_user("crm-scope-address-paging@example.invalid", "CRM Sales")
+        self._grant_address_role(user, "CRM Scope Address Paging", {"select"})
+        frappe.set_user(user)
+        for endpoint in ("search_widget", "search_link"):
+            for page_length in ("0", "-1"):
+                with self.subTest(endpoint=endpoint, page_length=page_length), \
+                    patch.object(frappe, "get_list", wraps=frappe.get_list) as get_list:
+                    rows = self._whitelisted_call(
+                        f"frappe.desk.search.{endpoint}", doctype="Address", txt="",
+                        filters=json.dumps({"name": address.name}), page_length=page_length,
+                    )
+                    values = [row["value"] if endpoint == "search_link" else row[0] for row in rows]
+                    self.assertEqual(values, [address.name])
+                    limits = [
+                        call.kwargs["limit_page_length"]
+                        for call in get_list.call_args_list if call.args[:1] == ("Address",)
+                    ]
+                    self.assertEqual(limits, [25_000])
+
     def test_mixed_address_owner_grant_keeps_ordinary_read_shares(self):
         frappe.set_user("Administrator")
         user = self._create_user("crm-scope-address-shared@example.invalid", "CRM Sales")

@@ -51,6 +51,8 @@ REQUIRED_DOC_EVENTS = {
     ("File", "before_validate"): "rayher_crm.services.managed_file_access.protect_file_write",
 }
 FILE_CONTENT_DELETE_HOOK = "rayher_crm.services.private_file_lifecycle.delete_file_content"
+# Ends with validate_permission_registry, the gate of every migration.
+MIGRATION_GATE_HOOK = "rayher_crm.setup.install.after_migrate"
 # Reviewed Frappe 15 hooks that precede this app's list restrictions.
 CORE_QUERY_HOOKS = {
     "Contact": ("frappe.contacts.address_and_contact.get_permission_query_conditions_for_contact",),
@@ -310,6 +312,16 @@ def validate_site_hooks():
     deletion = frappe.get_hooks("delete_file_data_content", [])
     if deletion[:1] != [hooks.delete_file_data_content]:
         raise ValueError(f"Effective site hook differs from rayher_crm: delete_file_data_content: {deletion}")
+    # frappe.migrate runs after_migrate app by app in installed order and nothing follows it.
+    # A hook after this gate could still change Custom DocPerm rows or enable a Permission
+    # Query Server Script, so an app that has one must be installed before rayher_crm.
+    migration = [
+        method
+        for app in frappe.get_installed_apps()
+        for method in frappe.get_hooks("after_migrate", app_name=app)
+    ]
+    if migration[-1:] != [MIGRATION_GATE_HOOK]:
+        raise ValueError(f"Effective site hook differs from rayher_crm: after_migrate: {migration}")
 
 
 def permission_grants(rows):
@@ -362,18 +374,29 @@ def installed_permission_rows(name):
 
 def installed_child_relationships(name):
     import frappe
+    from frappe.model.meta import Meta
 
-    filters = {
-        "fieldtype": ["in", ["Table", "Table MultiSelect"]],
-        "options": name,
+    # Frappe attaches the child type of the effective field: a DocField or Custom Field row
+    # as changed by its Property Setters (Meta.apply_property_setters). Any of the three can
+    # name this child, so each such parent is built from its stored rows; the Meta cache is
+    # neither trusted nor replaced.
+    parents = {
+        *frappe.get_all("DocField", filters={"options": name}, pluck="parent"),
+        *frappe.get_all("Custom Field", filters={"options": name}, pluck="dt"),
+        *frappe.get_all(
+            "Property Setter",
+            filters={"doctype_or_field": "DocField", "property": "options", "value": name},
+            pluck="doc_type",
+        ),
     }
-    rows = frappe.get_all("DocField", filters=filters, fields=["parent", "fieldname"])
-    rows += frappe.get_all(
-        "Custom Field",
-        filters=filters,
-        fields=["dt as parent", "fieldname"],
-    )
-    return {(row.parent, row.fieldname) for row in rows}
+    return {
+        (parent, field.fieldname)
+        for parent in parents
+        # Rows of a deleted DocType attach nothing.
+        if frappe.db.exists("DocType", parent)
+        for field in Meta(parent).get_table_fields()
+        if field.options == name
+    }
 
 
 def validate_permission_registry(*, installed=True):
