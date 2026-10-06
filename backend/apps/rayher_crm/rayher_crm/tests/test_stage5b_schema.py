@@ -16,6 +16,7 @@ EXPECTED_FIELDS = {
         "custom_crm_short_name": ("Data", None),
         "custom_crm_segment": ("Select", "Frontend\nAdvanced Packaging"),
         "custom_crm_tier": ("Select", "S\nA\nB"),
+        "custom_crm_customer_kind": ("Select", "\nProspect\nExisting"),
         "custom_crm_city": ("Data", None),
         "custom_crm_region": ("Select", "\nEast China\nSouth China\nWest China\nNorth China\nCentral China"),
         "custom_crm_visibility": ("Select", "Private\nPublic"),

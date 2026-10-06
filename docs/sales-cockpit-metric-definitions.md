@@ -32,7 +32,7 @@
 | PO 日期待补录 / 人民币金额待补录 · `orders.missingDate/missingAmount` · `po_missing_date`、`po_missing_amount` | 同上 | 当前状态 | 待补日期：范围内所有 Confirmed/Completed 订单中没有 actual_po_date 的，**不限年份**。待补金额：YTD 内缺人民币金额的订单 | 不需要 | Booking 数 = 行数 | 同上 | `build_review` |
 | 个人年度订单与目标 · `orders.target/planned/series/elapsedFraction` | 目标取 metric=orders、period=year、anchor = as_of 年 1 月 1 日 | 截至 as_of | planned = 年目标 × 已过天数 ÷ 全年天数（1 月 1 日数到 as_of 当天，含当天）。series 按 actual_po_date 逐日累计 | — | 金额 | 只在“单个销售、且没选区域/市场/设备”时有目标 | `attach_targets`、`po_series` |
 | 销售表现 · `sales[*]` | 各列沿用对应指标 | — | 行 = 全部 CRM Sales 用户 + 明细里出现过的负责人。某活动整体数据不足，或本期明细里有负责人为空的行，**整列**显示数据不足 | 同各指标 | 行数 / 金额 | 各指标自己的负责人口径 | `build_review` |
-| 停滞商机 · `stalled.count/items`（显示前 5）· `stalled` | Opportunity History 上的“实质”行动变更（actionCreated，或 title/owner/due/status 有变化的 actionUpdated）；没有时用商机 creation | 截至 as_of 的存量，只看当时处于 S1–S6 的商机 | as_of 日期 − 最后更新日期 ≥ 21 天提醒，≥ 35 天升级（high）。最后更新早于 actions 覆盖起点时按覆盖起点算，显示“≥N” | **当前周期也需要** actions ≤ as_of − 35 天，且阶段计数为 ready | 去重商机数 = 行数 | 同阶段分布 | `build_review`、`substantive` |
+| 停滞商机 · `stalled.count/items`（显示前 5）· `stalled` | 共用活动事实的实际业务时间及 Opportunity History 实质行动变更的最大值（详见 PR03 合同）；没有时用商机 creation | 截至 as_of 的存量，只看当时处于 S1–S6 的商机 | as_of 日期 − 最后更新日期 ≥ 21 天提醒，≥ 35 天升级（high）。最后更新早于 actions 覆盖起点时按覆盖起点算，显示“≥N” | **当前周期也需要** actions ≤ as_of − 35 天，且阶段计数为 ready | 去重商机数 = 行数 | 同阶段分布 | `build_review`、`substantive` |
 | 近 12 个月丢单 · `losses.count/reviewed/pending/items` · `losses` | 阶段历史 `marked_lost` 的 `reached_at`（跳过 migration 行） | 窗口发生量：[as_of 日期 − 12 个自然月, as_of] | 按**丢单事件**计（丢单、重开、再丢单算 2 次）。reviewed = 复盘为 Reviewed；pending = 未复盘且丢单后没有 reopened（都按当前状态） | stage ≤ 窗口起点；选了销售还需要 fields ≤ 窗口起点 | 事件数 = 行数 | 销售取**丢单时**的负责人。金额取丢单时的 amount_cny | `build_review`、`event_count` |
 | 阶段转化率 · `conversions.items[*]` · `reached_<stage>` | 阶段历史 `reached_at`，只认 basis ∈ recorded / declared / evidence | 窗口发生量：[as_of 日期 − 24 个自然月, as_of] | 每个阶段按商机去重、各自独立计数（比例可能超过 100%）。五步：S1→S2、S2→S3、S3→S4、S4→S5、S5→S7。低于 `crm_cockpit_conversion_threshold`（默认 45）标为瓶颈 | stage ≤ 窗口起点；窗口内有 upper_bound/unknown 或缺日期的到达记录就算不完整：比率显示数据不足，数量照常显示 | 去重商机数 = 行数 | 销售取 as_of 时的负责人 | `build_conversions` |
 | 覆盖倍数 · `pipelineCoverage.openPipeline/remainingTarget/ratio` | 沿用阶段金额和 PO 金额 | 截至 as_of | openPipeline = S2–S6 金额之和（五项须都是 ready）。remaining = 年目标 − 年累计 PO；ratio = openPipeline ÷ remaining；remaining ≤ 0 时不适用。参考范围 3–4× | 同上游指标 | 金额 / 倍数 | 目标适用条件同个人目标 | `pipeline_coverage` |
@@ -86,3 +86,16 @@
 2. **横幅文案**：Review 横幅只写“丢单”，实际数的是“近 4 周、待复盘”，与所选周期无关（年视图也只看最近 28 天）。
 3. **历史周期的报价到期**：要求 valid_until ≥ 今天，所以参考日比今天早 N 天以上的历史周期一定显示 0。
 4. **线索缺负责人的范围**：选了销售时，fields 覆盖起点之前转化的线索会让所有周期的线索数显示数据不足，是否只限窗口内的线索需要确认。
+
+
+## PR03 统一活动事实与客户关系快照（2026-10-05）
+
+Review 与 Plan 共用 `services/activities.py` 的来源身份与业务日期投影；同一来源通过不同关联读到时只保留一条。事实包含 sourceDoctype / sourceId / sourceKey、eventId、关联客户与商机、负责人、状态、计划日期、发生日期、记录日期及时间依据。它是当前源记录的投影，不是另一套可编辑业务记录；更正、取消与重开反映源记录当前状态，源记录审计仍用于历史解释。
+
+- 拜访完成状态仍是 Visited / Minutes Submitted / Manager Reviewed，业务日期仍取 visit_date。客户主档 customerKind 为 Prospect / Existing / 空；首次完成时锁定读取主档并保存 customer_kind、customer_kind_captured_at、completed_at。后两者是完成登记时间，不能证明回填拜访日期当天的客户关系。之后修改客户主档不重写快照；旧记录不补猜分类。
+- Demo 每个 Completed Test Run 按 run_date 计一次，复测是另一次测试。Plan 的 Scheduled / Testing Demo 仍按评估计一项，准备未完成或请求取消时不纳入。
+- 报价只按首次发布版本计算活动，其客户、负责人、金额来自该版本；版本金额币种为 CNY 才提供 amountCny，其余为空，不自动换汇。新金额与分类拆分指标的显示由 PR04 实现。
+- 商机行动进入 Done 时由服务器记录 completed_at；备注、标题等后续编辑不改完成时间。重开清空；再次完成记录新的当前周期。迁移仅使用审计里 actionCreated(Done) 或非 Done → Done 的真实转换，并拒绝断裂的状态链；无证据的历史 Done 保持未知。
+- 停滞的最后实质活动时间取：已完成拜访、Lead 转化、已完成 Test Run、首次报价发布、已完成行动的业务时间，以及既有实质行动变更时间的最大值。不取未来计划或仅改备注。没有实质活动时仍以商机创建时间为起点，保留既有历史覆盖门槛；有无日期的完成事实且可能影响停滞判断时，计数显示数据不足，不将其当成确定的停滞商机。
+
+旧行动在完整审计覆盖起点之前已创建、当前为 Done，且完整覆盖期间没有该行动的新建／重开／新完成转换或断裂审计时，可证明完成早于覆盖起点；完成时间字段仍保持未知，停滞继续按既有覆盖下界计算，不误使全范围数据不足。回填同时识别旧审计中的 Completed 为 Done。全团队线索计数不要求历史负责人已知；选定销售时仍保留归属不确定性。活动按商机预先分组，避免每个商机扫描全部活动。

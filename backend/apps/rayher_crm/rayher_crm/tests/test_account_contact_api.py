@@ -82,6 +82,21 @@ class TestAccountContactApi(FrappeTestCase):
     def _site_input(self, name: str) -> dict:
         return {"name": name, "city": "上海", "type": "Fab", "process": "Frontend", "status": "量产"}
 
+    def test_customer_relationship_validates_and_omitted_legacy_payload_preserves_it(self):
+        frappe.set_user(self.sales)
+        payload = self._account_input("Relationship Master")
+        created = create_account({**payload, "customerKind": "Prospect"})
+        self.assertEqual(created["customerKind"], "Prospect")
+        preserved = update_account(created["id"], payload, created["modified"])
+        self.assertEqual(preserved["customerKind"], "Prospect")
+        updated = update_account(created["id"], {**payload, "customerKind": "Existing"}, preserved["modified"])
+        self.assertEqual(updated["customerKind"], "Existing")
+        with self.assertRaises(CrmApiException):
+            update_account(created["id"], {**payload, "customerKind": "Invented"}, updated["modified"])
+        self.assertEqual(frappe.db.get_value("Customer", created["id"], "custom_crm_customer_kind"), "Existing")
+        cleared = update_account(created["id"], {**payload, "customerKind": ""}, updated["modified"])
+        self.assertEqual(cleared["customerKind"], "")
+
     def test_account_create_list_update_and_endpoint_envelope(self):
         frappe.set_user(self.sales)
         created = create_account(self._account_input("Account Vertical Slice"))

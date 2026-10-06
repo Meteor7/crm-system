@@ -4,12 +4,11 @@
   "creation": "2026-08-04 00:00:00.000000",
   "doctype": "DocType",
   "engine": "InnoDB",
-  "field_order": [
-    "account", "primary_contact", "opportunity", "visit_owner", "subject",
-    "visit_date", "visit_type", "status", "objective", "outcome",
-    "next_action", "action_owner", "due", "action_done", "created_by_user"
-  ],
+  "field_order": ["account", "primary_contact", "opportunity", "visit_owner", "subject", "visit_date", "visit_type", "status", "customer_kind", "customer_kind_captured_at", "completed_at", "objective", "outcome", "next_action", "action_owner", "due", "action_done", "created_by_user"],
   "fields": [
+    {"fieldname": "customer_kind", "fieldtype": "Select", "label": "Customer Relationship at Completion", "options": "\nProspect\nExisting", "read_only": 1},
+    {"fieldname": "customer_kind_captured_at", "fieldtype": "Datetime", "label": "Customer Relationship Captured At", "read_only": 1},
+    {"fieldname": "completed_at", "fieldtype": "Datetime", "label": "Completion Recorded At", "read_only": 1},
     {"fieldname": "account", "fieldtype": "Link", "label": "Account", "options": "Customer", "reqd": 1},
     {"fieldname": "primary_contact", "fieldtype": "Link", "label": "Primary Contact", "options": "Contact"},
     {"fieldname": "opportunity", "fieldtype": "Link", "label": "Opportunity", "options": "CRM Opportunity"},
@@ -27,7 +26,7 @@
     {"fieldname": "created_by_user", "fieldtype": "Link", "label": "Created By", "options": "User", "read_only": 1, "reqd": 1}
   ],
   "index_web_pages_for_search": 0,
-  "modified": "2026-08-04 00:00:00.000000",
+  "modified": "2026-10-05 12:00:00.000000",
   "modified_by": "Administrator",
   "module": "Rayher CRM",
   "name": "CRM Visit",

@@ -121,6 +121,9 @@ def serialize_visit(doc) -> dict[str, Any]:
         "actionOwner": doc.action_owner or "",
         "due": str(doc.due or ""),
         "actionDone": bool(doc.action_done),
+        "customerKind": doc.customer_kind or "",
+        "customerKindCapturedAt": to_iso_timestamp(doc.customer_kind_captured_at) if doc.customer_kind_captured_at else None,
+        "completedAt": to_iso_timestamp(doc.completed_at) if doc.completed_at else None,
         "modified": to_iso_timestamp(doc.modified),
     }
     if doc.primary_contact:

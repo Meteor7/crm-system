@@ -60,6 +60,22 @@ async function mountBookingAs(apiClient: CrmApi) {
 }
 
 describe('Account and Booking details', () => {
+  it('loads and submits the customer master relationship through the existing account editor', async () => {
+    const apiClient = createMockApi({ latency: 0 })
+    const response = await apiClient.getAccount360('ACC-002')
+    response.data.account.customerKind = 'Prospect'
+    vi.spyOn(apiClient, 'getAccount360').mockResolvedValue(response)
+    const update = vi.spyOn(apiClient, 'updateAccount').mockResolvedValue({ ...response, data: { ...response.data.account, customerKind: 'Existing' } })
+    const wrapper = await mountRoute('/accounts/ACC-002', AccountDetailPage, apiClient)
+    await wrapper.get('[data-testid="edit-account"]').trigger('click')
+    const relationship = wrapper.get<HTMLSelectElement>('select[aria-label="客户关系"]')
+    expect(relationship.element.value).toBe('Prospect')
+    await relationship.setValue('Existing')
+    await wrapper.get('[data-modal-submit]').trigger('submit')
+    expect(update).toHaveBeenCalledWith('ACC-002', expect.objectContaining({ customerKind: 'Existing' }), response.data.account.modified)
+    wrapper.unmount()
+  })
+
   it('moves Account 360 into the Account detail route and shows related equipment', async () => {
     const apiClient = createMockApi({ latency: 0 })
     const accountDetail = await apiClient.getAccount360('ACC-002')

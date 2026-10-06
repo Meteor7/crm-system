@@ -64,11 +64,12 @@ export interface OpportunityActionDto {
   due: string
   status: OpportunityActionStatus
   remark?: string
+  completedAt?: string | null
 }
 
 export type CreateOpportunityStakeholderInput = Omit<OpportunityStakeholderDto, 'id' | 'name' | 'title'>
 export type UpdateOpportunityStakeholderInput = CreateOpportunityStakeholderInput
-export type CreateOpportunityActionInput = Omit<OpportunityActionDto, 'id'>
+export type CreateOpportunityActionInput = Omit<OpportunityActionDto, 'id' | 'completedAt'>
 export type UpdateOpportunityActionInput = CreateOpportunityActionInput
 
 export interface OpportunityProbabilityHistoryDto {

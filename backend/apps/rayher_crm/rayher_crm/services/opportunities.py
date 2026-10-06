@@ -512,7 +512,7 @@ def _actions_for_opportunity(opportunity_id: str) -> list[dict[str, Any]]:
     rows = frappe.get_all(
         "CRM Opportunity Action",
         filters={"opportunity": opportunity_id, "archived": 0},
-        fields=["name", "title", "action_owner", "due", "status", "remark"],
+        fields=["name", "title", "action_owner", "due", "status", "remark", "completed_at"],
         order_by="creation asc",
     )
     return [{
@@ -522,6 +522,7 @@ def _actions_for_opportunity(opportunity_id: str) -> list[dict[str, Any]]:
         "due": str(row.due or ""),
         "status": row.status,
         "remark": row.remark or "",
+            "completedAt": to_iso_timestamp(row.completed_at) if row.completed_at else None,
     } for row in rows]
 
 
@@ -1675,6 +1676,7 @@ def _serialize_action(doc) -> dict[str, Any]:
     return {
         "id": doc.name, "title": doc.title, "owner": doc.action_owner,
         "due": str(doc.due or ""), "status": doc.status, "remark": doc.remark or "",
+        "completedAt": to_iso_timestamp(doc.completed_at) if doc.completed_at else None,
     }
 
 
@@ -1685,9 +1687,10 @@ def create_opportunity_action(opportunity_id: str, payload: dict[str, Any]) -> d
     savepoint = f"crm_opportunity_action_{frappe.generate_hash(length=8)}"
     frappe.db.savepoint(savepoint)
     try:
+        values = _validate_action(payload, opportunity)
         doc = frappe.get_doc({
             "doctype": "CRM Opportunity Action", "opportunity": opportunity_id,
-            **_validate_action(payload, opportunity),
+            **values,
         }).insert(ignore_permissions=True)
         serialized = _serialize_action(doc)
         _append_history(opportunity_id, "actionCreated", "", serialized)

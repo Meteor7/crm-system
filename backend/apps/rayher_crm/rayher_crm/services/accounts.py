@@ -32,6 +32,12 @@ ACCOUNT_TIERS = {"S", "A", "B"}
 ACCOUNT_VISIBILITY = {"Private", "Public"}
 
 
+def _customer_kind(value):
+    if value is None or value == "":
+        return ""
+    return validate_choice(value, "customerKind", {"Prospect", "Existing"})
+
+
 def _segment_options(raw_options: Any) -> list[str]:
     values = [*DEFAULT_ACCOUNT_SEGMENTS, *str(raw_options or "").splitlines()]
     result: list[str] = []
@@ -172,6 +178,7 @@ def serialize_account(doc) -> dict[str, Any]:
         "shortName": doc.custom_crm_short_name or doc.customer_name,
         "segment": doc.custom_crm_segment,
         "tier": doc.custom_crm_tier,
+        "customerKind": doc.get("custom_crm_customer_kind") or "",
         "city": doc.custom_crm_city or "",
         "region": doc.custom_crm_region or "",
         "owner": doc.custom_crm_owner,
@@ -279,6 +286,7 @@ def create_account(payload: dict[str, Any]) -> dict[str, Any]:
     assert_capability("account:write")
     ensure_server_generated_id(payload)
     values = _validate_account_input(payload)
+    customer_kind = _customer_kind(payload.get("customerKind"))
     savepoint = f"crm_account_create_{frappe.generate_hash(length=8)}"
     frappe.db.savepoint(savepoint)
     try:
@@ -298,6 +306,7 @@ def create_account(payload: dict[str, Any]) -> dict[str, Any]:
                 "custom_crm_city": values["city"],
                 "custom_crm_region": values["region"],
                 "custom_crm_visibility": values["visibility"],
+                "custom_crm_customer_kind": customer_kind,
             }
         ).insert(ignore_permissions=True)
         if doc.custom_crm_owner != frappe.session.user:
@@ -338,6 +347,8 @@ def update_account(
         # locked document still holds its old Meta instance. Keep the lock and
         # version check above; reload with current metadata before validation.
         doc = frappe.get_doc("Customer", name, for_update=True)
+        if "customerKind" in payload:
+            doc.custom_crm_customer_kind = _customer_kind(payload["customerKind"])
         doc.update(
             {
                 "customer_name": values["name"],

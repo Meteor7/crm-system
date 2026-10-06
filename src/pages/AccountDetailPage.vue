@@ -37,7 +37,7 @@ const accountDetail = ref<Account360Dto | null>(null)
 const editOpen = ref(false)
 const editBusy = ref(false)
 const editError = useLocaleMessage()
-const accountForm = ref<CreateAccountInput>({ name: '', shortName: '', segment: 'Frontend', tier: 'A', city: '', region: '', owner: '', visibility: 'Private' })
+const accountForm = ref<CreateAccountInput>({ name: '', shortName: '', segment: 'Frontend', tier: 'A', city: '', region: '', owner: '', visibility: 'Private', customerKind: '' })
 const segments = ref<string[]>(['Frontend', 'Advanced Packaging'])
 const regions = ref<string[]>([...REGION_PRESETS])
 const siteDrafts = ref<Array<SiteDto & { isNew?: boolean }>>([])
@@ -55,7 +55,7 @@ function captureAccount(detail: Account360Dto) { accountDetail.value = detail }
 function openEdit() {
   if (!accountDetail.value) return
   const account = accountDetail.value.account
-  accountForm.value = { name: account.name, shortName: account.shortName, segment: account.segment, tier: account.tier, city: account.city, region: account.region, owner: account.owner, visibility: account.visibility ?? 'Private' }
+  accountForm.value = { name: account.name, shortName: account.shortName, segment: account.segment, tier: account.tier, city: account.city, region: account.region, owner: account.owner, visibility: account.visibility ?? 'Private', customerKind: account.customerKind ?? '' }
   siteDrafts.value = accountDetail.value.sites.map((site) => ({ ...site }))
   removedSiteIds.value = []
   editError.value = ''
@@ -191,6 +191,7 @@ onMounted(() => { void loadEquipment(); void loadSegments(); void loadRegions() 
         <label><span>{{ t('detail.accountShortName') }}<RequiredMark /></span><input v-model="accountForm.shortName" :aria-label="t('detail.accountShortName')" required /></label>
          <label><span>{{ t('detail.businessArea') }}<RequiredMark /></span><AccountSegmentSelect v-model="accountForm.segment" :segments="segments" :label="t('detail.businessArea')" required /></label>
         <label><span>{{ t('detail.accountTier') }}</span><select v-model="accountForm.tier" :aria-label="t('detail.accountTier')"><option>S</option><option>A</option><option>B</option></select></label>
+        <label><span>{{ locale === 'en-US' ? 'Customer relationship' : '客户关系' }}</span><select v-model="accountForm.customerKind" :aria-label="locale === 'en-US' ? 'Customer relationship' : '客户关系'"><option value="">{{ locale === 'en-US' ? 'Unclassified' : '未分类' }}</option><option value="Prospect">{{ locale === 'en-US' ? 'Prospect' : '潜在客户' }}</option><option value="Existing">{{ locale === 'en-US' ? 'Existing customer' : '老客户' }}</option></select><small>{{ locale === 'en-US' ? 'Completed visits keep the relationship captured at completion.' : '已完成拜访保留完成时的客户关系，不随此处修改。' }}</small></label>
         <label><span>{{ t('detail.city') }}<RequiredMark /></span><input v-model="accountForm.city" :aria-label="t('detail.city')" required /></label>
         <label><span>{{ t('detail.region') }}<RequiredMark /></span><AccountSegmentSelect v-model="accountForm.region" :segments="regions" :label="t('detail.region')" :option-label="regionOptionLabel" :custom-option-label="t('region.customOption')" :custom-placeholder="t('region.customPlaceholder')" :empty-placeholder="t('region.choose')" :custom-on-empty="false" required /></label>
         <label class="wide"><span>{{ t('detail.owner') }}<RequiredMark /></span><PersonnelSelect owner v-model="accountForm.owner" :roles="['Sales']" :ariaLabel="t('detail.owner')" required /></label>

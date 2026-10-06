@@ -42,7 +42,7 @@ const cities = ref<string[]>([])
 const accountModal = ref(false), busy = ref(false), modalError = useLocaleMessage()
 const canWrite = computed(() => app.can('account:write'))
 const canDelete = computed(() => app.bootstrap?.user.role === 'Manager')
-const accountForm = ref<CreateAccountInput>({ name: '', shortName: '', segment: 'Frontend', tier: 'A', city: '上海', region: 'East China', owner: preferredPersonnelId('Sales', app.bootstrap?.user.id), visibility: 'Private' })
+const accountForm = ref<CreateAccountInput>({ name: '', shortName: '', segment: 'Frontend', tier: 'A', city: '上海', region: 'East China', owner: preferredPersonnelId('Sales', app.bootstrap?.user.id), visibility: 'Private', customerKind: '' })
 type NewSiteDraft = Omit<SiteDto, 'id'> & { clientId: string }
 const newSiteDrafts = ref<NewSiteDraft[]>([])
 const createdAccountId = ref('')
@@ -120,7 +120,7 @@ function submitSearch(event: KeyboardEvent) {
 function goPage(target: number) { page.value = target; syncUrl(); void load() }
 function changePageSize(value: number) { pageSize.value = value; page.value = 1; syncUrl(); void load() }
 function openAccountModal() {
-  accountForm.value = { name: '', shortName: '', segment: 'Frontend', tier: 'A', city: '上海', region: 'East China', owner: preferredPersonnelId('Sales', app.bootstrap?.user.id), visibility: 'Private' }
+  accountForm.value = { name: '', shortName: '', segment: 'Frontend', tier: 'A', city: '上海', region: 'East China', owner: preferredPersonnelId('Sales', app.bootstrap?.user.id), visibility: 'Private', customerKind: '' }
   newSiteDrafts.value = []
   createdAccountId.value = ''
   persistedSiteCount.value = 0
@@ -254,6 +254,7 @@ async function deleteAccount(account: AccountSummaryDto) {
         <label><span>{{ locale === 'en-US' ? 'Short name' : '客户简称' }}<RequiredMark /></span><input v-model="accountForm.shortName" :aria-label="locale === 'en-US' ? 'Short name' : '客户简称'" required /></label>
         <label><span>{{ locale === 'en-US' ? 'Business area' : '业务领域' }}<RequiredMark /></span><AccountSegmentSelect v-model="accountForm.segment" :segments="segments" :label="locale === 'en-US' ? 'Account business area' : '客户业务领域'" required /></label>
         <label><span>{{ locale === 'en-US' ? 'Account tier' : '客户等级' }}<RequiredMark /></span><select v-model="accountForm.tier" :aria-label="locale === 'en-US' ? 'Account tier' : '客户等级'" required><option>S</option><option>A</option><option>B</option></select></label>
+        <label><span>{{ locale === 'en-US' ? 'Customer relationship' : '客户关系' }}</span><select v-model="accountForm.customerKind" :aria-label="locale === 'en-US' ? 'Customer relationship' : '客户关系'"><option value="">{{ locale === 'en-US' ? 'Unclassified' : '未分类' }}</option><option value="Prospect">{{ locale === 'en-US' ? 'Prospect' : '潜在客户' }}</option><option value="Existing">{{ locale === 'en-US' ? 'Existing customer' : '老客户' }}</option></select></label>
         <label><span>{{ locale === 'en-US' ? 'Region' : '区域' }}<RequiredMark /></span><AccountSegmentSelect v-model="accountForm.region" :segments="regions" :label="locale === 'en-US' ? 'Region' : '客户区域'" :option-label="regionOptionLabel" :custom-option-label="t('region.customOption')" :custom-placeholder="t('region.customPlaceholder')" :empty-placeholder="t('region.choose')" :custom-on-empty="false" required /></label>
         <label><span>{{ locale === 'en-US' ? 'City' : '城市' }}<RequiredMark /></span><input v-model="accountForm.city" :aria-label="locale === 'en-US' ? 'City' : '客户城市'" required /></label>
         <label class="wide"><span>{{ locale === 'en-US' ? 'Owner' : '负责人' }}<RequiredMark /></span><PersonnelSelect owner v-model="accountForm.owner" :roles="['Sales']" :ariaLabel="locale === 'en-US' ? 'Account owner' : '客户负责人'" required /></label>

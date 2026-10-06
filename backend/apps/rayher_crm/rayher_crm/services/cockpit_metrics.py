@@ -2,30 +2,18 @@
 from __future__ import annotations
 
 import calendar
-import json
 from hashlib import sha256
-from datetime import date, datetime, time, timedelta, timezone
+from datetime import date, datetime, time, timedelta
 from decimal import Decimal, InvalidOperation
 
 from rayher_crm.services.equipment_names import equipment_key
+from rayher_crm.services.activities import activity_facts, completion_before_coverage, last_activity_at
+from rayher_crm.services.cockpit_history import (
+    stamp, iso, covered, field_at, action_json, actions_at, grouped, substantive,
+)
 from rayher_crm.services.opportunity_stages import INTERNAL_VALIDATION, OPEN_STAGES, PROBABILITY_LEVELS
 
-SHANGHAI = timezone(timedelta(hours=8))
 ACTIVITIES = ("visits", "leads", "tests", "quotes")
-
-
-def stamp(value):
-    if not value:
-        return None
-    if isinstance(value, date) and not isinstance(value, datetime):
-        return datetime.combine(value, time.min)
-    result = value if isinstance(value, datetime) else datetime.fromisoformat(str(value).replace("Z", "+00:00"))
-    return result.astimezone(SHANGHAI).replace(tzinfo=None) if result.tzinfo else result
-
-
-def iso(value):
-    dt = stamp(value)
-    return dt.replace(tzinfo=SHANGHAI).astimezone(timezone.utc).isoformat().replace("+00:00", "Z") if dt else None
 
 
 def month_shift(day, months):
@@ -83,14 +71,6 @@ def period(query, now):
             "historical": end <= now, "as_of": cutoff - timedelta(microseconds=1) if end <= now else now}
 
 
-def covered(coverage, key, at):
-    value = coverage.get(key)
-    try:
-        return bool(value and stamp(value) <= at)
-    except (ValueError, TypeError):
-        return False
-
-
 def metric(value=None, state="ready", reason=None):
     return {"value": value, "state": state, "reason": reason}
 
@@ -116,16 +96,6 @@ def number(value):
         return result if result.is_finite() and result >= 0 else None
     except (InvalidOperation, ValueError, TypeError):
         return None
-
-
-def field_at(opp, field, at, histories, coverage, now):
-    if at < now and not covered(coverage, "fields", at):
-        return None
-    result = opp.get(field)
-    for row in sorted(histories, key=lambda r: (stamp(r["at"]), str(r.get("creation", "")), r.get("name", "")), reverse=True):
-        if row["field"] == field and stamp(row["at"]) > at:
-            result = row.get("from_value")
-    return result
 
 
 def stage_at(opp, at, histories, coverage, now):
@@ -213,52 +183,6 @@ def stage6_stay(entered, at_least, created, history_start, at, threshold):
         # No entry for a deal created after the history start (it always has one), or a minimum under the threshold.
         return None, False
     return days, at_least
-
-
-def action_json(value):
-    try:
-        parsed = json.loads(value) if isinstance(value, str) else value
-        return parsed if isinstance(parsed, dict) and parsed.get("id") else None
-    except (ValueError, TypeError):
-        return None
-
-
-def substantive(row):
-    if row["field"] == "actionCreated":
-        return bool(action_json(row.get("to_value")))
-    if row["field"] != "actionUpdated":
-        return False
-    before, after = action_json(row.get("from_value")), action_json(row.get("to_value"))
-    return bool(before and after and any((before.get(k) or "") != (after.get(k) or "") for k in ("title", "owner", "due", "status")))
-
-
-def actions_at(actions, histories, at):
-    state = {r["name"]: {"id": r["name"], "title": r["title"], "owner": r.get("action_owner"),
-                          "due": str(r.get("due") or ""), "status": r["status"], "archived": bool(r.get("archived"))}
-             for r in actions if stamp(r["creation"]) <= at}
-    for row in sorted(histories, key=lambda r: (stamp(r["at"]), str(r.get("creation", "")), r.get("name", "")), reverse=True):
-        if stamp(row["at"]) <= at:
-            continue
-        if row["field"] == "actionUpdated":
-            before = action_json(row.get("from_value"))
-            if before and before["id"] in state:
-                state[before["id"]].update(before)
-        elif row["field"] == "actionDeleted":
-            action_id = str(row.get("to_value") or "").strip('"')
-            if action_id in state:
-                state[action_id]["archived"] = False
-        elif row["field"] == "actionCreated":
-            after = action_json(row.get("to_value"))
-            if after:
-                state.pop(after["id"], None)
-    return [r for r in state.values() if not r["archived"]]
-
-
-def grouped(rows, field):
-    result = {}
-    for row in rows:
-        result.setdefault(row.get(field), []).append(row)
-    return result
 
 
 def booking_cny_amount(booking):
@@ -392,74 +316,38 @@ def build_review(data, query, now, coverage, quotation_expiry_days=14, stage6_no
             value = number(field_at(opp, "amount", when, history, coverage, now))
         return format(value, ".2f") if value is not None and value > 0 else None
 
+    facts = activity_facts(data, coverage, now)
+    facts_by_opportunity = grouped(facts, "opportunityId")
     events = {key: [] for key in ACTIVITIES}
     missing = set()
-    for row in data["visits"]:
-        if row["status"] not in {"Visited", "Minutes Submitted", "Manager Reviewed"}:
+    for fact in facts:
+        key = fact["metric"]
+        if not fact["done"] or key not in events:
             continue
-        if in_scope(row["account"], row["visit_owner"]):
-            if equipment_filter and not row.get("opportunity"):
-                if row.get("visit_date"):
-                    unclassified["visits"].append(entry(row, row["account"], row["visit_owner"], row["visit_date"], "visit"))
-                continue
-            if not equipment_ok(row.get("opportunity")):
-                continue
-            if row.get("visit_date"):
-                events["visits"].append(entry(row, row["account"], row["visit_owner"], row["visit_date"], "visit"))
-            else:
-                missing.add("visits")
-    conversions = {r["reference_name"]: r for r in sorted(data["stages"], key=lambda r: str(r.get("reached_at") or ""), reverse=True)
-                   if r["event"] == "lead_converted" and r.get("reference_doctype") == "Lead" and r.get("reached_at")}
-    for row in data["leads"]:
-        event = conversions.get(row["name"], {})
-        when = row.get("custom_crm_converted_at") or event.get("reached_at")
-        opp = opportunities.get(row.get("custom_crm_converted_opportunity") or event.get("opportunity"), {})
-        account = row.get("custom_crm_converted_account") or opp.get("account")
-        owner = field_at(opp, "opportunity_owner", stamp(when), histories.get(opp.get("name"), []), coverage, now) if when and opp else None
-        if account in customers and (when or row.get("custom_crm_status") == "Converted"):
-            # A gap on another equipment's deal does not make this equipment's count unknown.
-            if owner_filter and owner is None and equipment_ok(opp.get("name")):
-                missing.add("leads")
-            if in_scope(account, owner) and equipment_ok(opp.get("name")):
-                if when:
-                    events["leads"].append(entry(row, account, owner, when, "lead"))
-                else:
-                    missing.add("leads")
-    requests = {r["name"]: r for r in data["requests"]}
-    evaluations = {r["name"]: r for r in data["evaluations"]}
-    for row in data["tests"]:
-        if row["status"] != "Completed":
+        account, owner = fact["accountId"], fact["owner"]
+        customer = customers.get(account)
+        base_scope = bool(customer and in_region(query, customer)
+                          and (not query.get("market") or customer.get("custom_crm_segment") == query["market"]))
+        if not base_scope:
             continue
-        evaluation = evaluations.get(row["evaluation"], {})
-        request = requests.get(evaluation.get("demo_request"), {})
-        account, owner = request.get("account") or evaluation.get("account"), request.get("sales_owner")
-        if not request and account in customers:
-            missing.add("tests")
-        if in_scope(account, owner):
-            if equipment_filter and not request.get("opportunity"):
-                if row.get("run_date") and owner:
-                    unclassified["tests"].append(entry(row, account, owner, row["run_date"], "test"))
-                continue
-            if not equipment_ok(request.get("opportunity")):
-                continue
-            if row.get("run_date") and owner:
-                events["tests"].append(entry(row, account, owner, row["run_date"], "test", evaluationId=row["evaluation"], round=row.get("test_round")))
-            else:
-                missing.add("tests")
-    versions = grouped([r for r in data["versions"] if r.get("published_at")], "quotation")
-    for quote in data["quotes"]:
-        published = versions.get(quote["name"], [])
-        if not published:
-            if quote.get("status") != "Draft" and in_scope(quote["account"], quote["quotation_owner"]) and equipment_ok(quote.get("opportunity")):
-                missing.add("quotes")
+        opportunity_id = fact.get("opportunityId")
+        when = fact["occurredAt"]
+        row = {**fact, "at": when, "customer": customer.get("customer_name", account)}
+        owner_required = bool(owner_filter) or key == "tests"
+        if not owner and owner_required and equipment_ok(opportunity_id):
+            missing.add(key)
+        if not in_scope(account, owner):
             continue
-        first = min(published, key=lambda r: (stamp(r["published_at"]), r["version_no"]))
-        if equipment_filter and not quote.get("opportunity"):
-            if in_scope(first["account"], first["quotation_owner"]):
-                unclassified["quotes"].append(entry(quote, first["account"], first["quotation_owner"], first["published_at"], "quotation"))
+        if equipment_filter and not opportunity_id:
+            if when:
+                unclassified[key].append(row)
             continue
-        if in_scope(first["account"], first["quotation_owner"]) and equipment_ok(quote.get("opportunity")):
-            events["quotes"].append(entry(quote, first["account"], first["quotation_owner"], first["published_at"], "quotation"))
+        if not equipment_ok(opportunity_id):
+            continue
+        if when and (owner or not owner_required):
+            events[key].append(row)
+        else:
+            missing.add(key)
 
     def during(rows, start, end):
         return [r for r in rows if start <= stamp(r["at"]) < end]
@@ -480,6 +368,7 @@ def build_review(data, query, now, coverage, quotation_expiry_days=14, stage6_no
     stalled_complete = covered(coverage, "actions", at - timedelta(days=35))
     stage_unknown = False
     stage6_unknown = False
+    stalled_unknown = False
     for opp in data["opportunities"]:
         if stamp(opp["creation"]) > at:
             continue
@@ -530,12 +419,18 @@ def build_review(data, query, now, coverage, quotation_expiry_days=14, stage6_no
                 # A recorded action takes the deal out of the count until its follow-up day; it stays listed apart.
                 details["stage6_no_po_handled" if handling["state"] == "handled" else "stage6_no_po"].append(
                     {**row, "at": exact, "enteredAt": exact, "daysInStage": days, "daysAtLeast": at_least, "handling": handling})
-        changes = [stamp(r["at"]) for r in history if stamp(r["at"]) <= at and substantive(r)]
-        last = max([stamp(opp["creation"]), *changes])
+        opportunity_facts = facts_by_opportunity.get(opp["name"], [])
+        actual_last = last_activity_at(opportunity_facts, opp["name"], at, history)
+        last = max(stamp(opp["creation"]), actual_last) if actual_last else stamp(opp["creation"])
         boundary = stamp(coverage.get("actions")) if stalled_complete else None
         lower_bound = bool(boundary and last < boundary)
         age = (at.date() - (boundary if lower_bound else last).date()).days
-        if age >= 21 and stalled_complete:
+        time_unknown = any(f["done"] and not f["occurredAt"]
+                           and (not f.get("createdAt") or stamp(f["createdAt"]) <= at)
+                           and not completion_before_coverage(f, coverage, history) for f in opportunity_facts)
+        # An undated completed activity might be recent. Do not assert inactivity.
+        stalled_unknown = stalled_unknown or (time_unknown and age >= 21)
+        if age >= 21 and stalled_complete and not time_unknown:
             details["stalled"].append({**row, "lastActionAt": None if lower_bound else iso(last), "days": age, "daysAtLeast": lower_bound, "severity": "high" if age >= 35 else "warning"})
 
     year_start = datetime(at.year, 1, 1)
@@ -717,7 +612,7 @@ def build_review(data, query, now, coverage, quotation_expiry_days=14, stage6_no
             "stage6NoPo": {"thresholdDays": stage6_no_po_days},
             "orders": {"actual": po_amount(details["po"]), "series": po_series(), "count": po_count(details["po"]),
                        "missingDate": po_count(details["po_missing_date"]), "missingAmount": po_count(details["po_missing_amount"])},
-            "stalled": {"count": count(details["stalled"], stages_ready and stalled_complete), "items": details["stalled"][:5]},
+            "stalled": {"count": insufficient("missing_date") if stalled_unknown else count(details["stalled"], stages_ready and stalled_complete), "items": details["stalled"][:5]},
             "losses": {"count": event_count(details["losses"], losses_ready), "items": details["losses"][:5],
                        "reviewed": event_count([r for r in details["losses"] if r["review"] and r["review"]["status"] == "reviewed"], losses_ready),
                        "pending": event_count([r for r in details["losses"] if r["reviewPending"]], losses_ready)},

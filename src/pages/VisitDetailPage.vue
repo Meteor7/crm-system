@@ -45,6 +45,12 @@ function parseText(status: MeetingRecordParseStatus) {
   return meetingRecordParseLabel(status, locale.value)
 }
 const notRecognized = computed(() => locale.value === 'en-US' ? 'Not recognized' : '未识别')
+const customerKindLabel = computed(() => {
+  const kind = detail.value?.customerKind
+  if (kind === 'Existing') return locale.value === 'en-US' ? 'Existing customer' : '老客户'
+  if (kind === 'Prospect') return locale.value === 'en-US' ? 'Prospect' : '潜在客户'
+  return locale.value === 'en-US' ? 'Unclassified' : '未分类'
+})
 
 function fillForm() {
   const record = detail.value?.meetingRecord
@@ -141,6 +147,10 @@ watch(visitId, () => { void load() })
         <div><small>{{ t('detail.primaryContactLabel') }}</small><strong>{{ detail.primaryContact?.name || t('detail.notLinked') }}</strong></div>
         <div><small>{{ t('detail.visitStatus') }}</small><strong>{{ statusText(detail.status) }}</strong></div>
       </section>
+      <p v-if="detail.status !== 'Planned'" data-visit-customer-kind>
+        {{ locale === 'en-US' ? 'Customer relationship captured at completion:' : '完成时的客户分类：' }}
+        {{ customerKindLabel }}
+      </p>
 
       <div class="detail-grid">
         <main>

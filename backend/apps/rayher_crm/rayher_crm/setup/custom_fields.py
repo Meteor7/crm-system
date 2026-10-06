@@ -19,6 +19,7 @@ CRM_CUSTOM_FIELDS = {
         {"fieldname": "custom_crm_short_name", "label": "CRM Short Name", "fieldtype": "Data", "insert_after": "custom_crm_owner"},
         {"fieldname": "custom_crm_segment", "label": "CRM Segment", "fieldtype": "Select", "options": "Frontend\nAdvanced Packaging", "insert_after": "custom_crm_short_name"},
         {"fieldname": "custom_crm_tier", "label": "CRM Tier", "fieldtype": "Select", "options": "S\nA\nB", "insert_after": "custom_crm_segment"},
+        {"fieldname": "custom_crm_customer_kind", "label": "CRM Customer Relationship", "fieldtype": "Select", "options": "\nProspect\nExisting", "insert_after": "custom_crm_tier"},
         {"fieldname": "custom_crm_city", "label": "CRM City", "fieldtype": "Data", "insert_after": "custom_crm_tier"},
         {"fieldname": "custom_crm_region", "label": "CRM Region", "fieldtype": "Select", "options": options_text(list(REGION_PRESETS)), "insert_after": "custom_crm_city"},
         {"fieldname": "custom_crm_visibility", "label": "CRM Visibility", "fieldtype": "Select", "options": "Private\nPublic", "default": "Private", "insert_after": "custom_crm_region"},

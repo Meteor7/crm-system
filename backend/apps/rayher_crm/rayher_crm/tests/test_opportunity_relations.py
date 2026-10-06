@@ -152,6 +152,44 @@ class TestOpportunityRelations(FrappeTestCase):
         self.assertEqual(denied.exception.code, "SCOPE_DENIED")
         self.assertTrue(foreign_opportunity["id"])
 
+    def test_completion_timestamp_survives_edits_and_reopening_starts_a_new_cycle(self):
+        _, opportunity, _ = self._records(self.sales, "CompletionCycle")
+        created = create_opportunity_action(opportunity["id"], self._action_input(completedAt="2000-01-01T00:00:00Z"))
+        self.assertIsNone(created["completedAt"])
+        done = update_opportunity_action(opportunity["id"], created["id"], self._action_input(status="Done"))
+        self.assertTrue(done["completedAt"])
+        edited = update_opportunity_action(opportunity["id"], created["id"], self._action_input(status="Done", remark="Notes"))
+        self.assertEqual(edited["completedAt"], done["completedAt"])
+        from rayher_crm.services.opportunities import _actions_for_opportunity
+        self.assertEqual(_actions_for_opportunity(opportunity["id"])[0]["completedAt"], done["completedAt"])
+        opened = update_opportunity_action(opportunity["id"], created["id"], self._action_input())
+        self.assertIsNone(opened["completedAt"])
+        redone = update_opportunity_action(opportunity["id"], created["id"], self._action_input(status="Done"))
+        self.assertNotEqual(redone["completedAt"], done["completedAt"])
+
+    def test_completion_backfill_uses_audited_current_cycle_and_is_idempotent(self):
+        from rayher_crm.patches.v1_0.backfill_action_completion import execute
+        from rayher_crm.services.common import to_iso_timestamp
+        _, opportunity, _ = self._records(self.sales, "CompletionBackfill")
+        action = create_opportunity_action(opportunity["id"], self._action_input())
+        update_opportunity_action(opportunity["id"], action["id"], self._action_input(status="Done"))
+        update_opportunity_action(opportunity["id"], action["id"], self._action_input(status="Done", remark="Later note"))
+        transition = frappe.get_all("CRM Opportunity History", filters={"opportunity": opportunity["id"], "field": "actionUpdated"}, fields=["at"], order_by="at asc")[0].at
+        frappe.db.set_value("CRM Opportunity Action", action["id"], "completed_at", None)
+        before_modified = frappe.db.get_value("CRM Opportunity Action", action["id"], "modified")
+        execute()
+        completed = frappe.db.get_value("CRM Opportunity Action", action["id"], "completed_at")
+        self.assertEqual(to_iso_timestamp(completed), to_iso_timestamp(transition))
+        execute()
+        self.assertEqual(frappe.db.get_value("CRM Opportunity Action", action["id"], "completed_at"), completed)
+        self.assertEqual(frappe.db.get_value("CRM Opportunity Action", action["id"], "modified"), before_modified)
+        # A missing audit must not be filled from due, creation or modified.
+        frappe.db.delete("CRM Opportunity History", {"opportunity": opportunity["id"], "field": ["in", ["actionCreated", "actionUpdated"]]})
+        frappe.db.set_value("CRM Opportunity Action", action["id"], "completed_at", None)
+        execute()
+        edited = update_opportunity_action(opportunity["id"], action["id"], self._action_input(status="Done", remark="Legacy"))
+        self.assertIsNone(edited["completedAt"])
+
     def test_action_validation_owner_lock_update_soft_archive_and_history(self):
         _, opportunity, _ = self._records(self.sales, "Action")
         with self.assertRaises(CrmApiException) as client_id:

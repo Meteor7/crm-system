@@ -6,6 +6,10 @@ param(
     [string]$SiteName = 'rayher-crm.test',
     [string]$EnvFile = 'backend/test.env.example',
     [string]$ComposeFile = 'backend/compose.yaml',
+    [ValidateSet('threads', 'forks')]
+    [string]$FrontendTestPool = 'threads',
+    [ValidateRange(5000, 60000)]
+    [int]$FrontendTestTimeout = 5000,
     [switch]$StartBackend
 )
 
@@ -100,7 +104,9 @@ try {
     $productionEnvFile = Join-Path $repositoryRoot 'backend/.env.example'
 
     Invoke-CheckedCommand 'TypeScript typecheck' (Join-Path $binDirectory "vue-tsc$commandExtension") @('--noEmit')
-    Invoke-CheckedCommand 'Frontend tests' (Join-Path $binDirectory "vitest$commandExtension") @('run', '--silent=passed-only')
+    Invoke-CheckedCommand 'Frontend tests' (Join-Path $binDirectory "vitest$commandExtension") @(
+        'run', '--silent=passed-only', "--pool=$FrontendTestPool", "--testTimeout=$FrontendTestTimeout"
+    )
     Invoke-CheckedCommand 'Production build' (Join-Path $binDirectory "vite$commandExtension") @(
         'build', '--mode', 'frappe',
         '--outDir', 'backend/apps/rayher_crm/rayher_crm/public/crm', '--emptyOutDir'

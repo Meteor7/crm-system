@@ -11,6 +11,25 @@ import VisitDetailPage from './VisitDetailPage.vue'
 
 enableAutoUnmount(afterEach)
 
+it('shows the completed visit relationship snapshot and explicitly labels legacy unknowns', async () => {
+  const { api, global } = await context('/visits/V-001')
+  const response = await api.getVisitDetail('V-001')
+  response.data.status = 'Visited'
+  response.data.customerKind = 'Prospect'
+  vi.spyOn(api, 'getVisitDetail').mockResolvedValue(response)
+  const wrapper = mount(VisitDetailPage, { props: { apiClient: api }, global })
+  await flushPromises()
+  expect(wrapper.get('[data-visit-customer-kind]').text()).toContain('潜在客户')
+  setLocale('en-US')
+  await flushPromises()
+  expect(wrapper.get('[data-visit-customer-kind]').text()).toContain('Prospect')
+  wrapper.unmount()
+  response.data.customerKind = ''
+  const legacy = mount(VisitDetailPage, { props: { apiClient: api }, global })
+  await flushPromises()
+  expect(legacy.get('[data-visit-customer-kind]').text()).toContain('Unclassified')
+})
+
 async function context(path: string) {
   const api = createMockApi({ latency: 0, role: 'Manager' })
   const pinia = createPinia()

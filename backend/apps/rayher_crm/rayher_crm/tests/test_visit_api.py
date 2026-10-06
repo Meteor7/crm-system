@@ -784,6 +784,50 @@ class TestVisitApi(FrappeTestCase):
         updated = update_meeting_record(visit["id"], {**payload, "summary": "Current"}, submitted["modified"])
         self.assertEqual(updated["summary"], "Current")
 
+    def test_customer_classification_is_captured_on_first_completion_and_never_reclassified(self):
+        account, contact = self._records(self.sales, "RelationshipSnapshot")
+        frappe.db.set_value("Customer", account["id"], "custom_crm_customer_kind", "Prospect")
+        visit = create_visit(self._input(account, contact, self.sales))
+        self.assertFalse(visit["customerKind"])
+        self.assertIsNone(visit["completedAt"])
+        # Classification is read at completion, not when the visit was planned.
+        frappe.db.set_value("Customer", account["id"], "custom_crm_customer_kind", "Existing")
+        visited = update_visit(visit["id"], {"type": "advance", "status": "Visited", "outcome": "Confirmed"}, visit["modified"])
+        self.assertEqual(visited["customerKind"], "Existing")
+        self.assertTrue(visited["customerKindCapturedAt"])
+        self.assertEqual(visited["customerKindCapturedAt"], visited["completedAt"])
+        frappe.db.set_value("Customer", account["id"], "custom_crm_customer_kind", "Prospect")
+        self._meeting_record(visit["id"])
+        submitted = update_visit(visit["id"], {"type": "advance", "status": "Minutes Submitted"}, visited["modified"])
+        self.assertEqual(submitted["customerKind"], "Existing")
+        self.assertEqual(submitted["completedAt"], visited["completedAt"])
+        # Service-managed fields cannot be overwritten through a document save either.
+        doc = frappe.get_doc("CRM Visit", visit["id"])
+        doc.customer_kind = "Prospect"
+        doc.completed_at = "2000-01-01"
+        doc.save(ignore_permissions=True)
+        self.assertEqual(get_visit(visit["id"])["customerKind"], "Existing")
+        self.assertEqual(get_visit(visit["id"])["completedAt"], visited["completedAt"])
+
+    def test_automatic_minutes_submission_captures_unknown_without_guessing_history(self):
+        account, contact = self._records(self.sales, "RelationshipUnknown")
+        visit = create_visit(self._input(account, contact, self.sales))
+        update_meeting_record(visit["id"], {
+            "purpose": "Review", "attendees": "Customer", "agenda": "Agenda", "summary": "Summary",
+            "conclusion": "Proceed", "followup": "Send plan", "meetingStart": "", "meetingEnd": "",
+        })
+        completed = get_visit(visit["id"])
+        self.assertEqual(completed["status"], "Minutes Submitted")
+        self.assertFalse(completed["customerKind"])
+        self.assertTrue(completed["customerKindCapturedAt"])
+        # Simulate a pre-migration completed record. A later save preserves the unknown.
+        frappe.db.set_value("CRM Visit", visit["id"], {"customer_kind_captured_at": None, "completed_at": None})
+        frappe.db.set_value("Customer", account["id"], "custom_crm_customer_kind", "Existing")
+        frappe.get_doc("CRM Visit", visit["id"]).save(ignore_permissions=True)
+        legacy = get_visit(visit["id"])
+        self.assertFalse(legacy["customerKind"])
+        self.assertIsNone(legacy["completedAt"])
+
     def test_saving_a_complete_record_submits_the_visit_for_manager_review(self):
         account, contact = self._records(self.sales, "AutoSubmit")
         frappe.set_user(self.sales)

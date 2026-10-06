@@ -13,6 +13,28 @@ from rayher_crm.tests.test_cockpit_plan import fixture as plan_fixture
 
 
 class TestCockpitApi(FrappeTestCase):
+    def test_activity_loader_follows_opportunity_links_after_customer_change(self):
+        sources = {"CRM Visit": "visit", "CRM Demo Request": "request", "CRM Quotation": "quote"}
+        def records(doctype, fields, field, names):
+            if doctype == "CRM Opportunity":
+                return [{"name": "opp", "account": "new"}] if field == "account" else []
+            if doctype in sources:
+                self.assertIn("creation", fields.split())
+                if field == "opportunity" and "opp" in names:
+                    return [{"name": sources[doctype], "account": "old", "opportunity": "opp"}]
+                return []
+            if doctype == "CRM Evaluation" and field == "demo_request" and "request" in names:
+                return [{"name": "evaluation", "account": "old", "demo_request": "request"}]
+            if doctype == "CRM Test Run" and "evaluation" in names:
+                self.assertIn("creation", fields.split())
+                return [{"name": "test", "evaluation": "evaluation"}]
+            return []
+        meta = SimpleNamespace(has_field=lambda name: True)
+        with patch.object(cockpit.frappe, "get_meta", return_value=meta), patch.object(cockpit, "linked", side_effect=records):
+            data = cockpit.load_data([{"name": "new"}], [])
+        for key, name in (("visits", "visit"), ("requests", "request"), ("quotes", "quote"), ("evaluations", "evaluation"), ("tests", "test")):
+            self.assertEqual([row["name"] for row in data[key]], [name])
+
     def setUp(self):
         super().setUp()
         self.previous_user = frappe.session.user

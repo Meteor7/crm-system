@@ -67,6 +67,13 @@ def load_data(customers, people):
         opportunity_fields += " amount_cny"
     opps = linked("CRM Opportunity", opportunity_fields, "account", ids)
     opp_ids = {r["name"] for r in opps}
+
+    def activity_sources(doctype, fields):
+        # Source accounts are snapshots and can differ after an Opportunity moves.
+        # Keep these facts for stall detection; activity KPIs still filter by source account.
+        return list({row["name"]: row for row in (
+            *linked(doctype, fields, "account", ids), *linked(doctype, fields, "opportunity", opp_ids)
+        )}.values())
     booking_meta = frappe.get_meta("CRM Booking")
     booking_dates_ready = bool(booking_meta.has_field("actual_po_date"))
     # A CNY order's amount is already in CNY; another currency needs the entered amount_cny (5c44a82).
@@ -74,8 +81,7 @@ def load_data(customers, people):
     if booking_meta.has_field("amount_cny"):
         booking_fields += " amount_cny"
     bookings = linked("CRM Booking", booking_fields, "source_opportunity", opp_ids) if booking_dates_ready else []
-    evaluations = linked("CRM Evaluation", "name account demo_request", "account", ids)
-    quotes = linked("CRM Quotation", "name account quotation_owner ref_no status opportunity current_published_version", "account", ids)
+    quotes = activity_sources("CRM Quotation", "name creation account quotation_owner ref_no status opportunity current_published_version")
     # A quotation keeps its customer snapshot when its opportunity changes customer.
     # Fetch linked stage only, even outside the customer filter; do not widen the
     # opportunity set used by any other Review metric.
@@ -86,11 +92,15 @@ def load_data(customers, people):
     if frappe.get_meta("CRM Opportunity Probability History").has_field("reason"):
         probability_fields += " reason"
     stages = linked("CRM Opportunity Stage History", "name creation opportunity from_stage to_stage source event recorded_at reached_at reached_at_basis reference_doctype reference_name reason", "opportunity", opp_ids)
-    leads = linked("Lead", "name lead_owner custom_crm_status custom_crm_converted_at custom_crm_converted_account custom_crm_converted_opportunity", "custom_crm_converted_opportunity", opp_ids)
+    leads = linked("Lead", "name creation lead_owner custom_crm_status custom_crm_converted_at custom_crm_converted_account custom_crm_converted_opportunity", "custom_crm_converted_opportunity", opp_ids)
     missing_lead_ids = {r["reference_name"] for r in stages if r["event"] == "lead_converted" and r.get("reference_doctype") == "Lead"} - {r["name"] for r in leads}
-    leads += linked("Lead", "name lead_owner custom_crm_status custom_crm_converted_at custom_crm_converted_account custom_crm_converted_opportunity", "name", missing_lead_ids)
-    visits = linked("CRM Visit", "name account opportunity visit_owner subject visit_date status", "account", ids)
-    requests = linked("CRM Demo Request", "name account sales_owner opportunity", "account", ids)
+    leads += linked("Lead", "name creation lead_owner custom_crm_status custom_crm_converted_at custom_crm_converted_account custom_crm_converted_opportunity", "name", missing_lead_ids)
+    visits = activity_sources("CRM Visit", "name creation account opportunity visit_owner subject visit_date status customer_kind completed_at")
+    requests = activity_sources("CRM Demo Request", "name creation account sales_owner opportunity")
+    evaluations = list({row["name"]: row for row in (
+        *linked("CRM Evaluation", "name creation account demo_request", "account", ids),
+        *linked("CRM Evaluation", "name creation account demo_request", "demo_request", {r["name"] for r in requests})
+    )}.values())
     # Equipment of a linked opportunity now at another customer (usually none: links start at one customer).
     moved_ids = {r["opportunity"] for r in (*visits, *requests) if r.get("opportunity")} - opp_ids - quote_opp_ids
     handling_fields = " ".join(HANDLING_FIELDS)
@@ -102,7 +112,7 @@ def load_data(customers, people):
         "cny_amount_ready": cny_amount_ready,
         "history": linked("CRM Opportunity History", "name creation opportunity at field from_value to_value", "opportunity", opp_ids),
         "stages": stages,
-        "actions": linked("CRM Opportunity Action", "name creation opportunity title action_owner due status archived", "opportunity", opp_ids),
+        "actions": linked("CRM Opportunity Action", "name creation opportunity title action_owner due status archived completed_at", "opportunity", opp_ids),
         "probabilities": linked("CRM Opportunity Probability History", probability_fields, "opportunity", opp_ids),
         "recoveries": linked("CRM Probability Recovery", "name opportunity probability_change plan action_taken acted_by acted_at", "opportunity", opp_ids),
         "loss_reviews": linked("CRM Opportunity Loss Review", "name opportunity stage_event review_status review_note reviewed_by reviewed_at reopened_at modified", "opportunity", opp_ids),
@@ -111,9 +121,9 @@ def load_data(customers, people):
         "requests": requests,
         "equipment_opportunities": linked("CRM Opportunity", "name tool_type", "name", moved_ids),
         "evaluations": evaluations,
-        "tests": linked("CRM Test Run", "name evaluation run_date test_round status", "evaluation", {r["name"] for r in evaluations}),
+        "tests": linked("CRM Test Run", "name creation evaluation run_date test_round status", "evaluation", {r["name"] for r in evaluations}),
         "quotes": quotes, "quotation_opportunities": quotation_opportunities,
-        "versions": linked("CRM Quotation Version", "name quotation version_no published_at account quotation_owner status valid_until", "quotation", {r["name"] for r in quotes}),
+        "versions": linked("CRM Quotation Version", "name quotation version_no published_at account quotation_owner status valid_until currency total", "quotation", {r["name"] for r in quotes}),
         # Next steps and S6 actions Managers recorded on Warnings rows (overdue, quotation expiry, S6).
         "warning_handlings": handling_records(handlings, linked(REVISION, " ".join(REVISION_FIELDS), "handling", {r["name"] for r in handlings})),
     }

@@ -12,11 +12,12 @@ from decimal import Decimal
 from rayher_crm.services.cockpit_metrics import bounds, in_region, insufficient, iso, metric, number, stamp, supported_bounds
 from rayher_crm.services.equipment_names import equipment_key
 from rayher_crm.services.opportunity_stages import OPEN_STAGES, PROBABILITY_LEVELS
+from rayher_crm.services.activities import DEMO_PLANNED, activity_facts, open_action
 
 KINDS = ("visits", "tests", "actions", "po")
 PLAN_METRICS = ("all", *KINDS, "overdue")
 # Both preparations are complete in Scheduled; Testing remains a plan until review.
-PLAN_EVALUATION_STATUSES = ("Scheduled", "Testing")
+PLAN_EVALUATION_STATUSES = DEMO_PLANNED
 
 
 def plan_period(query):
@@ -48,6 +49,9 @@ def money(rows):
 
 
 def build_plan(data, query, now):
+    facts = activity_facts(data, {}, now)
+    planned = {key: [f for f in facts if f["metric"] == key and not f["done"]] for key in ("visits", "tests", "actions")}
+    sources = {key: {r["name"]: r for r in data[key]} for key in ("visits", "evaluations", "actions")}
     window = plan_period(query)
     start, end = window["start"], window["end"]
     customers = {r["name"]: r for r in data["customers"]}
@@ -86,25 +90,27 @@ def build_plan(data, query, now):
                 "market": customer.get("custom_crm_segment") or None,
                 "status": status, "carryover": False, **extra}
 
-    for row in data["visits"]:
+    for fact in planned["visits"]:
+        row = sources["visits"][fact["sourceId"]]
         if row["status"] != "Planned" or not in_scope(row["account"], row.get("visit_owner")):
             continue
         if equipment_filter and not row.get("opportunity"):
             # Report only what this period would have shown, like the Review counts.
-            day = day_of(row.get("visit_date"))
+            day = day_of(fact["plannedAt"])
             if day is not None and start <= day <= end:
                 unclassified["visits"] += 1
             continue
         if not equipment_ok(row.get("opportunity")):
             continue
-        day = day_of(row.get("visit_date"))
+        day = day_of(fact["plannedAt"])
         if day is None:
             missing_date("visits", row["account"], row.get("visit_owner"))
         elif start <= day <= end:
             extra = {"opportunityId": row["opportunity"]} if row.get("opportunity") else {}
             rows["visits"].append(item("visits", row, row["account"], row.get("visit_owner"), day, "Planned", **extra))
 
-    for evaluation in data["evaluations"]:
+    for fact in planned["tests"]:
+        evaluation = sources["evaluations"][fact["sourceId"]]
         if evaluation.get("status") not in PLAN_EVALUATION_STATUSES:
             continue
         # Match the preparation UI's legacy fallback: absent flags in Scheduled/Testing
@@ -124,19 +130,20 @@ def build_plan(data, query, now):
             continue
         # One active Demo, regardless of Test Run count/results or its deadline.
         # Keep an absent/original deadline; never invent a day to make it fit the calendar.
-        day = day_of(evaluation.get("test_run_deadline"))
+        day = day_of(fact["plannedAt"])
         rows["tests"].append(item("tests", evaluation, account, owner, day, evaluation["status"],
                                   evaluationId=evaluation["name"],
                                   **({"opportunityId": request["opportunity"]} if request.get("opportunity") else {})))
 
-    for row in data["actions"]:
+    for fact in planned["actions"]:
+        row = sources["actions"][fact["sourceId"]]
         opp = opportunities.get(row["opportunity"])
-        if row["status"] != "Open" or row.get("archived") or not opp or opp.get("stage") not in OPEN_STAGES:
+        if not open_action(row) or not opp or opp.get("stage") not in OPEN_STAGES:
             continue
         owner = opp.get("opportunity_owner")
         if not in_scope(opp["account"], owner) or not equipment_ok(opp["name"]):
             continue
-        day = day_of(row.get("due"))
+        day = day_of(fact["plannedAt"])
         if day is None:
             missing_date("actions", opp["account"], owner)
             missing_date("overdue", opp["account"], owner)
