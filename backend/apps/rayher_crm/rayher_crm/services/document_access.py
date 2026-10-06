@@ -47,7 +47,10 @@ def latest_request(document_id: str, requester: str | None = None):
     return frappe.get_doc("CRM Document Access Request", names[0]) if names else None
 
 
-def serialize_request(document) -> dict[str, Any]:
+def serialize_request(document, *, with_document: bool = False, audit: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+    """The request; with `with_document`, the document's own confidentiality, status and download audit as well,
+    for the approval detail of a document the Released library no longer lists. The audit is read here for one
+    request; a caller serializing many passes the audit it read for all of their documents at once."""
     requester_name = frappe.db.get_value("User", document.requester, "full_name") or document.requester
     try:
         requester_role = resolve_crm_role(document.requester)
@@ -62,12 +65,29 @@ def serialize_request(document) -> dict[str, Any]:
         "documentId": document.controlled_document,
         "documentTitle": controlled.title,
         "versionId": document.version_id,
+        # The version and revision the request names, as the document had them when it was made; a request older
+        # than the fields takes the document's while it still names the document's current version.
+        "version": document.document_version or (controlled.version if document.version_id == version_id(controlled) else ""),
+        "revision": document.document_revision or (controlled.revision if document.version_id == version_id(controlled) else ""),
         "reason": document.reason,
         "status": document.status,
         "deliveryMode": document.delivery_mode or "",
         "submittedAt": str(document.creation or ""),
         "decidedBy": document.decided_by or "",
         "decidedAt": str(document.decided_at or ""),
+        "decisionNote": document.decision_note or "",
+        **(_document_of_request(controlled, audit) if with_document else {}),
+    }
+
+
+def _document_of_request(controlled, audit: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+    from rayher_crm.services.read_only_views import _download_audit
+
+    user = str(frappe.session.user)
+    return {
+        "documentConfidentiality": controlled.confidentiality or "",
+        "documentStatus": controlled.status or "",
+        "documentAudit": _download_audit(controlled, user, resolve_crm_role(user)) if audit is None else audit,
     }
 
 
@@ -98,6 +118,8 @@ def create_request(version_id_value: Any, reason: Any) -> dict[str, Any]:
             "doctype": "CRM Document Access Request",
             "controlled_document": document.name,
             "version_id": requested_version,
+            "document_version": document.version,
+            "document_revision": document.revision,
             "requester": requester,
             "reason": request_reason,
             "status": "Pending",
@@ -127,16 +149,46 @@ def list_requests() -> list[dict[str, Any]]:
         pluck="name",
         order_by="creation desc",
     )
-    return [serialize_request(frappe.get_doc("CRM Document Access Request", name)) for name in names]
+    from rayher_crm.services.read_only_views import _download_audits
+
+    # The audit of every document the queue names is read once, not once per request.
+    requests = [frappe.get_doc("CRM Document Access Request", name) for name in names]
+    documents: dict[str, Any] = {}
+    for request in requests:
+        if request.controlled_document not in documents:
+            documents[request.controlled_document] = frappe.get_doc("CRM Controlled Document", request.controlled_document)
+    user = str(frappe.session.user)
+    audits = _download_audits(list(documents.values()), user, resolve_crm_role(user))
+    return [
+        serialize_request(request, with_document=True, audit=audits.get(documents[request.controlled_document].document_id, []))
+        for request in requests
+    ]
 
 
-def decide_request(request_id: Any, decision: Any) -> dict[str, Any]:
+MAX_DECISION_NOTE = 1000
+
+
+# A notice's message is held to this (`notifications.py`): the note is told as far as it fits, the request keeps it all.
+NOTICE_MESSAGE_LIMIT = 1000
+
+
+def decide_request(request_id: Any, decision: Any, note: Any = None) -> dict[str, Any]:
     if resolve_crm_role() != "Manager":
         raise frappe.PermissionError("Manager approval is required.")
     request_name = required_text({"requestId": request_id}, "requestId")
     decision_name = required_text({"decision": decision}, "decision")
     if decision_name not in APPROVAL_DECISIONS:
         raise CrmApiException("VALIDATION_ERROR", "Unknown controlled-document decision.")
+    # The applicant is told what to add: a request for more information carries a note; a rejection may.
+    if note is not None and not isinstance(note, str):
+        raise CrmApiException("VALIDATION_ERROR", "The note must be text.", field_errors={"note": "Must be text"})
+    note_text = (note or "").strip() if decision_name in {"more-info", "reject"} else ""
+    if decision_name == "more-info" and not note_text:
+        raise CrmApiException(
+            "VALIDATION_ERROR", "Say what the applicant should add.", field_errors={"note": "Required"},
+        )
+    if len(note_text) > MAX_DECISION_NOTE:
+        raise CrmApiException("VALIDATION_ERROR", f"The note may hold at most {MAX_DECISION_NOTE} characters.")
     savepoint = f"crm_document_access_decision_{frappe.generate_hash(length=8)}"
     frappe.db.savepoint(savepoint)
     try:
@@ -154,12 +206,16 @@ def decide_request(request_id: Any, decision: Any) -> dict[str, Any]:
         document.delivery_mode = delivery_mode
         document.decided_by = frappe.session.user
         document.decided_at = now_datetime()
+        document.decision_note = note_text
         document.save(ignore_permissions=True)
         if document.requester != frappe.session.user:
+            head = f"{document.version_id}: your access request is now {status}."
+            room = NOTICE_MESSAGE_LIMIT - len(head) - 1
+            told = note_text if len(note_text) <= room else note_text[: room - 1].rstrip() + "…"
             notify_if_reachable(
                 recipient=document.requester, category="Document",
                 title=f"Controlled document access {status.lower()}",
-                message=f"{document.version_id}: your access request is now {status}.",
+                message=head + (f" {told}" if told else ""),
                 route="/document-center",
                 source_doctype="CRM Document Access Request", source_name=document.name,
             )

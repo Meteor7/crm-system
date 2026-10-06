@@ -47,5 +47,5 @@ def list_controlled_document_requests(**query) -> dict:
 
 @frappe.whitelist(methods=["POST"])
 @api_endpoint
-def decide_controlled_document_request(requestId: str, decision: str) -> dict:
-    return success_response(decide_request(requestId, decision))
+def decide_controlled_document_request(requestId: str, decision: str, note: str | None = None) -> dict:
+    return success_response(decide_request(requestId, decision, note))

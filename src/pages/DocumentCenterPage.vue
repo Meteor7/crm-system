@@ -48,6 +48,14 @@ interface ApprovalRequest {
   documentTitle: string
   version: string
   revision: string
+  /** The version id the request names (an access request). */
+  versionId?: string
+  /** The document's own confidentiality and download audit as the request carries them (an access request). */
+  documentConfidentiality?: string
+  documentStatus?: string
+  documentAudit?: ControlledDocumentAccessRequestDto['documentAudit']
+  /** Whether the version and revision are the request's own or the library's (not read off the version id). */
+  versionKnown?: boolean
   submittedAt: string
   reason: string
   status: 'Manager Review' | 'Document Manager Review' | 'Approved' | 'More Info Required' | 'Rejected'
@@ -61,7 +69,7 @@ const route = useRoute()
 const { t, locale } = useI18n()
 const documentLabels: Record<string, [string, string]> = {
   Internal: ['内部', 'Internal'], Confidential: ['机密', 'Confidential'], Restricted: ['受限', 'Restricted'],
-  Released: ['已发布', 'Released'], Published: ['已发布', 'Published'], Superseded: ['已替代', 'Superseded'], Obsolete: ['已废弃', 'Obsolete'],
+  Released: ['已发布', 'Released'], Published: ['已发布', 'Published'], Superseded: ['已替代', 'Superseded'], Obsolete: ['已废弃', 'Obsolete'], Pending: ['待审批', 'Pending'],
   Manager: ['经理', 'Manager'], Sales: ['销售', 'Sales'], Engineer: ['工程师', 'Engineer'],
   Engineering: ['工程团队', 'Engineering'], Management: ['管理团队', 'Management'],
 }
@@ -99,7 +107,9 @@ const libraryFilter = ref<LibraryFilter>('All')
 const activeDetailTab = ref<DetailTab>('details')
 const requestReason = ref('')
 const requestError = useLocaleMessage()
-const requestedIds = ref(new Set<string>())
+// Counts the library's reads: a read answered after a later one began is stale and dropped, so that what the
+// page shows is the latest read's (a submit's answer starts one).
+let libraryReadSeq = 0
 const loading = ref(true)
 const approvalLoading = ref(false)
 const submitting = ref(false)
@@ -113,6 +123,8 @@ const previewError = useLocaleMessage()
 const downloading = ref(false)
 const decidingRequestId = ref('')
 let previewRequest = 0
+// Counts the library's reads: a submit answered after a read leaves the library's word on its request.
+let libraryRevision = 0
 
 function applyWorkspaceQuery() {
   workspaceMode.value = role.value === 'Manager' && route?.query?.workspace === 'approvals'
@@ -132,10 +144,31 @@ const selectedRequest = computed(() =>
   ?? approvalRequests.value[0],
 )
 const approvalDocument = computed(() =>
-  controlledDocuments.value.find((document) => document.id === selectedRequest.value?.documentId)
-  ?? controlledDocuments.value.find((document) => document.id === 'DOC-PRICE-26')
-  ?? controlledDocuments.value[0],
+  controlledDocuments.value.find((document) => document.id === selectedRequest.value?.documentId),
 )
+// What the approval detail says of the document: the upload's own confidentiality and version while it waits; the
+// library's for an access request, or the request's own word of its document when the Released library no longer
+// lists it. Nothing of another document stands in, and nothing is made up.
+const approvalConfidentiality = computed(() => selectedRequest.value?.kind === 'upload'
+  ? selectedRequest.value.upload?.confidentiality ?? 'Restricted'
+  : approvalDocument.value?.confidentiality ?? selectedRequest.value?.documentConfidentiality ?? '')
+// The version history the approval detail shows: the version of the upload while it waits; the versions the library
+// lists for an access request of the version it lists; the version the request itself names, as the server gives it,
+// when the Released library no longer lists the document or lists a later version of it. No other version stands in.
+const approvalVersions = computed(() => {
+  const request = selectedRequest.value
+  if (request?.kind === 'upload' && request.upload) {
+    return [{ version: request.upload.version || '1.0', revision: request.upload.revision || 'R1', status: 'Pending', releasedAt: '', checksum: '' }]
+  }
+  const document = approvalDocument.value
+  if (document && (!request?.versionId || document.versionId === request.versionId)) return document.versions
+  return request?.versionKnown ? [{ version: request.version, revision: request.revision, status: request.documentStatus ?? '', releasedAt: '', checksum: '' }] : []
+})
+const approvalAudit = computed(() => approvalDocument.value?.audit ?? selectedRequest.value?.documentAudit ?? [])
+// The decision of a Manager on an access request: what the applicant should add, or why it was refused.
+const decisionNote = ref('')
+// The note is the selected request's: another request chosen starts it afresh.
+watch(selectedRequestId, () => { decisionNote.value = '' })
 const filteredDocuments = computed(() => {
   return controlledDocuments.value.filter((document) => libraryFilter.value === 'All' || document.category === libraryFilter.value)
 })
@@ -144,10 +177,14 @@ const categoryCounts = computed(() => ({
   Technical: controlledDocuments.value.filter((document) => document.category === 'Technical').length,
   Commercial: controlledDocuments.value.filter((document) => document.category === 'Commercial').length,
 }))
-const requestSubmitted = computed(() => Boolean(
-  selected.value
-  && (requestedIds.value.has(selected.value.id) || selected.value.accessRequest?.status === 'Pending'),
-))
+// The decision the applicant was given on this version: returned for more information, or rejected.
+const decidedRequest = computed(() => {
+  const request = selected.value?.accessRequest
+  return request && request.versionId === selected.value?.versionId && (request.status === 'Rejected' || request.status === 'More Info Required')
+    ? request as ControlledDocumentAccessRequestDto & { status: 'Rejected' | 'More Info Required' }
+    : null
+})
+const requestSubmitted = computed(() => selected.value?.accessRequest?.status === 'Pending')
 
 function loadAllControlledDocuments() {
   return readAllPages((page, pageSize) => props.apiClient.listControlledDocuments({ page, pageSize }))
@@ -161,8 +198,32 @@ function loadAllUploadRequests() {
   return readAllPages((page, pageSize) => props.apiClient.listControlledDocumentUploadRequests({ page, pageSize }))
 }
 
+// A version id is `<document id>-<version>-<revision>`, and a version or a revision may hold dashes of its own: for a
+// request that names no version of its own (older than the fields) whose document the library does not hold at
+// that version, the id's tail is shown whole, with no revision read off it.
+function versionTail(item: ControlledDocumentAccessRequestDto) {
+  const tail = item.versionId.startsWith(`${item.documentId}-`) ? item.versionId.slice(item.documentId.length + 1) : ''
+  return { version: tail || item.versionId, revision: '' }
+}
+
+// The library's document for a request, when the request names the version the document is at now (an older
+// request names an earlier one, which the library no longer describes).
+function documentAtRequestedVersion(documentId: string, versionId: string) {
+  const document = controlledDocuments.value.find((candidate) => candidate.id === documentId)
+  return document && `${document.id}-${document.version}-${document.revision}` === versionId ? document : undefined
+}
+
+// A request older than the version fields takes its version from the library once the library is here.
+function settleRequestVersions() {
+  for (const request of approvalRequests.value) {
+    if (request.kind !== 'access' || request.versionKnown) continue
+    const document = documentAtRequestedVersion(request.documentId, request.versionId ?? '')
+    if (document) Object.assign(request, { version: document.version, revision: document.revision, versionKnown: true })
+  }
+}
+
 function mapApprovalRequest(item: ControlledDocumentAccessRequestDto): ApprovalRequest {
-  const document = controlledDocuments.value.find((candidate) => candidate.id === item.documentId)
+  const document = documentAtRequestedVersion(item.documentId, item.versionId)
   const words = item.requesterName.trim().split(/\s+/)
   return {
     kind: 'access',
@@ -173,8 +234,13 @@ function mapApprovalRequest(item: ControlledDocumentAccessRequestDto): ApprovalR
     team: item.requesterRole === 'Engineer' ? 'Engineering' : item.requesterRole === 'Sales' ? 'Sales' : 'Management',
     documentId: item.documentId,
     documentTitle: item.documentTitle,
-    version: document?.version ?? item.versionId,
-    revision: document?.revision ?? '',
+    versionId: item.versionId,
+    documentConfidentiality: item.documentConfidentiality,
+    documentStatus: item.documentStatus,
+    documentAudit: item.documentAudit,
+    version: item.version || document?.version || versionTail(item).version,
+    revision: item.revision || document?.revision || versionTail(item).revision,
+    versionKnown: Boolean(item.version || document),
     submittedAt: item.submittedAt,
     reason: item.reason,
     status: item.status === 'Pending' ? 'Manager Review' : item.status,
@@ -210,9 +276,8 @@ async function submitDocumentUpload() {
     const result = await props.apiClient.submitControlledDocumentUpload(uploadForm.value, part)
     uploadOpen.value = false
     notice.value = result.data.status === 'Published' ? (localeMessage('Document published and archived.', '文档已直接发布并归档。')) : (localeMessage('Document submitted and waiting for Manager review.', '文档已提交，等待经理审核。'))
-    if (result.data.status === 'Published') {
-      controlledDocuments.value = await loadAllControlledDocuments()
-    }
+    // Published: the library has the document; read anew as every read is (sequenced, the selection kept).
+    if (result.data.status === 'Published') await refreshDocumentLibrary()
   } catch (reason) {
     uploadError.value = requestErrorMessage(reason, (localeMessage('Document upload failed.', '文档上传失败')))
   } finally {
@@ -249,9 +314,16 @@ async function submitAccessRequest() {
   requestError.value = ''
   try {
     const result = await props.apiClient.requestControlledDocumentAccess(document.versionId, reason)
-    document.accessRequest = result.data
-    requestedIds.value = new Set([...requestedIds.value, document.id])
+    // Shown as submitted at once, on the document as the page holds it now (a read may have replaced the object);
+    // then the library is read anew for the server's word, which outranks any read begun before.
+    const current = controlledDocuments.value.find((item) => item.id === document.id) ?? document
+    // What the library already carries stands when it is this very request decided meanwhile, or a request made
+    // since (asked again elsewhere, after a decision): the answer is of an older moment than either.
+    const known = current.accessRequest
+    const supersedes = !known || (known.id === result.data.id ? known.status === 'Pending' : result.data.submittedAt > known.submittedAt)
+    if (supersedes) current.accessRequest = result.data
     notice.value = localeMessage('Access request submitted. Current status: Manager Review.', '访问申请已提交，当前状态为经理审核')
+    void refreshDocumentLibrary()
   } catch (reasonError) {
     requestError.value = requestErrorMessage(reasonError, (localeMessage('Access request failed.', '访问申请提交失败')))
   } finally {
@@ -300,6 +372,8 @@ async function downloadControlledDocument() {
       : 'application/pdf'
     if (file.mimeType !== expectedMime || file.blob.size === 0) throw invalidDownload
     downloadBlob(file.blob, file.fileName)
+    // The audit's new row comes with the library read anew; the download itself is done.
+    void refreshDocumentLibrary()
     notice.value = role.value === 'Manager' ? (localeMessage(`Clean original for ${document.id} downloaded; action logged.`, `已下载 ${document.id} 的无水印原件，下载行为已记录`)) : document.deliveryMode === 'Original' ? (localeMessage(`Approved original for ${document.id} downloaded; action logged.`, `已下载 ${document.id} 的批准原件，下载行为已记录`)) : (localeMessage(`Personal watermarked PDF for ${document.id} generated; action logged.`, `已生成 ${document.id} 的个人水印 PDF，下载行为已记录`))
   } catch (reason) {
     notice.value = reason === invalidDownload ? localeMessage('The server returned an invalid controlled file type.', '服务端返回的受控文件类型不正确') : requestErrorMessage(reason, (localeMessage('Controlled download failed.', '受控下载生成失败')))
@@ -325,7 +399,7 @@ async function decideRequest(decision: ApprovalDecision) {
       request.status = result.data.status === 'Published' ? 'Approved' : 'Rejected'
       notice.value = result.data.status === 'Published' ? (localeMessage('Uploaded document approved and archived.', '上传文档已批准归档。')) : (localeMessage('Uploaded document rejected.', '上传文档已拒绝。'))
       approvalRequests.value = approvalRequests.value.filter((item) => item.id !== request.id)
-      selectedRequestId.value = approvalRequests.value[0]?.id ?? ''
+      if (!approvalRequests.value.some((item) => item.id === selectedRequestId.value)) selectedRequestId.value = approvalRequests.value[0]?.id ?? ''
     } catch (decisionError) {
       notice.value = requestErrorMessage(decisionError, (localeMessage('Approval action failed.', '审批操作失败')))
     } finally {
@@ -333,9 +407,15 @@ async function decideRequest(decision: ApprovalDecision) {
     }
     return
   }
+  const note = decisionNote.value.trim()
+  if (decision === 'more-info' && !note) {
+    notice.value = localeMessage('Say what the applicant should add before asking for more information.', '请先写明需要申请人补充什么。')
+    decidingRequestId.value = ''
+    return
+  }
   if (!usingMock) {
     try {
-      const result = await props.apiClient.decideControlledDocumentRequest(request.id, decision)
+      const result = await props.apiClient.decideControlledDocumentRequest(request.id, decision, note || undefined)
       const mapped = mapApprovalRequest(result.data)
       Object.assign(request, mapped)
     } catch (decisionError) {
@@ -349,10 +429,12 @@ async function decideRequest(decision: ApprovalDecision) {
     : decision === 'reject'
       ? 'Rejected'
       : 'More Info Required'
-  selectedRequest.value.status = nextStatus
+  // The decision lands on the request it was made for: another selected meanwhile keeps its selection and its note.
+  request.status = nextStatus
+  if (selectedRequestId.value === request.id) decisionNote.value = ''
   notice.value = decision === 'approve-watermarked' ? (localeMessage('Watermarked PDF preview and download approved.', '已批准水印 PDF 预览与下载')) : decision === 'approve-original' ? (localeMessage('Original PPTX download approved; preview still uses a personal watermarked PDF.', '已批准原始 PPTX 下载；预览仍使用个人水印 PDF')) : decision === 'reject' ? (localeMessage('Access request rejected.', '已拒绝该访问申请')) : (localeMessage('Applicant asked to provide more information.', '已要求申请人补充信息'))
   approvalRequests.value = approvalRequests.value.filter((item) => item.id !== request.id)
-  selectedRequestId.value = approvalRequests.value[0]?.id ?? ''
+  if (!approvalRequests.value.some((item) => item.id === selectedRequestId.value)) selectedRequestId.value = approvalRequests.value[0]?.id ?? ''
   decidingRequestId.value = ''
 }
 
@@ -380,13 +462,32 @@ function confidentialityClass(value: string) {
 }
 
 async function loadDocumentLibrary() {
+  const read = ++libraryReadSeq
   try {
-    controlledDocuments.value = await loadAllControlledDocuments()
+    const documents = await loadAllControlledDocuments()
+    if (read !== libraryReadSeq) return
+    controlledDocuments.value = documents
     selectedId.value = controlledDocuments.value[0]?.id ?? ''
+    settleRequestVersions()
   } catch (loadError) {
     error.value = requestErrorMessage(loadError, localeMessage('Document Center failed to load.', 'Document Center 加载失败'))
   } finally {
     loading.value = false
+  }
+}
+
+// After a download, or a request submitted, the library is read again (the audit has a row more, the request is
+// the server's), the selection kept; a read begun before a later one is dropped when it is answered.
+async function refreshDocumentLibrary() {
+  const read = ++libraryReadSeq
+  try {
+    const documents = await loadAllControlledDocuments()
+    if (read !== libraryReadSeq) return
+    controlledDocuments.value = documents
+    if (!documents.some((item) => item.id === selectedId.value)) selectedId.value = documents[0]?.id ?? ''
+    settleRequestVersions()
+  } catch {
+    // What was done went through; the list stands as it was until the next load.
   }
 }
 
@@ -433,7 +534,17 @@ onMounted(async () => {
 
 watch(() => route?.query?.workspace, applyWorkspaceQuery)
 
-watch(() => selected.value?.id, () => {
+// The preview is the selected document's at the version shown, as far as the user may see it: another document,
+// the same one at another version, or one the user may preview since (the library read anew after a download,
+// an approval meanwhile), is loaded anew.
+// Each field a source of its own (one getter returning an array would be compared as a new array every time, and
+// the library read anew replaces the document object): a read that changes none of them leaves the preview.
+watch([
+  () => selected.value?.id ?? '',
+  () => selected.value?.version ?? '',
+  () => selected.value?.revision ?? '',
+  () => Boolean(selected.value?.canPreview),
+], () => {
   void loadControlledPreview()
 })
 
@@ -545,9 +656,9 @@ onBeforeUnmount(() => {
           <header>
             <div>
               <h2>{{ selectedRequest.documentTitle }}</h2>
-              <span>{{ selectedRequest.documentId }} · {{ selectedRequest.version }} / {{ selectedRequest.revision }}</span>
+              <span>{{ selectedRequest.documentId }} · {{ selectedRequest.version }}<template v-if="selectedRequest.revision"> / {{ selectedRequest.revision }}</template></span>
             </div>
-            <span class="workspace-badge danger">{{ documentLabel('Restricted') }}</span>
+            <span class="workspace-badge" :class="confidentialityClass(approvalConfidentiality)" data-approval-confidentiality>{{ documentLabel(approvalConfidentiality) }}</span>
           </header>
 
           <div class="workspace-panel-body approval-body">
@@ -585,6 +696,10 @@ onBeforeUnmount(() => {
                 <small>{{ locale === 'en-US' ? 'Authorization policy' : '授权策略' }}</small>
                 <strong>{{ locale === 'en-US' ? 'Choose watermarked PDF or original PPTX during approval' : '审批时明确选择水印 PDF 或原始 PPTX' }}</strong>
               </div>
+              <label v-if="selectedRequest.kind === 'access'" class="decision-note">
+                <span>{{ locale === 'en-US' ? 'Note to the applicant (required to request more information)' : '给申请人的说明（补充信息时必填）' }}</span>
+                <textarea v-model="decisionNote" data-decision-note rows="2" :disabled="isManagementReadonly || selectedRequest.status !== 'Manager Review'" :placeholder="locale === 'en-US' ? 'e.g. Name the customer and the meeting' : '例如：请写明客户和会议场合'"></textarea>
+              </label>
               <div class="approval-actions">
                 <button
                   v-if="selectedRequest.kind === 'upload'"
@@ -654,12 +769,12 @@ onBeforeUnmount(() => {
 
             <section class="evidence-grid">
               <article class="evidence-card" data-version-history>
-                <header><h3>{{ locale === 'en-US' ? 'Version history' : '版本历史' }}</h3><span>{{ approvalDocument?.versions.length ?? 0 }} {{ locale === 'en-US' ? 'items' : '条' }}</span></header>
+                <header><h3>{{ locale === 'en-US' ? 'Version history' : '版本历史' }}</h3><span>{{ approvalVersions.length }} {{ locale === 'en-US' ? 'items' : '条' }}</span></header>
                 <div class="table-scroll">
                   <table class="crm-table evidence-table">
                     <thead><tr><th>{{ locale === 'en-US' ? 'Version' : '版本' }}</th><th>{{ locale === 'en-US' ? 'Status' : '状态' }}</th><th>{{ locale === 'en-US' ? 'Published' : '发布日期' }}</th></tr></thead>
                     <tbody>
-                      <tr v-for="version in approvalDocument?.versions ?? []" :key="`${version.version}-${version.revision}`">
+                      <tr v-for="version in approvalVersions" :key="`${version.version}-${version.revision}`">
                         <td><strong>{{ version.version }} / {{ version.revision }}</strong></td>
                         <td><span class="workspace-badge" :class="version.status === 'Released' ? 'positive' : ''">{{ documentLabel(version.status) }}</span></td>
                         <td>{{ formatDisplayDate(version.releasedAt) }}</td>
@@ -672,10 +787,10 @@ onBeforeUnmount(() => {
               <article class="evidence-card" data-download-audit>
                 <header><h3>{{ locale === 'en-US' ? 'Download audit' : '下载审计' }}</h3><span>{{ locale === 'en-US' ? 'Authorized access log' : '授权访问记录' }}</span></header>
                 <p class="audit-note"><Info :size="14" />{{ locale === 'en-US' ? 'No download record is created before approval.' : '批准前不会生成本次下载记录。' }}</p>
-                <div class="audit-list">
-                  <div><strong>Irene Li</strong><span>Manager</span><time>2026-06-20</time><small>{{ locale === 'en-US' ? 'Controlled download' : '受控下载' }}</small></div>
-                  <div><strong>Michael Zhang</strong><span>Sales Director</span><time>2026-05-18</time><small>{{ locale === 'en-US' ? 'Controlled download' : '受控下载' }}</small></div>
+                <div v-if="approvalAudit.length" class="audit-list">
+                  <div v-for="entry in approvalAudit" :key="entry.id"><strong>{{ entry.employee }}</strong><span>{{ entry.reason }}</span><time>{{ formatDisplayDate(entry.at) }}</time><small>{{ entry.version }}</small></div>
                 </div>
+                <p v-else class="workspace-empty-note">{{ locale === 'en-US' ? 'No download records for this version.' : '当前版本暂无下载记录。' }}</p>
               </article>
             </section>
           </div>
@@ -878,8 +993,13 @@ onBeforeUnmount(() => {
                 </template>
 
                 <form v-else data-access-request-form @submit.prevent="submitAccessRequest">
-                  <span class="workspace-badge warning"><FileLock2 :size="13" />{{ locale === 'en-US' ? 'Request required' : '需要申请' }}</span>
-                  <h3>{{ locale === 'en-US' ? 'Request access to Restricted document' : '申请访问受限文档' }}</h3>
+                  <div v-if="decidedRequest" class="request-decision" data-access-request-decision>
+                    <span class="workspace-badge" :class="statusTone(decidedRequest.status)">{{ requestStatusLabel(decidedRequest.status) }}</span>
+                    <p>{{ decidedRequest.decisionNote || (decidedRequest.status === 'Rejected' ? (locale === 'en-US' ? 'The Manager rejected the request.' : '经理已拒绝这次申请。') : (locale === 'en-US' ? 'The Manager asked for more information.' : '经理要求补充信息。')) }}</p>
+                    <small>{{ decidedRequest.status === 'Rejected' ? (locale === 'en-US' ? 'You may apply again with a different purpose.' : '可以换一个用途再次申请。') : (locale === 'en-US' ? 'Add the information asked for and submit the request again.' : '补充所要求的信息后再次提交申请。') }}</small>
+                  </div>
+                  <span v-else class="workspace-badge warning"><FileLock2 :size="13" />{{ locale === 'en-US' ? 'Request required' : '需要申请' }}</span>
+                  <h3>{{ decidedRequest ? (locale === 'en-US' ? 'Apply again' : '再次申请') : (locale === 'en-US' ? 'Request access to Restricted document' : '申请访问受限文档') }}</h3>
                   <p>{{ locale === 'en-US' ? 'Provide a specific business purpose. Content and download links remain hidden until approval.' : '填写具体业务用途。批准前不会显示正文或生成下载链接。' }}</p>
                   <label class="reason-field">
                     <span>{{ locale === 'en-US' ? 'Business purpose' : '访问用途' }}<RequiredMark /></span>
@@ -1782,4 +1902,10 @@ onBeforeUnmount(() => {
   .document-audit > div { grid-template-columns: 1fr; }
   .audit-list small { grid-column: auto; }
 }
+.decision-note { display: grid; gap: 6px; }
+.decision-note span { color: var(--crm-text-muted); font-size: 9px; font-weight: 700; }
+.decision-note textarea { width: 100%; box-sizing: border-box; padding: 8px 10px; border: 1px solid var(--crm-line); border-radius: 8px; font: inherit; font-size: 10px; resize: vertical; }
+.request-decision { display: grid; gap: 6px; padding: 10px; background: var(--crm-surface-muted); border: 1px solid var(--crm-line); border-radius: 9px; }
+.request-decision p { margin: 0; color: var(--crm-text); font-size: 10px; }
+.request-decision small { color: var(--crm-text-muted); font-size: 8px; }
 </style>

@@ -163,6 +163,70 @@ describe('DocumentCenterPage', () => {
     expect(wrapper.text()).toContain('已批准')
   })
 
+  it('shows the request\'s own document in the approval detail: its confidentiality, its version, its download audit', async () => {
+    const { wrapper, apiClient } = await mountPage('Manager', true)
+    const aconca = (await apiClient.listControlledDocuments({ page: 1, pageSize: 200 })).data.items.find((item) => item.id.startsWith('DOC-ACONCA'))!
+    const original = apiClient.listControlledDocuments.bind(apiClient)
+    vi.spyOn(apiClient, 'listControlledDocuments').mockImplementation(async (query) => {
+      const result = await original(query)
+      return { ...result, data: { ...result.data, items: result.data.items.map((item) => item.id === aconca.id
+        ? { ...item, audit: [{ id: 'DL-1', employee: 'Demo Staff 01', at: '2026-09-30 10:00:00', reason: 'Customer technical review', version: item.versionId }] }
+        : item) } }
+    })
+    const fresh = mount(DocumentCenterPage, { props: { apiClient } })
+    await flushPromises()
+    await fresh.get('[data-workspace-tab="approvals"]').trigger('click')
+
+    expect(fresh.get('[data-approval-confidentiality]').text()).toBe(aconca.confidentiality === 'Restricted' ? '受限' : aconca.confidentiality === 'Confidential' ? '机密' : '内部')
+    expect(fresh.get('.approval-detail header span').text()).toBe(`${aconca.id} · ${aconca.version} / ${aconca.revision}`)
+    expect(fresh.get('[data-version-history]').text()).toContain(`${aconca.versions.length} 条`)
+    const audit = fresh.get('[data-download-audit]')
+    expect(audit.text()).toContain('Demo Staff 01')
+    expect(audit.text()).toContain('Customer technical review')
+    expect(audit.text()).not.toContain('Irene Li')
+    expect(audit.text()).not.toContain('Michael Zhang')
+    fresh.unmount()
+    wrapper.unmount()
+  })
+
+  it('asks the Manager to say what the applicant should add before requesting more information', async () => {
+    const { wrapper } = await mountPage('Manager', true)
+    await wrapper.get('[data-workspace-tab="approvals"]').trigger('click')
+
+    await wrapper.get('[data-approval-action="more-info"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.findAll('.request-card')).toHaveLength(1)
+    expect(wrapper.text()).toContain('请先写明需要申请人补充什么')
+
+    await wrapper.get('[data-decision-note]').setValue('请写明客户和会议场合')
+    await wrapper.get('[data-approval-action="more-info"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.findAll('.request-card')).toHaveLength(0)
+    expect(wrapper.text()).toContain('已要求申请人补充信息')
+  })
+
+  it('tells the applicant that the request was returned, with the note, and lets them apply again', async () => {
+    const apiClient = createMockApi({ latency: 0, role: 'Sales', userName: 'Demo Staff 01' })
+    const original = apiClient.listControlledDocuments.bind(apiClient)
+    vi.spyOn(apiClient, 'listControlledDocuments').mockImplementation(async (query) => {
+      const result = await original(query)
+      return { ...result, data: { ...result.data, items: result.data.items.map((item) => item.id === 'DOC-NANSI-0610'
+        ? { ...item, accessRequest: { id: 'ACCESS-9', requester: 'person002@crm.example.invalid', requesterName: 'Demo Staff 01', requesterRole: 'Sales', documentId: item.id, documentTitle: item.title, versionId: item.versionId, reason: 'Customer review', status: 'More Info Required' as const, deliveryMode: '' as const, submittedAt: '2026-09-30 09:00:00', decidedBy: 'person029@crm.example.invalid', decidedAt: '2026-09-30 10:00:00', decisionNote: '请写明客户和会议场合' } }
+        : item) } }
+    })
+    const wrapper = mount(DocumentCenterPage, { props: { apiClient } })
+    await flushPromises()
+    await wrapper.get('[data-document-id="DOC-NANSI-0610"]').trigger('click')
+
+    const decision = wrapper.get('[data-access-request-decision]')
+    expect(decision.text()).toContain('待补充信息')
+    expect(decision.text()).toContain('请写明客户和会议场合')
+    expect(wrapper.find('[data-access-request-form]').exists()).toBe(true)
+    expect(wrapper.text()).toContain('再次申请')
+    expect(wrapper.find('[data-access-request-status]').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
   it('keeps the released library visible when one approval queue fails to load', async () => {
     const apiClient = createMockApi({ latency: 0, role: 'Manager' })
     vi.spyOn(apiClient, 'listControlledDocumentRequests').mockRejectedValue(new Error('REQ-ACCESS-LOAD: access queue unavailable'))

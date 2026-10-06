@@ -10,7 +10,7 @@ from pypdf import PdfReader
 
 from rayher_crm.api.v1.errors import CrmApiException
 from rayher_crm.services.controlled_documents import PPTX_MIME, render_controlled_document
-from rayher_crm.services.document_access import create_request, decide_request, version_id
+from rayher_crm.services.document_access import MAX_DECISION_NOTE, create_request, decide_request, version_id
 from rayher_crm.setup.controlled_documents import ACONCA_DOCUMENT_ID
 from rayher_crm.tests._controlled_document_fixtures import install_test_controlled_documents
 
@@ -227,6 +227,138 @@ class TestControlledDocumentDelivery(FrappeTestCase):
         result = render_controlled_document(ACONCA_DOCUMENT_ID, "preview")
         self.assertEqual(result["mime_type"], "application/pdf")
 
+    def test_the_download_audit_names_who_downloaded_and_why(self):
+        from rayher_crm.services.read_only_views import list_controlled_documents
+
+        def audit_of(user: str) -> list[dict]:
+            frappe.set_user(user)
+            return next(item for item in list_controlled_documents() if item["id"] == ACONCA_DOCUMENT_ID)["audit"]
+
+        # The site keeps the audit of earlier runs (a download commits its row): what this test adds is read against
+        # what was there, newest first.
+        sales_before = [entry["id"] for entry in audit_of(self.sales)]
+        engineer_before = [entry["id"] for entry in audit_of(self.engineer)]
+        manager_before = [entry["id"] for entry in audit_of(self.manager)]
+        self.assertTrue(all(entry["employee"] == "Controlled Engineer" for entry in audit_of(self.engineer)))
+        frappe.set_user(self.sales)
+        render_controlled_document(ACONCA_DOCUMENT_ID, "download")
+        frappe.set_user(self.manager)
+        render_controlled_document(ACONCA_DOCUMENT_ID, "download")
+
+        # The requester sees their own download, with the purpose they gave; another user sees none of it; the
+        # Manager sees everyone's, their own clean original among them.
+        own = [entry for entry in audit_of(self.sales) if entry["id"] not in sales_before]
+        self.assertEqual(
+            [(entry["employee"], entry["reason"], entry["version"]) for entry in own],
+            [("Controlled Sales", "Customer technical review", version_id(self.document))],
+        )
+        self.assertTrue(own[0]["id"] and own[0]["at"])
+        self.assertEqual([entry["id"] for entry in audit_of(self.engineer)], engineer_before)
+        self.assertEqual(
+            sorted((entry["employee"], entry["reason"]) for entry in audit_of(self.manager) if entry["id"] not in manager_before),
+            [("Controlled Manager", "Download without a request"), ("Controlled Sales", "Customer technical review")],
+        )
+
+        # The version shown is the one downloaded (the request's, or the one the audit row notes), not the document's
+        # current one: a later revision of the document leaves the audit as it was.
+        downloaded = version_id(self.document)
+        frappe.set_user("Administrator")
+        frappe.db.set_value("CRM Controlled Document", self.document.name, "revision", "V9", update_modified=False)
+        try:
+            self.assertEqual(
+                sorted((entry["employee"], entry["version"]) for entry in audit_of(self.manager) if entry["id"] not in manager_before),
+                [("Controlled Manager", downloaded), ("Controlled Sales", downloaded)],
+            )
+        finally:
+            frappe.set_user("Administrator")
+            frappe.db.set_value("CRM Controlled Document", self.document.name, "revision", self.document.revision, update_modified=False)
+
+    def test_the_managers_queue_carries_the_documents_own_confidentiality_and_audit(self):
+        from rayher_crm.services.document_access import list_requests
+
+        # The approval detail of a document the Released library no longer lists reads these off the request.
+        frappe.set_user(self.engineer)
+        requested = create_request(version_id(self.document), "Queue carries the document")
+        frappe.set_user(self.manager)
+        render_controlled_document(ACONCA_DOCUMENT_ID, "download")
+        queued = next(item for item in list_requests() if item["id"] == requested["id"])
+        self.assertEqual((queued["documentConfidentiality"], queued["documentStatus"]), (self.document.confidentiality, "Released"))
+        self.assertTrue(any(entry["employee"] == "Controlled Manager" for entry in queued["documentAudit"]))
+
+    def test_a_request_names_the_version_and_revision_it_was_made_for(self):
+        from rayher_crm.services.read_only_views import list_controlled_documents
+
+        # A version with a dash in it, as the upload accepts: the request carries it whole, and keeps it when the
+        # document moves on.
+        frappe.set_user("Administrator")
+        frappe.db.set_value("CRM Controlled Document", self.document.name, "version", "2026-Q4", update_modified=False)
+        try:
+            frappe.set_user(self.engineer)
+            requested = create_request(f"{self.document.document_id}-2026-Q4-{self.document.revision}", "Dashed version")
+            self.assertEqual((requested["version"], requested["revision"]), ("2026-Q4", self.document.revision))
+            frappe.set_user("Administrator")
+            frappe.db.set_value("CRM Controlled Document", self.document.name, "version", "2026-Q5", update_modified=False)
+            frappe.set_user(self.engineer)
+            shown = next(item for item in list_controlled_documents() if item["id"] == ACONCA_DOCUMENT_ID)["accessRequest"]
+            self.assertEqual((shown["id"], shown["version"], shown["revision"]), (requested["id"], "2026-Q4", self.document.revision))
+        finally:
+            frappe.set_user("Administrator")
+            frappe.db.set_value("CRM Controlled Document", self.document.name, "version", self.document.version, update_modified=False)
+
+    def test_a_request_for_more_information_carries_a_note_for_the_applicant(self):
+        from rayher_crm.services.read_only_views import list_controlled_documents
+
+        frappe.set_user(self.engineer)
+        requested = create_request(version_id(self.document), "Need the edge-defect slides for a customer call")
+        frappe.set_user(self.manager)
+        # Asking for more information without saying what is refused; a note that is no text, or too long, too.
+        for bad in (None, "", "   ", 42, "x" * 1001):
+            with self.assertRaises(CrmApiException) as refused:
+                decide_request(requested["id"], "more-info", bad)
+            self.assertEqual(refused.exception.code, "VALIDATION_ERROR")
+        self.assertEqual(frappe.db.get_value("CRM Document Access Request", requested["id"], "status"), "Pending")
+
+        asked = decide_request(requested["id"], "more-info", "  Name the customer and the meeting date.  ")
+        self.assertEqual((asked["status"], asked["decisionNote"]), ("More Info Required", "Name the customer and the meeting date."))
+        # The applicant's document carries the decision and the note, so the page can show them.
+        frappe.set_user(self.engineer)
+        document = next(item for item in list_controlled_documents() if item["id"] == ACONCA_DOCUMENT_ID)
+        self.assertEqual(
+            (document["accessRequest"]["status"], document["accessRequest"]["decisionNote"], document["canDownload"]),
+            ("More Info Required", "Name the customer and the meeting date.", False),
+        )
+        notice = frappe.get_all(
+            "CRM Notification Event",
+            filters={"source_doctype": "CRM Document Access Request", "source_name": requested["id"], "recipient_user": self.engineer},
+            fields=["message"], order_by="creation desc", limit=1,
+        )[0]
+        self.assertIn("Name the customer and the meeting date.", notice.message)
+
+        # A note at its limit is taken whole; the notice tells it as far as a notice holds, and shows that it was cut.
+        frappe.set_user(self.engineer)
+        long_request = create_request(version_id(self.document), "Customer ACME, technical call on 2026-10-21")
+        frappe.set_user(self.manager)
+        told = decide_request(long_request["id"], "more-info", "N" * MAX_DECISION_NOTE)
+        self.assertEqual((told["status"], len(told["decisionNote"])), ("More Info Required", MAX_DECISION_NOTE))
+        cut = frappe.get_all(
+            "CRM Notification Event",
+            filters={"source_doctype": "CRM Document Access Request", "source_name": long_request["id"], "recipient_user": self.engineer},
+            fields=["message"], order_by="creation desc", limit=1,
+        )[0]
+        self.assertTrue(len(cut.message) <= 1000 and cut.message.endswith("…") and "NNNN" in cut.message)
+
+        # Asked again with more to say: a new request; a rejection may carry a note, an approval carries none.
+        again = create_request(version_id(self.document), "Customer ACME, technical call on 2026-10-20")
+        self.assertNotEqual(again["id"], requested["id"])
+        frappe.set_user(self.manager)
+        rejected = decide_request(again["id"], "reject", "Not for external calls.")
+        self.assertEqual((rejected["status"], rejected["decisionNote"]), ("Rejected", "Not for external calls."))
+        frappe.set_user(self.engineer)
+        third = create_request(version_id(self.document), "Internal training only")
+        frappe.set_user(self.manager)
+        approved = decide_request(third["id"], "approve-watermarked", "ignored")
+        self.assertEqual((approved["status"], approved["decisionNote"]), ("Approved", ""))
+
     def test_decision_skips_requester_after_crm_role_is_revoked(self):
         requested = create_request(version_id(self.document), "Former CRM user")
         frappe.set_user("Administrator")
@@ -301,6 +433,8 @@ class TestControlledDocumentDelivery(FrappeTestCase):
         frappe.db.set_value(
             "CRM Controlled Document", self.document.name, "access_mode", "Direct", update_modified=False,
         )
+        # A version with a space in it, as the upload accepts: recorded whole.
+        frappe.db.set_value("CRM Controlled Document", self.document.name, "version", "2026 Q4", update_modified=False)
         frappe.set_user(self.engineer)
 
         result = render_controlled_document(ACONCA_DOCUMENT_ID, "download")
@@ -314,6 +448,15 @@ class TestControlledDocumentDelivery(FrappeTestCase):
             }),
             1,
         )
+        # The download audit says what it was (no Manager's), and which version.
+        from rayher_crm.services.read_only_views import list_controlled_documents
+
+        row_name = frappe.db.get_value("CRM File Access Audit", {"access_id": result["access_id"]}, "name")
+        audit = next(item for item in list_controlled_documents() if item["id"] == ACONCA_DOCUMENT_ID)["audit"]
+        entry = next(item for item in audit if item["id"] == row_name)
+        self.assertEqual((entry["reason"], entry["version"]), ("Direct access (no request needed)", f"{self.document.document_id}-2026 Q4-{self.document.revision}"))
+        frappe.set_user("Administrator")
+        frappe.db.set_value("CRM Controlled Document", self.document.name, "version", self.document.version, update_modified=False)
 
     def _assert_native_source_denied(self, file_name: str, *, list_fails_closed: bool = False) -> None:
         from frappe.client import get, get_list

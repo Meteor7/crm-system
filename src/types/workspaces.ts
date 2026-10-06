@@ -751,10 +751,19 @@ export interface ControlledDocumentAccessRequestDto {
   documentId: string
   documentTitle: string
   versionId: string
+  /** The version and revision the request names, as the document had them when it was made (empty on a request older than the fields, whose document moved on). */
+  version?: string
+  revision?: string
+  /** The document's own confidentiality, status and download audit, with the Manager's queue: the approval detail of a document the Released library no longer lists reads them here. */
+  documentConfidentiality?: string
+  documentStatus?: string
+  documentAudit?: Array<{ id: string; employee: string; at: string; reason: string; version: string }>
   reason: string
   status: 'Pending' | 'Approved' | 'Rejected' | 'More Info Required'
   deliveryMode: 'Watermarked' | 'Original' | ''
   submittedAt: string
   decidedBy: string
   decidedAt: string
+  /** What the Manager told the applicant with a rejection or a request for more information. */
+  decisionNote: string
 }

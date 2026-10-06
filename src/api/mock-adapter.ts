@@ -4345,12 +4345,15 @@ export function createMockApi(options: {
         documentId: document.id,
         documentTitle: document.title,
         versionId,
+        version: document.version,
+        revision: document.revision,
         reason: requestReason,
         status: 'Pending',
         deliveryMode: '',
         submittedAt: now,
         decidedBy: '',
         decidedAt: '',
+        decisionNote: '',
       }
       localDocumentRequests.unshift(request)
       return response(request)

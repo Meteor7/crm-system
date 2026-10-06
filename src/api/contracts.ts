@@ -346,7 +346,7 @@ export interface CrmApi {
   downloadControlledDocument(documentId: string): Promise<BinaryDownload>
   requestControlledDocumentAccess(versionId: string, reason: string): Promise<ApiResponse<ControlledDocumentAccessRequestDto>>
   listControlledDocumentRequests(query?: ListQuery): Promise<ApiResponse<PageData<ControlledDocumentAccessRequestDto>>>
-  decideControlledDocumentRequest(requestId: string, decision: 'approve-watermarked' | 'approve-original' | 'reject' | 'more-info'): Promise<ApiResponse<ControlledDocumentAccessRequestDto>>
+  decideControlledDocumentRequest(requestId: string, decision: 'approve-watermarked' | 'approve-original' | 'reject' | 'more-info', note?: string): Promise<ApiResponse<ControlledDocumentAccessRequestDto>>
   submitControlledDocumentUpload(input: DocumentUploadInput, file: MultipartFilePart): Promise<ApiResponse<DocumentUploadRequestDto>>
   listControlledDocumentUploadRequests(query?: ListQuery): Promise<ApiResponse<PageData<DocumentUploadRequestDto>>>
   decideControlledDocumentUploadRequest(requestId: string, input: DocumentUploadDecisionInput): Promise<ApiResponse<DocumentUploadRequestDto>>

@@ -37,7 +37,7 @@ def _access_id() -> str:
     return f"DL-{uuid.uuid4().hex[:20].upper()}"
 
 
-def _audit(document_id: str, action: str, outcome: str, access_id: str, reason: str = "") -> None:
+def _audit(document_id: str, action: str, outcome: str, access_id: str, reason: str = "", version_id: str = "") -> None:
     actor = str(getattr(frappe.session, "user", "") or "Guest")
     frappe.get_doc({
         "doctype": "CRM File Access Audit",
@@ -50,6 +50,8 @@ def _audit(document_id: str, action: str, outcome: str, access_id: str, reason: 
         "at": now_datetime(),
         "access_id": access_id,
         "request_id": str(getattr(frappe.local, "request_id", "") or "")[:140],
+        # The version downloaded, as it was then (the document's may move on).
+        "version_id": version_id,
     }).insert(ignore_permissions=True)
     frappe.local.flags.commit = True
 
@@ -214,7 +216,10 @@ def render_controlled_document(
     action_name = _action_name(action)
     access_id = _access_id()
     document, approval_request, delivery_mode = _authorized_document(str(document_id or ""), action_name, access_id)
-    approval_id = approval_request.name if approval_request else "MANAGER-PREVIEW"
+    # Without a request: a Manager's own download, or a document open to direct access. The audit notes which, and
+    # records the version downloaded; the download audit of the document reads both.
+    approval_id = approval_request.name if approval_request else ("MANAGER-PREVIEW" if resolve_crm_role() == "Manager" else "DIRECT-ACCESS")
+    downloaded = f"{document.document_id}-{document.version}-{document.revision}"
 
     if action_name == "Preview" and resolve_crm_role() == "Manager":
         content = _verified_file(document, "preview_file", "preview_content_hash", b"%PDF-", action_name, access_id)
@@ -228,7 +233,7 @@ def render_controlled_document(
 
     if action_name == "Download" and delivery_mode == "Original":
         content = _verified_file(document, "private_file", "content_hash", None, action_name, access_id)
-        _audit(document.document_id, action_name, "Allowed", access_id, f"Original {approval_id}")
+        _audit(document.document_id, action_name, "Allowed", access_id, f"Original {approval_id}", version_id=downloaded)
         return {
             "content": content,
             "file_name": document.file_name,
@@ -255,7 +260,7 @@ def render_controlled_document(
         raise error  # pragma: no cover
     stem = _FILE_STEM.sub("-", str(document.preview_file_name or document.document_id).rsplit(".", 1)[0]).strip("-._")
     file_name = f"{stem or 'Controlled-Document'}-Controlled.pdf"
-    _audit(document.document_id, action_name, "Allowed", access_id, f"Watermarked {approval_id}")
+    _audit(document.document_id, action_name, "Allowed", access_id, f"Watermarked {approval_id}", version_id=downloaded)
     return {
         "content": content,
         "file_name": file_name,

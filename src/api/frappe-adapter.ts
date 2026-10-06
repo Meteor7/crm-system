@@ -628,7 +628,7 @@ export function createFrappeApi(options: FrappeApiOptions = {}): CrmApi {
     downloadControlledDocument: (documentId) => requestBinary(FRAPPE_METHODS.downloadControlledDocument, { documentId }, 'controlled-document.pdf'),
     requestControlledDocumentAccess: (versionId, reason) => post('requestControlledDocumentAccess', { versionId, reason }),
     listControlledDocumentRequests: (query) => get('listControlledDocumentRequests', query as RequestValues),
-    decideControlledDocumentRequest: (requestId, decision) => post('decideControlledDocumentRequest', { requestId, decision }),
+    decideControlledDocumentRequest: (requestId, decision, note) => post('decideControlledDocumentRequest', { requestId, decision, ...(note ? { note } : {}) }),
     submitControlledDocumentUpload(input, file) {
       const form = new FormData()
       Object.entries(input).forEach(([key, value]) => appendValue(form, key, value))
