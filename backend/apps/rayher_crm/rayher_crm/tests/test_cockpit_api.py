@@ -103,13 +103,13 @@ class TestCockpitApi(FrappeTestCase):
             self.assertEqual(result["pipelineCoverage"]["openPipeline"]["value"], "200000.00")
             self.assertEqual(result["pipelineCoverage"]["ratio"]["value"], "0.50")
             self.assertNotIn("_details", result)
-            # Stage 6 without PO: 30 days unless the site sets a whole number of days from 1 to 365.
-            self.assertEqual(result["stage6NoPo"], {"thresholdDays": 30})
-            for configured, expected in ((45, 45), ("0", 30), (1000, 30), ("x", 30), (7.5, 30)):
+            # Stage 6 without PO: 56 days unless the site sets a whole number of days from 1 to 365.
+            self.assertEqual(result["stage6NoPo"], {"thresholdDays": 56})
+            for configured, expected in ((45, 45), ("0", 56), (1000, 56), ("x", 56), (7.5, 56)):
                 with self.subTest(configured=configured), patch.dict(frappe.conf, {"crm_cockpit_stage6_no_po_days": configured}):
                     self.assertEqual(cockpit.get_review(query)["stage6NoPo"]["thresholdDays"], expected)
             warnings = cockpit.get_warnings(query)
-            self.assertEqual(warnings["stage6NoPo"], {"thresholdDays": 30})
+            self.assertEqual(warnings["stage6NoPo"], {"thresholdDays": 56})
             self.assertIsInstance(warnings["stage6NoPoItems"], list)
             self.assertIn("stage6_no_po", [w["key"] for w in warnings["warnings"]])
             first = cockpit.get_details({**query, "metric": "reached_po_received", "pageSize": 1})

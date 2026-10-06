@@ -6,6 +6,7 @@ import { api as defaultApi, CrmApiError, type CrmApi } from '@/api'
 import { requestErrorMessage } from '@/api/request-state'
 import { useAppStore } from '@/stores/app'
 import { localeMessage, useI18n, useLocaleMessage } from '@/i18n'
+import { opportunityActionLabel } from '@/features/shared/sales-i18n'
 import { detailRoute, labels, metricText } from '@/features/cockpit/presentation'
 import { cockpitRoute, dateWithin, EARLIEST_COCKPIT_DATE, endsBeforeEarliest, pickScope, shanghaiDate, showableAnchor, type CockpitContext } from '@/features/cockpit/scope'
 import WarningNextStep from '@/features/cockpit/WarningNextStep.vue'
@@ -93,7 +94,7 @@ const largestDowngrade = computed(() => [...(data.value?.downgrade ?? [])].filte
 // Quotes expiring plus stage 6 without PO, the two Review banner counts behind this zone.
 // One insufficient count makes the total insufficient, never a partial sum.
 const otherCount = computed(() => {
-  const counts = ['quotation_expiry', 'stage6_no_po'].map(key => data.value?.warnings.find(w => w.key === key)?.count).filter((m): m is Metric => !!m)
+  const counts = ['quotation_expiry', 'stage6_no_po', 'close_date_slip'].map(key => data.value?.warnings.find(w => w.key === key)?.count).filter((m): m is Metric => !!m)
   if (!data.value || !counts.length) return '—'
   const unknown = counts.find(m => m.state !== 'ready' || m.value == null)
   return fmt(unknown ? { ...unknown, state: unknown.state === 'ready' ? 'insufficient' : unknown.state } : { state: 'ready', value: counts.reduce((sum, m) => sum + Number(m.value), 0) })
@@ -102,13 +103,16 @@ const stage6Items = computed(() => data.value?.stage6NoPoItems ?? [])
 // Stage 6 rows with an action recorded and the follow-up date ahead: listed apart, collapsed, never counted.
 const stage6Handled = computed(() => data.value?.stage6NoPoHandledItems ?? [])
 const showHandled = ref(false)
+const slipItems = computed(() => data.value?.closeDateSlipItems ?? [])
+const slipHandled = computed(() => data.value?.closeDateSlipHandledItems ?? [])
+const showSlipHandled = ref(false)
 // Only a backend with warning handling sends the handled list: an older one gets no thresholds button
 // (and, rows without handling, no next-step editors).
 const handlingReady = computed(() => data.value?.stage6NoPoHandledItems !== undefined)
 const overdueHandling = computed(() => (data.value?.overdue ?? []).some(row => row.handling))
 // Older backends send no stage 6 count; an unknown count means an empty list proves nothing.
 const stage6Known = computed(() => !!data.value?.warnings.some(w => w.key === 'stage6_no_po'))
-const otherUnknown = computed(() => (data.value?.warnings ?? []).some(w => ['quotation_expiry', 'stage6_no_po'].includes(w.key) && (w.count.state !== 'ready' || w.count.value == null)))
+const otherUnknown = computed(() => (data.value?.warnings ?? []).some(w => ['quotation_expiry', 'stage6_no_po', 'close_date_slip'].includes(w.key) && (w.count.state !== 'ready' || w.count.value == null)))
 const warningCount = (key: string) => { const metric = data.value?.warnings.find(w => w.key === key)?.count; return metric ? fmt(metric) : '—' }
 // One line each on the card (the masthead keeps one height); the full text is the tooltip.
 const summaryCards = computed(() => {
@@ -120,7 +124,8 @@ const summaryCards = computed(() => {
     : `${copy('Oldest', '最久')} ${oldestOverdue.value} ${copy('days late', '天')} · ${stalledOverdue.value === null ? copy('stall status unverified', '停滞状态待核验') : `${stalledOverdue.value} ${copy('on stalled deals', '条在停滞商机上')}`}`
   const downgradeNote = !d ? '—' : `${copy('awaiting action', '待负责人行动')} · ${downgradeSummary.value.text}`
   const otherNote = !d ? '—' : [`${label('quotation_expiry')} ${warningCount('quotation_expiry')}`,
-    stage6Known.value ? `${label('stage6_no_po')} ${warningCount('stage6_no_po')}` : ''].filter(Boolean).join(' · ')
+    stage6Known.value ? `${label('stage6_no_po')} ${warningCount('stage6_no_po')}` : '',
+    d.closeDateSlipItems ? `${label('close_date_slip')} ${warningCount('close_date_slip')}` : ''].filter(Boolean).join(' · ')
   return [
     { key: 'lost', label: copy('Lost · 4 wk · post-mortem pending', '近 4 周丢单待复盘'), value: warningCount('lost'), note: lostNote },
     { key: 'overdue', label: copy('Planned actions not executed', '未执行计划'), value: warningCount('overdue'), note: overdueNote },
@@ -280,7 +285,7 @@ function failureMessage(reason: unknown) {
   const fields = reason instanceof CrmApiError ? Object.keys(reason.fieldErrors).map(key => fieldMessages.get(key)).filter((message): message is [string, string] => !!message) : []
   return fields.length ? localeMessage(fields.map(([english]) => english).join(' '), fields.map(([, chinese]) => chinese).join('；')) : requestErrorMessage(reason)
 }
-const handlingRows = (dto: WarningsDto) => [...dto.overdue, ...dto.quotationExpiryItems, ...(dto.stage6NoPoItems ?? []), ...(dto.stage6NoPoHandledItems ?? [])]
+const handlingRows = (dto: WarningsDto) => [...dto.overdue, ...dto.quotationExpiryItems, ...(dto.stage6NoPoItems ?? []), ...(dto.stage6NoPoHandledItems ?? []), ...(dto.closeDateSlipItems ?? []), ...(dto.closeDateSlipHandledItems ?? [])]
 const handlingKeys = (dto: WarningsDto) => new Set(handlingRows(dto).flatMap(row => row.handling ? [handlingKey(row.handling)] : []))
 // A follow-up date falls after the Shanghai today and at most 365 days ahead, as the backend checks.
 function followUpBounds() {
@@ -294,7 +299,7 @@ const followUpOk = computed(() => {
 })
 const stepReady = computed(() => !!handlingEdit.value && !!stepDraft.value.trim() && (handlingEdit.value.mode === 'plan' || followUpOk.value))
 // Back to the button that opened the editor; a stage 6 row that moved to the collapsed handled list falls back to its toggle.
-const focusStepButton = (key: string, mode: 'plan' | 'action') => focusIn('data-handling-key', key, mode === 'plan' ? '[data-step-edit]' : '[data-action-open], [data-action-edit]', key.startsWith('stage6_no_po:') ? '[data-s6-handled-toggle]' : undefined)
+const focusStepButton = (key: string, mode: 'plan' | 'action') => focusIn('data-handling-key', key, mode === 'plan' ? '[data-step-edit]' : '[data-action-open], [data-action-edit]', key.startsWith('stage6_no_po:') ? '[data-s6-handled-toggle]' : key.startsWith('close_date_slip:') ? '[data-slip-handled-toggle]' : undefined)
 function startStepEdit(handling: WarningHandling, mode: 'plan' | 'action') {
   if (planEdit.value) return
   const { warningType, sourceId, sourceEvent } = handling
@@ -329,7 +334,7 @@ async function saveStep() {
     const { sourceId, sourceEvent } = edit.source, text = stepDraft.value.trim()
     const result = edit.mode === 'plan'
       ? await props.apiClient.saveWarningPlan({ warningType: edit.source.warningType, sourceId, sourceEvent, nextStep: text }, edit.modified)
-      : await props.apiClient.recordWarningAction({ warningType: 'stage6_no_po', sourceId, sourceEvent, actionTaken: text, followUpOn: followUpDraft.value }, edit.modified)
+      : await props.apiClient.recordWarningAction({ warningType: edit.source.warningType === 'close_date_slip' ? 'close_date_slip' : 'stage6_no_po', sourceId, sourceEvent, actionTaken: text, followUpOn: followUpDraft.value }, edit.modified)
     if (requestRevision !== revision) return
     handlingEdit.value = null
     patchHandling(edit.key, result.data)
@@ -361,7 +366,7 @@ function stepBind(handling: WarningHandling) {
   return {
     'data-handling-key': key, handling, name: ownerName, editing: edit?.mode ?? null,
     locked: busy.value || !!handlingEdit.value || !!planEdit.value, saving: stepSaving.value, canSave: stepReady.value && !busy.value, dateHint: edit?.mode === 'action' && !followUpOk.value,
-    error: edit ? stepError.value : '', conflict: stepConflict.value, allowAction: handling.warningType === 'stage6_no_po', followUpMin: edit?.min, followUpMax: edit?.max,
+    error: edit ? stepError.value : '', conflict: stepConflict.value, allowAction: ['stage6_no_po', 'close_date_slip'].includes(handling.warningType), followUpMin: edit?.min, followUpMax: edit?.max,
     draft: stepDraft.value, 'onUpdate:draft': (value: string) => { stepDraft.value = value },
     followUp: followUpDraft.value, 'onUpdate:followUp': (value: string) => { followUpDraft.value = value },
     onEdit: (mode: 'plan' | 'action') => startStepEdit(handling, mode), onCancel: cancelStepEdit, onSave: () => void saveStep(), onReload: () => void load(),
@@ -517,7 +522,7 @@ onBeforeUnmount(() => { revision++ })
         </section>
         <section class="panel overdue-panel" data-zone="overdue"><div class="panel-heading"><div><h2>{{ copy('Planned actions not executed', '未执行计划') }}</h2><p>{{ copy('Open actions past their due date with no completion logged', '已过截止日期且没有记录完成的行动计划') }}</p></div><span class="zone-count">{{ warningCount('overdue') }} {{ copy('overdue', '条逾期') }}</span></div>
           <div class="table-scroll"><table><thead><tr><th>{{ copy('Action', '行动') }}</th><th>{{ copy('Opportunity', '商机') }}</th><th>{{ copy('Owner', '负责人') }}</th><th>{{ copy('Due', '到期') }}</th><th>{{ copy('Overdue', '逾期') }}</th><th>{{ copy('Status', '状态') }}</th><th v-if="overdueHandling">{{ copy('Next step', '下一步') }}</th></tr></thead>
-            <tbody><tr v-for="row in data.overdue" :key="`${row.actionId}:${row.id}`" :data-overdue-row="row.actionId"><td><strong>{{ row.actionTitle }}</strong></td><td><RouterLink :to="detailRoute(row)"><strong>{{ row.customer }}</strong><small>{{ row.title }} · {{ rowAmount(row) }}</small></RouterLink></td><td>{{ ownerName(row.actionOwner ?? row.owner) }}</td><td>{{ dayText(row.due) }}</td><td class="negative idle">{{ daysLate(row.due) ?? '—' }} {{ copy('d', '天') }}</td><td><span v-if="row.stalled" class="badge danger">{{ copy('Stalled deal', '商机停滞') }}</span><span v-else class="badge warn">{{ copy('Open', '未完成') }}</span></td><td v-if="overdueHandling" class="step-cell"><WarningNextStep v-if="row.handling" v-bind="stepBind(row.handling)" /><span v-else class="muted">—</span></td></tr></tbody></table></div>
+            <tbody><tr v-for="row in data.overdue" :key="`${row.actionId}:${row.id}`" :data-overdue-row="row.actionId"><td><strong>{{ row.actionTitle }}</strong><small v-if="row.actionStatus">{{ opportunityActionLabel(row.actionStatus, locale) }}</small></td><td><RouterLink :to="detailRoute(row)"><strong>{{ row.customer }}</strong><small>{{ row.title }} · {{ rowAmount(row) }}</small></RouterLink></td><td>{{ ownerName(row.actionOwner ?? row.owner) }}</td><td>{{ dayText(row.due) }}</td><td class="negative idle">{{ daysLate(row.due) ?? '—' }} {{ copy('d', '天') }}</td><td><span v-if="row.stalled" class="badge danger">{{ copy('Stalled deal', '商机停滞') }}</span><span v-else class="badge warn">{{ copy('Open', '未完成') }}</span></td><td v-if="overdueHandling" class="step-cell"><WarningNextStep v-if="row.handling" v-bind="stepBind(row.handling)" /><span v-else class="muted">—</span></td></tr></tbody></table></div>
           <p v-if="!data.overdue.length" class="empty-list">{{ copy('No overdue actions', '没有逾期的行动计划') }}</p>
           <footer v-if="busiestOwner" class="zone-note">{{ ownerName(busiestOwner.owner) }} {{ copy('owns', '名下有') }} {{ busiestOwner.count }} / {{ data.overdue.length }} {{ copy('overdue actions — check workload before adding new commitments', '条逾期行动，安排新任务前先看负荷') }}</footer>
           <footer v-else class="zone-note">{{ copy('Completing the action on the opportunity page clears the row', '在商机页把行动标记完成后，该行自动清除') }}</footer>
@@ -532,10 +537,13 @@ onBeforeUnmount(() => { revision++ })
           <ul class="alert-list">
             <li v-for="row in data.quotationExpiryItems" :key="`${row.id}:${row.quotationVersionId}`" class="alert-item" data-alert="quotation_expiry"><span class="alert-mark"><TriangleAlert :size="14" /></span><div><strong>{{ copy('Quote validity expires', '报价有效期截止') }} {{ dayText(row.validUntil) }}<small class="alert-owner">{{ ownerName(row.owner) }}</small></strong><p><RouterLink :to="detailRoute(row)">{{ row.customer }} · {{ row.title }}</RouterLink> · V{{ row.quotationVersionNo }} · {{ row.daysToExpiry === 0 ? copy('due on the reference date', '截止日当天到期') : `${row.daysToExpiry} ${copy('days after the reference date', '天后到期')}` }} — {{ copy('extend or re-price before expiry', '到期前续期或重新报价') }}</p><WarningNextStep v-if="row.handling" v-bind="stepBind(row.handling)" /></div></li>
             <li v-for="row in stage6Items" :key="`s6:${row.id}`" class="alert-item" data-alert="stage6_no_po"><span class="alert-mark"><TriangleAlert :size="14" /></span><div><strong>{{ copy('In stage 6 without a PO for', '第 6 阶段未收到 PO 已') }} {{ row.daysAtLeast ? '≥' : '' }}{{ row.daysInStage }} {{ copy('days', '天') }}<small class="alert-owner">{{ ownerName(row.owner) }}</small></strong><p><RouterLink :to="detailRoute(row)">{{ row.customer }} · {{ row.title }}</RouterLink> · {{ rowAmount(row) }} — {{ copy('chase the order, or move or close the deal', '跟进客户下单，或更新 / 关闭商机') }}</p><WarningNextStep v-if="row.handling" v-bind="stepBind(row.handling)" /></div></li>
-            <li v-if="!data.quotationExpiryItems.length && !stage6Items.length" class="alert-empty" data-alert-empty>{{ otherUnknown ? copy('Alert data is insufficient: an empty list does not mean there are no alerts', '提醒数据不足，列表为空不代表没有提醒') : stage6Known && stage6Handled.length ? copy('No quotes expiring and no stage 6 deal waiting for action', '没有即将到期的报价，暂无待处理的第 6 阶段超期商机') : stage6Known ? copy('No quotes expiring and no stage 6 deal waiting too long for a PO', '没有即将到期的报价，也没有第 6 阶段超期未收到 PO 的商机') : copy('No quotes expiring in this window', '没有即将到期的报价') }}</li>
+            <li v-for="row in slipItems" :key="`slip:${row.eventId}`" class="alert-item" data-alert="close_date_slip"><span class="alert-mark"><TriangleAlert :size="14" /></span><div><strong>{{ label('close_date_slip') }}<small class="alert-owner">{{ ownerName(row.owner) }}</small></strong><p><RouterLink :to="detailRoute(row)">{{ row.customer }} · {{ row.title }}</RouterLink> · {{ row.previousPoDate }} → {{ row.postponedPoDate }}</p><p>{{ copy('Current expected PO', '当前预计 PO') }}: {{ row.currentPoDate }}</p><WarningNextStep v-if="row.handling" v-bind="stepBind(row.handling)" /></div></li>
+            <li v-if="!data.quotationExpiryItems.length && !stage6Items.length && !slipItems.length" class="alert-empty" data-alert-empty>{{ otherUnknown ? copy('Alert data is insufficient: an empty list does not mean there are no alerts', '提醒数据不足，列表为空不代表没有提醒') : stage6Known && stage6Handled.length ? copy('No quotes expiring and no stage 6 deal waiting for action', '没有即将到期的报价，暂无待处理的第 6 阶段超期商机') : stage6Known ? copy('No quotes expiring and no stage 6 deal waiting too long for a PO', '没有即将到期的报价，也没有第 6 阶段超期未收到 PO 的商机') : copy('No quotes expiring in this window', '没有即将到期的报价') }}</li>
           </ul>
           <template v-if="stage6Known && stage6Handled.length"><button type="button" class="backlog-toggle" data-s6-handled-toggle :aria-expanded="showHandled" @click="showHandled = !showHandled">{{ copy('Handled', '已处理') }} ({{ stage6Handled.length }}) · {{ showHandled ? copy('hide', '收起') : copy('stage 6 deals with an action recorded, back on the follow-up date if still without a PO; not counted', '第 6 阶段已记录行动，到复核日期仍无 PO 会重新提醒；不计入预警数') }}</button>
             <ul v-if="showHandled" class="handled-list" data-s6-handled><li v-for="row in stage6Handled" :key="`s6h:${row.id}`" :data-s6-handled-row="row.id"><RouterLink :to="detailRoute(row)">{{ row.customer }} · {{ row.title }}</RouterLink><WarningNextStep v-if="row.handling" v-bind="stepBind(row.handling)" /></li></ul></template>
+          <template v-if="slipHandled.length"><button type="button" class="backlog-toggle" data-slip-handled-toggle :aria-expanded="showSlipHandled" @click="showSlipHandled = !showSlipHandled">{{ copy('Postponed PO · action recorded', 'PO 推迟 · 已记录行动') }} ({{ slipHandled.length }}) · {{ copy('Returns on the follow-up date if still postponed', '复核日仍推迟时恢复提醒') }}</button><ul v-if="showSlipHandled" class="handled-list" data-slip-handled><li v-for="row in slipHandled" :key="row.eventId"><RouterLink :to="detailRoute(row)">{{ row.customer }} · {{ row.title }}</RouterLink><WarningNextStep v-if="row.handling" v-bind="stepBind(row.handling)" /></li></ul></template>
+          <p v-if="data.closeDateSlipItems" class="zone-note">{{ copy('Cross-quarter PO changes known by the selected cutoff and still active now. Bringing the date back to its original quarter or closing the deal clears the alert. Another cross-quarter postponement creates a new alert.', '所选截止日前发生、目前仍有效的 PO 跨季度推迟。日期恢复到原季度或商机结束后清除；再次跨季度推迟产生新提醒。') }}</p>
           <footer class="zone-note">{{ copy('Reference date', '参考日') }} {{ data.quotationExpiry.referenceDate }} · {{ copy('quotes', '报价') }} {{ data.quotationExpiry.thresholdDays }} {{ copy('days', '天') }}<template v-if="data.stage6NoPo"> · {{ copy('stage 6', '第 6 阶段') }} {{ data.stage6NoPo.thresholdDays }} {{ copy('days', '天') }}</template> · {{ copy('Alerts clear on their own: a quote once accepted, rejected, replaced or its deal closes', '提醒自动清除：报价在接受、拒绝、换版或商机结束后') }}<template v-if="stage6Known">{{ copy('; a stage 6 deal once it has its PO or leaves stage 6', '；第 6 阶段商机在收到 PO 或离开第 6 阶段（推进、退回或关闭）后') }}<template v-if="handlingReady">{{ copy(', or once the action taken is recorded, until its follow-up date', '，或记录已采取行动后至复核日期') }}</template></template><template v-if="handlingReady">{{ copy('. Saving a next step never clears an alert', '。保存下一步不清除提醒') }}</template></footer>
         </section>
       </div>

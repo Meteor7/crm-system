@@ -7,6 +7,8 @@ from datetime import date, datetime, time, timedelta
 from decimal import Decimal, InvalidOperation
 
 from rayher_crm.services.equipment_names import equipment_key
+from rayher_crm.services.action_statuses import open_action
+from rayher_crm.services.close_date_slips import current_slip
 from rayher_crm.services.activities import activity_facts, completion_before_coverage, last_activity_at
 from rayher_crm.services.cockpit_history import (
     stamp, iso, covered, field_at, action_json, actions_at, grouped, substantive,
@@ -141,7 +143,7 @@ def stage_entered(histories, stage, at):
 # A Warnings row is one warning instance: the same action overdue again after a new due date, a new
 # quotation version or a new entry into S6 is a new warning with its own handling record.
 BEFORE_HISTORY = "before_history"
-HANDLING_TYPES = ("overdue", "quotation_expiry", "stage6_no_po")
+HANDLING_TYPES = ("overdue", "quotation_expiry", "stage6_no_po", "close_date_slip")
 
 
 def handling_key(kind, source_id, source_event):
@@ -150,7 +152,7 @@ def handling_key(kind, source_id, source_event):
 
 def handling_state(record, today):
     """Only an S6 action clears its row, and only until the follow-up day (``today`` is YYYY-MM-DD)."""
-    handled = record["warningType"] == "stage6_no_po" and bool(record.get("actedAt")) and (record.get("followUpOn") or "") > today
+    handled = record["warningType"] in {"stage6_no_po", "close_date_slip"} and bool(record.get("actedAt")) and (record.get("followUpOn") or "") > today
     return "handled" if handled else "open"
 
 
@@ -264,7 +266,7 @@ def quotation_expiry(data, query, reference, days=14, now=None):
 LOST_WINDOW_DAYS = 28
 
 
-def build_review(data, query, now, coverage, quotation_expiry_days=14, stage6_no_po_days=30):
+def build_review(data, query, now, coverage, quotation_expiry_days=14, stage6_no_po_days=56):
     now = stamp(now)
     window = period(query, now)
     at = window["as_of"]
@@ -290,6 +292,7 @@ def build_review(data, query, now, coverage, quotation_expiry_days=14, stage6_no
         return not equipment_filter or bool(opportunity_id and equipment_of.get(opportunity_id) == equipment_filter)
     cny_amount_ready = bool(data.get("cny_amount_ready"))
     details = {key: [] for key in (*ACTIVITIES, *OPEN_STAGES, "po", "po_missing_date", "po_missing_amount", "lost", "lost_backlog", "overdue", "downgrade", "downgrade_history", "stalled", "losses", "stage6_no_po", "stage6_no_po_handled")}
+    details.update(close_date_slip=[], close_date_slip_handled=[])
 
     def in_scope(account, owner):
         customer = customers.get(account)
@@ -392,16 +395,16 @@ def build_review(data, query, now, coverage, quotation_expiry_days=14, stage6_no
         # closed since (warning_handling._source takes no next step on a closed deal) clears the row.
         current_actions = {r["name"]: r for r in actions.get(opp["name"], [])} if opp.get("stage") in OPEN_STAGES else {}
         for action in actions_at(actions.get(opp["name"], []), history, at):
-            if not (action.get("due") and action["status"] == "Open" and date.fromisoformat(str(action["due"])[:10]) < at.date()):
+            if not (action.get("due") and open_action(action) and date.fromisoformat(str(action["due"])[:10]) < at.date()):
                 continue
             now_action = current_actions.get(action["id"])
-            if not now_action or now_action.get("status") != "Open" or now_action.get("archived") or not now_action.get("due"):
+            if not now_action or not open_action(now_action) or not now_action.get("due"):
                 continue
             due = str(now_action["due"])[:10]
             if date.fromisoformat(due) >= at.date():
                 continue
             details["overdue"].append({**row, "actionId": action["id"], "actionTitle": now_action.get("title") or action["title"], "due": due,
-                                       "actionOwner": now_action.get("action_owner") or action.get("owner"),
+                                       "actionStatus": now_action.get("status"), "actionOwner": now_action.get("action_owner") or action.get("owner"),
                                        "handling": handling_for(data, "overdue", action["id"], due, today)})
         # Internal validation (S6) with no PO for too long. Like overdue actions, the viewed period decides
         # the time in the stage; moving on, receiving the PO or losing the deal since then clears the row.
@@ -434,6 +437,25 @@ def build_review(data, query, now, coverage, quotation_expiry_days=14, stage6_no
             details["stalled"].append({**row, "lastActionAt": None if lower_bound else iso(last), "days": age, "daysAtLeast": lower_bound, "severity": "high" if age >= 35 else "warning"})
 
     year_start = datetime(at.year, 1, 1)
+    # Current responsibility and resolution, as for downgrade handling. Historical
+    # views show only the current instance if it already existed at their cutoff.
+    for opp in data["opportunities"]:
+        owner = opp.get("opportunity_owner")
+        if (opp.get("stage") not in OPEN_STAGES or not in_scope(opp["account"], owner)
+                or not equipment_ok(opp["name"])):
+            continue
+        history = histories.get(opp["name"], [])
+        slip = current_slip(history, opp.get("po_date"), now)
+        if not slip or stamp(slip["at"]) > at:
+            continue
+        handling = handling_for(data, "close_date_slip", opp["name"], slip["name"], today)
+        key = "close_date_slip_handled" if handling["state"] == "handled" else "close_date_slip"
+        details[key].append(entry(opp, opp["account"], owner, slip["at"], "opportunity",
+                                  eventId=slip["name"], previousPoDate=slip["from_value"],
+                                  postponedPoDate=slip["to_value"], currentPoDate=str(opp["po_date"]),
+                                  handling=handling, stage=opp["stage"],
+                                  amount=cny_amount_at(opp, at, history), currency="CNY"))
+
     # Current Booking state, including later backfills/corrections; never replay PO events.
     po_ready = bool(data.get("booking_dates_ready"))
     po_by_day = {}
@@ -581,6 +603,7 @@ def build_review(data, query, now, coverage, quotation_expiry_days=14, stage6_no
     ]
     warnings.append({"key": "quotation_expiry", "count": expiring["count"]})
     warnings.append({"key": "stage6_no_po", "count": count(details["stage6_no_po"], not stage6_unknown and (not owner_filter or fields_complete))})
+    warnings.append({"key": "close_date_slip", "count": count(details["close_date_slip"], covered(coverage, "fields", at))})
     pipeline = [{"key": key, "count": count(details[key], stages_ready),
                  "amount": metric(None, "not_applicable") if i == 0 else amount(details[key], stages_ready and fields_complete)} for i, key in enumerate(OPEN_STAGES)]
     pipeline.append({"key": "po", "count": po_count(details["po"]), "amount": po_amount(details["po"])})

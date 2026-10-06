@@ -43,7 +43,7 @@ class TestWarningHandling(FrappeTestCase):
             "probabilityLevel": "committed", "qualificationConfirmed": True,
         })
         frappe.set_user(self.manager)
-        self.patches = [patch("frappe.utils.now_datetime", return_value=NOW), patch.dict(frappe.conf, COVERAGE)]
+        self.patches = [patch("frappe.utils.now_datetime", return_value=NOW), patch.dict(frappe.conf, {**COVERAGE, "crm_cockpit_stage6_no_po_days": 30})]
         for item in self.patches:
             item.start()
 
@@ -159,8 +159,9 @@ class TestWarningHandling(FrappeTestCase):
         self.assertEqual(self._code(lambda: warning_handling.save_plan({**source, "nextStep": "x"}, acted["modified"])), "INVALID_TRANSITION")
 
     def test_manager_thresholds_override_site_config_and_are_audited(self):
+        frappe.conf.crm_cockpit_stage6_no_po_days = None
         settings = cockpit_settings.get_settings()
-        self.assertEqual((settings["quoteExpiryDays"], settings["stage6NoPoDays"], settings["modified"]), (14, 30, None))
+        self.assertEqual((settings["quoteExpiryDays"], settings["stage6NoPoDays"], settings["modified"]), (14, 56, None))
         self.assertEqual(settings["sources"], {"quoteExpiryDays": "default", "stage6NoPoDays": "default"})
         with patch.dict(frappe.conf, {"crm_cockpit_stage6_no_po_days": 40, "crm_cockpit_quote_expiry_days": "bad"}):
             fallback = cockpit_settings.get_settings()
@@ -171,13 +172,15 @@ class TestWarningHandling(FrappeTestCase):
         frappe.db.sql("INSERT INTO `tabSingles` (`doctype`, `field`, `value`) VALUES (%s, 'quote_expiry_days', '0'), (%s, 'stage6_no_po_days', '0'),"
                       " (%s, 'modified', '2026-09-24 17:07:24.983428'), (%s, 'modified_by', 'Administrator')", (cockpit_settings.SETTINGS,) * 4)
         installed = cockpit_settings.get_settings()
-        self.assertEqual((installed["quoteExpiryDays"], installed["stage6NoPoDays"], installed["modified"], installed["modifiedBy"]), (14, 30, None, None))
+        self.assertEqual((installed["quoteExpiryDays"], installed["stage6NoPoDays"], installed["modified"], installed["modifiedBy"]), (14, 56, None, None))
         self.assertEqual(installed["sources"], {"quoteExpiryDays": "default", "stage6NoPoDays": "default"})
         self.assertEqual(self._warnings()["quotationExpiry"]["thresholdDays"], 14)
         for bad in (366, -1, "7.5", "x", None, True, 7.0, "²"):
             with self.subTest(bad=bad):
                 self.assertEqual(self._code(lambda: cockpit_settings.save_settings({"quoteExpiryDays": bad, "stage6NoPoDays": 30}, None)), "VALIDATION_ERROR")
         self.assertEqual(self._code(lambda: cockpit_settings.save_settings({"quoteExpiryDays": 14, "stage6NoPoDays": 0}, None)), "VALIDATION_ERROR")
+        frappe.conf.crm_cockpit_stage6_no_po_days = 30
+        self.assertEqual(cockpit_settings.get_settings()["sources"]["stage6NoPoDays"], "site_config")
         self._to_stage6(45)
         self.assertEqual(len(self._mine(self._warnings()["stage6NoPoItems"])), 1)
         with patch.dict(frappe.conf, {"crm_cockpit_stage6_no_po_days": 20}):
@@ -226,6 +229,97 @@ class TestWarningHandling(FrappeTestCase):
     def _notices(self, user, source_name):
         return frappe.get_all("CRM Notification Event", filters={"recipient_user": user, "source_name": source_name},
                               fields=["title", "route", "category"])
+
+    def _postpone(self, new_date):
+        from rayher_crm.services.opportunities import _append_history
+        previous = frappe.db.get_value("CRM Opportunity", self.opportunity["id"], "po_date")
+        frappe.db.set_value("CRM Opportunity", self.opportunity["id"], "po_date", new_date)
+        _append_history(self.opportunity["id"], "po_date", previous, new_date)
+        event = frappe.db.get_value("CRM Opportunity History", {
+            "opportunity": self.opportunity["id"], "field": "po_date", "to_value": new_date,
+        }, "name")
+        # now_datetime is frozen for handling/follow-up assertions; give audited
+        # changes a deterministic order rather than depending on random hash names.
+        sequence = frappe.db.count("CRM Opportunity History", {"opportunity": self.opportunity["id"], "field": "po_date"})
+        frappe.db.set_value("CRM Opportunity History", event, "at", NOW - timedelta(seconds=60 - sequence))
+        return event
+
+    def test_postponement_plan_action_version_new_instance_and_recovery(self):
+        event = self._postpone("2031-01-01")
+        source = {"warningType": "close_date_slip", "sourceId": self.opportunity["id"], "sourceEvent": event}
+        self.assertEqual(self._mine(self._warnings()["closeDateSlipItems"])[0]["eventId"], event)
+        plan = warning_handling.save_plan({**source, "nextStep": "Confirm purchasing timetable"})
+        retry = warning_handling.save_plan({**source, "nextStep": "Confirm purchasing timetable"})
+        self.assertEqual((plan["id"], plan["modified"]), (retry["id"], retry["modified"]))
+        self.assertEqual(len(self._mine(self._warnings()["closeDateSlipItems"])), 1)
+        acted = warning_handling.record_action({**source, "actionTaken": "Called purchasing", "followUpOn": "2030-03-20"}, plan["modified"])
+        self.assertEqual(self._mine(self._warnings()["closeDateSlipItems"]), [])
+        self.assertEqual(self._mine(self._warnings()["closeDateSlipHandledItems"])[0]["handling"]["state"], "handled")
+        self.assertEqual(self._code(lambda: warning_handling.save_plan({**source, "nextStep": "Stale edit"}, plan["modified"])), "VERSION_CONFLICT")
+        with patch("frappe.utils.now_datetime", return_value=datetime(2030, 3, 20, 9)):
+            self.assertEqual(len(self._mine(self._warnings("2030-03-20")["closeDateSlipItems"])), 1)
+        # Same-quarter date edits preserve the handled identity; a new quarter does not.
+        self._postpone("2031-02-01")
+        self.assertEqual(self._mine(self._warnings()["closeDateSlipHandledItems"])[0]["eventId"], event)
+        later = self._postpone("2031-04-01")
+        row = self._mine(self._warnings()["closeDateSlipItems"])[0]
+        self.assertEqual((row["eventId"], row["handling"]["state"]), (later, "open"))
+        self.assertEqual(self._code(lambda: warning_handling.record_action({**source, "actionTaken": "Old event", "followUpOn": "2030-03-21"}, acted["modified"])), "INVALID_TRANSITION")
+        self._postpone("2031-03-31")
+        self.assertEqual(self._mine(self._warnings()["closeDateSlipItems"]), [])
+        self.assertTrue(frappe.db.exists(warning_handling.HANDLING, plan["id"]))
+        frappe.set_user(self.sales)
+        self.assertEqual(self._code(lambda: warning_handling.save_plan({**source, "nextStep": "Not manager"})), "PERMISSION_DENIED")
+
+    def test_postponement_notices_deduplicate_and_follow_current_source_scope(self):
+        from rayher_crm.permissions.notification_scope import can_read_source
+        event = self._postpone("2031-01-01")
+        frappe.set_user("Administrator")
+        send_warning_notifications()
+        send_warning_notifications()
+        self.assertEqual(len(self._notices(self.manager, event)), 1)
+        self.assertEqual(len(self._notices(self.sales, event)), 1)
+        self.assertEqual(self._notices(self.other_sales, event), [])
+        self.assertTrue(can_read_source("CRM Opportunity History", event, self.sales))
+        frappe.db.set_value("CRM Opportunity", self.opportunity["id"], "opportunity_owner", self.other_sales)
+        self.assertFalse(can_read_source("CRM Opportunity History", event, self.sales))
+        # A foreign private customer also prevents the new owner from receiving it.
+        self.assertFalse(can_read_source("CRM Opportunity History", event, self.other_sales))
+        self.assertTrue(can_read_source("CRM Opportunity History", event, self.manager))
+        frappe.db.set_value("CRM Opportunity", self.opportunity["id"], "opportunity_owner", self.sales)
+        frappe.set_user(self.manager)
+        source = {"warningType": "close_date_slip", "sourceId": self.opportunity["id"], "sourceEvent": event}
+        warning_handling.record_action({**source, "actionTaken": "Called", "followUpOn": "2030-03-20"})
+        frappe.set_user("Administrator")
+        send_warning_notifications()
+        self.assertEqual(len(self._notices(self.sales, event)), 1)
+        with patch("frappe.utils.now_datetime", return_value=datetime(2030, 3, 20, 9)):
+            send_warning_notifications()
+            send_warning_notifications()
+        self.assertEqual(len(self._notices(self.sales, event)), 2)
+        next_event = self._postpone("2031-04-01")
+        send_warning_notifications()
+        self.assertEqual(len(self._notices(self.sales, next_event)), 1)
+
+    def test_delete_removes_slip_notices_atomically_with_the_history_source(self):
+        from rayher_crm.services.opportunities import delete_strategy_opportunity
+        event = self._postpone("2031-01-01")
+        frappe.set_user("Administrator")
+        send_warning_notifications()
+        source = {"source_doctype": "CRM Opportunity History", "source_name": event}
+        count = frappe.db.count("CRM Notification Event", source)
+        self.assertGreater(count, 0)
+        # A failed delete restores the notices and their source in the same savepoint.
+        frappe.set_user(self.sales)
+        with self.assertRaises(frappe.PermissionError):
+            delete_strategy_opportunity(self.opportunity["id"])
+        self.assertEqual(frappe.db.count("CRM Notification Event", source), count)
+        self.assertTrue(frappe.db.exists("CRM Opportunity History", event))
+        frappe.set_user(self.manager)
+        delete_strategy_opportunity(self.opportunity["id"])
+        self.assertFalse(frappe.db.exists("CRM Opportunity", self.opportunity["id"]))
+        self.assertFalse(frappe.db.exists("CRM Opportunity History", event))
+        self.assertEqual(frappe.db.count("CRM Notification Event", source), 0)
 
     def test_each_warning_notifies_once_and_a_new_instance_notifies_again(self):
         frappe.set_user("Administrator")
@@ -381,6 +475,15 @@ class TestWarningHandling(FrappeTestCase):
         # Review and Warnings read every handling's revisions; the Opportunity delete removes them per handling.
         self.assertTrue(frappe.db.has_index("tabCRM Warning Handling Revision", indexes.WARNING_HANDLING_REVISION_INDEX))
 
+    def test_slip_history_lock_uses_opportunity_field_index(self):
+        self.assertTrue(frappe.db.has_index("tabCRM Opportunity History", indexes.OPPORTUNITY_FIELD_HISTORY_INDEX))
+        plan = frappe.db.sql(
+            f"EXPLAIN SELECT name FROM `tabCRM Opportunity History` FORCE INDEX (`{indexes.OPPORTUNITY_FIELD_HISTORY_INDEX}`) "
+            "WHERE opportunity=%s AND field='po_date' FOR UPDATE", (self.opportunity["id"],), as_dict=True,
+        )
+        self.assertEqual(plan[0].key, indexes.OPPORTUNITY_FIELD_HISTORY_INDEX)
+        self.assertNotEqual(plan[0].type, "ALL")
+
     def test_a_lost_deal_awaiting_its_post_mortem_is_announced_to_managers(self):
         from rayher_crm.services.opportunities import mark_opportunity_lost
 
@@ -480,6 +583,40 @@ class TestWarningNotificationDeletionLock(FrappeTestCase):
         )
         self.assertEqual(locked, {"CRM-OPP-A", "CRM-OPP-C"})
 
+    def test_slip_job_skips_a_parent_deleted_after_its_snapshot(self):
+        self.assertTrue(frappe.local.site.endswith(".test"))
+        opportunity_id = f"CRM-OPP-SLIP-RACE-{frappe.generate_hash(length=10)}"
+        primary = frappe.local.db
+        connection = None
+        try:
+            frappe.db.sql("INSERT INTO `tabCRM Opportunity` (`name`, `creation`, `modified`, `modified_by`, `owner`, `docstatus`, `idx`) VALUES (%s, NOW(6), NOW(6), 'Administrator', 'Administrator', 0, 0)", (opportunity_id,))
+            primary.commit()
+            self.assertTrue(frappe.db.exists("CRM Opportunity", opportunity_id))
+            connection = primary._get_connection()
+            with connection.cursor() as cursor:
+                cursor.execute("DELETE FROM `tabCRM Opportunity` WHERE name=%s", (opportunity_id,))
+            connection.commit()
+            # Ordinary reads still see the old parent in this transaction.
+            self.assertTrue(frappe.db.exists("CRM Opportunity", opportunity_id))
+            details = {"lost": [], "overdue": [], "quotation_expiry": [], "stage6_no_po": [], "close_date_slip": [{
+                "id": opportunity_id, "eventId": "deleted-history", "at": NOW.isoformat(),
+                "title": "Deleted", "customer": "Scope", "previousPoDate": "2030-03-01", "postponedPoDate": "2030-04-01",
+            }]}
+            with (patch.object(warning_notifications, "warning_details", return_value=details),
+                  patch.object(warning_notifications, "active_crm_users", return_value={"manager"}),
+                  patch.object(warning_notifications, "_can_read", return_value=True),
+                  patch.object(warning_notifications, "_notify") as notify):
+                warning_notifications.send_warning_notifications()
+            notify.assert_not_called()
+        finally:
+            if connection is not None:
+                connection.rollback()
+                connection.close()
+            frappe.local.db = primary
+            primary.rollback()
+            frappe.db.sql("DELETE FROM `tabCRM Opportunity` WHERE name=%s", (opportunity_id,))
+            primary.commit()
+
     def test_every_legacy_parent_is_locked_before_the_first_notification_insert(self):
         self.assertTrue(frappe.local.site.endswith(".test"))
         opportunity_id = f"CRM-OPP-ORDER-{frappe.generate_hash(length=10)}"
@@ -536,6 +673,13 @@ class TestWarningNotificationDeletionLock(FrappeTestCase):
                 patch.object(warning_notifications, "_can_read", return_value=True),
                 patch.object(warning_notifications, "_notify", side_effect=assert_parent_already_locked),
             ):
+                warning_notifications.send_warning_notifications()
+                self.assertTrue(checked)
+                primary.rollback()
+                checked = False
+                details["stage6_no_po"] = []
+                details["close_date_slip"] = [{"id": opportunity_id, "eventId": "slip-after-lost", "at": today,
+                    "title": "Lock order", "customer": "Scope", "previousPoDate": "2030-03-01", "postponedPoDate": "2030-04-01"}]
                 warning_notifications.send_warning_notifications()
             self.assertTrue(checked)
         finally:

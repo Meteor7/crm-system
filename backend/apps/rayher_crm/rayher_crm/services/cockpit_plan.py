@@ -148,7 +148,7 @@ def build_plan(data, query, now):
             missing_date("actions", opp["account"], owner)
             missing_date("overdue", opp["account"], owner)
         elif day <= end:
-            entry = item("actions", row, opp["account"], owner, day, "Open",
+            entry = item("actions", row, opp["account"], owner, day, row["status"],
                          actionOwner=row.get("action_owner") or None,
                          actionOwnerName=action_names.get(row.get("action_owner")), opportunityId=opp["name"])
             if day < start:

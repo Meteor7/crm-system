@@ -10,6 +10,7 @@ export const labels: Record<string, [string, string]> = {
   po_received: ['已收到 PO', 'PO received'],
   po: ['已收到 PO · 年累计', 'PO received · YTD'], lost: ['丢单', 'Lost'], overdue: ['行动逾期', 'Overdue actions'],
   quotation_expiry: ['报价即将到期', 'Quotes expiring soon'], warnings: ['预警', 'Warnings'],
+  close_date_slip: ['预计 PO 跨季度推迟', 'Expected PO postponed to a later quarter'],
   other_alerts: ['其他提醒', 'Other alerts'], stage6_no_po: ['第 6 阶段超期无 PO', 'Stage 6 overdue, no PO'],
   downgrade: ['待处理降档', 'Pending downgrades'], downgrade_history: ['本期降档记录', 'Downgrade history'], stalled: ['行动久未更新', 'Stalled opportunities'], losses: ['近 12 个月丢单', 'Losses · last 12 months'],
   low_probability: ['Low probability', 'Low probability'], pipeline: ['Pipeline', 'Pipeline'], upside: ['Upside', 'Upside'], committed: ['Committed', 'Committed'],

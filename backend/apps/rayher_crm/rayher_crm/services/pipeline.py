@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from rayher_crm.services.action_statuses import open_action
+
 from decimal import Decimal
 from collections.abc import Callable
 from typing import Any
@@ -35,7 +37,7 @@ def _includes(value: str, search: str) -> bool:
 
 def project_opportunity(item: dict[str, Any]) -> dict[str, Any]:
     open_actions = sorted(
-        (action for action in item.get("actions", []) if action.get("status") == "Open"),
+        (action for action in item.get("actions", []) if open_action(action)),
         key=lambda action: (action.get("due") or "", action.get("id") or ""),
     )
     next_action = open_actions[0] if open_actions else None

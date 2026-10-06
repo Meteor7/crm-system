@@ -12,7 +12,7 @@ SOURCE_DOCTYPES = (
     "CRM Demo Comment", "CRM Demo Request", "CRM Evaluation", "CRM Installed Tool",
     "CRM Installed Tool Service History", "CRM Opportunity Action",
     "CRM Opportunity Internal Validation", "CRM Opportunity Probability History",
-    "CRM Opportunity Stage History", "CRM Probability Recovery Revision",
+    "CRM Opportunity Stage History", "CRM Opportunity History", "CRM Probability Recovery Revision",
     "CRM Quotation", "CRM Quotation Version", "CRM RFQ", "CRM Visit",
     "CRM Document Access Request", "CRM Document Upload Request",
 )

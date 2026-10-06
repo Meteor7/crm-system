@@ -7,7 +7,7 @@
     {"fieldname": "title", "fieldtype": "Data", "label": "Title", "reqd": 1},
     {"fieldname": "action_owner", "fieldtype": "Link", "label": "Owner", "options": "User", "reqd": 1},
     {"fieldname": "due", "fieldtype": "Date", "label": "Due", "reqd": 1},
-    {"default": "Open", "fieldname": "status", "fieldtype": "Select", "label": "Status", "options": "Open\nDone", "reqd": 1},
+    {"default": "Open", "fieldname": "status", "fieldtype": "Select", "label": "Status", "options": "Open\nIn Progress\nBlocked\nRescheduled\nDone", "reqd": 1},
     {"fieldname": "remark", "fieldtype": "Text", "label": "Remark"},
     {"default": "0", "fieldname": "archived", "fieldtype": "Check", "label": "Archived", "read_only": 1}
   ],

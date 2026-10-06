@@ -25,7 +25,7 @@
       "fieldname": "stage6_no_po_days",
       "fieldtype": "Int",
       "label": "Stage 6 Without PO Days",
-      "description": "Empty: site config crm_cockpit_stage6_no_po_days, else 30."
+      "description": "Empty: site config crm_cockpit_stage6_no_po_days, else 56."
     },
     {
       "fieldname": "configured",

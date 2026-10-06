@@ -190,6 +190,22 @@ class TestOpportunityRelations(FrappeTestCase):
         edited = update_opportunity_action(opportunity["id"], action["id"], self._action_input(status="Done", remark="Legacy"))
         self.assertIsNone(edited["completedAt"])
 
+    def test_incomplete_states_remain_actionable_and_reopen_done_without_completion_time(self):
+        from rayher_crm.services.accounts import _account_activity_metrics
+        from rayher_crm.services.cockpit import load_plan_data
+        from rayher_crm.services.opportunities import _actions_for_opportunity
+        account, opportunity, _ = self._records(self.sales, "ActionStates")
+        created = create_opportunity_action(opportunity["id"], self._action_input(status="Done"))
+        self.assertTrue(created["completedAt"])
+        for status in ("In Progress", "Blocked", "Rescheduled", "Open"):
+            with self.subTest(status=status):
+                edited = update_opportunity_action(opportunity["id"], created["id"], self._action_input(status=status))
+                self.assertIsNone(edited["completedAt"])
+                self.assertEqual(_account_activity_metrics(account["id"])["nextAction"], edited["title"])
+                plan = load_plan_data([{"name": account["id"]}], [])
+                self.assertIn(created["id"], [a["name"] for a in plan["actions"]])
+        self.assertEqual(_actions_for_opportunity(opportunity["id"])[0]["status"], "Open")
+
     def test_action_validation_owner_lock_update_soft_archive_and_history(self):
         _, opportunity, _ = self._records(self.sales, "Action")
         with self.assertRaises(CrmApiException) as client_id:

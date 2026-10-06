@@ -430,7 +430,7 @@ class TestCockpitMetrics(unittest.TestCase):
         data["actions"] = [{**base, "name": "a1", "title": "Call", "due": "2026-09-01"}, {**base, "name": "a2", "title": "Visit", "due": "2026-09-05"}]
         data["probabilities"] = [{"name": "p1", "opportunity": "opp", "from_level": "committed", "to_level": "upside", "changed_at": "2026-09-08", "reason": "Delay"}]
         result = build_review(data, QUERY, NOW, COVERAGE)
-        self.assertEqual([w["key"] for w in result["warnings"]], ["lost", "overdue", "downgrade", "quotation_expiry", "stage6_no_po"])
+        self.assertEqual([w["key"] for w in result["warnings"]], ["lost", "overdue", "downgrade", "quotation_expiry", "stage6_no_po", "close_date_slip"])
         self.assertEqual(len(result["_details"]["overdue"]), 2)
         self.assertEqual(next(w["count"]["value"] for w in result["warnings"] if w["key"] == "overdue"), 2)
         # The action owner is who has to act; the row owner stays the opportunity owner for the filters.
@@ -553,7 +553,7 @@ class TestCockpitMetrics(unittest.TestCase):
         # opp-old has no S6 entry: stage history is complete from 2025-01-01, so it has been in S6 at least since creation.
         data["stages"] = [s6("opp", "2026-08-01"), s6("opp-new", "2026-09-10"), s6("opp-moved", "2026-08-01"),
                           {**stage("stage_changed", "2026-09-15", "internal_validation", "po_received"), "opportunity": "opp-moved", "name": "po-moved"}]
-        result = build_review(data, QUERY, NOW, COVERAGE)
+        result = build_review(data, QUERY, NOW, COVERAGE, stage6_no_po_days=30)
         rows = {r["id"]: r for r in result["_details"]["stage6_no_po"]}
         # opp-moved was still in S6 at the end of the viewed week but has its PO now, so it is cleared.
         self.assertEqual(set(rows), {"opp", "opp-old"})
@@ -581,7 +581,7 @@ class TestCockpitMetrics(unittest.TestCase):
                 # The entry event names the warning; an entry before the history is one warning too.
                 data["warning_handlings"] = {handling_key("stage6_no_po", "opp", "s6-opp"): acted(follow_up),
                                              handling_key("stage6_no_po", "opp-old", BEFORE_HISTORY): {"id": "p", "nextStep": "Plan only"}}
-                result = build_review(data, QUERY, NOW, COVERAGE)
+                result = build_review(data, QUERY, NOW, COVERAGE, stage6_no_po_days=30)
                 open_rows = {r["id"]: r["handling"] for r in result["_details"]["stage6_no_po"]}
                 handled_rows = {r["id"]: r["handling"] for r in result["_details"]["stage6_no_po_handled"]}
                 # A next step alone never clears; an action clears only before its follow-up day (today is 2026-09-16).
@@ -591,7 +591,7 @@ class TestCockpitMetrics(unittest.TestCase):
                 self.assertEqual(next(w["count"]["value"] for w in result["warnings"] if w["key"] == "stage6_no_po"), 1 if handled else 2)
         # Without a record the row still carries what the page needs to start one.
         del data["warning_handlings"]
-        blank = build_review(data, QUERY, NOW, COVERAGE)["_details"]["stage6_no_po"][0]["handling"]
+        blank = build_review(data, QUERY, NOW, COVERAGE, stage6_no_po_days=30)["_details"]["stage6_no_po"][0]["handling"]
         self.assertEqual((blank["id"], blank["warningType"], blank["history"], blank["state"]), (None, "stage6_no_po", [], "open"))
 
     def test_stage6_without_po_edges_latest_entry_threshold_day_and_minimums(self):
@@ -613,7 +613,7 @@ class TestCockpitMetrics(unittest.TestCase):
         ]
         data["stages"].append(move("opp", "2026-08-01", "quotation_sent", "internal_validation"))
         # "no-entry" was created after the history start, so a missing entry means the history is inconsistent.
-        result = build_review(data, QUERY, NOW, COVERAGE)
+        result = build_review(data, QUERY, NOW, COVERAGE, stage6_no_po_days=30)
         rows = {r["id"]: r for r in result["_details"]["stage6_no_po"]}
         self.assertEqual({k: (r["daysInStage"], r["daysAtLeast"]) for k, r in rows.items()},
                          {"opp": (43, False), "exact": (30, False), "after": (43, False), "migrated": (74, True)})
@@ -626,7 +626,7 @@ class TestCockpitMetrics(unittest.TestCase):
         data["opportunities"] = [o for o in data["opportunities"] if o["name"] not in ("recent-min", "no-entry")]
         data["opportunities"].append({**data["opportunities"][0], "name": "elsewhere", "stage": "demo_done"})
         data["stages"].append({**move("elsewhere", "2026-09-10", "qualified_opportunity", "demo_done"), "source": "migration", "recorded_at": "2026-09-15"})
-        count = next(w["count"] for w in build_review(data, QUERY, NOW, COVERAGE)["warnings"] if w["key"] == "stage6_no_po")
+        count = next(w["count"] for w in build_review(data, QUERY, NOW, COVERAGE, stage6_no_po_days=30)["warnings"] if w["key"] == "stage6_no_po")
         self.assertEqual(count, {"value": 4, "state": "ready", "reason": None})
 
     def test_stage6_without_po_each_unknown_leaves_the_count_insufficient(self):

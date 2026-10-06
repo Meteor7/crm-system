@@ -49,6 +49,20 @@ function mountPage({ api, pinia, router }: Awaited<ReturnType<typeof context>>) 
 describe('Opportunity detail', () => {
   afterEach(() => setLocale('zh-CN'))
 
+  it.each(['In Progress', 'Blocked', 'Rescheduled'] as const)('keeps %s as the next incomplete action', async (status) => {
+    const setup = await context()
+    const response = await setup.api.getStrategyOpportunity('OPP-001')
+    setup.api.getStrategyOpportunity = vi.fn(async () => ({ ...response, data: { ...response.data, actions: [
+      { id: 'done', title: 'Already done', owner: response.data.owner, due: '2026-10-01', status: 'Done' as const },
+      { id: 'next', title: 'Confirm next step', owner: response.data.owner, due: '2026-10-02', status },
+      { id: 'later', title: 'Later task', owner: response.data.owner, due: '2026-10-03', status: 'Open' as const },
+    ] } }))
+    const wrapper = mountPage(setup)
+    await flushPromises()
+    expect(wrapper.get('[data-testid="opportunity-next-action"]').text()).toBe('Confirm next step')
+    wrapper.unmount()
+  })
+
   it('shows Not Found without rendering or mutating an unrelated opportunity', async () => {
     const setup = await context('OPP-NOT-FOUND')
     ;(setup.api as unknown as { getStrategyOpportunity: (id: string) => Promise<never> }).getStrategyOpportunity = async () => {

@@ -42,17 +42,19 @@
 | 指标（UI · API · 明细 key） | 业务日期 | 类型 | 规则 / 阈值 | 历史覆盖 | 计数单位 | 筛选：销售 / 设备 | 函数 |
 |---|---|---|---|---|---|---|---|
 | 近 4 周丢单待复盘 · `warnings[lost]` · `lost`、`lost_backlog` | `marked_lost` 的 `reached_at` ≤ as_of（跳过 migration 行） | **固定 28 天**窗口 [as_of 日期 − 27 天, as_of]，与周期类型无关 | 只计窗口内“待复盘”：复盘不是 Reviewed，且丢单后没有 reopened（按当前状态）。更早、仍待复盘的进 backlog（不限多久以前，补丁补建的也在内），标“复盘逾期”，**只列出不计数** | stage ≤ 窗口起点；选了销售还需要 fields。**当前周期也需要** | 按商机去重；`lost` 列表含窗口内全部丢单（已复盘的也在），行数 ≥ 数字 | 销售取丢单时的负责人 | `build_review` |
-| 未执行计划（行动逾期） · `warnings[overdue]` · `overdue` | Action.`due` | 截至 as_of 的存量 + 当前状态 | as_of 时状态为 Open 且 due < **as_of 的上海日期**；同时**现在**仍 Open、未归档，当前 due 也 < as_of 日期。完成、归档或改期都会清除。as_of 时商机须处于 S1–S6，且**现在**仍处于 S1–S6（收到 PO 或丢单即清除，与记录“下一步”的校验一致）。保存“下一步”不清除 | 历史周期需要 stage 和 actions ≤ as_of（选了销售还需要 fields） | 按（商机, 行动）计 = 行数 | 销售取 as_of 时的**商机负责人**（不是 action_owner） | `actions_at`、`build_review`、`action_count` |
+| 未执行计划（行动逾期） · `warnings[overdue]` · `overdue` | Action.`due` | 截至 as_of 的存量 + 当前状态 | as_of 时状态为 Open / In Progress / Blocked / Rescheduled 且 due < **as_of 的上海日期**；同时**现在**仍 Open / In Progress / Blocked / Rescheduled、未归档，当前 due 也 < as_of 日期。完成、归档或改期都会清除。as_of 时商机须处于 S1–S6，且**现在**仍处于 S1–S6（收到 PO 或丢单即清除，与记录“下一步”的校验一致）。保存“下一步”不清除 | 历史周期需要 stage 和 actions ≤ as_of（选了销售还需要 fields） | 按（商机, 行动）计 = 行数 | 销售取 as_of 时的**商机负责人**（不是 action_owner） | `actions_at`、`build_review`、`action_count` |
 | 概率降档 · `warnings[downgrade]` · `downgrade`、`downgrade_history` | Probability History.`changed_at` | 期间发生量 [周期开始, as_of]，处理状态看当前 | 档位下降才算（low_probability < pipeline < upside < committed）。待处理 = 没有 Recovery 记录或 acted_at 为空；只改计划不清除 | **当前周期也需要** probability ≤ 周期开始 | 待处理按商机去重；列表每次降档一行，行数 ≥ 数字 | 销售取**当前**负责人 | `build_review` |
 | 报价即将到期 · `warnings[quotation_expiry]` · `quotation_expiry` | 当前正式版本的 `valid_until` | 参考日 = as_of 的上海日期；版本状态看当前 | 0 ≤ valid_until − 参考日 ≤ N（含两端），并要求 valid_until ≥ **今天**、published_at ≤ as_of、版本为 Published；商机当前是 po_received 或 lost 的跳过。保存“下一步”不清除 | 不需要；正式版本数据缺失时显示数据不足（`quotation_expiry_data_missing`） | 报价单数 = 行数 | 客户取报价 account；销售取 quotation_owner 当前值；设备看关联商机，没有商机的排除 | `quotation_expiry` |
 | 第 6 阶段超期无 PO · `warnings[stage6_no_po]` · `stage6_no_po`、`stage6_no_po_handled` | 最后一次进入 S6 的 `reached_at`（为空用 `recorded_at`） | 截至 as_of 的存量，且**现在**仍在 S6 | as_of 日期 − 进入日期 ≥ N 天。进入记录早于覆盖起点、或商机在覆盖起点前创建而没有进入记录时，按覆盖起点算；进入记录是 migration / unknown / upper_bound 时，按该记录的 `reached_at` 算（为空用 `recorded_at`；实际进入可能更早）。这两种情况都显示“≥N”。**已记录行动且复核日晚于今天的转入 handled，只列出不计数；到复核日重新计入** | 进入时间精确且未到阈值时不需要；其余需要 stage ≤ as_of，否则数据不足 | 去重商机数 = `stage6_no_po` 行数 | 同阶段分布 | `stage6_stay`、`handling_state` |
 | 其他提醒（Warnings 卡片） | — | — | 前端把报价到期和第 6 阶段两个数相加；任一项不是 ready，整体显示数据不足 | — | — | — | `WarningsPage.vue` `otherCount` |
 
-**阈值来源**（`cockpit_settings.thresholds`）：Warnings 页“阈值设置”（CRM Cockpit Settings；报价 0–365，0 表示只提醒当天到期；第 6 阶段 1–365）优先；其次 site config（`crm_cockpit_quote_expiry_days` 0–365，`crm_cockpit_stage6_no_po_days` 1–365）；默认 14 / 30。改动当期立即生效，每次保存留版本记录。
+预计 PO 跨季度推迟使用字段审计 `po_date`，只取当前仍有效、所选截止日前发生的最新延期实例。Q4 到次年 Q1 算跨季度，同季度调整保持身份；新跨季度延期产生新身份。恢复到该次延期前的季度或关闭商机清除提醒；经理记录行动与未来复核日暂移到已处理列表，复核日仍有效时恢复。按当前商机负责人、当前客户地域和设备筛选；`fields` 审计覆盖不足时计数显示数据不足。卡片 `close_date_slip` 与相同键的明细逐条对应，`close_date_slip_handled` 只列出不计数。
 
-**处理记录**（CRM Warning Handling）：每条逾期行动（行动 + 到期日）、报价（报价 + 版本）、第 6 阶段（商机 + 进入事件）是一个提醒实例。改期、换版或重新进入 S6 就是新实例；同一行动改回同一个到期日（完成后又重新打开，或改期后又改回）仍是同一个实例，沿用之前的下一步，通知也只发一次。“下一步”只记录、不清除；只有第 6 阶段可记录已采取行动 + 复核日。阈值只决定哪些行显示，处理记录绑定提醒实例：阈值调高后，先前记录的行动仍然有效，商机再次达到阈值时按已处理列出、到复核日重新计入，不会因为阈值变动而丢失；但商机未达当前阈值时不能再记录新的行动（提醒已变化，页面提示重新加载），避免旧动作压掉之后才出现的预警。
+**阈值来源**（`cockpit_settings.thresholds`）：Warnings 页“阈值设置”（CRM Cockpit Settings；报价 0–365，0 表示只提醒当天到期；第 6 阶段 1–365）优先；其次 site config（`crm_cockpit_quote_expiry_days` 0–365，`crm_cockpit_stage6_no_po_days` 1–365）；默认 14 / 56（已有经理设置和站点配置不覆盖）。改动当期立即生效，每次保存留版本记录。
 
-**通知**（每日任务 `send_warning_notifications`）：每个提醒实例只通知一次，且只通知最近 3 天内新出现的提醒（`NOTICE_DAYS`；首次启用或清库后不补发旧提醒，旧提醒在页面上看）。“新出现”按提醒第一次满足条件的日子算：逾期行动是到期次日，报价是进入提醒窗口的日子，第 6 阶段是停留天数第一次达到阈值的日子（只知道下界时按下界算，也就是第一次列出的日子）；已记录行动的第 6 阶段商机，在复核日和重新达到阈值两者中较晚的那天再通知一次。覆盖起点（`crm_cockpit_history_complete_from`）是部署设置；上线后再改它，只知道下界的商机“第一次列出”的日子会跟着变：改晚，已在页面上的商机可能补一次通知（每个提醒实例、每个收件人最多一次）；改早，3 天窗口内还没发出的提醒可能不再补发，提醒仍在 Warnings 页上。Manager 收全部；逾期行动的执行人、报价负责人也收自己的。降档仍在变更当时通知。
+**处理记录**（CRM Warning Handling）：每条逾期行动（行动 + 到期日）、报价（报价 + 版本）、第 6 阶段（商机 + 进入事件）是一个提醒实例。改期、换版或重新进入 S6 就是新实例；同一行动改回同一个到期日（完成后又重新打开，或改期后又改回）仍是同一个实例，沿用之前的下一步，通知也只发一次。“下一步”只记录、不清除；第 6 阶段和预计 PO 跨季度推迟可记录已采取行动 + 复核日。阈值只决定哪些行显示，处理记录绑定提醒实例：阈值调高后，先前记录的行动仍然有效，商机再次达到阈值时按已处理列出、到复核日重新计入，不会因为阈值变动而丢失；但商机未达当前阈值时不能再记录新的行动（提醒已变化，页面提示重新加载），避免旧动作压掉之后才出现的预警。
+
+**通知**（每日任务 `send_warning_notifications`）：每个提醒实例只通知一次，且只通知最近 3 天内新出现的提醒（`NOTICE_DAYS`；首次启用或清库后不补发旧提醒，旧提醒在页面上看）。“新出现”按提醒第一次满足条件的日子算：逾期行动是到期次日，报价是进入提醒窗口的日子，第 6 阶段是停留天数第一次达到阈值的日子（只知道下界时按下界算，也就是第一次列出的日子）；已记录行动的第 6 阶段商机，在复核日和重新达到阈值两者中较晚的那天再通知一次。覆盖起点（`crm_cockpit_history_complete_from`）是部署设置；上线后再改它，只知道下界的商机“第一次列出”的日子会跟着变：改晚，已在页面上的商机可能补一次通知（每个提醒实例、每个收件人最多一次）；改早，3 天窗口内还没发出的提醒可能不再补发，提醒仍在 Warnings 页上。Manager 收全部；逾期行动的执行人、报价负责人及跨季度延期商机的当前负责人也收自己的（须仍具备来源访问权限）。降档仍在变更当时通知。
 
 ## 三、Plan（`build_plan`；只读当前记录，不回放历史，也不需要历史覆盖）
 
@@ -62,7 +64,7 @@
 |---|---|---|---|---|---|---|
 | 计划拜访 · `summary.visits` · `visits` | Visit.`visit_date` ∈ [start, end] | 周期内，状态看当前 | 当前 status = Planned。范围内任一 Planned 拜访缺日期，显示数据不足（`missing_date`） | 拜访条数 | 销售取 visit_owner。设备看关联商机；没有商机的计入 `equipmentUnclassified.visits` | `build_plan` |
 | 计划测试 · `summary.tests` · `tests` | **不按日期筛选**；`test_run_deadline` 只用来排列 | 当前存量，与所选周期无关 | Evaluation 状态 ∈ Scheduled / Testing，准备项都不是 Pending，Demo Request 未取消 | **Evaluation 数** | 销售取 Request.sales_owner。设备看 Request.opportunity | `build_plan` |
-| 到期行动 · `summary.actions` · `actions` | Action.`due` ∈ [start, end] | 周期内，状态看当前 | Open、未归档，商机当前处于 S1–S6。缺 due 显示数据不足。due < 周期开始的是结转（逾期已移到 Warnings），不计入本期 | 行动条数 | 销售取当前**商机负责人** | `build_plan` |
+| 到期行动 · `summary.actions` · `actions` | Action.`due` ∈ [start, end] | 周期内，状态看当前 | Open / In Progress / Blocked / Rescheduled、未归档，商机当前处于 S1–S6。缺 due 显示数据不足。due < 周期开始的是结转（逾期已移到 Warnings），不计入本期 | 行动条数 | 销售取当前**商机负责人** | `build_plan` |
 | 本期预计 PO · `summary.po`、`expectedPO` · `po` | Opportunity.`po_date` ∈ [start, end] | 周期内，状态看当前 | 商机当前处于 S1–S6。金额 = 当前 amount_cny > 0，S1 不给金额，不加权；已知金额相加，缺的标“部分金额数据不足” | 商机数 | 销售取当前商机负责人 | `build_plan` |
 | 销售计划汇总 · `sales[*]` / 按市场汇总 · `markets[*]` | 同上 | — | 按负责人或客户市场分行；有缺日期的记录时对应列显示数据不足 | 计数 / 金额 | 同上 | `build_plan` |
 

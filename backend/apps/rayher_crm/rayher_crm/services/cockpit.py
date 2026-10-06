@@ -5,6 +5,7 @@ from datetime import datetime
 from hashlib import sha256
 
 import frappe
+from rayher_crm.services.action_statuses import OPEN_ACTION_STATUSES
 
 from rayher_crm.api.v1.errors import CrmApiException
 from rayher_crm.permissions.roles import resolve_crm_role
@@ -61,7 +62,7 @@ def options():
 
 def load_data(customers, people):
     ids = {r["name"] for r in customers}
-    opportunity_fields = "name creation title account source_lead opportunity_owner stage amount currency lost_at lost_at_stage lost_reason tool_type"
+    opportunity_fields = "name creation title account source_lead opportunity_owner stage amount currency lost_at lost_at_stage lost_reason tool_type po_date"
     cny_amount_ready = bool(frappe.get_meta("CRM Opportunity").has_field("amount_cny"))
     if cny_amount_ready:
         opportunity_fields += " amount_cny"
@@ -229,6 +230,8 @@ def get_warnings(query):
               "quotationExpiryItems": details["quotation_expiry"],
               "stage6NoPo": result["stage6NoPo"],
               "stage6NoPoItems": details["stage6_no_po"],
+              "closeDateSlipItems": details["close_date_slip"],
+              "closeDateSlipHandledItems": details["close_date_slip_handled"],
               # S6 deals with a recorded action whose follow-up day is still ahead: listed, never counted.
               "stage6NoPoHandledItems": details["stage6_no_po_handled"]}
     result["names"] = _names(result)
@@ -238,8 +241,8 @@ def get_warnings(query):
 def _names(result):
     """Display names for everyone the page shows: reviewers and plan editors are usually Managers
     and action owners may be engineers, none of whom are in the Sales filter list."""
-    handled = ("overdue", "quotationExpiryItems", "stage6NoPoItems", "stage6NoPoHandledItems")
-    users = {r.get("owner") for key in ("lost", "lostBacklog", "overdue", "downgrade", "quotationExpiryItems", "stage6NoPoItems", "stage6NoPoHandledItems") for r in result[key]}
+    handled = ("overdue", "quotationExpiryItems", "stage6NoPoItems", "stage6NoPoHandledItems", "closeDateSlipItems", "closeDateSlipHandledItems")
+    users = {r.get("owner") for key in ("lost", "lostBacklog", "overdue", "downgrade", "quotationExpiryItems", "stage6NoPoItems", "stage6NoPoHandledItems", "closeDateSlipItems", "closeDateSlipHandledItems") for r in result[key]}
     for record in (r.get("handling") or {} for key in handled for r in result[key]):
         users |= {record.get("planBy"), record.get("actedBy")} | {h.get("actor") for h in record.get("history", [])}
     users |= {r.get("actionOwner") for r in result["overdue"]} | {r.get("currentOwner") for r in result["downgrade"]}
@@ -276,7 +279,7 @@ def load_plan_data(customers, people, equipment=False):
                          "name account demo_request title status test_run_deadline "
                          "wafer_preparation_status test_preparation_status", "account", ids)
     actions = read("CRM Opportunity Action", "name opportunity title action_owner due status archived",
-                   {"opportunity": ["in", [r["name"] for r in opps]], "status": "Open", "archived": 0}) if opps else []
+                   {"opportunity": ["in", [r["name"] for r in opps]], "status": ["in", list(OPEN_ACTION_STATUSES)], "archived": 0}) if opps else []
     # Action assignees can be engineers or managers. Keep their labels separate
     # from the CRM Sales filter and fetch them in one batch, never once per row.
     action_owner_ids = {r["action_owner"] for r in actions if r.get("action_owner")}

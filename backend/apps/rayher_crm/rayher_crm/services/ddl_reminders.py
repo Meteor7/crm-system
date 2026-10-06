@@ -7,6 +7,7 @@ import hashlib
 from typing import Any
 
 import frappe
+from rayher_crm.services.action_statuses import OPEN_ACTION_STATUSES
 from frappe.utils import getdate, today
 
 from rayher_crm.permissions.roles import resolve_crm_role
@@ -44,7 +45,7 @@ def _related_users(
         candidates.add(frappe.db.get_value("CRM Opportunity", opportunity_id, "opportunity_owner"))
         candidates.update(frappe.get_all(
             "CRM Opportunity Action",
-            filters={"opportunity": opportunity_id, "status": "Open", "archived": 0},
+            filters={"opportunity": opportunity_id, "status": ["in", list(OPEN_ACTION_STATUSES)], "archived": 0},
             pluck="action_owner",
         ))
         for row in frappe.get_all(

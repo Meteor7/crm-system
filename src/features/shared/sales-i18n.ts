@@ -84,6 +84,9 @@ const labels: Record<string, LocalizedPair> = {
   Video: { 'zh-CN': '视频会议', 'en-US': 'Video' },
   Phone: { 'zh-CN': '电话', 'en-US': 'Phone' },
   Open: { 'zh-CN': '进行中', 'en-US': 'Open' },
+  'In Progress': { 'zh-CN': '进行中', 'en-US': 'In progress' },
+  Blocked: { 'zh-CN': '阻塞', 'en-US': 'Blocked' },
+  Rescheduled: { 'zh-CN': '已改期', 'en-US': 'Rescheduled' },
   Done: { 'zh-CN': '已完成', 'en-US': 'Done' },
   'Decision Maker': { 'zh-CN': '决策人', 'en-US': 'Decision maker' },
   'Economic Buyer': { 'zh-CN': '经济决策人', 'en-US': 'Economic buyer' },
@@ -130,6 +133,10 @@ export function contactStatusLabel(value: string, currentLocale: Locale) {
 
 export function meetingRecordParseLabel(value: string, currentLocale: Locale) {
   return meetingRecordParseLabels[value]?.[currentLocale] ?? value
+}
+
+export function opportunityActionLabel(value: string, currentLocale: Locale) {
+  return value === 'Open' ? (currentLocale === 'en-US' ? 'Not started' : '未开始') : salesEnumLabel(value, currentLocale)
 }
 
 export function salesUnits(currentLocale: Locale) {

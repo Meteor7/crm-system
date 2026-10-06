@@ -30,7 +30,7 @@
     {
       "fieldname": "warning_type",
       "fieldtype": "Select",
-      "options": "overdue\nquotation_expiry\nstage6_no_po",
+      "options": "overdue\nquotation_expiry\nstage6_no_po\nclose_date_slip",
       "label": "Warning Type",
       "reqd": 1
     },

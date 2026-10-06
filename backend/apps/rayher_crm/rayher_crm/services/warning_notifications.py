@@ -57,6 +57,9 @@ def began(kind: str, row: dict, thresholds_days: dict, today: date) -> date | No
     if kind == "quotation_expiry":
         entered_window = date.fromisoformat(row["validUntil"]) - timedelta(days=thresholds_days["quote_expiry_days"])
         return max(filter(None, (day(row.get("publishedAt")), entered_window)))
+    if kind == "close_date_slip":
+        handling = row.get("handling") or {}
+        return max(filter(None, (day(row.get("at")), day(handling.get("followUpOn")) if handling.get("actedAt") else None)))
     # The first day the stay reached the threshold: the entry plus the threshold, or for a stay known only as
     # a minimum (an entry before the complete history) the first day that minimum did, when it was first listed.
     reached = today - timedelta(days=row["daysInStage"] - thresholds_days["stage6_no_po_days"])
@@ -125,11 +128,14 @@ def send_warning_notifications() -> int:
     since = now.date() - timedelta(days=NOTICE_DAYS)
     fresh = lambda kind, rows: [r for r in rows if (began(kind, r, days, now.date()) or date.min) >= since]
     stage6_rows = fresh("stage6_no_po", details["stage6_no_po"])
-    before_history_ids = _lock_current_opportunities(
-        row["id"]
-        for row in stage6_rows
-        if ((row.get("handling") or {}).get("sourceEvent") or BEFORE_HISTORY) == BEFORE_HISTORY
-    )
+    slip_rows = fresh("close_date_slip", details.get("close_date_slip", []))
+    # Lock every relevant parent before any notification can take the naming-series
+    # lock. Current reads exclude parents deleted after warning_details' RR snapshot.
+    before_history_ids = _lock_current_opportunities([
+        *[row["id"] for row in stage6_rows
+          if ((row.get("handling") or {}).get("sourceEvent") or BEFORE_HISTORY) == BEFORE_HISTORY],
+        *[row["id"] for row in slip_rows],
+    ])
     managers = active_crm_users("Manager")
     created = 0
 
@@ -172,4 +178,14 @@ def send_warning_notifications() -> int:
                            # their notice to the current parent, never an unscoped copy.
                            source_doctype="CRM Opportunity Stage History" if event != BEFORE_HISTORY else "CRM Opportunity",
                            source_name=event if event != BEFORE_HISTORY else row["id"])
+    for row in slip_rows:
+        if row["id"] not in before_history_ids:
+            continue
+        handling = row.get("handling") or {}
+        created += _notify(readers({*managers, row.get("owner")}, "CRM Opportunity", row["id"]),
+                           key=f"close_date_slip:{row['eventId']}:{handling.get('followUpOn') or ''}", category="Opportunity",
+                           title="预警：预计 PO 日期跨季度推迟",
+                           message=f"{row['title']}（{row['customer']}）预计 PO 日期由 {row['previousPoDate']} 推迟至 {row['postponedPoDate']}，请跟进并记录行动。",
+                           route=f"/opportunities/{quote(row['id'], safe='')}",
+                           source_doctype="CRM Opportunity History", source_name=row["eventId"])
     return created

@@ -8,6 +8,7 @@ the source's audit history remains authoritative for what was recorded previousl
 from __future__ import annotations
 
 from decimal import Decimal, InvalidOperation
+from rayher_crm.services.action_statuses import open_action
 
 from rayher_crm.services.cockpit_history import action_json, field_at, grouped, iso, stamp, substantive
 
@@ -21,9 +22,6 @@ def unique_records(rows):
     """A source joined through two associations remains one record."""
     return list({row["name"]: row for row in rows}.values())
 
-
-def open_action(row):
-    return row.get("status") == "Open" and not row.get("archived")
 
 
 def cny_quote_value(version):

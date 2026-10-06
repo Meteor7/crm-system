@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { opportunityActionLabel } from '@/features/shared/sales-i18n'
 import { personnelDisplayName } from '@/demo/personnel'
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
@@ -303,7 +304,7 @@ onMounted(async () => {
           <article class="workspace-panel evidence-card info-card"><header><h2>Information Needed</h2><span>{{ selected.informationNeeded.length }}</span></header><ul><li v-for="item in selected.informationNeeded" :key="item">{{ item }}</li></ul></article>
         </section>
 
-        <section class="workspace-panel action-panel"><header><div><h2>Action Plan</h2><span>多行动 · 每项独立Owner与Due Date</span></div><button v-if="canWrite" class="secondary-button" type="button" data-testid="new-opportunity-action" @click="openAction()"><Plus :size="13" />新增 Action</button></header><div class="action-list"><div v-for="action in selected.actions" :key="action.id" :data-action-title="action.title"><i :class="{ done: action.status === 'Done' }" /><strong>{{ action.title }}</strong><span>{{ personnelDisplayName(action.owner) }}</span><time>{{ formatDisplayDate(action.due) }}</time><b class="workspace-badge" :class="action.status === 'Done' ? 'positive' : 'warning'">{{ action.status }}</b><div v-if="canWrite" class="row-actions"><button type="button" data-action="edit" aria-label="编辑 Action" @click="openAction(action)"><Pencil :size="13" /></button><button type="button" data-action="delete" aria-label="删除 Action" @click="removeAction(action)"><Trash2 :size="13" /></button></div></div></div></section>
+        <section class="workspace-panel action-panel"><header><div><h2>Action Plan</h2><span>多行动 · 每项独立Owner与Due Date</span></div><button v-if="canWrite" class="secondary-button" type="button" data-testid="new-opportunity-action" @click="openAction()"><Plus :size="13" />新增 Action</button></header><div class="action-list"><div v-for="action in selected.actions" :key="action.id" :data-action-title="action.title"><i :class="{ done: action.status === 'Done' }" /><strong>{{ action.title }}</strong><span>{{ personnelDisplayName(action.owner) }}</span><time>{{ formatDisplayDate(action.due) }}</time><b class="workspace-badge" :class="action.status === 'Done' ? 'positive' : 'warning'">{{ opportunityActionLabel(action.status, 'zh-CN') }}</b><div v-if="canWrite" class="row-actions"><button type="button" data-action="edit" aria-label="编辑 Action" @click="openAction(action)"><Pencil :size="13" /></button><button type="button" data-action="delete" aria-label="删除 Action" @click="removeAction(action)"><Trash2 :size="13" /></button></div></div></div></section>
       </div>
     </section>
     </template>

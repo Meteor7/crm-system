@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from rayher_crm.services.action_statuses import open_action
+
 from collections import defaultdict
 from decimal import Decimal, ROUND_HALF_UP
 from typing import Any, Callable
@@ -172,7 +174,7 @@ def get_dashboard(query: dict[str, Any]) -> dict[str, Any]:
     # them leave out the past, so the first five of all open actions were no use once five were overdue;
     # those are counted in overdueActions.
     weekly_actions = sorted(
-        (item for item in actions if item["status"] == "Open" and item["due"] >= today),
+        (item for item in actions if open_action(item) and item["due"] >= today),
         key=lambda item: (item["due"], item["id"]),
     )
     return {
@@ -188,7 +190,7 @@ def get_dashboard(query: dict[str, Any]) -> dict[str, Any]:
             } for currency in sorted({item["currency"] for item in [*priced, *bookings]})],
             "openPipelineMissingAmountCount": sum(item["stage"] in OPEN_STAGES for item in unpriced),
             "cumulativeWonMissingAmountCount": sum(item["stage"] == PO_RECEIVED for item in unpriced),
-            "overdueActions": sum(item["status"] == "Open" and item["due"] < today for item in actions),
+            "overdueActions": sum(open_action(item) and item["due"] < today for item in actions),
             "pendingDemoRequests": sum(item["status"] in {"Engineer Review", "Manager Approval"} for item in demos),
             "activeEvaluations": sum(item["status"] not in {"Accepted", "Rejected"} for item in evaluations),
         },
@@ -199,8 +201,8 @@ def get_dashboard(query: dict[str, Any]) -> dict[str, Any]:
         "riskDistribution": _count_by(accounts, lambda item: item["risk"]),
         "process": {
             "requirementsByStatus": [], "budgetByStatus": [],
-            "actionsBySource": _count_by([item for item in actions if item["status"] == "Open"], lambda item: item["sourceType"]),
-            "actionsByTimeliness": _count_by([item for item in actions if item["status"] == "Open"], lambda item: "已逾期" if item["due"] < today else "未逾期"),
+            "actionsBySource": _count_by([item for item in actions if open_action(item)], lambda item: item["sourceType"]),
+            "actionsByTimeliness": _count_by([item for item in actions if open_action(item)], lambda item: "已逾期" if item["due"] < today else "未逾期"),
             "demoByStatus": _count_by(demos, lambda item: item["status"]),
             "demoByPriority": _count_by(demos, lambda item: item["priority"]),
             "evaluationByStatus": _count_by(evaluations, lambda item: item["status"]),

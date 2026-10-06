@@ -8,6 +8,7 @@ from decimal import Decimal
 from typing import Any
 
 import frappe
+from rayher_crm.services.action_statuses import OPEN_ACTION_STATUSES
 
 from rayher_crm.api.v1.errors import CrmApiException
 from rayher_crm.permissions.roles import assert_capability, capabilities_for_user, resolve_crm_role
@@ -136,7 +137,7 @@ def _account_activity_metrics(account_id: str) -> dict[str, Any]:
     open_ids = [item.name for item in open_opportunities]
     actions = frappe.get_all(
         "CRM Opportunity Action",
-        filters={"opportunity": ["in", open_ids], "archived": 0, "status": "Open"},
+        filters={"opportunity": ["in", open_ids], "archived": 0, "status": ["in", list(OPEN_ACTION_STATUSES)]},
         fields=["name AS id", "title", "due"],
         order_by="due asc, name asc",
     ) if open_ids else []

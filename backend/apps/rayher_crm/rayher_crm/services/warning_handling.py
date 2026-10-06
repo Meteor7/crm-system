@@ -8,8 +8,11 @@ until that day and comes back if it is still waiting then. A next step never cle
 from __future__ import annotations
 
 from datetime import date, timedelta
+from rayher_crm.services.action_statuses import open_action
+from rayher_crm.services.close_date_slips import current_slip
 
 import frappe
+from rayher_crm.setup.indexes import OPPORTUNITY_FIELD_HISTORY_INDEX
 
 from rayher_crm.api.v1.errors import CrmApiException
 from rayher_crm.permissions.roles import resolve_crm_role
@@ -131,7 +134,7 @@ def _source(payload) -> tuple[str, str, str, str | None]:
         parent = frappe.db.get_value("CRM Opportunity Action", source_id, "opportunity")
         current_stage = stage(parent)
         row = frappe.db.get_value("CRM Opportunity Action", source_id, ["opportunity", "due", "status", "archived"], as_dict=True, for_update=True)
-        if (not row or row.opportunity != parent or row.status != "Open" or row.archived or not row.due or str(row.due)[:10] != event
+        if (not row or row.opportunity != parent or not open_action(row) or not row.due or str(row.due)[:10] != event
                 or str(row.due)[:10] >= today.isoformat() or current_stage not in OPEN_STAGES):
             raise _gone()
         return kind, source_id, event, row.opportunity
@@ -143,6 +146,19 @@ def _source(payload) -> tuple[str, str, str, str | None]:
                 or stage(row.opportunity, lock=False) in {"po_received", "lost"}):
             raise _gone()
         return kind, source_id, event, row.opportunity or None
+    if kind == "close_date_slip":
+        if stage(source_id) not in OPEN_STAGES:
+            raise _gone()
+        current_date = frappe.db.get_value("CRM Opportunity", source_id, "po_date", for_update=True)
+        history = frappe.db.sql(
+            "SELECT name, creation, at, field, from_value, to_value FROM `tabCRM Opportunity History` "
+            f"FORCE INDEX (`{OPPORTUNITY_FIELD_HISTORY_INDEX}`) "
+            "WHERE opportunity=%s AND field='po_date' FOR UPDATE", (source_id,), as_dict=True,
+        )
+        slip = current_slip(history, current_date, stamp(frappe.utils.now_datetime()))
+        if not slip or slip["name"] != event:
+            raise _gone()
+        return kind, source_id, event, source_id
     if stage(source_id) != INTERNAL_VALIDATION or current_stage6_event(source_id) != event:
         raise _gone()
     return kind, source_id, event, source_id
@@ -205,10 +221,11 @@ def record_action(payload, expected_modified=None) -> dict:
     """What was done about a deal waiting in S6 without a PO, and the day to look at it again."""
     _require_manager()
     payload = as_payload(payload)
-    if payload.get("warningType") != "stage6_no_po":
-        raise CrmApiException("INVALID_TRANSITION", "Only stage 6 warnings take a recorded action; the others clear through their own records.")
+    if payload.get("warningType") not in {"stage6_no_po", "close_date_slip"}:
+        raise CrmApiException("INVALID_TRANSITION", "Only stage 6 and postponed PO warnings take a recorded action; the others clear through their own records.")
     source = _source(payload)
-    _require_current_stage6_warning(source[1])
+    if source[0] == "stage6_no_po":
+        _require_current_stage6_warning(source[1])
     action = _text(payload.get("actionTaken"), "actionTaken")
     today = frappe.utils.now_datetime().date()
     try:

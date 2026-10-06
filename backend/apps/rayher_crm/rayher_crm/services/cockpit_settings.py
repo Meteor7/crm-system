@@ -12,7 +12,7 @@ SETTINGS = "CRM Cockpit Settings"
 # field: (API key, site config key, default, lowest value). A quotation threshold of 0 flags only quotes expiring today.
 THRESHOLDS = {
     "quote_expiry_days": ("quoteExpiryDays", "crm_cockpit_quote_expiry_days", 14, 0),
-    "stage6_no_po_days": ("stage6NoPoDays", "crm_cockpit_stage6_no_po_days", 30, 1),
+    "stage6_no_po_days": ("stage6NoPoDays", "crm_cockpit_stage6_no_po_days", 56, 1),
 }
 
 

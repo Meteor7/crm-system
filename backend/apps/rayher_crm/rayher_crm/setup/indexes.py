@@ -16,6 +16,7 @@ STAGE_REACHED_INDEX = "idx_crm_opportunity_stage_reached"
 LOSS_REVIEW_INDEX = "idx_crm_opportunity_loss_review"
 LOSS_REVIEW_REVISION_INDEX = "idx_crm_opportunity_loss_review_revision"
 WARNING_HANDLING_REVISION_INDEX = "idx_crm_warning_handling_revision"
+OPPORTUNITY_FIELD_HISTORY_INDEX = "idx_crm_opportunity_field_history"
 LEAD_CONVERTED_ACCOUNT_INDEX = "custom_crm_converted_account_index"
 NOTIFICATION_RECIPIENT_CREATED_INDEX = "idx_crm_notification_recipient_created"
 NOTIFICATION_RECIPIENT_UNREAD_CREATED_INDEX = "idx_crm_notification_recipient_unread_created"
@@ -85,6 +86,9 @@ def install_stage5f_indexes() -> None:
         frappe.db.add_index(
             "CRM Opportunity Probability History", ["opportunity", "changed_at"], PROBABILITY_HISTORY_INDEX,
         )
+    if frappe.db.table_exists("CRM Opportunity History"):
+        # Slip handling locks this opportunity's PO-date history, not other deals.
+        frappe.db.add_index("CRM Opportunity History", ["opportunity", "field"], OPPORTUNITY_FIELD_HISTORY_INDEX)
     if frappe.db.table_exists("CRM Opportunity Stage History"):
         frappe.db.add_index(
             "CRM Opportunity Stage History", ["opportunity", "recorded_at"], STAGE_HISTORY_INDEX,

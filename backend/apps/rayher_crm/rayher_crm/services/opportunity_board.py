@@ -53,7 +53,7 @@ SELECT `crm_board_action`.`name` AS `name`, `crm_board_action`.`opportunity` AS 
     `crm_board_action`.`status` AS `status`, `crm_board_action`.`archived` AS `archived`
 FROM `tabCRM Opportunity Action` AS `crm_board_action`
 INNER JOIN `tabCRM Opportunity` ON `tabCRM Opportunity`.`name` = `crm_board_action`.`opportunity`
-WHERE `crm_board_action`.`status` = 'Open' AND `crm_board_action`.`archived` = 0 AND ({scope})
+WHERE `crm_board_action`.`status` IN ('Open', 'In Progress', 'Blocked', 'Rescheduled') AND `crm_board_action`.`archived` = 0 AND ({scope})
 """
 
 

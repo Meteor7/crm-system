@@ -40,6 +40,32 @@ async function setup(role: UserRole = 'Manager', attach = false) {
 }
 
 describe('Warnings page', () => {
+  it('shows a quarter postponement and saves the action against its own event type', async () => {
+    const { wrapper, api } = await setup()
+    const data = warningsFixture()
+    const source = { warningType: 'close_date_slip' as const, sourceId: 'opp-slip', sourceEvent: 'history-slip' }
+    const handling = savedHandling(source)
+    data.closeDateSlipItems = [{ id: 'opp-slip', kind: 'opportunity', title: 'Capex', customer: 'Customer', accountId: 'account-1', owner: 'alice', at: '2026-10-01', previousPoDate: '2026-12-31', postponedPoDate: '2027-01-01', currentPoDate: '2027-02-01', handling }]
+    data.closeDateSlipHandledItems = []
+    data.warnings.push({ key: 'close_date_slip', count: { value: 1, state: 'ready', reason: null } })
+    api.getWarnings = vi.fn(async () => ({ data, warnings: [], meta }))
+    await wrapper.get('select[aria-label="Market"]').setValue('Frontend'); await flushPromises()
+    const row = wrapper.get('[data-alert="close_date_slip"]')
+    expect(row.text()).toContain('2026-12-31')
+    expect(row.text()).toContain('2027-01-01')
+    await row.get('[data-action-open]').trigger('click')
+    await row.get('textarea').setValue('Confirmed purchasing schedule')
+    await row.get('input[type="date"]').setValue(shanghaiDay(7))
+    await row.get('[data-step-save]').trigger('click'); await flushPromises()
+    expect(api.recordWarningAction).toHaveBeenCalledWith({ ...source, actionTaken: 'Confirmed purchasing schedule', followUpOn: shanghaiDay(7) }, handling.modified)
+    data.closeDateSlipHandledItems = data.closeDateSlipItems.map(item => ({ ...item, handling: { ...handling, state: 'handled', actedAt: '2026-10-05', followUpOn: shanghaiDay(7) } }))
+    data.closeDateSlipItems = []
+    await wrapper.get('select[aria-label="Market"]').setValue(''); await flushPromises()
+    expect(wrapper.find('[data-alert="close_date_slip"]').exists()).toBe(false)
+    await wrapper.get('[data-slip-handled-toggle]').trigger('click')
+    expect(wrapper.get('[data-slip-handled]').text()).toContain('Capex')
+    wrapper.unmount()
+  })
   it('lists the region filter as the territory tree and sends the territory that is chosen', async () => {
     const { wrapper, api } = await setup()
     const data = warningsFixture()

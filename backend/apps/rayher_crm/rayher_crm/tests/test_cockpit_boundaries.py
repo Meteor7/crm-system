@@ -92,7 +92,7 @@ class TestCockpitBoundaries(unittest.TestCase):
                 self.assertEqual({a["key"]: a["actual"] for a in result["activities"]},
                                  {k: {"value": 0, "state": "ready", "reason": None} for k in ("visits", "leads", "tests", "quotes")})
                 self.assertEqual({w["key"]: (w["count"]["value"], w["count"]["state"]) for w in result["warnings"]},
-                                 {k: (0, "ready") for k in ("lost", "overdue", "downgrade", "quotation_expiry", "stage6_no_po")})
+                                 {k: (0, "ready") for k in ("lost", "overdue", "downgrade", "quotation_expiry", "stage6_no_po", "close_date_slip")})
                 self.assertTrue(all((p["count"]["value"], p["count"]["state"]) == (0, "ready") for p in result["pipeline"]))
 
     def test_every_card_number_equals_its_drill_down_rows(self):
@@ -113,7 +113,7 @@ class TestCockpitBoundaries(unittest.TestCase):
                              "booking_owner": "alice", "currency": "CNY", "amount": "50.00"}]
         for query in ({"period": "week", "anchor": "2026-09-14"}, {"period": "year", "anchor": "2026-01-01"}, {"period": "week", "anchor": "2026-09-14", "sales": "alice"}):
             with self.subTest(query=query):
-                result = build_review(data, query, now, COVERAGE)
+                result = build_review(data, query, now, COVERAGE, stage6_no_po_days=30)
                 details = result["_details"]
                 for item in result["activities"]:
                     self.assertEqual(item["actual"]["value"], len(details[item["key"]]), item["key"])
@@ -125,7 +125,8 @@ class TestCockpitBoundaries(unittest.TestCase):
                         "overdue": {(r["id"], r["actionId"]) for r in details["overdue"]},
                         "downgrade": {r["id"] for r in details["downgrade"]},
                         "quotation_expiry": {r["id"] for r in details["quotation_expiry"]},
-                        "stage6_no_po": {r["id"] for r in details["stage6_no_po"]}}
+                        "stage6_no_po": {r["id"] for r in details["stage6_no_po"]},
+                        "close_date_slip": {r["id"] for r in details["close_date_slip"]}}
                 for warning in result["warnings"]:
                     self.assertEqual(warning["count"]["value"], len(rows[warning["key"]]), warning["key"])
                 self.assertEqual(result["stalled"]["count"]["value"], len(details["stalled"]))

@@ -8,6 +8,7 @@ from decimal import Decimal
 from typing import Any
 
 import frappe
+from rayher_crm.services.action_statuses import ACTION_STATUSES
 
 from rayher_crm.api.v1.errors import CrmApiException
 from rayher_crm.permissions.roles import assert_capability, resolve_crm_role
@@ -91,6 +92,14 @@ def delete_strategy_opportunity(name: str) -> dict[str, str]:
         frappe.db.get_value("CRM Opportunity", name, "name", for_update=True)
         # A direct-source legacy warning must not block parent deletion.
         frappe.db.delete("CRM Notification Event", {"source_doctype": "CRM Opportunity", "source_name": name})
+        # Slip warnings use the immutable field-history event as their source. Purge
+        # those inbox rows while parent/history locks still protect the source graph.
+        field_history = [row[0] for row in frappe.db.sql(
+            "SELECT `name` FROM `tabCRM Opportunity History` WHERE `opportunity` = %s FOR UPDATE", (name,))]
+        if field_history:
+            frappe.db.delete("CRM Notification Event", {
+                "source_doctype": "CRM Opportunity History", "source_name": ["in", field_history],
+            })
         # History and internal validation rows link to the Opportunity; remove them first or
         # the link check in frappe.delete_doc reports the Opportunity as still referenced.
         # The field history, stakeholders and actions belong to this Opportunity alone (the
@@ -133,7 +142,6 @@ MAX_COMPETITORS = 10
 MAX_COMPETITOR_NAME = 140
 MAX_COMPETITOR_TEXT = 1000
 COMPETITOR_TEXT_FIELDS = ("strengths", "response")
-ACTION_STATUSES = ("Open", "Done")
 
 
 def _positive_money(value: Any, fieldname: str):

@@ -19,6 +19,8 @@ Decisions recorded in docs/opportunity-board/backend-handoff.md:
 
 from __future__ import annotations
 
+from rayher_crm.services.action_statuses import open_action
+
 import operator
 import re
 from datetime import date, datetime, timedelta, timezone
@@ -359,7 +361,7 @@ def next_actions(actions):
 
     best = {}
     for action in actions:
-        if action.get("status") != "Open" or action.get("archived"):
+        if not open_action(action):
             continue
         due = _calendar_day(action.get("due"))
         key = (due is None, due or date.max, str(action["name"]))

@@ -38,7 +38,7 @@ export interface OpportunityCompetitor {
   response: string
 }
 export const MAX_OPPORTUNITY_COMPETITORS = 10
-export const OPPORTUNITY_ACTION_STATUSES = ['Open', 'Done'] as const
+export const OPPORTUNITY_ACTION_STATUSES = ['Open', 'In Progress', 'Blocked', 'Rescheduled', 'Done'] as const
 export type OpportunityActionStatus = typeof OPPORTUNITY_ACTION_STATUSES[number]
 
 export interface OpportunityStakeholderDto {

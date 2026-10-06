@@ -10,6 +10,7 @@ export interface ReviewRow {
   kind: 'visit' | 'lead' | 'test' | 'quotation' | 'opportunity' | 'booking'; stage?: string
   status?: string; opportunityId?: string; reason?: string | null; fromLevel?: string; toLevel?: string; eventId?: string
   actionId?: string; actionTitle?: string; due?: string; days?: number; daysAtLeast?: boolean; severity?: string
+  previousPoDate?: string; postponedPoDate?: string; currentPoDate?: string; actionStatus?: string
   currentOwner?: string | null
   // Lost rows: the post-mortem state (null until the loss review row exists), whether one is still owed,
   // whether it is older than the four-week window, and when the deal reopened (no post-mortem owed).
@@ -32,7 +33,7 @@ export interface ReviewRow {
   // Missing means a backend without warning handling: the editors stay hidden.
   handling?: WarningHandling | null
 }
-export type WarningHandlingType = 'overdue' | 'quotation_expiry' | 'stage6_no_po'
+export type WarningHandlingType = 'overdue' | 'quotation_expiry' | 'stage6_no_po' | 'close_date_slip'
 export interface WarningHandlingRevision { kind: 'PlanUpdated' | 'ActionRecorded'; nextStep: string | null; actionTaken: string | null; followUpOn: string | null; actor: string; at: string }
 export interface WarningHandling {
   warningType: WarningHandlingType
@@ -49,7 +50,7 @@ export interface WarningHandling {
   history: WarningHandlingRevision[]
 }
 export interface WarningPlanInput { warningType: WarningHandlingType; sourceId: string; sourceEvent: string; nextStep: string }
-export interface WarningActionInput { warningType: 'stage6_no_po'; sourceId: string; sourceEvent: string; actionTaken: string; followUpOn: string }
+export interface WarningActionInput { warningType: 'stage6_no_po' | 'close_date_slip'; sourceId: string; sourceEvent: string; actionTaken: string; followUpOn: string }
 export type CockpitSettingSource = 'settings' | 'site_config' | 'default'
 export interface CockpitSettingsInput { quoteExpiryDays: number; stage6NoPoDays: number }
 export interface CockpitSettings extends CockpitSettingsInput {
@@ -100,6 +101,8 @@ export interface WarningsDto {
   stage6NoPoItems?: ReviewRow[]
   // Stage 6 rows with an action recorded and a follow-up date still ahead: listed apart, never counted.
   stage6NoPoHandledItems?: ReviewRow[]
+  closeDateSlipItems?: ReviewRow[]
+  closeDateSlipHandledItems?: ReviewRow[]
   // Display names for users on the page (reviewers and editors are often Managers, not in filters.sales).
   names?: Record<string, string>
 }

@@ -57,7 +57,7 @@ import {
 import { readAllPages } from '@/features/shared/read-all-pages'
 import { sitesByAccountId } from '@/features/accounts/account-sites'
 import { useI18n, useLocaleMessage, localeMessage } from '@/i18n'
-import { salesEnumLabel } from '@/features/shared/sales-i18n'
+import { salesEnumLabel, opportunityActionLabel } from '@/features/shared/sales-i18n'
 
 const props = withDefaults(defineProps<{ apiClient?: CrmApi }>(), { apiClient: () => defaultApi })
 const { locale, t } = useI18n()
@@ -155,7 +155,7 @@ watch([loading, () => route.hash], async ([pending, hash]) => {
 const contactSites = computed(() => Object.entries(sitesByAccount.value).flatMap(([accountId, sites]) =>
   sites.map((site) => ({ ...site, accountId })),
 ))
-const nextAction = computed(() => selected.value?.actions.find((item) => item.status === 'Open'))
+const nextAction = computed(() => selected.value?.actions.find((item) => item.status !== 'Done'))
 function stanceClass(stance: OpportunityStakeholderStance) {
   if (stance === 'Support') return 'positive'
   if (stance === 'Against') return 'danger'
@@ -522,7 +522,7 @@ onMounted(async () => {
               <div v-if="selected.budgetApprovedOn"><dt>{{ t('detail.budgetApprovedOn') }}</dt><dd data-testid="opportunity-budget-approved-on">{{ formatDisplayDate(selected.budgetApprovedOn) }}</dd></div>
               <div><dt>{{ t('oppEditor.probabilityLevel') }}</dt><dd data-testid="opportunity-probability-level"><StatusBadge :label="opportunityProbabilityLevelLabel(selected.probabilityLevel, locale)" :tone="opportunityProbabilityLevelTone(selected.probabilityLevel)" /></dd></div>
               <div><dt>{{ t('detail.purchaseIntent') }}</dt><dd data-testid="opportunity-intent">{{ selected.score }}/100</dd></div>
-              <div><dt>{{ t('detail.nextStep') }}</dt><dd>{{ nextAction?.title || t('detail.noOpenAction') }}</dd></div>
+              <div><dt>{{ t('detail.nextStep') }}</dt><dd data-testid="opportunity-next-action">{{ nextAction?.title || t('detail.noOpenAction') }}</dd></div>
               <div><dt>{{ t('detail.updated') }}</dt><dd>{{ formatDisplayDate(selected.updated) }}</dd></div>
             </dl>
           </section>
@@ -559,7 +559,7 @@ onMounted(async () => {
               <article v-for="action in selected.actions" :key="action.id" :data-action-title="action.title">
                 <i :class="{ done: action.status === 'Done' }"></i>
                 <div><strong>{{ action.title }}</strong><span>{{ personnelDisplayName(action.owner) }} · {{ t('actionEditor.dueDate') }} {{ formatDisplayDate(action.due) }}</span><p v-if="action.remark" class="action-remark">{{ t('actionEditor.remark') }} · {{ action.remark }}</p></div>
-                <b :class="{ done: action.status === 'Done' }">{{ salesEnumLabel(action.status, locale) }}</b>
+                <b :class="{ done: action.status === 'Done' }">{{ opportunityActionLabel(action.status, locale) }}</b>
                 <div v-if="canWrite" class="compact-actions"><button type="button" data-action="edit" :aria-label="locale === 'en-US' ? 'Edit action' : '编辑 Action'" @click="openAction(action)"><Pencil :size="12" /></button><button type="button" data-action="delete" :aria-label="locale === 'en-US' ? 'Delete action' : '删除 Action'" @click="removeAction(action)"><Trash2 :size="12" /></button></div>
               </article>
             </div>
