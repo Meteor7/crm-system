@@ -199,6 +199,8 @@ export interface CrmApi {
   recordWarningAction(input: WarningActionInput, expectedModified: string | null): Promise<ApiResponse<WarningHandling>>
   getBootstrap(): Promise<ApiResponse<BootstrapDto>>
   changeCurrentUserPassword(input: { currentPassword: string; newPassword: string }): Promise<ApiResponse<{ updated: true }>>
+  /** Ends the signed-in session on the server (Frappe's own `logout`); the page then goes to the login page. */
+  signOut(): Promise<void>
   listNotifications(query?: NotificationListQuery): Promise<ApiResponse<PageData<NotificationDto>>>
   markNotificationRead(id: string): Promise<ApiResponse<{ id: string; read: true; readAt: string }>>
   markAllNotificationsRead(): Promise<ApiResponse<{ updated: number; readAt: string }>>

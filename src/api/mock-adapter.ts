@@ -4421,6 +4421,11 @@ export function createMockApi(options: {
       throw new CrmApiError('BACKEND_NOT_CONNECTED', 'Mock 模式不修改真实账号密码', requestId(), false)
     },
 
+    async signOut() {
+      await wait()
+      throw new CrmApiError('BACKEND_NOT_CONNECTED', 'Mock 模式没有会话可退出', requestId(), false)
+    },
+
     async listNotifications(query = {}) {
       await wait()
       const page = Number.isInteger(query.page) && Number(query.page) > 0 ? Number(query.page) : 1

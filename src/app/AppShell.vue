@@ -3,7 +3,7 @@ import { notificationCopy } from '@/i18n/notification-copy'
 import { requestErrorMessage } from '@/api/request-state'
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { START_LOCATION, useRoute, useRouter } from 'vue-router'
-import { Bell, Globe2, KeyRound, Menu, PanelLeftClose, PanelLeftOpen, Settings, X } from '@lucide/vue'
+import { Bell, Globe2, KeyRound, LogOut, Menu, PanelLeftClose, PanelLeftOpen, Settings, X } from '@lucide/vue'
 import { navigation } from './navigation'
 import { useAppStore } from '@/stores/app'
 import { hasCapability } from '@/domain/permissions'
@@ -12,7 +12,8 @@ import type { AppNotification, NotificationCategory } from '@/types/notification
 import { usingMock } from '@/api'
 import { SESSION_EXPIRED_EVENT, loginUrl } from '@/api/session'
 import { formatDisplayDate } from '@/domain/time'
-import { useI18n, useLocaleMessage } from '@/i18n'
+import { localeMessage, useI18n, useLocaleMessage } from '@/i18n'
+import type { Locale, LocaleMessage } from '@/i18n'
 
 type FrappeWindow = Window & { frappe?: unknown }
 
@@ -27,6 +28,38 @@ const mobileOpen = ref(false)
 const desktopSidebarCollapsed = ref(false)
 const accountOpen = ref(false)
 const savingPassword = ref(false)
+// Signing out: the server ends the session, then the page goes to the login page (a shared computer, another account).
+const signingOut = ref(false)
+// Once the session is ended, nothing loaded for the account (the route content, the navigation, the bell and its
+// notifications, the account centre) is shown while the login page is on its way.
+const sessionEnded = ref(false)
+// The account this page was loaded for, and the one the tab holds now (the last page's, or none after a sign-out,
+// kept in the tab's own storage): a page brought back whole from the back-forward cache for another account than the
+// tab holds now, or for none, loads anew. Without the storage, the page's own sign-out is all it knows.
+const SESSION_USER_KEY = 'rayher-crm:session-user'
+// The account this page was loaded for: null until its bootstrap is in (not the same as none).
+let loadedFor: string | null = null
+// Brought back whole from the cache before its account was known: the tab may have signed out, or in as someone
+// else, since; the account is checked against the tab's when it arrives.
+let restoredBeforeKnown = false
+let signedOut = false
+function tabSessionUser(): string | null {
+  try { return window.sessionStorage.getItem(SESSION_USER_KEY) } catch { return null }
+}
+function rememberTabSessionUser(user: string) {
+  try { window.sessionStorage.setItem(SESSION_USER_KEY, user) } catch { /* the page's own memory stands */ }
+}
+// The account is recorded the moment the bootstrap is published (the shell's own load goes on reading
+// notifications after that). A page brought back before then, whose tab holds another account now or none, is
+// stale whatever its late bootstrap says: it loads anew.
+watch(() => store.bootstrap?.user.id ?? '', (user) => {
+  if (!user || loadedFor !== null || signedOut) return
+  const held = tabSessionUser()
+  if (restoredBeforeKnown && held !== null && held !== user) { window.location.reload(); return }
+  loadedFor = user
+  rememberTabSessionUser(user)
+}, { immediate: true })
+const signOutError = useLocaleMessage()
 const currentPassword = ref('')
 const newPassword = ref('')
 const confirmPassword = ref('')
@@ -108,8 +141,45 @@ const sessionExpired = ref(false)
 function markSessionExpired() { sessionExpired.value = true }
 function signInAgain() { window.location.assign(loginUrl()) }
 
+async function signOut() {
+  if (signingOut.value) return
+  signingOut.value = true
+  signOutError.value = ''
+  try {
+    await store.activeApi.signOut()
+  } catch (error) {
+    // Still signed in: the page stays, and says so, and then what the server said (its own message, or the
+    // transport's reading of its status) when there is one.
+    const failed = message('shell.signOutFailed')
+    const detail = requestErrorMessage(error, failed)
+    const text = (value: LocaleMessage, which: Locale) => typeof value === 'string' ? value : value[which]
+    signOutError.value = detail === failed ? failed : localeMessage(`${text(failed, 'en-US')} ${text(detail, 'en-US')}`, `${text(failed, 'zh-CN')} ${text(detail, 'zh-CN')}`)
+    signingOut.value = false
+    return
+  }
+  // Nothing of the account stays in the page, and the page leaves history for the login page (`replace`).
+  signedOut = true
+  rememberTabSessionUser('')
+  store.endSession()
+  sessionEnded.value = true
+  window.location.replace('/login')
+}
+
+// A page the browser kept whole (its back-forward cache) and brought back with "back" would show the account it was
+// loaded for: one that signed out, or whose tab holds another account now or none (a later page of the tab signed
+// out), loads anew, and the session gone sends it to the login page. One brought back while its account is still the
+// tab's (the user went elsewhere and back) keeps what it has, a draft in a form included.
+function reloadIfRestored(event: PageTransitionEvent) {
+  if (!event.persisted) return
+  if (signedOut) { window.location.reload(); return }
+  if (loadedFor === null) { restoredBeforeKnown = true; return }
+  const held = tabSessionUser()
+  if (held !== null && held !== loadedFor) window.location.reload()
+}
+
 async function refreshNotifications() {
-  if (usingMock || !store.bootstrap || sessionExpired.value) return
+  // Not while signing out: a read answered after the session was ended would write it back.
+  if (usingMock || !store.bootstrap || sessionExpired.value || signingOut.value) return
   try {
     await store.refreshNotifications()
   } catch (reason) {
@@ -189,13 +259,17 @@ async function submitPasswordChange() {
 
 onMounted(async () => {
   window.addEventListener(SESSION_EXPIRED_EVENT, markSessionExpired)
+  window.addEventListener('pageshow', reloadIfRestored)
   await store.loadBootstrap()
+  // Signed out while the bootstrap was out: nothing more for this page to do.
+  if (signedOut) return
   window.addEventListener('focus', refreshNotificationsWhenVisible)
   document.addEventListener('visibilitychange', refreshNotificationsWhenVisible)
   notificationTimer = window.setInterval(() => void refreshNotifications(), 30_000)
 })
 onBeforeUnmount(() => {
   window.removeEventListener(SESSION_EXPIRED_EVENT, markSessionExpired)
+  window.removeEventListener('pageshow', reloadIfRestored)
   window.removeEventListener('focus', refreshNotificationsWhenVisible)
   document.removeEventListener('visibilitychange', refreshNotificationsWhenVisible)
   if (notificationTimer !== undefined) window.clearInterval(notificationTimer)
@@ -203,7 +277,8 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div class="semicrm-app" :class="{ 'is-embedded': isEmbedded, 'is-sidebar-collapsed': desktopSidebarCollapsed }" data-testid="app-shell">
+  <div v-if="sessionEnded" class="semicrm-app session-ended" data-testid="session-ended" />
+  <div v-else class="semicrm-app" :class="{ 'is-embedded': isEmbedded, 'is-sidebar-collapsed': desktopSidebarCollapsed }" data-testid="app-shell">
     <button
       v-if="mobileOpen"
       class="nav-scrim"
@@ -363,6 +438,10 @@ onBeforeUnmount(() => {
                 <small>{{ store.bootstrap?.user.id ?? t('shell.currentAccount') }}</small>
                 <span v-if="store.bootstrap">{{ roleLabel }} · {{ user.team }}</span>
               </div>
+              <div v-if="!usingMock" class="account-sign-out">
+                <button class="secondary-button" type="button" data-testid="sign-out" :disabled="signingOut" @click="signOut"><LogOut :size="15" />{{ signingOut ? t('shell.signingOut') : t('shell.signOut') }}</button>
+                <p v-if="signOutError" class="account-error" role="alert">{{ signOutError }}</p>
+              </div>
               <form v-if="!usingMock" class="password-setting" @submit.prevent="submitPasswordChange">
                 <h3><KeyRound :size="15" />{{ t('shell.changePassword') }}</h3>
                 <label>{{ t('shell.currentPassword') }}<input v-model="currentPassword" type="password" autocomplete="current-password" /></label>
@@ -463,6 +542,8 @@ onBeforeUnmount(() => {
 .account-center-close { display: grid; margin-left: auto; width: 30px; height: 30px; flex: 0 0 auto; place-items: center; padding: 0; color: var(--crm-text-muted); background: transparent; border: 1px solid transparent; border-radius: 8px; cursor: pointer; }
 .account-center-close:hover { color: var(--crm-navy); background: var(--crm-teal-soft); border-color: var(--crm-line); }
 .account-center-close:focus-visible { outline: 2px solid rgba(254,153,0,.72); outline-offset: 2px; }
+.account-sign-out { display: grid; gap: 8px; padding: 0 16px 14px; }
+.account-sign-out .secondary-button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; width: 100%; }
 .account-profile strong { color: var(--crm-navy); font-size: 12px; }
 .account-profile small { color: var(--crm-text-muted); font-size: 8px; }
 .account-profile span { margin-top: 4px; color: var(--crm-teal-ink); font-size: 8px; font-weight: 700; }

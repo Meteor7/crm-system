@@ -94,6 +94,13 @@ export const useAppStore = defineStore('app', {
         if (this.bootstrapPromise === request) this.bootstrapPromise = null
       }
     },
+    // The session ended (a sign-out): the account leaves the store, and a bootstrap still out — its answer arriving
+    // after the sign-out — is retired, so that it does not bring the account back.
+    endSession() {
+      this.sessionRequestRevision += 1
+      this.bootstrap = null
+      this.loading = false
+    },
     async refreshNotifications() {
       if (!usesServerNotificationDelivery() || !this.bootstrap) return
       const notifications = useNotificationStore()

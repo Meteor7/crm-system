@@ -52,6 +52,7 @@ describe('Frappe method contract', () => {
       recordWarningAction: 'cockpit.record_warning_action',
       getBootstrap: 'bootstrap.get_bootstrap',
       changeCurrentUserPassword: 'account.change_password',
+      signOut: 'logout',
       listNotifications: 'notifications.list_notifications',
       markNotificationRead: 'notifications.mark_notification_read',
       markAllNotificationsRead: 'notifications.mark_all_notifications_read',
@@ -278,6 +279,80 @@ describe('Frappe JSON transport', () => {
     // `command.type` is the command discriminator; the visit type must not overwrite it.
     expect(JSON.parse(body.get('command')!)).toEqual({ type: 'edit', subject: '改期后拜访', date: '2026-07-28', visitType: 'On-site', owner: 'sales@example.com', objective: '确认样片' })
     expect(body.get('expectedModified')).toBe('2026-08-04 12:00:00.000000')
+  })
+
+  it('signs out through Frappe\'s own logout endpoint, as a GET that needs no CSRF token', async () => {
+    // No token: the CRM's bootstrap, which brings it, may have failed while the session is there to end.
+    ;(window as Window & { frappe?: { csrf_token?: string } }).frappe = {}
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ message: 'Logged Out' }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+    const api = createFrappeApi({ fetchImpl: fetchMock })
+
+    await api.signOut()
+
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit]
+    expect(url).toBe('/api/method/logout')
+    expect(init.method).toBe('GET')
+    expect(init.credentials).toBe('same-origin')
+    expect(init.body).toBeUndefined()
+
+    // A refusal is an error the page can show; the session is then still there.
+    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ exc_type: 'ValidationError' }), { status: 400, headers: { 'Content-Type': 'application/json' } }))
+    await expect(api.signOut()).rejects.toBeInstanceOf(CrmApiError)
+  })
+
+  it('ends the session only once the requests out under it are answered', async () => {
+    // A request answered after the logout would write the session back (Frappe renews the session cache at the end
+    // of every request it authenticated): the logout waits for what is out.
+    ;(window as Window & { frappe?: { csrf_token?: string } }).frappe = {}
+    let answer: (response: Response) => void = () => undefined
+    const fetchMock = vi.fn()
+      .mockImplementationOnce(() => new Promise<Response>((resolve) => { answer = resolve }))
+      .mockResolvedValue(new Response(JSON.stringify({ message: 'Logged Out' }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+    const api = createFrappeApi({ fetchImpl: fetchMock })
+
+    const reading = api.listNotifications({ page: 1, pageSize: 1 }).catch(() => undefined)
+    const signingOut = api.signOut()
+    await Promise.resolve(); await Promise.resolve()
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect((fetchMock.mock.calls[0] as [string])[0]).not.toBe('/api/method/logout')
+
+    answer(new Response(JSON.stringify({ message: { data: [], meta: { requestId: 'req_n', page: 1, pageSize: 1, total: 0 }, warnings: [] } }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+    await reading
+    await signingOut
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    expect((fetchMock.mock.calls[1] as [string])[0]).toBe('/api/method/logout')
+  })
+
+  it('sends nothing else once the sign-out is under way, until the sign-out fails', async () => {
+    ;(window as Window & { frappe?: { csrf_token?: string } }).frappe = {}
+    const ok = () => new Response(JSON.stringify({ message: { data: {}, meta: { requestId: 'req' }, warnings: [] } }), { status: 200, headers: { 'Content-Type': 'application/json' } })
+    let answerBootstrap: (response: Response) => void = () => undefined
+    let answerLogout: (response: Response) => void = () => undefined
+    const fetchMock = vi.fn()
+      .mockImplementationOnce(() => new Promise<Response>((resolve) => { answerBootstrap = resolve }))
+      .mockImplementationOnce(() => new Promise<Response>((resolve) => { answerLogout = resolve }))
+      .mockImplementation(async () => ok())
+    const api = createFrappeApi({ fetchImpl: fetchMock })
+
+    // The bootstrap is out when the sign-out starts: the logout waits for it, and what the bootstrap's answer sets
+    // off (the notification reads) is not sent.
+    const booting = api.getBootstrap().catch(() => undefined)
+    const signingOut = api.signOut()
+    await Promise.resolve(); await Promise.resolve()
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    answerBootstrap(ok())
+    await booting
+    await Promise.resolve(); await Promise.resolve()
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    expect((fetchMock.mock.calls[1] as [string])[0]).toBe('/api/method/logout')
+    await expect(api.listNotifications({ page: 1, pageSize: 1 })).rejects.toMatchObject({ message: '正在退出登录，请求未发送。' })
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+
+    // The sign-out refused: the session is there to use, and the requests go out again.
+    answerLogout(new Response(JSON.stringify({ exc_type: 'ValidationError' }), { status: 400, headers: { 'Content-Type': 'application/json' } }))
+    await expect(signingOut).rejects.toBeInstanceOf(CrmApiError)
+    await api.listNotifications({ page: 1, pageSize: 1 }).catch(() => undefined)
+    expect(fetchMock).toHaveBeenCalledTimes(3)
   })
 
   it('JSON-serializes complex POST fields and sends the Frappe CSRF token', async () => {

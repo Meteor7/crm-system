@@ -28,6 +28,8 @@ export const FRAPPE_METHODS = {
   recordWarningAction: 'cockpit.record_warning_action',
   getBootstrap: 'bootstrap.get_bootstrap',
   changeCurrentUserPassword: 'account.change_password',
+  // Frappe's own endpoint, outside the rayher_crm whitelist: `signOut` below does not go through `methodUrl`.
+  signOut: 'logout',
   listNotifications: 'notifications.list_notifications',
   markNotificationRead: 'notifications.mark_notification_read',
   markAllNotificationsRead: 'notifications.mark_all_notifications_read',
@@ -331,15 +333,28 @@ export function createFrappeApi(options: FrappeApiOptions = {}): CrmApi {
   const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS
   const csrfToken = options.csrfToken ?? defaultCsrfToken
 
-  async function send(method: string, init: RequestInit, fallbackRequestId: string) {
+  // The requests out at the moment, so that the sign-out can wait for them: Frappe writes a session back to its
+  // cache at the end of a request it authenticated, so one answered after the session was ended would revive it.
+  const inFlight = new Set<Promise<Response>>()
+  // Once the sign-out is under way nothing else leaves this client (a request answered after the session was ended
+  // would write it back), until the sign-out fails and the session is there to use.
+  let signingOut = false
+
+  async function send(method: string, init: RequestInit, fallbackRequestId: string, forSignOut = false) {
+    if (signingOut && !forSignOut) {
+      throw new ClientRequestError('INTERNAL_ERROR', localeMessage('Signing out; the request was not sent.', '正在退出登录，请求未发送。'), fallbackRequestId)
+    }
     const controller = new AbortController()
     const timer = setTimeout(() => controller.abort(), timeoutMs)
+    const request = fetchImpl(method, { ...init, signal: controller.signal })
+    inFlight.add(request)
     try {
-      return await fetchImpl(method, { ...init, signal: controller.signal })
+      return await request
     } catch (error) {
       throw normalizeFrappeError(error, fallbackRequestId)
     } finally {
       clearTimeout(timer)
+      inFlight.delete(request)
     }
   }
 
@@ -401,6 +416,23 @@ export function createFrappeApi(options: FrappeApiOptions = {}): CrmApi {
   const api: CrmApi = {
     getBootstrap: () => get('getBootstrap'),
     changeCurrentUserPassword: (input) => post('changeCurrentUserPassword', input),
+    async signOut() {
+      signingOut = true
+      try {
+        // The session is ended once the requests out under it are answered (none of them writes it back then), and
+        // none follows them. One that timed out here may still be running on the server: not waited for.
+        while (inFlight.size) await Promise.allSettled([...inFlight])
+        // Frappe's own `logout`, as a GET: Frappe asks no CSRF token of a GET, and the CRM's token comes with its
+        // bootstrap, which may have failed (no CRM role, a server fault) while the session is there to end.
+        const fallbackRequestId = requestId()
+        const response = await send('/api/method/logout', { method: 'GET', credentials: 'same-origin', headers: { Accept: 'application/json' } }, fallbackRequestId, true)
+        if (!response.ok) throwRequestError(await parseJson(response), response, fallbackRequestId, FRAPPE_METHODS.signOut)
+      } catch (error) {
+        // Still signed in: the page goes on using the session.
+        signingOut = false
+        throw error
+      }
+    },
     async listNotifications(query) {
       const result = await get<Awaited<ReturnType<CrmApi['listNotifications']>>['data']['items']>('listNotifications', query as RequestValues)
       return { ...result, data: { items: result.data } }
