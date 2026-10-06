@@ -513,5 +513,7 @@ onBeforeUnmount(() => {
 }
 @media (max-width: 520px) {
   .global-search { width: calc(100vw - 134px); }
+  /* The panel is wider than what is left of the screen right of the bell: pin it to the screen, 16px in. */
+  .notification-center { position: fixed; top: 64px; right: 16px; left: 16px; width: auto; max-height: calc(100dvh - 80px); overflow: auto; }
 }
 </style>
