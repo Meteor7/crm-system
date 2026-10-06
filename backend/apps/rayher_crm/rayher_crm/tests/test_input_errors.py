@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import io
 from unittest.mock import patch
+from uuid import uuid4
 
 import frappe
 import pymysql
@@ -62,7 +63,10 @@ class TestInputErrors(FrappeTestCase):
         frappe.set_user("Administrator")
         self.sales = self._user("crm-input-errors-sales@example.invalid", "CRM Sales")
         frappe.set_user(self.sales)
-        self.account = create_account(self._account("Input Errors Account"))
+        # FrappeTestCase shares one transaction across the tests of a class: the Account of one test's
+        # setUp is still there at the next, and an Account named as one the user sees is refused. The
+        # name is unique and 20 characters long, as "Input Errors Account" was: a test measures it.
+        self.account = create_account(self._account(f"Input Errors {uuid4().hex[:7]}"))
         self.contact = create_contact(self._contact("Input Errors Contact"))
 
     def tearDown(self):

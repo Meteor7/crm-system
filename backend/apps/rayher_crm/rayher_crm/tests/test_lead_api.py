@@ -361,6 +361,26 @@ class TestLeadApi(FrappeTestCase):
         payload.update(overrides)
         return payload
 
+    def test_conversion_into_an_account_named_like_one_the_user_sees_asks_first(self):
+        frappe.set_user(self.sales)
+        existing = create_account(self._account_input("Converted Twin Account"))
+        lead = create_lead(self._input("Twin Conversion Lead"))
+        conversion = self._conversion_input(
+            newAccount=self._account_input("Converted Twin Account"),
+            newSite=self._site_input("Twin Site"),
+            newContact=self._contact_input("placeholder", "Twin Contact"),
+        )
+        with self.assertRaises(CrmApiException) as taken:
+            convert_lead(lead["id"], conversion)
+        self.assertEqual((taken.exception.code, taken.exception.field_errors), ("CONFLICT", {"name": existing["id"]}))
+        self.assertNotEqual(frappe.db.get_value("Lead", lead["id"], "custom_crm_status"), "Converted")
+
+        # Confirmed as another company, the conversion creates it (ERPNext suffixes the id).
+        conversion["newAccount"]["confirmDuplicate"] = True
+        converted = convert_lead(lead["id"], conversion)
+        self.assertFalse(converted["reusedAccount"])
+        self.assertEqual(frappe.db.get_value("Lead", lead["id"], "custom_crm_status"), "Converted")
+
     def test_conversion_reuses_records_uses_selected_owner_and_is_idempotent(self):
         frappe.set_user(self.sales)
         account = create_account(self._account_input("Lead Reuse Account"))

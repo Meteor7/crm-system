@@ -21,7 +21,7 @@ from rayher_crm.services.common import (
     to_iso_timestamp,
     validate_choice,
 )
-from rayher_crm.services.concurrency import lock_document
+from rayher_crm.services.concurrency import committed_reader, lock_document
 from rayher_crm.services.notifications import create_notification, record_route
 
 
@@ -43,6 +43,12 @@ def _contact_account(name: str) -> str | None:
 
 
 CONTACT_NOT_FOUND_MESSAGE = "Contact was not found, or you have no access to it."
+
+
+def _accounts_of(doc) -> set[str]:
+    """The Accounts a Contact document links (read under a lock, those as committed by now)."""
+
+    return {link.link_name for link in doc.get("links") or [] if link.link_doctype == "Customer"}
 
 
 def _require_contact(name: str):
@@ -323,9 +329,11 @@ def get_contact(name: str) -> dict[str, Any]:
     assert_capability("contact:view")
     doc = _require_contact(name)
     reports_to = serialize_contact(_require_contact(doc.custom_crm_reports_to)) if doc.custom_crm_reports_to else None
+    # A Contact merged into another is not a direct report: the merge moved its reports to the survivor and
+    # cleared its line, and the patch cleared the lines of those merged before.
     direct_report_names = frappe.db.sql(
         "SELECT `name` FROM `tabContact` "
-        "WHERE `custom_crm_reports_to` = %s "
+        "WHERE `custom_crm_reports_to` = %s AND IFNULL(`custom_crm_merged_into`, '') = '' "
         f"AND ({conditions_for_doctype('Contact')})",
         (name,),
         as_dict=True,
@@ -429,20 +437,94 @@ def merge_contacts(
         raise CrmApiException("VALIDATION_ERROR", "A contact cannot be merged into itself.")
     survivor = _require_contact(survivor_id)
     duplicate = _require_contact(duplicate_id)
-    if _contact_account(survivor.name) != _contact_account(duplicate.name):
+    account = _contact_account(survivor.name)
+    if account != _contact_account(duplicate.name):
         raise CrmApiException("CONTACT_MERGE_CONFLICT", "Contacts from different accounts cannot be merged.")
+    # The Account's row first: the merges of one Account take turns, so the second reads the lines the first
+    # committed (two merges whose locks did not meet could otherwise close a loop between them).
+    frappe.db.sql("SELECT `name` FROM `tabCustomer` WHERE `name` = %s FOR UPDATE", (account,))
     _lock_contact_pair(survivor_id, duplicate_id)
+    # Under the locks, both Contacts are read again with a locking read, which returns the rows as committed by
+    # now (lines and `modified` alike: another merge may have moved them while this one waited, and a save with
+    # the snapshot's version would be refused). The walk below reads the other Contacts' lines as committed too.
+    survivor = frappe.get_doc("Contact", survivor_id, for_update=True)
+    duplicate = frappe.get_doc("Contact", duplicate_id, for_update=True)
+    # Read again, each is asked anew. One moved to another Account meanwhile (an edit may move a Contact) is not
+    # the held Account's to merge: the Contacts of two Accounts are not merged, and the row held is that of the
+    # Account the snapshot had them both at. One merged meanwhile (two users merging the pair, each their way) is
+    # merged no more, and one archived meanwhile neither takes a merge nor goes into one (one who left the
+    # company may, as before this change).
+    if any(account not in _accounts_of(doc) for doc in (survivor, duplicate)):
+        raise CrmApiException("CONTACT_MERGE_CONFLICT", "Contacts from different accounts cannot be merged.")
+    if duplicate.custom_crm_merged_into or survivor.custom_crm_merged_into or "Archived" in (survivor.custom_crm_status, duplicate.custom_crm_status):
+        raise CrmApiException("CONTACT_MERGE_CONFLICT", "A Contact merged or archived already cannot be merged.")
+    # The duplicate's direct reports as committed by now (a merge or an edit that went first may have moved a
+    # line the snapshot still shows, or merged one of them away), and those the committed read cannot see at
+    # all: Contacts this request made itself, not committed yet (a test's fixtures).
+    read, close = committed_reader()
+    try:
+        committed = {
+            row[0] for row in read(
+                "SELECT `name` FROM `tabContact` WHERE `custom_crm_reports_to` = %s AND IFNULL(`custom_crm_merged_into`, '') = ''",
+                (duplicate.name,),
+            )
+        }
+        own = {
+            name for name in frappe.get_all(
+                "Contact", filters={"custom_crm_reports_to": duplicate.name, "custom_crm_merged_into": ("in", ("", None))}, pluck="name",
+            )
+            if not read("SELECT `name` FROM `tabContact` WHERE `name` = %s", (name,))
+        }
+        direct_reports = sorted(committed | own)
+    finally:
+        close()
     savepoint = f"crm_merge_{frappe.generate_hash(length=8)}"
     frappe.db.savepoint(savepoint)
     try:
+        # The duplicate's own line goes: their reports are the survivor's now, and a line kept would keep them in
+        # their manager's direct reports beside the survivor.
+        duplicate_line = duplicate.custom_crm_reports_to
         duplicate.custom_crm_status = "Archived"
         duplicate.custom_crm_merged_into = survivor.name
+        duplicate.custom_crm_reports_to = None
         duplicate.save(ignore_permissions=True)
         if failure_injector:
             failure_injector()
-        direct_reports = frappe.get_all("Contact", filters={"custom_crm_reports_to": duplicate.name}, pluck="name")
+        # The duplicate's direct reports report to the survivor now, except the survivor, who would report to
+        # themselves; a survivor who reported to the duplicate takes the duplicate's own line (none when that is
+        # the survivor), as a reporting line may not come back on itself.
+        changed: dict[str, str | None] = {duplicate.name: None}
         for contact_name in direct_reports:
+            if contact_name == survivor.name:
+                continue
             frappe.db.set_value("Contact", contact_name, "custom_crm_reports_to", survivor.name, update_modified=True)
+            changed[contact_name] = survivor.name
+        survivor_line = survivor.custom_crm_reports_to
+        if survivor.custom_crm_reports_to == duplicate.name:
+            survivor_line = duplicate_line if duplicate_line != survivor.name else None
+            frappe.db.set_value("Contact", survivor.name, "custom_crm_reports_to", survivor_line, update_modified=True)
+        changed[survivor.name] = survivor_line
+        # Every line the merge changed runs through the survivor: one that comes back to them (the top of a
+        # longer line merged into its bottom) is refused, as the editor refuses such a line, and nothing changes.
+        # The lines are read as this merge set them, else as committed by now (another merge may have moved
+        # them), else as the snapshot has them (a Contact this request made itself).
+        read, close = committed_reader()
+        try:
+            def line_of(contact_name: str) -> str | None:
+                if contact_name in changed:
+                    return changed[contact_name]
+                rows = read("SELECT `custom_crm_reports_to` FROM `tabContact` WHERE `name` = %s", (contact_name,))
+                return rows[0][0] if rows else frappe.db.get_value("Contact", contact_name, "custom_crm_reports_to")
+
+            seen: set[str] = set()
+            current = survivor_line
+            while current and current not in seen:
+                if current == survivor.name:
+                    raise CrmApiException("INVALID_REPORTING_LINE", "The merge would make the reporting line a cycle.")
+                seen.add(current)
+                current = line_of(current)
+        finally:
+            close()
     except Exception:
         frappe.db.rollback(save_point=savepoint)
         raise

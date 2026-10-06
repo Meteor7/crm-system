@@ -86,9 +86,10 @@ class TestDemoRequestApi(FrappeTestCase):
 
     def _records(self, owner: str, suffix: str):
         frappe.set_user(owner)
+        # Every test of the class makes this Account again in the one transaction: the same name, confirmed.
         account = create_account({
             "name": f"Demo {suffix}", "shortName": suffix, "segment": "Frontend", "tier": "A",
-            "city": "Shanghai", "region": "East China", "owner": owner,
+            "city": "Shanghai", "region": "East China", "owner": owner, "confirmDuplicate": True,
         })
         site = create_site(account["id"], {
             "name": f"{suffix} Demo Site", "city": "Shanghai", "type": "Fab",

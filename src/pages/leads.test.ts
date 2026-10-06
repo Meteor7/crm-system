@@ -3,6 +3,7 @@ import { flushPromises, mount } from '@vue/test-utils'
 import { createMemoryHistory, createRouter } from 'vue-router'
 import { describe, expect, it, vi } from 'vitest'
 import { createMockApi } from '@/api/mock-adapter'
+import { CrmApiError } from '@/api'
 import { useAppStore } from '@/stores/app'
 import LeadListView from '@/features/leads/LeadListView.vue'
 import LeadDetailPage from './LeadDetailPage.vue'
@@ -253,6 +254,65 @@ describe('Leads pages', () => {
     }))
     expect(wrapper.text()).toContain('OPP-')
     expect(wrapper.find('[data-testid="convert-lead"]').exists()).toBe(false)
+  })
+
+  it('asks before converting into an Account named like one the user sees, and converts on "仍要新建"', async () => {
+    const { api, pinia, router } = await pageContext()
+    const lead = (await api.getLead('LEAD-001')).data
+    const convertLead = vi.spyOn(api, 'convertLead').mockImplementation(async (id, input) => {
+      if (!input.newAccount?.confirmDuplicate) throw new CrmApiError('CONFLICT', 'An Account with this name exists already.', 'req_twin', false, { name: 'ACC-003' })
+      return {
+        data: {
+          lead: { ...lead, id, status: 'Converted', convertedAt: '2026-09-30', convertedAccountId: 'ACC-NEW', convertedContactId: 'CON-NEW', convertedOpportunityId: 'OPP-TWIN' },
+          accountId: 'ACC-NEW', contactId: 'CON-NEW', opportunityId: 'OPP-TWIN', reusedAccount: false, reusedContact: false,
+        },
+        meta: { requestId: 'req_convert_twin' },
+        warnings: [],
+      }
+    })
+    await router.push('/leads/LEAD-001')
+    const wrapper = mount(LeadDetailPage, { props: { apiClient: api }, global: { plugins: [pinia, router] } })
+    await flushPromises()
+
+    await wrapper.get('[data-testid="convert-lead"]').trigger('click')
+    await flushPromises()
+    await wrapper.get('[aria-label="Opportunity 名称"]').setValue('示例企业016缺陷检测正式商机')
+    await wrapper.get('select[aria-label="设备类型"]').setValue('Aconca')
+    await wrapper.get('[data-testid="qualification-confirmed"]').setValue(true)
+    await wrapper.get('[data-testid="lead-convert-probability-level"]').setValue('upside')
+    await wrapper.get('[data-modal-submit]').trigger('submit')
+    await flushPromises()
+
+    // The refusal names the Accounts the user may look at and offers to go on; the dialog stays.
+    expect(convertLead).toHaveBeenCalledTimes(1)
+    expect(wrapper.get('[data-duplicate-accounts]').text()).toContain('ACC-003')
+    expect(wrapper.text()).toContain('已有同名的客户。')
+    // Another new-Account name takes the offer away; the name asked about brings it back.
+    await wrapper.get('[aria-label="客户全称"]').setValue('另一家公司')
+    expect(wrapper.find('[data-duplicate-accounts]').exists()).toBe(false)
+    await wrapper.get('[aria-label="客户全称"]').setValue(lead.company)
+    expect(wrapper.find('[data-duplicate-accounts]').exists()).toBe(true)
+    // A submission the dialog's own checks stop asks about no name: the offer does not come back for a name the
+    // server was never asked about, and that name goes without a confirmation when it is sent.
+    await wrapper.get('[aria-label="客户全称"]').setValue('另一家公司')
+    await wrapper.get('[data-testid="qualification-confirmed"]').setValue(false)
+    await wrapper.get('[data-modal-submit]').trigger('submit')
+    await flushPromises()
+    expect(convertLead).toHaveBeenCalledTimes(1)
+    expect(wrapper.find('[data-duplicate-accounts]').exists()).toBe(false)
+    await wrapper.get('[data-testid="qualification-confirmed"]').setValue(true)
+    await wrapper.get('[data-modal-submit]').trigger('submit')
+    await flushPromises()
+    expect(convertLead).toHaveBeenCalledTimes(2)
+    expect(convertLead.mock.calls[1]![1].newAccount).toMatchObject({ name: '另一家公司' })
+    expect(convertLead.mock.calls[1]![1].newAccount?.confirmDuplicate).toBeFalsy()
+    // Refused for that name as well, the offer is for it; "仍要新建" sends it with the confirmation.
+    expect(wrapper.find('[data-duplicate-accounts]').exists()).toBe(true)
+    await wrapper.get('[data-create-anyway]').trigger('click')
+    await flushPromises()
+    expect(convertLead).toHaveBeenCalledTimes(3)
+    expect(convertLead.mock.calls[2]![1]).toMatchObject({ newAccount: expect.objectContaining({ name: '另一家公司', confirmDuplicate: true }) })
+    expect(wrapper.text()).toContain('转换已完成')
   })
 
   it('converts a Lead with both amounts left blank, since the new Opportunity starts at stage 1', async () => {

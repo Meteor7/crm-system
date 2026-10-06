@@ -90,7 +90,8 @@ class TestContactFileApi(FrappeTestCase):
         }).insert(ignore_permissions=True).name
 
     def _account_input(self, name: str) -> dict:
-        return {"name": name, "shortName": name[:8], "segment": "Frontend", "tier": "A", "city": "Shanghai", "region": "East", "owner": frappe.session.user}
+        # Every test of the class makes this Account again in the one transaction: the same name, confirmed.
+        return {"name": name, "shortName": name[:8], "segment": "Frontend", "tier": "A", "city": "Shanghai", "region": "East", "owner": frappe.session.user, "confirmDuplicate": True}
 
     def _contact_input(self, account_id: str, name: str) -> dict:
         return {"accountId": account_id, "name": name, "title": "Director", "department": "Engineering", "phone": "13800000002", "email": f"{name.replace(' ', '.').lower()}@example.invalid", "relationship": "Developing", "owner": frappe.session.user, "status": "Active"}

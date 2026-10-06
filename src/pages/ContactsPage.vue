@@ -152,7 +152,8 @@ async function loadAllContacts() {
 }
 
 function resetFilters() {
-  // One reload for the whole reset, at once (the filter watcher fires per change).
+  // The filter watcher reloads on each change it sees; the reset reloads once for all of them, and also when
+  // they already stood at their defaults, which used to leave the page where it was (F1-03).
   restoringRoute = true
   search.value = ''
   searchDraft.value = ''

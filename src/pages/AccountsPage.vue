@@ -2,7 +2,7 @@
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { Building2, Plus } from '@lucide/vue'
-import { api as defaultApi, type CrmApi } from '@/api'
+import { api as defaultApi, CrmApiError, type CrmApi } from '@/api'
 import type { AccountSummaryDto, CreateAccountInput, SiteDto, Tone } from '@/types/crm'
 import { useAppStore } from '@/stores/app'
 import PageHeader from '@/design-system/PageHeader.vue'
@@ -40,9 +40,14 @@ const segments = ref<string[]>(['Frontend', 'Advanced Packaging'])
 const regions = ref<string[]>([...REGION_PRESETS])
 const cities = ref<string[]>([])
 const accountModal = ref(false), busy = ref(false), modalError = useLocaleMessage()
+// The Accounts named like the one being created, which the server refused until the user says it is another company.
+const duplicateAccounts = ref('')
 const canWrite = computed(() => app.can('account:write'))
 const canDelete = computed(() => app.bootstrap?.user.role === 'Manager')
 const accountForm = ref<CreateAccountInput>({ name: '', shortName: '', segment: 'Frontend', tier: 'A', city: '上海', region: 'East China', owner: preferredPersonnelId('Sales', app.bootstrap?.user.id), visibility: 'Private', customerKind: '' })
+// The name the last submission asked about: the refusal, and the offer to go on, are for that name alone,
+// whatever the field says by the time the answer arrives.
+const askedName = ref('')
 type NewSiteDraft = Omit<SiteDto, 'id'> & { clientId: string }
 const newSiteDrafts = ref<NewSiteDraft[]>([])
 const createdAccountId = ref('')
@@ -101,7 +106,8 @@ function includeCity(value: string) {
   const normalized = value.trim()
   if (normalized && !cities.value.includes(normalized)) cities.value = [...cities.value, normalized].sort((left, right) => left.localeCompare(right, 'zh-CN'))
 }
-// One reload for the whole reset, at once (the filter watcher fires per change).
+// The filter watcher reloads on each change it sees; the reset reloads once for both, and also when they already
+// stood at "All", which used to leave the page where it was (F1-03).
 function reset() { restoringRoute = true; search.value = ''; searchDraft.value = ''; segment.value = 'All'; city.value = 'All'; restoringRoute = false; changeFilters() }
 let restoringRoute = false
 function syncUrl() { if (!restoringRoute) void router.replace({ name: 'accounts', query: { ...route.query, page: String(page.value), pageSize: String(pageSize.value), search: search.value.trim() || undefined, segment: segment.value === 'All' ? undefined : segment.value, city: city.value === 'All' ? undefined : city.value } }) }
@@ -125,6 +131,7 @@ function openAccountModal() {
   createdAccountId.value = ''
   persistedSiteCount.value = 0
   modalError.value = ''
+  duplicateAccounts.value = ''
   accountModal.value = true
 }
 function addNewSiteDraft() {
@@ -141,8 +148,11 @@ function removeNewSiteDraft(index: number) {
   if (index < persistedSiteCount.value) return
   newSiteDrafts.value.splice(index, 1)
 }
+function submitAccount() { accountForm.value.confirmDuplicate = false; return createAccount() }
+function createAnyway() { accountForm.value.confirmDuplicate = true; return createAccount() }
 async function createAccount() {
-  busy.value = true; modalError.value = ''
+  askedName.value = accountForm.value.name
+  busy.value = true; modalError.value = ''; duplicateAccounts.value = ''
   try {
     let accountId = createdAccountId.value
     try {
@@ -162,6 +172,8 @@ async function createAccount() {
     } catch (reason) {
       const mapped = mapRequestError(reason)
       const localized = mapped.localizedMessage ?? mapped.message
+      // Accounts named like this one: the server names the ones the user may see and waits for their word.
+      if (!createdAccountId.value && reason instanceof CrmApiError && reason.code === 'CONFLICT' && reason.fieldErrors.name) duplicateAccounts.value = reason.fieldErrors.name
       if (createdAccountId.value) {
         const english = typeof localized === 'string' ? localized : localized['en-US']
         const chinese = typeof localized === 'string' ? localized : localized['zh-CN']
@@ -247,8 +259,9 @@ async function deleteAccount(account: AccountSummaryDto) {
       </div>
       <PaginationControls v-if="!denied && !error && total > pageSize" :page="page" :page-size="pageSize" :total="total" @change="goPage" @page-size-change="changePageSize" />
     </section>
-    <ModalShell v-if="accountModal" :title="locale === 'en-US' ? 'New account' : '新增客户'" eyebrow="ACCOUNT MASTER" :busy="busy" @close="accountModal = false" @submit="createAccount">
+    <ModalShell v-if="accountModal" :title="locale === 'en-US' ? 'New account' : '新增客户'" eyebrow="ACCOUNT MASTER" :busy="busy" @close="accountModal = false" @submit="submitAccount">
       <p v-if="modalError" class="form-error">{{ modalError }}</p>
+      <p v-if="duplicateAccounts && accountForm.name === askedName" class="form-error duplicate-accounts" data-duplicate-accounts>{{ t('accounts.duplicateHint', { names: duplicateAccounts }) }} <button type="button" class="secondary-button" data-create-anyway :disabled="busy" @click="createAnyway">{{ t('accounts.createAnyway') }}</button></p>
       <div class="account-form-grid">
         <label><span>{{ locale === 'en-US' ? 'Account name' : '客户全称' }}<RequiredMark /></span><input v-model="accountForm.name" :aria-label="locale === 'en-US' ? 'Account name' : '客户全称'" required /></label>
         <label><span>{{ locale === 'en-US' ? 'Short name' : '客户简称' }}<RequiredMark /></span><input v-model="accountForm.shortName" :aria-label="locale === 'en-US' ? 'Short name' : '客户简称'" required /></label>

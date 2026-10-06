@@ -141,6 +141,8 @@ export interface CreateAccountInput {
   region: string
   owner: string
   visibility?: 'Private' | 'Public'
+  /** The user looked at the Accounts named like this one and says this is another company. */
+  confirmDuplicate?: boolean
   customerKind?: '' | 'Prospect' | 'Existing'
 }
 

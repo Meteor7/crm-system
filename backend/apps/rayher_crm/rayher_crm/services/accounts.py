@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 from collections.abc import Callable
 from decimal import Decimal
 from typing import Any
@@ -21,7 +22,7 @@ from rayher_crm.services.common import (
     to_iso_timestamp,
     validate_choice,
 )
-from rayher_crm.services.concurrency import lock_document
+from rayher_crm.services.concurrency import committed_reader, lock_document
 from rayher_crm.services.notifications import create_notification, record_route
 from rayher_crm.services.opportunity_stages import OPEN_STAGES
 from rayher_crm.services.regions import collapse_region, list_regions, matching_region, register_region
@@ -225,6 +226,104 @@ def _validate_account_input(
 
 
 ACCOUNT_NOT_FOUND_MESSAGE = "Account was not found, or you have no access to it."
+ACCOUNT_NAME_TAKEN_MESSAGE = "An Account with this name exists already."
+ACCOUNT_NAME_BUSY_MESSAGE = "Another request is naming an Account like this; try again."
+# Seconds a request waits for another one that is naming an Account the same way.
+NAME_LOCK_TIMEOUT = 5
+
+
+# By site: a worker serving several sites asks each site's own column.
+_collation: dict[str, str] = {}
+
+
+def _customer_name_collation() -> str:
+    """The collation of `tabCustomer.customer_name`, which decides what the name comparison calls equal."""
+
+    site = str(getattr(frappe.local, "site", "") or "")
+    if site not in _collation:
+        rows = frappe.db.sql(
+            "SELECT `COLLATION_NAME` FROM `information_schema`.`COLUMNS` WHERE `TABLE_SCHEMA` = DATABASE() "
+            "AND `TABLE_NAME` = 'tabCustomer' AND `COLUMN_NAME` = 'customer_name'",
+        )
+        _collation[site] = (rows[0][0] if rows and rows[0][0] else "utf8mb4_unicode_ci")
+    return _collation[site]
+
+
+def _name_key(name: str) -> str:
+    """The lock of a name: keyed by the name as the database compares it (the column's collation: case, accents
+    and the width of a character aside), so that two spellings the comparison calls one name take one lock."""
+
+    folded = frappe.db.sql(
+        f"SELECT HEX(WEIGHT_STRING(%s COLLATE {_customer_name_collation()}))", (name,),
+    )[0][0]
+    return "crm-account-name:" + hashlib.sha256(f"{frappe.local.site}:{folded}".encode()).hexdigest()[:48]
+
+
+def _hold_name(name: str) -> None:
+    """Hold the name until this request commits or rolls back, so that two requests naming an Account the same
+    way (two creates, a create and a rename) take turns: the second sees what the first committed."""
+
+    key = _name_key(name)
+    held = getattr(frappe.local, "crm_account_name_locks", None)
+    if held is None:
+        held = frappe.local.crm_account_name_locks = set()
+    if key in held:
+        return
+    if frappe.db.sql("SELECT GET_LOCK(%s, %s)", (key, NAME_LOCK_TIMEOUT))[0][0] != 1:
+        raise CrmApiException("ACCOUNT_NAME_LOCKED", ACCOUNT_NAME_BUSY_MESSAGE, retryable=True)
+    held.add(key)
+
+    def release():
+        if key not in held:
+            return
+        try:
+            frappe.db.sql("SELECT RELEASE_LOCK(%s)", (key,))
+        finally:
+            held.discard(key)
+
+    frappe.db.after_commit.add(release)
+    frappe.db.after_rollback.add(release)
+
+
+def _accounts_named(name: str, *, except_account: str | None = None) -> list[str]:
+    """The ids of the Accounts the user may see whose name is this one, case and spacing aside: those this
+    request sees (its snapshot and its own writes) and those committed by now, read on a connection of its own,
+    as the snapshot (REPEATABLE READ) may predate an Account another request named the same way and committed
+    while this one waited for the name."""
+
+    # Every Customer the list shows the user, the ERP ones included: the list has no group filter either.
+    where = [
+        f"({conditions_for_doctype('Customer')})",
+        "LOWER(TRIM(`customer_name`)) = %s",
+    ]
+    values: list[Any] = [name]
+    if except_account:
+        where.append("`name` != %s")
+        values.append(except_account)
+    query = f"SELECT `name` FROM `tabCustomer` WHERE {' AND '.join(where)}"
+    names = set(frappe.db.sql(query, values, pluck=True))
+    read, close = committed_reader()
+    try:
+        names.update(row[0] for row in read(query, values))
+    finally:
+        close()
+    return sorted(names)
+
+
+def _assert_name_free(payload: dict[str, Any], name: str, *, except_account: str | None = None) -> None:
+    """An Account named as one the user sees is refused until they say it is another company (`confirmDuplicate`):
+    the same name, whatever the case and spacing. The ids they may look at are named, so that they can decide;
+    Accounts out of their reach are not compared, as Salesforce's duplicate rules enforce sharing. The short name
+    is an alias that companies of one group share, and is not compared. The name is held to the commit, and the
+    Accounts compared are those committed by now, so that two requests naming Accounts the same way take turns."""
+
+    normalized = name.strip().lower()
+    _hold_name(normalized)
+    if payload.get("confirmDuplicate") is True:
+        return
+    taken = _accounts_named(normalized, except_account=except_account)
+    if taken:
+        raise CrmApiException("DUPLICATE_ACCOUNT", ACCOUNT_NAME_TAKEN_MESSAGE, field_errors={"name": ", ".join(taken)})
 
 
 def _require_account(name: str):
@@ -286,6 +385,7 @@ def create_account(payload: dict[str, Any]) -> dict[str, Any]:
     assert_capability("account:write")
     ensure_server_generated_id(payload)
     values = _validate_account_input(payload)
+    _assert_name_free(payload, values["name"])
     customer_kind = _customer_kind(payload.get("customerKind"))
     savepoint = f"crm_account_create_{frappe.generate_hash(length=8)}"
     frappe.db.savepoint(savepoint)
@@ -334,6 +434,8 @@ def update_account(
     if resolve_crm_role() == "Sales" and current.custom_crm_owner != frappe.session.user:
         raise CrmApiException("SCOPE_DENIED", "Only the Account owner or a Manager may edit this Account.")
     values = _validate_account_input(payload, current.custom_crm_owner, current.custom_crm_visibility or "Private")
+    if values["name"] != current.customer_name:
+        _assert_name_free(payload, values["name"], except_account=name)
     doc = lock_document("Customer", name, expected_modified, "NOT_FOUND")
     if not frappe.has_permission("Customer", "read", doc=doc, user=frappe.session.user):
         raise CrmApiException("ACCOUNT_NOT_FOUND", ACCOUNT_NOT_FOUND_MESSAGE)

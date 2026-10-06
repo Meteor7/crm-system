@@ -24,6 +24,8 @@ const props = defineProps<{
   equipmentTypes?: readonly string[]
   busy?: boolean
   error?: string
+  /** The ids of the Accounts named like the new one, which the server refused until the user confirms. */
+  duplicateAccounts?: string
 }>()
 const emit = defineEmits<{ close: []; submit: [payload: LeadConversionInput] }>()
 const app = useAppStore()
@@ -106,7 +108,11 @@ watch(() => form.probabilityLevel, () => { levelError.value = '' })
 // The converted Opportunity is in CNY, so its amount in CNY is its amount: shown, not typed (#87).
 watch(() => form.opportunityAmount, (amount) => { form.opportunityAmountCny = amount }, { immediate: true })
 
-function submit() {
+// The new Account's name the last submission asked about: the refusal, and the offer to go on, are for that
+// name alone, whatever the field says by the time the answer arrives.
+const askedName = ref('')
+// `confirmDuplicate`: the user looked at the Accounts named like the new one and says it is another company.
+function submit(confirmDuplicate = false) {
   if (!qualificationConfirmed.value) {
     qualificationError.value = message('oppEditor.qualificationRequired')
     return
@@ -115,6 +121,8 @@ function submit() {
     levelError.value = message('oppEditor.probabilityLevelRequired')
     return
   }
+  // Set with the request, not before the checks above: a submission they stop asks nobody about the name.
+  askedName.value = form.accountName
   emit('submit', {
     ...(form.accountId ? { accountId: form.accountId } : {}),
     ...(form.contactId ? { contactId: form.contactId } : {}),
@@ -128,6 +136,7 @@ function submit() {
         city: form.accountCity,
         region: form.accountRegion,
         owner: form.accountOwner,
+        ...(confirmDuplicate ? { confirmDuplicate: true } : {}),
       },
       newSite: {
         name: form.siteName,
@@ -165,9 +174,10 @@ const opportunityTitleInput = useLocalizedInput(() => form.opportunityTitle, (va
 </script>
 
 <template>
-  <ModalShell :title="t('leadConvert.title')" eyebrow="QUALIFIED → BUSINESS RECORDS" :busy="busy" @close="emit('close')" @submit="submit">
+  <ModalShell :title="t('leadConvert.title')" eyebrow="QUALIFIED → BUSINESS RECORDS" :busy="busy" @close="emit('close')" @submit="submit()">
     <p class="conversion-note">{{ t('leadConvert.note') }}</p>
     <p v-if="error" class="form-error">{{ error }}</p>
+    <p v-if="duplicateAccounts && !form.accountId && form.accountName === askedName" class="form-error" data-duplicate-accounts>{{ t('accounts.duplicateHint', { names: duplicateAccounts }) }} <button type="button" class="secondary-button" data-create-anyway :disabled="busy" @click="submit(true)">{{ t('accounts.createAnyway') }}</button></p>
     <div class="convert-form">
       <label><span>{{ t('leadConvert.reuseAccount') }}</span><select v-model="form.accountId" :aria-label="t('leadConvert.reuseAccount')"><option value="">{{ t('leadConvert.newAccount') }}: {{ lead.company }}</option><option v-for="account in accounts" :key="account.id" :value="account.id">{{ account.name }}</option></select></label>
       <label><span>{{ t('leadConvert.reuseContact') }}</span><select v-model="form.contactId" :aria-label="t('leadConvert.reuseContact')" :disabled="!form.accountId"><option value="">{{ t('leadConvert.newContact') }}: {{ lead.name }}</option><option v-for="contact in accountContacts" :key="contact.id" :value="contact.id">{{ contact.name }} · {{ contact.title }}</option></select></label>

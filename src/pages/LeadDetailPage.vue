@@ -3,7 +3,7 @@ import { personnelDisplayName } from '@/demo/personnel'
 import { computed, onMounted, ref, watch } from 'vue'
 import { ArrowLeft, Building2, CheckCircle2, Edit3, Mail, Phone, Plus, UserRoundSearch } from '@lucide/vue'
 import { RouterLink, useRoute, useRouter } from 'vue-router'
-import { api as defaultApi, type CrmApi } from '@/api'
+import { api as defaultApi, CrmApiError, type CrmApi } from '@/api'
 import { mapRequestError } from '@/api/request-state'
 import { useAppStore } from '@/stores/app'
 import type { AccountSummaryDto, ContactSummaryDto, CreateLeadInput, LeadActivityDto, LeadConversionInput, LeadConversionResult, LeadDto, LeadStatus, SiteDto, Tone } from '@/types/crm'
@@ -220,10 +220,13 @@ async function saveArrangement() {
   }))
   if (saved) arrangementOpen.value = false
 }
+// The Accounts named like the new one of a conversion, which the server refused until the user says it is another company.
+const convertDuplicates = ref('')
 async function convertLead(payload: LeadConversionInput) {
   if (!lead.value) return
   busy.value = true
   actionError.value = ''
+  convertDuplicates.value = ''
   try {
     const result = await props.apiClient.convertLead(lead.value.id, payload)
     lead.value = result.data.lead
@@ -231,6 +234,7 @@ async function convertLead(payload: LeadConversionInput) {
     convertOpen.value = false
   } catch (reason) {
     const mapped = mapRequestError(reason); actionError.value = mapped.localizedMessage ?? mapped.message
+    if (reason instanceof CrmApiError && reason.code === 'CONFLICT' && reason.fieldErrors.name) convertDuplicates.value = reason.fieldErrors.name
   } finally {
     busy.value = false
   }
@@ -320,7 +324,7 @@ onMounted(async () => {
       </div>
 
       <LeadEditorModal v-if="editOpen" :lead="lead" :busy="busy" :error="actionError" @close="editOpen = false" @submit="saveLead" />
-      <LeadConvertModal v-if="convertOpen" :lead="lead" :accounts="accounts" :contacts="contacts" :sites="sites" :segments="segments" :regions="regions" :equipment-types="equipmentTypes" :busy="busy" :error="actionError" @close="convertOpen = false" @submit="convertLead" />
+      <LeadConvertModal v-if="convertOpen" :lead="lead" :accounts="accounts" :contacts="contacts" :sites="sites" :segments="segments" :regions="regions" :equipment-types="equipmentTypes" :busy="busy" :error="actionError" :duplicate-accounts="convertDuplicates" @close="convertOpen = false; convertDuplicates = ''" @submit="convertLead" />
     </template>
   </div>
 </template>

@@ -28,6 +28,8 @@ const FIXED_MESSAGES: Partial<Record<string, Record<string, CopyPair>>> = {
   VALIDATION_ERROR: {
     'Invalid Review period or anchor.': ['This period cannot be shown. Choose another date.', '无法显示这个周期，请重新选择日期。'],
     'Invalid Plan period or anchor.': ['This period cannot be shown. Choose another date.', '无法显示这个周期，请重新选择日期。'],
+    'The reporting line would create a cycle.': ['The reporting line would create a cycle.', '汇报关系不能形成环。'],
+    'The merge would make the reporting line a cycle.': ['The merge would make the reporting line a cycle.', '合并后汇报关系会形成环。'],
     'Lost Reason is required for a lost Opportunity.': ['A lost reason is required for a lost Opportunity.', '丢单商机必须填写丢单原因。'],
     'probabilityLevel cannot be cleared once the demo is done.': ['The success probability cannot be cleared once the demo is done.', 'Demo 完成后不能清空成功概率。'],
     'Confirm the customer need and the budget owner before creating the Opportunity.': ['Confirm the customer need and the budget owner before creating the Opportunity.', '请先确认客户需求与预算负责人，再创建商机。'],
@@ -78,6 +80,9 @@ const FIXED_MESSAGES: Partial<Record<string, Record<string, CopyPair>>> = {
     'Mentioned user must have access to this Demo Request.': ['Only someone who can read this Demo Request can be mentioned.', '只能 @ 能看到这条 Demo Request 的人。'],
   },
   CONFLICT: {
+    'A Contact merged or archived already cannot be merged.': ['A Contact merged or archived already cannot be merged.', '已被合并或已归档的联系人不能再合并。'],
+    'An Account with this name exists already.': ['An account with this name exists already.', '已有同名的客户。'],
+    'Another request is naming an Account like this; try again.': ['Another request is naming an account like this; try again.', '另一个请求正在用同样的名字新建或修改客户，请稍后再试。'],
     'Account and sale type cannot change while the Opportunity has a live Booking.': ['The account and sale type cannot change while the Opportunity has a live Booking.', '商机存在未取消的 Booking 时，不能修改客户或销售类型。'],
     'The Opportunity already has a pending internal validation.': ['The Opportunity already has a pending internal validation.', '该商机已有待审批的内部生产审批申请。'],
     'No other active Manager can review this internal validation.': ['No other active Manager can review this internal validation.', '没有其他在职 Manager 可以审批该内部生产审批申请。'],

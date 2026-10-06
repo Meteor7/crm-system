@@ -3,7 +3,7 @@ import { systemValueLabel } from '@/features/shared/system-labels'
 import { computed, onMounted, ref, watch } from 'vue'
 import { ArrowLeft, Cpu, Edit3, ExternalLink, MapPin, Wrench } from '@lucide/vue'
 import { RouterLink, useRoute, useRouter } from 'vue-router'
-import { api as defaultApi, type CrmApi } from '@/api'
+import { api as defaultApi, CrmApiError, type CrmApi } from '@/api'
 import { mapRequestError } from '@/api/request-state'
 import { useAppStore } from '@/stores/app'
 import type { Account360Dto, CreateAccountInput, SiteDto } from '@/types/crm'
@@ -37,7 +37,12 @@ const accountDetail = ref<Account360Dto | null>(null)
 const editOpen = ref(false)
 const editBusy = ref(false)
 const editError = useLocaleMessage()
+// The Accounts named like the new name, which the server refused until the user says this is another company.
+const duplicateAccounts = ref('')
 const accountForm = ref<CreateAccountInput>({ name: '', shortName: '', segment: 'Frontend', tier: 'A', city: '', region: '', owner: '', visibility: 'Private', customerKind: '' })
+// The name the last submission asked about: the refusal, and the offer to go on, are for that name alone,
+// whatever the field says by the time the answer arrives.
+const askedName = ref('')
 const segments = ref<string[]>(['Frontend', 'Advanced Packaging'])
 const regions = ref<string[]>([...REGION_PRESETS])
 const siteDrafts = ref<Array<SiteDto & { isNew?: boolean }>>([])
@@ -59,11 +64,16 @@ function openEdit() {
   siteDrafts.value = accountDetail.value.sites.map((site) => ({ ...site }))
   removedSiteIds.value = []
   editError.value = ''
+  duplicateAccounts.value = ''
   editOpen.value = true
 }
+function submitEdit() { accountForm.value.confirmDuplicate = false; return saveAccount() }
+function saveAnyway() { accountForm.value.confirmDuplicate = true; return saveAccount() }
 async function saveAccount() {
+  askedName.value = accountForm.value.name
   editBusy.value = true
   editError.value = ''
+  duplicateAccounts.value = ''
   try {
     const accountResult = await props.apiClient.updateAccount(accountId.value, accountForm.value, accountDetail.value?.account.modified)
     if (!segments.value.includes(accountResult.data.segment)) segments.value = [...segments.value, accountResult.data.segment]
@@ -90,6 +100,8 @@ async function saveAccount() {
   } catch (reason) {
     const mapped = mapRequestError(reason)
     editError.value = mapped.localizedMessage ?? mapped.message
+    // Accounts named like the new name: the server names the ones the user may see and waits for their word.
+    if (reason instanceof CrmApiError && reason.code === 'CONFLICT' && reason.fieldErrors.name) duplicateAccounts.value = reason.fieldErrors.name
   } finally {
     editBusy.value = false
   }
@@ -184,8 +196,9 @@ onMounted(() => { void loadEquipment(); void loadSegments(); void loadRegions() 
         </SectionCard>
       </aside>
     </div>
-    <ModalShell v-if="editOpen" :title="t('detail.editAccount')" eyebrow="ACCOUNT MASTER" :busy="editBusy" @close="editOpen = false" @submit="saveAccount">
+    <ModalShell v-if="editOpen" :title="t('detail.editAccount')" eyebrow="ACCOUNT MASTER" :busy="editBusy" @close="editOpen = false" @submit="submitEdit">
       <p v-if="editError" class="form-error">{{ editError }}</p>
+      <p v-if="duplicateAccounts && accountForm.name === askedName" class="form-error duplicate-accounts" data-duplicate-accounts>{{ t('accounts.duplicateHint', { names: duplicateAccounts }) }} <button type="button" class="secondary-button" data-save-anyway :disabled="editBusy" @click="saveAnyway">{{ t('accounts.saveAnyway') }}</button></p>
       <div class="account-form-grid">
         <label><span>{{ t('detail.accountName') }}<RequiredMark /></span><input v-model="accountForm.name" :aria-label="t('detail.accountName')" required /></label>
         <label><span>{{ t('detail.accountShortName') }}<RequiredMark /></span><input v-model="accountForm.shortName" :aria-label="t('detail.accountShortName')" required /></label>

@@ -42,3 +42,20 @@ def lock_document(
     if actual != expected:
         raise CrmApiException("VERSION_CONFLICT", "The record was changed by another request.")
     return frappe.get_doc(doctype, name)
+
+
+def committed_reader():
+    """A current read of what other requests have committed, outside this request's snapshot (REPEATABLE READ).
+
+    A connection of its own, opened per use so that it is a current read, as `private_file_lifecycle` reads
+    file references. The caller closes it. MariaDB only, as that module is.
+    """
+
+    connection = frappe.db._get_connection()
+
+    def read(query: str, values: tuple | list) -> list[tuple]:
+        with connection.cursor() as cursor:
+            cursor.execute(query, tuple(values))
+            return list(cursor.fetchall())
+
+    return read, connection.close

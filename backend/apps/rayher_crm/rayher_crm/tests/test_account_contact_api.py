@@ -559,3 +559,96 @@ class TestAccountContactApi(FrappeTestCase):
         with self.assertRaises(RuntimeError):
             delete_contact(rollback_delete["id"], failure_injector=fail_after_contact_archive)
         self.assertEqual(frappe.db.get_value("Contact", rollback_delete["id"], "custom_crm_status"), "Active")
+
+    def test_merging_a_contact_into_their_own_report_keeps_the_line_off_itself(self):
+        frappe.set_user("Administrator")
+        account = create_account(self._account_input("Merge Line Account", self.sales))
+        top = create_contact(self._contact_input(account["id"], "Top", owner=self.sales))
+        boss = create_contact(self._contact_input(account["id"], "Boss", owner=self.sales, reportsToContactId=top["id"]))
+        staff = create_contact(self._contact_input(account["id"], "Staff", owner=self.sales, reportsToContactId=boss["id"]))
+        peer = create_contact(self._contact_input(account["id"], "Peer", owner=self.sales, reportsToContactId=boss["id"]))
+
+        # The Boss is merged into their own report: the Staff takes the Boss's line (the Top), the Peer reports
+        # to the Staff, and nobody reports to themselves (F1-06).
+        merged = merge_contacts(staff["id"], boss["id"])
+        self.assertEqual(merged.get("reportsToContactId"), top["id"])
+        self.assertEqual(frappe.db.get_value("Contact", peer["id"], "custom_crm_reports_to"), staff["id"])
+        self.assertEqual(frappe.db.get_value("Contact", staff["id"], "custom_crm_reports_to"), top["id"])
+        # The merged Boss keeps no line of their own: the Top's direct reports are the Staff, once, not the Boss too.
+        self.assertIsNone(frappe.db.get_value("Contact", boss["id"], "custom_crm_reports_to"))
+        self.assertEqual([item["id"] for item in get_contact(top["id"])["directReports"]], [staff["id"]])
+        # The other way round (the report merged into their Boss), the Boss does not list the merged report.
+        chief = create_contact(self._contact_input(account["id"], "Chief", owner=self.sales))
+        aide = create_contact(self._contact_input(account["id"], "Aide", owner=self.sales, reportsToContactId=chief["id"]))
+        self.assertNotIn("reportsToContactId", merge_contacts(chief["id"], aide["id"]))
+        self.assertIsNone(frappe.db.get_value("Contact", aide["id"], "custom_crm_reports_to"))
+        self.assertEqual(get_contact(chief["id"])["directReports"], [])
+        # A Contact merged already is merged no more, either way; nor is one merged into an archived Contact.
+        for survivor_id, duplicate_id in ((aide["id"], chief["id"]), (chief["id"], aide["id"])):
+            with self.assertRaises(CrmApiException) as merged_already:
+                merge_contacts(survivor_id, duplicate_id)
+            self.assertEqual(merged_already.exception.code, "CONFLICT")
+        gone = create_contact(self._contact_input(account["id"], "Gone", owner=self.sales))
+        delete_contact(gone["id"])
+        with self.assertRaises(CrmApiException) as archived:
+            merge_contacts(gone["id"], peer["id"])
+        self.assertEqual(archived.exception.code, "CONFLICT")
+        self.assertEqual(frappe.db.get_value("Contact", peer["id"], "custom_crm_status"), "Active")
+
+        # A Boss without a line of their own leaves their report without one.
+        lone = create_contact(self._contact_input(account["id"], "Lone Boss", owner=self.sales))
+        junior = create_contact(self._contact_input(account["id"], "Junior", owner=self.sales, reportsToContactId=lone["id"]))
+        self.assertNotIn("reportsToContactId", merge_contacts(junior["id"], lone["id"]))
+
+        # The top of a three-deep line merged into its bottom would close a loop: refused, nothing changes.
+        head = create_contact(self._contact_input(account["id"], "Line Head", owner=self.sales))
+        middle = create_contact(self._contact_input(account["id"], "Line Middle", owner=self.sales, reportsToContactId=head["id"]))
+        bottom = create_contact(self._contact_input(account["id"], "Line Bottom", owner=self.sales, reportsToContactId=middle["id"]))
+        with self.assertRaises(CrmApiException) as loop:
+            merge_contacts(bottom["id"], head["id"])
+        self.assertEqual(loop.exception.code, "VALIDATION_ERROR")
+        self.assertEqual(frappe.db.get_value("Contact", head["id"], "custom_crm_status"), "Active")
+        self.assertEqual(frappe.db.get_value("Contact", middle["id"], "custom_crm_reports_to"), head["id"])
+        self.assertEqual(frappe.db.get_value("Contact", bottom["id"], "custom_crm_reports_to"), middle["id"])
+        self.assertEqual(
+            frappe.db.sql("SELECT `name` FROM `tabContact` WHERE `custom_crm_reports_to` = `name`"), (),
+        )
+
+    def test_an_account_named_like_one_the_user_sees_is_refused_until_confirmed(self):
+        frappe.set_user(self.sales)
+        first = create_account(self._account_input("Dup Name Co"))
+        # The same name in another case and spacing is refused with the ids the user may look at; confirmed as
+        # another company, the Account is created (ERPNext suffixes its id). The short name, an alias that the
+        # companies of a group share, is not compared.
+        with self.assertRaises(CrmApiException) as taken:
+            create_account(self._account_input(" dup name co "))
+        self.assertEqual(
+            (taken.exception.code, taken.exception.public_message, taken.exception.field_errors),
+            ("CONFLICT", "An Account with this name exists already.", {"name": first["id"]}),
+        )
+        self.assertEqual(frappe.db.count("Customer", {"custom_crm_short_name": first["shortName"]}), 1)
+        alias = create_account({**self._account_input("Dup Name Sister Co"), "shortName": first["shortName"]})
+        self.assertEqual(alias["shortName"], first["shortName"])
+        confirmed = create_account({**self._account_input("dup name co"), "confirmDuplicate": True})
+        self.assertNotEqual(confirmed["id"], first["id"])
+        self.assertEqual(confirmed["name"], "dup name co")
+        with self.assertRaises(CrmApiException) as both:
+            create_account(self._account_input("Dup Name Co"))
+        self.assertEqual(both.exception.field_errors, {"name": ", ".join(sorted([first["id"], confirmed["id"]]))})
+
+        # An Account out of the user's reach (someone else's Private one) is not compared: nothing tells of it.
+        frappe.set_user(self.other_sales)
+        create_account(self._account_input("Hidden Name Co"))
+        frappe.set_user(self.sales)
+        self.assertEqual(create_account(self._account_input("Hidden Name Co"))["name"], "Hidden Name Co")
+
+        # A rename to a name in use is refused the same way until confirmed; an edit that keeps the name is not.
+        other = create_account(self._account_input("Rename Me Co"))
+        renamed = self._account_input("Dup Name Co")
+        with self.assertRaises(CrmApiException) as rename:
+            update_account(other["id"], renamed, other["modified"])
+        self.assertEqual(rename.exception.code, "CONFLICT")
+        updated = update_account(other["id"], {**self._account_input("Rename Me Co"), "city": "苏州"}, other["modified"])
+        self.assertEqual(updated["city"], "苏州")
+        confirmed_rename = update_account(other["id"], {**renamed, "confirmDuplicate": True}, updated["modified"])
+        self.assertEqual(confirmed_rename["name"], "Dup Name Co")
