@@ -603,6 +603,31 @@ describe('Opportunity detail', () => {
     expect(manager.get('[data-testid="opportunity-probability-level-owner-only"]').text()).toBe('仅商机负责人可设置成功概率')
   })
 
+  it('says so when the editor opens before the Accounts and Sites arrive, and shows the Opportunity\'s own once they do', async () => {
+    const ctx = await context('OPP-001')
+    const opportunity = (await ctx.api.getStrategyOpportunity('OPP-001')).data
+    // The Accounts (and after them the Sites) are slow; the Opportunity itself is not.
+    const listAccounts = ctx.api.listAccounts.bind(ctx.api)
+    let release: (() => void) | undefined
+    const held = new Promise<void>((resolve) => { release = resolve })
+    vi.spyOn(ctx.api, 'listAccounts').mockImplementation(async (query) => { await held; return listAccounts(query) })
+    const wrapper = mountPage(ctx)
+    await flushPromises()
+
+    await wrapper.get('[data-testid="edit-opportunity"]').trigger('click')
+    expect(wrapper.get('[data-testid="references-loading"]').text()).toBe('客户和厂区列表加载中，到了再保存。')
+    expect(wrapper.get('[data-modal-submit]').attributes('disabled')).toBeDefined()
+    expect((wrapper.get('[aria-label="厂区"]').element as HTMLSelectElement).value).toBe('')
+
+    release!()
+    await flushPromises()
+    expect(wrapper.find('[data-testid="references-loading"]').exists()).toBe(false)
+    expect(wrapper.get('[data-modal-submit]').attributes('disabled')).toBeUndefined()
+    expect((wrapper.get('[aria-label="客户"]').element as HTMLSelectElement).value).toBe(opportunity.accountId)
+    expect((wrapper.get('[aria-label="厂区"]').element as HTMLSelectElement).value).toBe(opportunity.siteId)
+    wrapper.unmount()
+  })
+
   it('shows rollback only to Manager and only when an earlier milestone exists', async () => {
     const manager = mountPage(await context('OPP-003', false, 'Manager'))
     await flushPromises()

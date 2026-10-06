@@ -46,6 +46,8 @@ const page = ref(typeof route.query.page === 'string' && Number(route.query.page
 const pageSize = ref(typeof route.query.pageSize === 'string' && [10, 12, 25, 50].includes(Number(route.query.pageSize)) ? Number(route.query.pageSize) : 12)
 const accounts = ref<AccountSummaryDto[]>([])
 const sitesByAccount = ref<Record<string, SiteDto[]>>({})
+// The Accounts come with the rows, the Sites after them; the editor, opened meanwhile, says so until they are here.
+const referencesLoading = ref(true)
 const loading = ref(true)
 const denied = ref(false)
 const error = useLocaleMessage()
@@ -145,6 +147,7 @@ function changeLayout() { if (restoringRoute) return; resetBoardLimits(); syncUr
 async function load() {
   const current = ++sequence
   loading.value = true
+  referencesLoading.value = true
   denied.value = false
   error.value = ''
   const scope = wantedScope.value
@@ -181,7 +184,10 @@ async function load() {
     requestId.value = mapped.requestId
     denied.value = mapped.denied
   } finally {
-    if (current === sequence) loading.value = false
+    if (current === sequence) {
+      loading.value = false
+      referencesLoading.value = false
+    }
   }
 }
 async function saveOpportunity(input: CreateStrategyOpportunityInput) {
@@ -292,7 +298,7 @@ watch(() => [route.query.page, route.query.pageSize, route.query.status, route.q
       <PaginationControls v-if="layout === 'list' && !denied && !error && total > pageSize" :page="page" :page-size="pageSize" :total="total" @change="goPage" @page-size-change="changePageSize" />
     </div>
 
-    <OpportunityEditorModal v-if="editorOpen" :accounts="opportunityAccounts" :sites-by-account="sitesByAccount" :equipment-types="equipmentTypes" :default-owner="app.bootstrap?.user.id ?? ''" :current-user-id="app.bootstrap?.user.id ?? ''" :busy="busy" :error="modalError" @close="editorOpen = false" @submit="saveOpportunity" />
+    <OpportunityEditorModal v-if="editorOpen" :accounts="opportunityAccounts" :sites-by-account="sitesByAccount" :equipment-types="equipmentTypes" :default-owner="app.bootstrap?.user.id ?? ''" :current-user-id="app.bootstrap?.user.id ?? ''" :references-loading="referencesLoading" :busy="busy" :error="modalError" @close="editorOpen = false" @submit="saveOpportunity" />
   </section>
 </template>
 

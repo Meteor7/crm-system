@@ -4,7 +4,8 @@ import { createMemoryHistory, createRouter } from 'vue-router'
 import { describe, expect, it, vi } from 'vitest'
 import { defineComponent, h, type Component } from 'vue'
 import { RouterView, useRoute } from 'vue-router'
-import { withAccountSites } from '@/features/accounts/mock-account-sites'
+import { accountSitesOf, withAccountSites } from '@/features/accounts/mock-account-sites'
+import { sitesByAccountId } from '@/features/accounts/account-sites'
 import { createMockApi } from '@/api/mock-adapter'
 import { useAppStore } from '@/stores/app'
 import LeadsOpportunitiesPage from './LeadsOpportunitiesPage.vue'
@@ -119,6 +120,30 @@ describe('Leads&Opportunities workspace', () => {
     expect(wrapper.find('[aria-label="Opportunity 阶段"]').exists()).toBe(false)
     expect(wrapper.get('.readonly-stage').text()).toContain('合格商机')
     expect(wrapper.find('[data-testid="qualification-confirmed"]').exists()).toBe(true)
+  })
+
+  it('gives a new Opportunity the first Site of its Account when the Sites arrive after the editor opened', async () => {
+    const { api, pinia, router } = await context('/leads-opportunities?view=opportunities')
+    // The rows and the Accounts arrive; the Sites, read after them, are slow.
+    const gate = deferred<void>()
+    vi.spyOn(api, 'listAccountSites').mockImplementation(async () => { await gate.promise; return { data: await accountSitesOf(api), warnings: [] } })
+    const wrapper = mount(LeadsOpportunitiesPage, { props: { apiClient: api }, global: { plugins: [pinia, router] } })
+    await flushPromises()
+
+    await wrapper.get('[data-testid="new-opportunity"]').trigger('click')
+    const accountId = (wrapper.get('[aria-label="客户"]').element as HTMLSelectElement).value
+    expect(accountId).not.toBe('')
+    expect(wrapper.find('[data-testid="references-loading"]').exists()).toBe(true)
+    expect(wrapper.get('[data-modal-submit]').attributes('disabled')).toBeDefined()
+    expect(wrapper.get('[aria-label="厂区"]').findAll('option')).toHaveLength(0)
+
+    gate.resolve()
+    await flushPromises()
+    const accountRows = (await api.listAccounts({ page: 1, pageSize: 200 })).data.items
+    const firstSite = sitesByAccountId(accountRows, await accountSitesOf(api))[accountId]![0]!
+    expect(wrapper.find('[data-testid="references-loading"]').exists()).toBe(false)
+    expect(wrapper.get('[data-modal-submit]').attributes('disabled')).toBeUndefined()
+    expect((wrapper.get('[aria-label="厂区"]').element as HTMLSelectElement).value).toBe(firstSite.id)
   })
 
   it('filters Opportunities by success probability, including records pending sales confirmation', async () => {

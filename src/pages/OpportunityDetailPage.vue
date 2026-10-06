@@ -71,6 +71,8 @@ const rfqStatus = ref('')
 const accounts = ref<AccountSummaryDto[]>([])
 const contacts = ref<ContactSummaryDto[]>([])
 const sitesByAccount = ref<Record<string, SiteDto[]>>({})
+// The editors open before these arrive (the Opportunity is read alongside); they say so while that lasts.
+const referencesLoading = ref(true)
 const loading = ref(true)
 const error = useLocaleMessage()
 const requestId = ref('')
@@ -199,18 +201,23 @@ async function loadOpportunity() {
   }
 }
 async function loadReferences() {
-  const accountRowsPromise = readAllPages((page, pageSize) => props.apiClient.listAccounts({ page, pageSize }))
-  const contactRowsPromise = app.can('contact:view')
-    ? readAllPages((page, pageSize) => props.apiClient.listContacts({ page, pageSize }))
-    : Promise.resolve([] as ContactSummaryDto[])
-  const [accountRows, contactRows] = await Promise.all([accountRowsPromise, contactRowsPromise])
-  accounts.value = accountRows
-  contacts.value = contactRows
-  if (!app.can('contact:view')) {
-    sitesByAccount.value = {}
-    return
+  referencesLoading.value = true
+  try {
+    const accountRowsPromise = readAllPages((page, pageSize) => props.apiClient.listAccounts({ page, pageSize }))
+    const contactRowsPromise = app.can('contact:view')
+      ? readAllPages((page, pageSize) => props.apiClient.listContacts({ page, pageSize }))
+      : Promise.resolve([] as ContactSummaryDto[])
+    const [accountRows, contactRows] = await Promise.all([accountRowsPromise, contactRowsPromise])
+    accounts.value = accountRows
+    contacts.value = contactRows
+    if (!app.can('contact:view')) {
+      sitesByAccount.value = {}
+      return
+    }
+    sitesByAccount.value = sitesByAccountId(accounts.value, (await props.apiClient.listAccountSites()).data)
+  } finally {
+    referencesLoading.value = false
   }
-  sitesByAccount.value = sitesByAccountId(accounts.value, (await props.apiClient.listAccountSites()).data)
 }
 async function saveOpportunity(input: CreateStrategyOpportunityInput) {
   if (!selected.value) return
@@ -617,7 +624,7 @@ onMounted(async () => {
         </section>
       </main>
 
-      <OpportunityEditorModal v-if="opportunityModal && canMutateOpportunity" :opportunity="selected" :accounts="accounts" :sites-by-account="sitesByAccount" :equipment-types="equipmentTypes" :default-owner="currentUserId" :current-user-id="currentUserId" :busy="busy" :error="modalError" @close="opportunityModal = false" @submit="saveOpportunity" />
+      <OpportunityEditorModal v-if="opportunityModal && canMutateOpportunity" :opportunity="selected" :accounts="accounts" :sites-by-account="sitesByAccount" :equipment-types="equipmentTypes" :default-owner="currentUserId" :current-user-id="currentUserId" :references-loading="referencesLoading" :busy="busy" :error="modalError" @close="opportunityModal = false" @submit="saveOpportunity" />
       <StakeholderEditorModal v-if="stakeholderModal && selected" :stakeholder="editingStakeholder" :contacts="contacts" :account-id="selected.accountId" :selected-contact-id="selectedContactId" :busy="busy" :error="modalError" @close="stakeholderModal = false" @create-contact="openContact" @submit="saveStakeholder" />
       <ContactModal v-if="contactModal" :accounts="accounts" :sites="contactSites" :contacts="contacts" :fixed-account-id="contactAccountId" :busy="busy" :error="modalError" @close="contactModal = false" @submit="saveContact" />
       <ActionEditorModal v-if="actionModal" :action="editingAction" :default-owner="currentUserId" :busy="busy" :error="modalError" @close="actionModal = false" @submit="saveAction" />

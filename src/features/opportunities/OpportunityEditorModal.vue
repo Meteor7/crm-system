@@ -23,6 +23,8 @@ const props = defineProps<{
   currentUserId?: string
   /** Equipment type options from listEquipmentTypes; the presets until they load. */
   equipmentTypes?: readonly string[]
+  /** Whether the page is still reading the Accounts and Sites the editor offers. */
+  referencesLoading?: boolean
   busy?: boolean
   error?: string
 }>()
@@ -66,6 +68,24 @@ const form = ref<CreateStrategyOpportunityInput>({
   informationNeeded: props.opportunity?.informationNeeded ?? [],
 })
 const sites = computed(() => props.sitesByAccount[form.value.accountId] ?? [])
+// The page opens the editor before the Accounts and Sites may have arrived (it reads them after its own data):
+// until they have, the editor says so and does not submit. A new Opportunity takes the first Account, and the
+// first Site of its Account, as they arrive; an edit keeps the Opportunity's own Site while the Account is still
+// the Opportunity's own, and takes the first Site of an Account chosen meanwhile, as a change of Account does.
+const waitingForReferences = computed(() => Boolean(props.referencesLoading) && (!props.accounts.length || !sites.value.length))
+watch(() => props.accounts, (list) => {
+  if (!props.opportunity && !form.value.accountId && list[0]) form.value.accountId = list[0].id
+})
+watch(sites, (list) => {
+  // The Opportunity's own Site stays, listed or not. Otherwise a Site the list does not hold (none yet, or the
+  // Account changed and changed back while the Sites were out) gives way to the own Site, back at the own Account,
+  // or to the first Site of the Account.
+  const ownAccount = Boolean(props.opportunity) && form.value.accountId === props.opportunity?.accountId
+  if (ownAccount && form.value.siteId === props.opportunity?.siteId) return
+  if (list.some((site) => site.id === form.value.siteId)) return
+  const own = ownAccount ? props.opportunity?.siteId ?? '' : ''
+  form.value.siteId = own && list.some((site) => site.id === own) ? own : list[0]?.id ?? ''
+})
 // No opportunity prop = creating a new one, which always starts at stage 1 (amount optional).
 // An existing opportunity requires the amount once it has left stage 1; a deal lost at stage 1 never did.
 const reachedStage = computed(() => props.opportunity?.stage === 'lost' && props.opportunity.lostAtStage ? props.opportunity.lostAtStage : props.opportunity?.stage)
@@ -206,8 +226,9 @@ const equipmentChoices = computed(() => props.equipmentTypes ?? EQUIPMENT_PRESET
 </script>
 
 <template>
-  <ModalShell :title="opportunity ? t('oppEditor.edit') : t('oppEditor.new')" eyebrow="OPPORTUNITY STRATEGY" :busy="busy" @close="$emit('close')" @submit="submit">
+  <ModalShell :title="opportunity ? t('oppEditor.edit') : t('oppEditor.new')" eyebrow="OPPORTUNITY STRATEGY" :busy="busy" :submit-disabled="waitingForReferences" @close="$emit('close')" @submit="submit">
     <p v-if="error" class="form-error">{{ error }}</p>
+    <p v-if="waitingForReferences" class="form-note" data-testid="references-loading" role="status">{{ t('oppEditor.referencesLoading') }}</p>
     <div class="opportunity-form-grid">
       <div v-if="!opportunity" class="wide qualification-field" data-testid="qualification-confirmed-field">
         <label class="qualification-check"><input v-model="qualificationConfirmed" type="checkbox" :aria-label="t('oppEditor.qualificationConfirmed')" data-testid="qualification-confirmed" required /><span>{{ t('oppEditor.qualificationConfirmed') }}<RequiredMark /></span></label>
@@ -287,7 +308,7 @@ const equipmentChoices = computed(() => props.equipmentTypes ?? EQUIPMENT_PRESET
 </template>
 
 <style scoped>
-.form-error{margin:0 0 12px;padding:10px;color:var(--crm-danger);background:var(--crm-danger-soft);border-radius:8px;font-size:9px}.opportunity-form-grid{display:grid;grid-template-columns:1fr 1fr;gap:13px}.opportunity-form-grid label{display:grid;gap:6px;align-content:start}.opportunity-form-grid label.wide,.opportunity-form-grid .wide{grid-column:1/-1}.opportunity-form-grid span{color:var(--crm-text-muted);font-size:9px;font-weight:700}.opportunity-form-grid input,.opportunity-form-grid select,.opportunity-form-grid textarea{box-sizing:border-box;width:100%;padding:9px 10px;background:#fff;border:1px solid var(--crm-line);border-radius:8px;font:inherit}.opportunity-form-grid input,.opportunity-form-grid select{height:38px}.opportunity-form-grid textarea{resize:vertical}.opportunity-form-grid :focus{border-color:var(--crm-teal);outline:0}.intent-slider-row{display:grid;grid-template-columns:minmax(0,1fr) 28px;gap:10px;align-items:center;height:38px}.opportunity-form-grid .intent-slider-row input[type="range"]{height:22px;padding:0;background:transparent;border:0;border-radius:0;accent-color:var(--crm-teal);cursor:pointer}.opportunity-form-grid .intent-slider-row input[type="range"]:focus-visible{outline:2px solid var(--crm-teal);outline-offset:2px}.intent-slider-row output{text-align:right;color:var(--crm-text);font-size:11px;font-weight:700;font-variant-numeric:tabular-nums}.opportunity-form-grid select:disabled{color:var(--crm-text-muted);background:var(--crm-surface-muted);cursor:not-allowed}.probability-level-field small{color:var(--crm-text-muted);font-size:8px;line-height:1.45}@media(max-width:560px){.opportunity-form-grid{grid-template-columns:1fr}.opportunity-form-grid label.wide,.opportunity-form-grid .wide{grid-column:auto}}
+.form-error{margin:0 0 12px;padding:10px;color:var(--crm-danger);background:var(--crm-danger-soft);border-radius:8px;font-size:9px}.form-note{margin:0 0 12px;padding:10px;color:var(--crm-text-muted);background:var(--crm-surface-muted);border-radius:8px;font-size:9px}.opportunity-form-grid{display:grid;grid-template-columns:1fr 1fr;gap:13px}.opportunity-form-grid label{display:grid;gap:6px;align-content:start}.opportunity-form-grid label.wide,.opportunity-form-grid .wide{grid-column:1/-1}.opportunity-form-grid span{color:var(--crm-text-muted);font-size:9px;font-weight:700}.opportunity-form-grid input,.opportunity-form-grid select,.opportunity-form-grid textarea{box-sizing:border-box;width:100%;padding:9px 10px;background:#fff;border:1px solid var(--crm-line);border-radius:8px;font:inherit}.opportunity-form-grid input,.opportunity-form-grid select{height:38px}.opportunity-form-grid textarea{resize:vertical}.opportunity-form-grid :focus{border-color:var(--crm-teal);outline:0}.intent-slider-row{display:grid;grid-template-columns:minmax(0,1fr) 28px;gap:10px;align-items:center;height:38px}.opportunity-form-grid .intent-slider-row input[type="range"]{height:22px;padding:0;background:transparent;border:0;border-radius:0;accent-color:var(--crm-teal);cursor:pointer}.opportunity-form-grid .intent-slider-row input[type="range"]:focus-visible{outline:2px solid var(--crm-teal);outline-offset:2px}.intent-slider-row output{text-align:right;color:var(--crm-text);font-size:11px;font-weight:700;font-variant-numeric:tabular-nums}.opportunity-form-grid select:disabled{color:var(--crm-text-muted);background:var(--crm-surface-muted);cursor:not-allowed}.probability-level-field small{color:var(--crm-text-muted);font-size:8px;line-height:1.45}@media(max-width:560px){.opportunity-form-grid{grid-template-columns:1fr}.opportunity-form-grid label.wide,.opportunity-form-grid .wide{grid-column:auto}}
 .readonly-stage{display:grid;gap:6px;align-content:start}.readonly-stage span{color:var(--crm-text-muted);font-size:9px;font-weight:700}.readonly-stage strong{display:flex;height:38px;box-sizing:border-box;align-items:center;padding:0 10px;color:var(--crm-text);background:var(--crm-surface-muted);border:1px solid var(--crm-line);border-radius:8px;font-size:10px}
 .opportunity-form-grid small.field-error{color:var(--crm-danger);font-size:8px;line-height:1.45}
 .competitor-field{display:grid;gap:8px}.competitor-head{display:flex;align-items:center;justify-content:space-between;gap:10px}.competitor-head button{display:inline-flex;align-items:center;gap:4px;height:26px;padding:0 9px;color:var(--crm-teal);background:#fff;border:1px solid var(--crm-line);border-radius:7px;font:inherit;font-size:9px;font-weight:700;cursor:pointer}.competitor-head button:disabled{color:var(--crm-text-muted);background:var(--crm-surface-muted);cursor:not-allowed}

@@ -517,6 +517,83 @@ describe('OpportunityEditorModal single sales objective', () => {
   })
 })
 
+describe('OpportunityEditorModal before its references arrive', () => {
+  const firstAccount = accounts[0]!
+  const firstSite = sites[firstAccount.id]![0]!
+
+  it('says the Accounts and Sites are loading, does not submit, and takes the first of each for a new Opportunity as they arrive', async () => {
+    const wrapper = mount(OpportunityEditorModal, { props: { ...props, referencesLoading: true } })
+    expect(wrapper.get('[data-testid="references-loading"]').text()).toBe('客户和厂区列表加载中，到了再保存。')
+    expect(wrapper.get('[data-modal-submit]').attributes('disabled')).toBeDefined()
+    expect((wrapper.get('[aria-label="客户"]').element as HTMLSelectElement).value).toBe('')
+
+    await wrapper.setProps({ accounts })
+    expect((wrapper.get('[aria-label="客户"]').element as HTMLSelectElement).value).toBe(firstAccount.id)
+    // The Sites are still out: the editor still says so.
+    expect(wrapper.find('[data-testid="references-loading"]').exists()).toBe(true)
+
+    await wrapper.setProps({ sitesByAccount: sites, referencesLoading: false })
+    expect((wrapper.get('[aria-label="厂区"]').element as HTMLSelectElement).value).toBe(firstSite.id)
+    expect(wrapper.find('[data-testid="references-loading"]').exists()).toBe(false)
+    expect(wrapper.get('[data-modal-submit]').attributes('disabled')).toBeUndefined()
+    wrapper.unmount()
+  })
+
+  it('keeps the Opportunity being edited at its own Account and Site as they arrive', async () => {
+    const ownSite = sites[firstAccount.id]![1] ?? firstSite
+    const opportunity = { ...legacyOpportunity('Service'), accountId: firstAccount.id, siteId: ownSite.id } as StrategyOpportunityDto
+    const wrapper = mount(OpportunityEditorModal, { props: { ...props, opportunity, referencesLoading: true } })
+    expect(wrapper.find('[data-testid="references-loading"]').exists()).toBe(true)
+
+    await wrapper.setProps({ accounts, sitesByAccount: sites, referencesLoading: false })
+    expect((wrapper.get('[aria-label="客户"]').element as HTMLSelectElement).value).toBe(firstAccount.id)
+    expect((wrapper.get('[aria-label="厂区"]').element as HTMLSelectElement).value).toBe(ownSite.id)
+    expect(wrapper.find('[data-testid="references-loading"]').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('takes the first Site of an Account chosen while the Sites were still out, editing too', async () => {
+    const otherAccount = accounts[1]!
+    const opportunity = { ...legacyOpportunity('Service'), accountId: firstAccount.id, siteId: firstSite.id } as StrategyOpportunityDto
+    // The Accounts are there, the Sites not yet: the user moves the Opportunity to another Account meanwhile.
+    const wrapper = mount(OpportunityEditorModal, { props: { ...props, opportunity, accounts, referencesLoading: true } })
+    await wrapper.get('[aria-label="客户"]').setValue(otherAccount.id)
+    expect((wrapper.get('[aria-label="厂区"]').element as HTMLSelectElement).value).toBe('')
+
+    await wrapper.setProps({ sitesByAccount: sites, referencesLoading: false })
+    expect((wrapper.get('[aria-label="厂区"]').element as HTMLSelectElement).value).toBe(sites[otherAccount.id]![0]!.id)
+    expect(wrapper.find('[data-testid="references-loading"]').exists()).toBe(false)
+    expect(wrapper.get('[data-modal-submit]').attributes('disabled')).toBeUndefined()
+
+    // Back at the Opportunity's own Account: the Account's first Site, as a change of Account gives (the own Site was left with the Account).
+    await wrapper.get('[aria-label="客户"]').setValue(firstAccount.id)
+    expect((wrapper.get('[aria-label="厂区"]').element as HTMLSelectElement).value).toBe(firstSite.id)
+    wrapper.unmount()
+  })
+
+  it('gives an edit back its own Site when the Account was changed and changed back before the Sites arrived', async () => {
+    const otherAccount = accounts[1]!
+    const ownSite = sites[firstAccount.id]![1] ?? firstSite
+    const opportunity = { ...legacyOpportunity('Service'), accountId: firstAccount.id, siteId: ownSite.id } as StrategyOpportunityDto
+    const wrapper = mount(OpportunityEditorModal, { props: { ...props, opportunity, accounts, referencesLoading: true } })
+    await wrapper.get('[aria-label="客户"]').setValue(otherAccount.id)
+    await wrapper.get('[aria-label="客户"]').setValue(firstAccount.id)
+    expect((wrapper.get('[aria-label="厂区"]').element as HTMLSelectElement).value).toBe('')
+
+    await wrapper.setProps({ sitesByAccount: sites, referencesLoading: false })
+    expect((wrapper.get('[aria-label="厂区"]').element as HTMLSelectElement).value).toBe(ownSite.id)
+    expect(wrapper.get('[data-modal-submit]').attributes('disabled')).toBeUndefined()
+    wrapper.unmount()
+  })
+
+  it('says nothing when the references are already there, refreshed or not', () => {
+    const wrapper = mount(OpportunityEditorModal, { props: { ...props, accounts, sitesByAccount: sites, referencesLoading: true } })
+    expect(wrapper.find('[data-testid="references-loading"]').exists()).toBe(false)
+    expect(wrapper.get('[data-modal-submit]').attributes('disabled')).toBeUndefined()
+    wrapper.unmount()
+  })
+})
+
 describe('OpportunityEditorModal competitors', () => {
   const stored = [
     { name: 'Acme Metrology', strengths: 'Installed base at the fab', response: 'Local service team' },
