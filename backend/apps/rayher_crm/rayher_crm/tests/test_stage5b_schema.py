@@ -53,6 +53,7 @@ EXPECTED_FIELDS = {
         "custom_crm_first_contact_note": ("Small Text", None),
         "custom_crm_next_action": ("Data", None),
         "custom_crm_next_action_due": ("Date", None),
+        "custom_crm_activities": ("JSON", None),
         "custom_crm_converted_account": ("Link", "Customer"),
         "custom_crm_converted_contact": ("Link", "Contact"),
         "custom_crm_converted_opportunity": ("Link", "CRM Opportunity"),

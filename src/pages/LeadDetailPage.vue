@@ -305,7 +305,7 @@ onMounted(async () => {
             <button class="card-action" type="button" data-testid="add-arrangement" @click="startArrangement"><Plus :size="13" />{{ locale === 'en-US' ? 'Add activity' : '增添安排' }}</button>
           </template>
           <form v-if="arrangementOpen" class="inline-form arrangement-form" @submit.prevent="saveArrangement">
-            <label><span>{{ locale === 'en-US' ? 'Next action' : '后续安排' }}</span><input v-model="arrangementAction" :aria-label="locale === 'en-US' ? 'Next action' : '后续安排'" required /></label>
+            <label><span>{{ locale === 'en-US' ? 'Next action' : '后续安排' }}</span><input v-model="arrangementAction" :aria-label="locale === 'en-US' ? 'Next action' : '后续安排'" maxlength="140" required /></label>
             <label><span>{{ locale === 'en-US' ? 'Due date' : '安排日期' }}</span><input v-model="arrangementDue" :aria-label="locale === 'en-US' ? 'Due date' : '安排日期'" type="date" required /></label>
             <p v-if="actionError" class="inline-error">{{ actionError }}</p>
             <div class="inline-actions"><button class="text-button" type="button" @click="arrangementOpen = false">{{ locale === 'en-US' ? 'Cancel' : '取消' }}</button><button class="primary-button compact" type="submit" data-testid="save-arrangement" :disabled="busy">{{ locale === 'en-US' ? 'Save activity' : '保存安排' }}</button></div>

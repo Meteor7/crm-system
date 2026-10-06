@@ -7,7 +7,7 @@ from rayher_crm.api.v1.errors import CrmApiException
 from rayher_crm.api.v1.leads import create_lead as create_lead_endpoint
 from rayher_crm.services.accounts import create_account, get_account_360
 from rayher_crm.services.contacts import create_contact, get_contact
-from rayher_crm.services.leads import convert_lead, create_lead, delete_lead, get_lead, list_leads, update_lead
+from rayher_crm.services.leads import MAX_ACTIVITIES, convert_lead, create_lead, delete_lead, get_lead, list_leads, update_lead
 from rayher_crm.services.opportunities import get_strategy_opportunity
 from rayher_crm.services.opportunity_stages import QUALIFIED_OPPORTUNITY
 from rayher_crm.services.sites import create_site
@@ -102,6 +102,142 @@ class TestLeadApi(FrappeTestCase):
         endpoint = create_lead_endpoint(self._input("Endpoint Lead"))
         self.assertEqual(endpoint["data"]["name"], "Endpoint Lead")
         self.assertRegex(endpoint["meta"]["requestId"], r"^req_[0-9a-f]{24}$")
+
+    def test_a_next_action_with_markup_in_it_is_the_same_arrangement_when_the_form_sends_it_back(self):
+        frappe.set_user(self.sales)
+        # Frappe stores the next action with "<" escaped; the form sends it back as stored. The arrangement is one.
+        plain_input = self._input("Escaped Timeline Lead", nextAction="Contact <sales@example.invalid>", nextActionDue="2026-08-20")
+        del plain_input["activities"]
+        created = create_lead(plain_input)
+        self.assertEqual([item["action"] for item in created["activities"]], ["Contact <sales@example.invalid>"])
+        stored = get_lead(created["id"])
+        payload = self._input("Escaped Timeline Lead", nextAction=stored["nextAction"], nextActionDue="2026-08-20", title="Senior Process Manager")
+        del payload["activities"]
+        edited = update_lead(created["id"], payload, stored["modified"])
+        self.assertEqual((edited["title"], [item["action"] for item in edited["activities"]]), ("Senior Process Manager", ["Contact <sales@example.invalid>"]))
+        # Re-dated the same way: still one, with the new date.
+        redated = update_lead(created["id"], {**payload, "nextActionDue": "2026-08-27"}, edited["modified"])
+        self.assertEqual([(item["action"], item["dueDate"]) for item in redated["activities"]], [("Contact <sales@example.invalid>", "2026-08-27")])
+
+        # Entity text that is no markup ("&amp;lt;") is stored as written by Frappe and must stay one arrangement
+        # through any number of plain saves.
+        literal = "Explain &amp;lt; in the quote"
+        literal_input = self._input("Literal Timeline Lead", nextAction=literal, nextActionDue="2026-08-20")
+        del literal_input["activities"]
+        first = create_lead(literal_input)
+        self.assertEqual(([item["action"] for item in first["activities"]], get_lead(first["id"])["nextAction"]), ([literal], literal))
+        stored_literal = get_lead(first["id"])
+        again = self._input("Literal Timeline Lead", nextAction=stored_literal["nextAction"], nextActionDue="2026-08-20", title="Senior Process Manager")
+        del again["activities"]
+        once = update_lead(first["id"], again, stored_literal["modified"])
+        twice = update_lead(first["id"], {**again, "title": "Principal Process Manager"}, once["modified"])
+        self.assertEqual(([item["action"] for item in twice["activities"]], twice["title"]), ([literal], "Principal Process Manager"))
+
+        # A wrapping tag Frappe drops leaves its spaces in the Data field, which the form's next save trims: one
+        # arrangement still, through a plain save, a re-dating, and a plain save at the cap.
+        wrapped_input = self._input("Wrapped Timeline Lead", nextAction="<body> Call </body>", nextActionDue="2026-08-20")
+        del wrapped_input["activities"]
+        wrapped = create_lead(wrapped_input)
+        self.assertEqual([item["action"] for item in wrapped["activities"]], ["<body> Call </body>"])
+        stored_wrapped = get_lead(wrapped["id"])
+        plain = self._input("Wrapped Timeline Lead", nextAction=stored_wrapped["nextAction"], nextActionDue="2026-08-20", title="Senior Process Manager")
+        del plain["activities"]
+        kept = update_lead(wrapped["id"], plain, stored_wrapped["modified"])
+        redated_wrapped = update_lead(wrapped["id"], {**plain, "nextActionDue": "2026-08-27"}, kept["modified"])
+        self.assertEqual([(item["action"], item["dueDate"]) for item in redated_wrapped["activities"]], [("<body> Call </body>", "2026-08-27")])
+        full = update_lead(wrapped["id"], {**plain, "activities": [*redated_wrapped["activities"][:1], *[{"action": f"Step {index:03d}", "dueDate": "2026-08-20"} for index in range(MAX_ACTIVITIES - 2)], {"action": "<body> Call </body>", "dueDate": "2026-08-27"}]}, redated_wrapped["modified"])
+        self.assertEqual(len(full["activities"]), MAX_ACTIVITIES)
+        at_cap = update_lead(wrapped["id"], {**plain, "title": "Principal Process Manager"}, full["modified"])
+        self.assertEqual((len(at_cap["activities"]), at_cap["title"]), (MAX_ACTIVITIES, "Principal Process Manager"))
+
+    def test_a_lead_full_of_arrangements_refuses_another_from_the_form(self):
+        frappe.set_user(self.sales)
+        full = [{"action": f"Step {index:03d}", "dueDate": "2026-08-20"} for index in range(MAX_ACTIVITIES)]
+        latest = f"Step {MAX_ACTIVITIES - 1:03d}"
+        created = create_lead(self._input("Full Timeline Lead", nextAction=latest, nextActionDue="2026-08-20", activities=full))
+        self.assertEqual(len(created["activities"]), MAX_ACTIVITIES)
+        payload = self._input("Full Timeline Lead", nextAction=latest, nextActionDue="2026-08-27")
+        del payload["activities"]
+        # The latest re-dated by the form: not an addition, nothing dropped.
+        redated = update_lead(created["id"], payload, created["modified"])
+        self.assertEqual(len(redated["activities"]), MAX_ACTIVITIES)
+        self.assertEqual((redated["activities"][-1]["action"], redated["activities"][-1]["dueDate"]), (latest, "2026-08-27"))
+        # Another one from the form: refused, as a list of more than the cap is, rather than the first dropped unasked.
+        with self.assertRaises(CrmApiException) as refused:
+            update_lead(created["id"], {**payload, "nextAction": "One more"}, redated["modified"])
+        self.assertEqual(refused.exception.code, "VALIDATION_ERROR")
+        self.assertIn("the most it can", refused.exception.public_message)
+        kept = get_lead(created["id"])
+        self.assertEqual(len(kept["activities"]), MAX_ACTIVITIES)
+        self.assertEqual(kept["activities"][0]["action"], "Step 000")
+
+    def test_a_lead_keeps_its_arrangements_and_adds_to_them(self):
+        frappe.set_user(self.sales)
+        # The Lead form sends the next action alone: it is recorded as the first arrangement.
+        plain_input = self._input("Plain Timeline Lead")
+        del plain_input["activities"]
+        plain = create_lead(plain_input)
+        self.assertEqual(plain["activities"], [{"id": f"{plain['id']}-ACT-001", "action": "Arrange discovery call", "dueDate": "2026-08-20"}])
+
+        first = {"id": "client-made", "action": "Call procurement", "dueDate": "2026-08-20"}
+        created = create_lead(self._input("Timeline Lead", activities=[first]))
+        # Kept in order, with ids of the server's own; the client's id is not taken.
+        self.assertEqual(created["activities"], [{"id": f"{created['id']}-ACT-001", "action": "Call procurement", "dueDate": "2026-08-20"}])
+
+        # A second arrangement is added, as the detail page sends them: the ones shown and the new one (F2-04 had the
+        # server drop them all and keep the last next action alone).
+        second = {"action": " Send quote draft ", "dueDate": "2026-08-25"}
+        updated = update_lead(created["id"], self._input(
+            "Timeline Lead", nextAction="Send quote draft", nextActionDue="2026-08-25", activities=[*created["activities"], second],
+        ), created["modified"])
+        self.assertEqual(
+            [(item["id"], item["action"], item["dueDate"]) for item in updated["activities"]],
+            [(f"{created['id']}-ACT-001", "Call procurement", "2026-08-20"), (f"{created['id']}-ACT-002", "Send quote draft", "2026-08-25")],
+        )
+        self.assertEqual((updated["nextAction"], updated["nextActionDue"]), ("Send quote draft", "2026-08-25"))
+        self.assertEqual(get_lead(created["id"])["activities"], updated["activities"])
+        listed = next(item for item in list_leads({"search": "Timeline Lead", "page": 1, "pageSize": 50})[0] if item["id"] == created["id"])
+        self.assertEqual(listed["activities"], updated["activities"])
+
+        # An edit that says nothing of the arrangements (the Lead form) leaves them when the next action is the latest
+        # of them; one that sets another next action records it as the latest (the form, then "增添安排", lost it
+        # otherwise); one that re-dates it re-dates that arrangement. An empty list clears them.
+        payload = self._input("Timeline Lead", nextAction="Send quote draft", nextActionDue="2026-08-25")
+        del payload["activities"]
+        kept = update_lead(created["id"], payload, updated["modified"])
+        self.assertEqual(kept["activities"], updated["activities"])
+        moved = update_lead(created["id"], {**payload, "nextAction": "Visit the fab", "nextActionDue": "2026-09-02"}, kept["modified"])
+        self.assertEqual(
+            [(item["action"], item["dueDate"]) for item in moved["activities"]],
+            [("Call procurement", "2026-08-20"), ("Send quote draft", "2026-08-25"), ("Visit the fab", "2026-09-02")],
+        )
+        redated = update_lead(created["id"], {**payload, "nextAction": "Visit the fab", "nextActionDue": "2026-09-09"}, moved["modified"])
+        self.assertEqual(
+            [(item["id"], item["action"], item["dueDate"]) for item in redated["activities"]][2:],
+            [(f"{created['id']}-ACT-003", "Visit the fab", "2026-09-09")],
+        )
+        cleared = update_lead(created["id"], {**payload, "activities": []}, redated["modified"])
+        self.assertEqual(cleared["activities"], [])
+
+        # An arrangement needs an action, a real date if any, and the list stays a list.
+        for bad, message in (
+            ([{"dueDate": "2026-09-01"}], "action is required"),
+            ([{"action": {"text": "Visit"}}], "action must be a string"),
+            ([{"action": "V" * 141}], "at most 140 characters"),
+            # 140 as typed, 146 as Frappe stores it ("<x>" is escaped): too long for the next-action field.
+            ([{"action": "<x>" + "V" * 137}], "at most 140 characters"),
+            ([{"action": "Visit", "dueDate": "2026-13-01"}], "real YYYY-MM-DD"),
+            ([{"action": "Visit", "dueDate": 20260901}], "YYYY-MM-DD"),
+            ({"action": "Visit"}, "must be an array"),
+        ):
+            with self.assertRaises(CrmApiException) as refused:
+                update_lead(created["id"], {**payload, "activities": bad}, cleared["modified"])
+            self.assertEqual(refused.exception.code, "VALIDATION_ERROR")
+            self.assertIn(message, refused.exception.public_message)
+        self.assertEqual(get_lead(created["id"])["activities"], [])
+        # A date is optional: an arrangement without one is kept with an empty date.
+        dated = update_lead(created["id"], {**payload, "activities": [{"action": "Visit"}]}, cleared["modified"])
+        self.assertEqual(dated["activities"], [{"id": f"{created['id']}-ACT-001", "action": "Visit", "dueDate": ""}])
 
     def test_manager_assignment_notifies_owner_who_can_open_lead(self):
         frappe.set_user(self.manager)

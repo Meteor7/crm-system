@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import json
 from collections.abc import Callable
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
 import frappe
 from frappe.utils import validate_email_address
+from frappe.utils.html_utils import sanitize_html
 
 from rayher_crm.api.v1.errors import CrmApiException
 from rayher_crm.permissions.roles import assert_capability, resolve_crm_role
@@ -30,6 +32,11 @@ from rayher_crm.services.notifications import create_notification
 LEAD_STATUSES = {"New", "Working", "Qualified", "Nurturing", "Disqualified", "Converted"}
 LEAD_SOURCES = {"Website", "Trade Show", "Partner Referral", "Outbound", "Customer Referral", "Other"}
 MAX_OPPORTUNITY_AMOUNT = Decimal("999999999999999999.99")
+# The arrangements of a Lead (its activity timeline), kept in order on the Lead as JSON, as the Opportunity keeps
+# its lists: an action and a due date each. The ids are given on the way out, from the position.
+MAX_ACTIVITIES = 200
+# The latest arrangement is written to custom_crm_next_action as well, a Data field of Frappe 15: 140 characters.
+MAX_ACTIVITY_ACTION = 140
 
 
 def delete_lead(name: str) -> dict[str, str]:
@@ -51,7 +58,10 @@ def serialize_lead(doc) -> dict[str, Any]:
         "firstContactNote": doc.custom_crm_first_contact_note or "",
         "nextAction": doc.custom_crm_next_action or "",
         "nextActionDue": str(doc.custom_crm_next_action_due or ""),
-        "activities": [],
+        "activities": [
+            {"id": f"{doc.name}-ACT-{index:03d}", "action": item["action"], "dueDate": item["dueDate"]}
+            for index, item in enumerate(_decode_activities(doc.get("custom_crm_activities")), start=1)
+        ],
         "createdAt": to_iso_timestamp(doc.creation),
         "updatedAt": to_iso_timestamp(doc.modified),
         "modified": to_iso_timestamp(doc.modified),
@@ -69,6 +79,52 @@ def serialize_lead(doc) -> dict[str, Any]:
         result["convertedReusedAccount"] = bool(doc.custom_crm_reused_account)
         result["convertedReusedContact"] = bool(doc.custom_crm_reused_contact)
     return result
+
+
+def _decode_activities(value: Any) -> list[dict[str, str]]:
+    if not value:
+        return []
+    try:
+        parsed = json.loads(value) if isinstance(value, str) else value
+    except (TypeError, json.JSONDecodeError):
+        return []
+    if not isinstance(parsed, list):
+        return []
+    return [
+        {"action": str(item.get("action") or ""), "dueDate": str(item.get("dueDate") or "")}
+        for item in parsed if isinstance(item, dict) and item.get("action")
+    ]
+
+
+def _activities(value: Any) -> list[dict[str, str]] | None:
+    """The arrangements as sent: an action each, a due date or none. Absent (or null), the Lead's are kept."""
+
+    if value is None:
+        return None
+    if not isinstance(value, list):
+        raise CrmApiException("VALIDATION_ERROR", "activities must be an array.", field_errors={"activities": "Must be an array"})
+    if len(value) > MAX_ACTIVITIES:
+        raise CrmApiException("VALIDATION_ERROR", f"activities may hold at most {MAX_ACTIVITIES} entries.")
+    activities = []
+    for index, item in enumerate(value):
+        if not isinstance(item, dict):
+            raise CrmApiException("VALIDATION_ERROR", "Each activity must be an object with an action and a dueDate.")
+        action = item.get("action")
+        if action is not None and not isinstance(action, str):
+            raise CrmApiException(
+                "VALIDATION_ERROR", f"activities[{index}].action must be a string.", field_errors={"activities": "Action must be text"},
+            )
+        action = (action or "").strip()
+        if not action:
+            raise CrmApiException(
+                "VALIDATION_ERROR", f"activities[{index}].action is required.", field_errors={"activities": "Action required"},
+            )
+        # As typed and as stored: the latest arrangement is written to the next-action field, which Frappe sanitizes
+        # (a "<" or ">" in it is escaped, longer), and the field holds 140 characters of the stored value.
+        if len(action) > MAX_ACTIVITY_ACTION or len(_as_stored(action)) > MAX_ACTIVITY_ACTION:
+            raise CrmApiException("VALIDATION_ERROR", f"activities[{index}].action may hold at most {MAX_ACTIVITY_ACTION} characters.")
+        activities.append({"action": action, "dueDate": optional_date(item.get("dueDate"), f"activities[{index}].dueDate") or ""})
+    return activities
 
 
 def _validate_lead(payload: dict[str, Any]) -> dict[str, Any]:
@@ -102,6 +158,7 @@ def _validate_lead(payload: dict[str, Any]) -> dict[str, Any]:
         "first_contact_note": str(payload.get("firstContactNote") or "").strip(),
         "next_action": str(payload.get("nextAction") or "").strip(),
         "next_action_due": optional_date(payload.get("nextActionDue"), "nextActionDue"),
+        "activities": _activities(payload.get("activities")),
     }
 
 
@@ -146,6 +203,17 @@ def list_leads(query: dict[str, Any]) -> tuple[list[dict[str, Any]], int, int, i
     return [serialize_lead(frappe.get_doc("Lead", row.name)) for row in rows], total, page, page_size
 
 
+def _as_stored(text: str) -> str:
+    """The next action as Frappe stores it in its Data field (`BaseDocument._sanitize_content`): a value with "<" or
+    ">" in it has its HTML sanitized, which escapes what is no allowed tag and drops an allowed one (its spaces
+    stay, which the form's next save trims); any other value is kept as written. The arrangements (JSON) are kept as
+    written, so the two are compared through this, trimmed. It is its own fixed point: what it gives, it gives again."""
+    value = (text or "").strip()
+    if "<" not in value and ">" not in value:
+        return value
+    return str(sanitize_html(value)).strip()
+
+
 def _apply_lead(doc, values: dict[str, Any]) -> None:
     doc.first_name = values["name"]
     doc.last_name = None
@@ -161,6 +229,28 @@ def _apply_lead(doc, values: dict[str, Any]) -> None:
     doc.custom_crm_first_contact_note = values["first_contact_note"]
     doc.custom_crm_next_action = values["next_action"]
     doc.custom_crm_next_action_due = values["next_action_due"]
+    if values["activities"] is not None:
+        doc.custom_crm_activities = json.dumps(values["activities"], ensure_ascii=False)
+    elif values["next_action"]:
+        # The Lead form sends the next action alone: it is the latest arrangement, and is recorded as such (a new one
+        # is added, one re-dated takes the date), so that the timeline keeps what the form set between additions.
+        recorded = _decode_activities(doc.get("custom_crm_activities"))
+        # Frappe stores the next action (a Data field) with its HTML sanitized ("<" as "&lt;") and the arrangements
+        # (JSON) as written, and the form sends the next action back as it was stored: the two are compared as the
+        # Data field stores them, and the arrangement is recorded as sent.
+        latest = {"action": values["next_action"], "dueDate": values["next_action_due"] or ""}
+        if recorded and _as_stored(recorded[-1]["action"]) == _as_stored(latest["action"]):
+            # The same arrangement, re-dated or not: it keeps its text as recorded.
+            recorded[-1] = {**recorded[-1], "dueDate": latest["dueDate"]}
+        elif len(recorded) >= MAX_ACTIVITIES:
+            # Full: refused, as a list of more than the cap is, rather than the first dropped unasked.
+            raise CrmApiException(
+                "VALIDATION_ERROR",
+                f"The Lead holds {MAX_ACTIVITIES} arrangements, the most it can; remove one before adding another.",
+            )
+        else:
+            recorded.append(latest)
+        doc.custom_crm_activities = json.dumps(recorded, ensure_ascii=False)
 
 
 def create_lead(payload: dict[str, Any]) -> dict[str, Any]:
