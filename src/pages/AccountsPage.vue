@@ -31,6 +31,11 @@ const deletingId = ref(''), deleteError = useLocaleMessage(), deleteRequestId = 
 const page = ref(typeof route.query.page === 'string' && Number(route.query.page) > 0 ? Number(route.query.page) : 1)
 const pageSize = ref(typeof route.query.pageSize === 'string' && [10, 25, 50].includes(Number(route.query.pageSize)) ? Number(route.query.pageSize) : 10)
 const segment = ref(typeof route.query.segment === 'string' ? route.query.segment : 'All'), city = ref(typeof route.query.city === 'string' ? route.query.city : 'All')
+// Matched by the server against the company name, the short name and the owner (F1-09).
+const search = ref(typeof route.query.search === 'string' ? route.query.search : '')
+// The box's text is a draft until Enter applies it: every other load (a page turned, a refresh after a delete or
+// a save, a retry) runs with the search in force, which the URL shows; text typed but not entered goes nowhere.
+const searchDraft = ref(search.value)
 const segments = ref<string[]>(['Frontend', 'Advanced Packaging'])
 const regions = ref<string[]>([...REGION_PRESETS])
 const cities = ref<string[]>([])
@@ -47,11 +52,12 @@ const regionOptionLabel = (value: string) => regionLabel(value, locale.value)
 // A total of 0 that leaves out unknown amounts is not a known zero.
 const pipelineText = (account: AccountSummaryDto) => account.pipelineAmount === 0 && account.pipelineMissingAmountCount ? t('dashboard.insufficientData') : `¥${account.pipelineAmount.toLocaleString(locale.value)}`
 const riskTone = (risk: AccountSummaryDto['risk']): Tone => risk === '高风险' ? 'danger' : risk === '关注' ? 'warning' : 'positive'
+const visibilityLabel = (account: AccountSummaryDto) => account.visibility === 'Public' ? t('accounts.visibilityPublic') : t('accounts.visibilityPrivate')
 
 async function load() {
   const sequence = ++loadSequence; loading.value = true; error.value = ''; denied.value = false; meta.value = null
   try {
-    const result = await props.apiClient.listAccounts({ segment: segment.value, city: city.value, page: page.value, pageSize: pageSize.value })
+    const result = await props.apiClient.listAccounts({ search: search.value.trim() || undefined, segment: segment.value, city: city.value, page: page.value, pageSize: pageSize.value })
     if (sequence !== loadSequence) return
     rows.value = result.data.items; total.value = result.meta?.total ?? rows.value.length; meta.value = readRequestMeta(result)
     rows.value.forEach((account) => includeCity(account.city))
@@ -95,10 +101,22 @@ function includeCity(value: string) {
   const normalized = value.trim()
   if (normalized && !cities.value.includes(normalized)) cities.value = [...cities.value, normalized].sort((left, right) => left.localeCompare(right, 'zh-CN'))
 }
-function reset() { page.value = 1; segment.value = 'All'; city.value = 'All' }
+// One reload for the whole reset, at once (the filter watcher fires per change).
+function reset() { restoringRoute = true; search.value = ''; searchDraft.value = ''; segment.value = 'All'; city.value = 'All'; restoringRoute = false; changeFilters() }
 let restoringRoute = false
-function syncUrl() { if (!restoringRoute) void router.replace({ query: { ...route.query, page: String(page.value), pageSize: String(pageSize.value), segment: segment.value === 'All' ? undefined : segment.value, city: city.value === 'All' ? undefined : city.value } }) }
+function syncUrl() { if (!restoringRoute) void router.replace({ name: 'accounts', query: { ...route.query, page: String(page.value), pageSize: String(pageSize.value), search: search.value.trim() || undefined, segment: segment.value === 'All' ? undefined : segment.value, city: city.value === 'All' ? undefined : city.value } }) }
 function changeFilters() { if (restoringRoute) return; page.value = 1; syncUrl(); void load() }
+// The search runs on Enter and is written into the URL, as a change of a filter is: a list is what its URL says
+// (back, a reload and the link bring the search back). A reload per keystroke would rebuild the page under the
+// cursor (the shell keys a page by its URL), and one that left the URL alone left the list and the address apart.
+function submitSearch(event: KeyboardEvent) {
+  // An Enter that ends an IME composition commits the characters; it is not the search, and the input keeps them
+  // (WebKit sends that Enter after the composition, with keyCode 229 and `isComposing` false).
+  if (event.isComposing || event.keyCode === 229) return
+  event.preventDefault()
+  search.value = searchDraft.value.trim()
+  changeFilters()
+}
 function goPage(target: number) { page.value = target; syncUrl(); void load() }
 function changePageSize(value: number) { pageSize.value = value; page.value = 1; syncUrl(); void load() }
 function openAccountModal() {
@@ -162,17 +180,20 @@ async function createAccount() {
   } catch (reason) { const mapped = mapRequestError(reason); modalError.value = mapped.localizedMessage ?? mapped.message }
   finally { busy.value = false }
 }
+// Synchronous, so that a reset or a route restore (which set `restoringRoute` around their assignments) is one reload.
 watch([segment, city], changeFilters, { flush: 'sync' })
-watch(() => [route.query.page, route.query.pageSize, route.query.segment, route.query.city], ([nextPage, nextSize, nextSegment, nextCity]) => {
+watch(() => [route.query.page, route.query.pageSize, route.query.search, route.query.segment, route.query.city], ([nextPage, nextSize, nextSearch, nextSegment, nextCity]) => {
   const restoredPage = typeof nextPage === 'string' && Number(nextPage) > 0 ? Number(nextPage) : 1
   const restoredSize = typeof nextSize === 'string' && [10, 25, 50].includes(Number(nextSize)) ? Number(nextSize) : 10
+  const restoredSearch = typeof nextSearch === 'string' ? nextSearch : ''
   const restoredSegment = typeof nextSegment === 'string' ? nextSegment : 'All'
   const restoredCity = typeof nextCity === 'string' ? nextCity : 'All'
-  if (restoredPage === page.value && restoredSize === pageSize.value && restoredSegment === segment.value && restoredCity === city.value) return
-  restoringRoute = true; page.value = restoredPage; pageSize.value = restoredSize; segment.value = restoredSegment; city.value = restoredCity; restoringRoute = false; void load()
+  if (restoredPage === page.value && restoredSize === pageSize.value && restoredSearch === search.value.trim() && restoredSegment === segment.value && restoredCity === city.value) return
+  restoringRoute = true; page.value = restoredPage; pageSize.value = restoredSize; search.value = restoredSearch; searchDraft.value = restoredSearch; segment.value = restoredSegment; city.value = restoredCity; restoringRoute = false; void load()
 })
 onMounted(() => { void load(); void loadSegments(); void loadRegions(); void loadCities() })
-function openDetail(account: AccountSummaryDto) { void router.push({ name: 'account-detail', params: { accountId: account.id } }) }
+// The record carries the list's URL, for its "Back to Accounts" control.
+function openDetail(account: AccountSummaryDto) { void router.push({ name: 'account-detail', params: { accountId: account.id }, query: { from: route.fullPath } }) }
 async function deleteAccount(account: AccountSummaryDto) {
   if (deletingId.value || !window.confirm(`${t('accounts.delete')} ${t('accounts.account').toLowerCase()} ${account.name}?`)) return
   deletingId.value = account.id
@@ -198,7 +219,7 @@ async function deleteAccount(account: AccountSummaryDto) {
       <button v-if="canWrite" class="primary-button" type="button" data-testid="new-account" @click="openAccountModal"><Plus :size="15" />{{ t('accounts.new') }}</button>
     </PageHeader>
     <section v-if="!denied" class="account-stats"><div><span>{{ t('accounts.total') }}</span><strong>{{ total }}</strong><small>{{ t('accounts.scope') }}</small></div><div><span>{{ t('accounts.completeness') }}</span><strong>{{ rows.length ? Math.round(rows.reduce((sum, item) => sum + item.completeness, 0) / rows.length) : 0 }}%</strong><small>{{ t('accounts.completenessHint') }}</small></div></section>
-    <FilterBar :result-label="t('accounts.result', { count: total })" @reset="reset"><select v-model="segment" class="filter-control" :aria-label="locale === 'en-US' ? 'Business area' : '业务领域'"><option value="All">{{ t('accounts.allSegments') }}</option><option v-for="item in segments" :key="item" :value="item">{{ item }}</option></select><select v-model="city" class="filter-control" :aria-label="locale === 'en-US' ? 'City' : '城市'"><option value="All">{{ t('accounts.allCities') }}</option><option v-for="item in cities" :key="item" :value="item">{{ item }}</option></select></FilterBar>
+    <FilterBar :result-label="t('accounts.result', { count: total })" @reset="reset"><input v-model="searchDraft" class="filter-control filter-search" type="search" data-account-search :placeholder="t('accounts.searchPlaceholder')" :aria-label="t('accounts.searchPlaceholder')" @keydown.enter="submitSearch" /><select v-model="segment" class="filter-control" :aria-label="locale === 'en-US' ? 'Business area' : '业务领域'"><option value="All">{{ t('accounts.allSegments') }}</option><option v-for="item in segments" :key="item" :value="item">{{ item }}</option></select><select v-model="city" class="filter-control" :aria-label="locale === 'en-US' ? 'City' : '城市'"><option value="All">{{ t('accounts.allCities') }}</option><option v-for="item in cities" :key="item" :value="item">{{ item }}</option></select></FilterBar>
     <DataNotice v-if="meta?.stale" :message="meta.localizedMessage ?? meta.message" :request-id="meta.requestId" @refresh="load" />
     <p v-if="deleteError" class="form-error" data-delete-error>{{ deleteError }}<small v-if="deleteRequestId">{{ locale === 'en-US' ? 'Request ID' : '请求编号' }} {{ deleteRequestId }}</small></p>
 
@@ -212,10 +233,13 @@ async function deleteAccount(account: AccountSummaryDto) {
           <thead><tr><th>{{ t('accounts.account') }}</th><th>{{ t('accounts.businessRegion') }}</th><th>{{ t('accounts.owner') }}</th><th>{{ t('accounts.contactsSites') }}</th><th>{{ t('accounts.pipelineIntent') }}</th><th>{{ t('accounts.nextStep') }}</th><th>{{ t('accounts.risk') }}</th><th>{{ t('accounts.completeness') }}</th><th>{{ t('accounts.updated') }}</th><th v-if="canDelete">{{ t('accounts.actions') }}</th></tr></thead>
           <tbody>
             <tr v-for="account in rows" :key="account.id" :data-account-id="account.id">
-              <td><button class="account-link record-name-link" type="button" :data-open-account-detail="account.id" @click="openDetail(account)"><span><Building2 :size="14" /></span><div><strong>{{ account.shortName }}</strong><small>{{ account.name }}</small></div></button></td>
+              <td><button class="account-link record-name-link" type="button" :data-open-account-detail="account.id" @click="openDetail(account)"><span><Building2 :size="14" /></span><div><strong>{{ account.shortName }}</strong><small>{{ account.name }}</small></div></button><StatusBadge class="visibility-badge" :data-account-visibility="account.visibility ?? 'Private'" :label="visibilityLabel(account)" :tone="account.visibility === 'Public' ? 'info' : 'neutral'" :dot="false" /></td>
               <td><strong>{{ account.segment }}</strong><small>{{ account.city }} · {{ regionLabel(account.region, locale) }}</small></td>
-              <td>{{ personnelDisplayName(account.owner) }}</td><td><strong>{{ t('accounts.contactsCount', { count: account.stakeholderCount }) }}</strong><small>{{ t('accounts.sitesCount', { count: account.siteCount }) }}</small></td><td><strong :data-account-pipeline="account.id">{{ pipelineText(account) }}</strong><small v-if="account.pipelineMissingAmountCount" :data-account-pipeline-missing="account.id">{{ t('opportunities.unknownAmountCount', { count: account.pipelineMissingAmountCount }) }}</small><small>{{ locale === 'en-US' ? 'Intent score' : '意愿评分' }} {{ account.intentScore }}</small></td><td><strong>{{ account.nextAction || t('accounts.none') }}</strong><small>{{ account.nextActionDue ? formatDisplayDate(account.nextActionDue) : t('accounts.unscheduled') }}</small></td>
-              <td><StatusBadge :label="account.risk === '高风险' ? t('accounts.riskHigh') : account.risk === '关注' ? t('accounts.riskWatch') : t('accounts.riskStable')" :tone="riskTone(account.risk)" /></td><td>{{ account.completeness }}%</td><td>{{ formatDisplayDate(account.updatedAt) }}</td>
+              <td>{{ personnelDisplayName(account.owner) }}</td><td><strong>{{ t('accounts.contactsCount', { count: account.stakeholderCount }) }}</strong><small>{{ account.metricsRestricted ? t('accounts.ownerOnly') : t('accounts.sitesCount', { count: account.siteCount }) }}</small></td>
+              <!-- A Sales user who does not own the Account gets these zeroed by the server: said so, not shown as numbers (F1-11). -->
+              <td v-if="account.metricsRestricted" :data-account-owner-only="account.id"><small>{{ t('accounts.ownerOnly') }}</small></td>
+              <td v-else><strong :data-account-pipeline="account.id">{{ pipelineText(account) }}</strong><small v-if="account.pipelineMissingAmountCount" :data-account-pipeline-missing="account.id">{{ t('opportunities.unknownAmountCount', { count: account.pipelineMissingAmountCount }) }}</small><small>{{ locale === 'en-US' ? 'Intent score' : '意愿评分' }} {{ account.intentScore }}</small></td><td><strong>{{ account.metricsRestricted ? t('accounts.ownerOnly') : (account.nextAction || t('accounts.none')) }}</strong><small v-if="!account.metricsRestricted">{{ account.nextActionDue ? formatDisplayDate(account.nextActionDue) : t('accounts.unscheduled') }}</small></td>
+              <td><StatusBadge v-if="account.metricsRestricted" :label="t('accounts.ownerOnly')" tone="neutral" /><StatusBadge v-else :label="account.risk === '高风险' ? t('accounts.riskHigh') : account.risk === '关注' ? t('accounts.riskWatch') : t('accounts.riskStable')" :tone="riskTone(account.risk)" /></td><td>{{ account.completeness }}%</td><td>{{ formatDisplayDate(account.updatedAt) }}</td>
               <td v-if="canDelete"><button type="button" class="site-remove" :data-delete-account="account.id" :disabled="Boolean(deletingId)" @click="deleteAccount(account)">{{ t('accounts.delete') }}</button></td>
             </tr>
           </tbody>

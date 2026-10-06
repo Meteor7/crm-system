@@ -176,6 +176,9 @@ def serialize_account(doc) -> dict[str, Any]:
         "region": doc.custom_crm_region or "",
         "owner": doc.custom_crm_owner,
         "visibility": doc.custom_crm_visibility or "Private",
+        # The Sites, pipeline, intent, next step and risk above are zeroed for a Sales user who does not own the
+        # Account; said here, so that the pages show "owner only" and not a zero.
+        "metricsRestricted": is_non_owner_sales,
         "pipelineAmount": activity["pipelineAmount"],
         "pipelineMissingAmountCount": activity["pipelineMissingAmountCount"],
         "intentScore": activity["intentScore"],
@@ -238,9 +241,14 @@ def list_accounts(query: dict[str, Any]) -> tuple[list[dict[str, Any]], int, int
         values.append(account_id)
     search = str(query.get("search") or "").strip()
     if search:
-        pattern = f"%{search}%"
-        where.append("(`customer_name` LIKE %s OR `custom_crm_short_name` LIKE %s OR `custom_crm_owner` LIKE %s)")
-        values.extend([pattern, pattern, pattern])
+        # The owner by the name the pages show (the user's full name) as well as by their id; the search's own
+        # `%` and `_` are letters, not wildcards.
+        pattern = "%" + search.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
+        where.append(
+            "(`customer_name` LIKE %s OR `custom_crm_short_name` LIKE %s OR `custom_crm_owner` LIKE %s "
+            "OR `custom_crm_owner` IN (SELECT `name` FROM `tabUser` WHERE `full_name` LIKE %s))"
+        )
+        values.extend([pattern, pattern, pattern, pattern])
     segment = query.get("segment")
     if segment and segment != "All":
         where.append("`custom_crm_segment` = %s")

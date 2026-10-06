@@ -21,10 +21,13 @@ import { readAllPages } from '@/features/shared/read-all-pages'
 import { useI18n, useLocaleMessage, localeMessage } from '@/i18n'
 import { contactStatusLabel, salesEnumLabel, recordTypeLabel } from '@/features/shared/sales-i18n'
 import { isOpportunityStage, opportunityStageLabel } from '@/domain/opportunity-stages'
+import { listReturnTarget } from '@/features/shared/list-return'
 
 const props = withDefaults(defineProps<{ apiClient?: CrmApi }>(), { apiClient: () => defaultApi })
 const route = useRoute()
 const router = useRouter()
+// Back to the list as it was (its search, filters and page) when the Contact was opened from it.
+const backTo = computed(() => listReturnTarget(router, route.query, 'contacts'))
 const app = useAppStore()
 const { locale, t } = useI18n()
 const detail = ref<ContactDetailDto | null>(null)
@@ -198,7 +201,7 @@ onMounted(async () => {
     <DataState v-else-if="notFound" type="denied" :title="t('state.unavailableTitle')" :message="error" :request-id="requestId" />
     <DataState v-else-if="error || !detail" type="error" :message="error || t('detail.notFoundContact')" :request-id="requestId" @retry="load" />
     <template v-else>
-      <RouterLink class="back-link detail-back-button" :to="{ name: 'contacts' }"><ArrowLeft :size="14" />{{ t('detail.backContacts') }}</RouterLink>
+      <RouterLink class="back-link detail-back-button" :to="backTo"><ArrowLeft :size="14" />{{ t('detail.backContacts') }}</RouterLink>
       <PageHeader eyebrow="CONTACT 360" :title="detail.contact.name" :description="`${detail.contact.accountName} · ${detail.contact.title} · ${personnelDisplayName(detail.contact.owner)}`">
         <button v-if="isActive && canCreateOpportunity" class="secondary-button" type="button" data-testid="new-opportunity" @click="createOpportunity"><BriefcaseBusiness :size="14" />{{ locale === 'en-US' ? 'New opportunity' : '新建 Opportunity' }}</button>
         <button v-if="isActive && canCreateVisit" class="secondary-button" type="button" data-testid="record-visit" @click="createVisit"><CalendarPlus :size="14" />{{ locale === 'en-US' ? 'Record visit' : '记录拜访' }}</button>

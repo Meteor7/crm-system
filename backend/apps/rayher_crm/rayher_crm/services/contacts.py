@@ -247,9 +247,12 @@ def list_contacts(query: dict[str, Any]) -> tuple[list[dict[str, Any]], int, int
         values.append(status)
     search = str(query.get("search") or "").strip()
     if search:
-        pattern = f"%{search}%"
-        where.append("(`tabContact`.`first_name` LIKE %s OR `tabContact`.`last_name` LIKE %s OR `tabContact`.`email_id` LIKE %s)")
-        values.extend([pattern, pattern, pattern])
+        # The search's own `%` and `_` are letters, not wildcards.
+        pattern = "%" + search.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
+        # The name the pages show is first_name and last_name joined (serialize_contact); a standard Frappe
+        # Contact keeps them apart, and its full name must find it. CONCAT_WS skips a NULL last_name.
+        where.append("(CONCAT_WS(' ', `tabContact`.`first_name`, `tabContact`.`last_name`) LIKE %s OR `tabContact`.`email_id` LIKE %s)")
+        values.extend([pattern, pattern])
     base = (
         " FROM `tabContact` INNER JOIN `tabDynamic Link` AS `crm_link` ON `crm_link`.`parent` = `tabContact`.`name` "
         "AND `crm_link`.`parenttype` = 'Contact' AND `crm_link`.`parentfield` = 'links' AND `crm_link`.`link_doctype` = 'Customer' "

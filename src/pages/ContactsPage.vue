@@ -29,6 +29,12 @@ const rows = ref<ContactSummaryDto[]>([])
 const accounts = ref<AccountSummaryDto[]>([])
 const sites = ref<Array<SiteDto & { accountId: string }>>([])
 const allContacts = ref<ContactSummaryDto[]>([])
+// Whether the cache was ever the whole set (a page that was, or a read of them all): a Contact saved before that is in
+// the cache, which is not the whole set yet, and the page's start still reads them all.
+let wholeSetSeen = false
+// The reads of every Contact, in order: one that an edit overtook (a save, a delete, a page that was the whole set)
+// is stale, and changes nothing when it returns (it would bring back what the edit took out, or take out what it put in).
+let allContactsRequest = 0
 const total = ref(0)
 const page = ref(typeof route.query.page === 'string' && Number(route.query.page) > 0 ? Number(route.query.page) : 1)
 const pageSize = ref(typeof route.query.pageSize === 'string' && [10, 12, 25, 50].includes(Number(route.query.pageSize)) ? Number(route.query.pageSize) : 12)
@@ -39,6 +45,11 @@ const requestId = ref('')
 const accountId = ref(typeof route.query.accountId === 'string' ? route.query.accountId : 'All')
 const siteId = ref(typeof route.query.siteId === 'string' ? route.query.siteId : 'All')
 const owner = ref(typeof route.query.owner === 'string' ? route.query.owner : 'All')
+// Matched by the server against the Contact's names and email (F1-09).
+const search = ref(typeof route.query.search === 'string' ? route.query.search : '')
+// The box's text is a draft until Enter applies it: every other load (a page turned, a refresh after a delete or
+// a save, a retry) runs with the search in force, which the URL shows; text typed but not entered goes nowhere.
+const searchDraft = ref(search.value)
 const contactStatus = ref<ContactStatus | 'All'>(
   route.query.contactStatus === 'All' || route.query.contactStatus === 'Active' || route.query.contactStatus === 'Left Company' || route.query.contactStatus === 'Archived'
     ? route.query.contactStatus
@@ -90,13 +101,18 @@ async function loadReferences() {
   }
 }
 
+// Whether the list asks for every Active Contact: what the cache of them (the reporting-line choices) may be filled from.
+function unfilteredNow() { return !search.value.trim() && accountId.value === 'All' && siteId.value === 'All' && owner.value === 'All' && contactStatus.value === 'Active' }
 async function load() {
   const current = ++sequence
+  // Decided as the request leaves: the search may be cleared before it returns.
+  const unfiltered = unfilteredNow()
   loading.value = true
   error.value = ''
   denied.value = false
   try {
     const result = await props.apiClient.listContacts({
+      search: search.value.trim() || undefined,
       accountId: accountId.value,
       siteId: siteId.value,
       owner: owner.value,
@@ -107,8 +123,13 @@ async function load() {
     if (current !== sequence) return
     rows.value = result.data.items
     total.value = result.meta?.total ?? rows.value.length
-    if (!allContacts.value.length && accountId.value === 'All' && siteId.value === 'All' && owner.value === 'All' && contactStatus.value === 'Active') {
+    // A page that holds every Active Contact is the whole set, and refreshes the cache of them (the reporting-line
+    // choices); a first page of more is not, and `loadAllContacts` reads them all. A load that fails, or a read of
+    // them all that fails, leaves the cache as it was: the last whole set seen, less a Contact deleted since.
+    if (unfiltered && rows.value.length >= total.value) {
       allContacts.value = rows.value
+      wholeSetSeen = true
+      allContactsRequest += 1
     }
   } catch (reason) {
     if (current !== sequence) return
@@ -123,19 +144,39 @@ async function load() {
   }
 }
 async function loadAllContacts() {
-  allContacts.value = await readAllPages((page, pageSize) => props.apiClient.listContacts({ contactStatus: 'Active', page, pageSize }))
+  const current = ++allContactsRequest
+  const rows = await readAllPages((page, pageSize) => props.apiClient.listContacts({ contactStatus: 'Active', page, pageSize }))
+  if (current !== allContactsRequest) return
+  allContacts.value = rows
+  wholeSetSeen = true
 }
 
 function resetFilters() {
-  page.value = 1
+  // One reload for the whole reset, at once (the filter watcher fires per change).
+  restoringRoute = true
+  search.value = ''
+  searchDraft.value = ''
   accountId.value = 'All'
   siteId.value = 'All'
   owner.value = 'All'
   contactStatus.value = 'Active'
+  restoringRoute = false
+  changeFilters()
 }
 let restoringRoute = false
-function syncUrl() { if (!restoringRoute) void router.replace({ query: { ...route.query, page: String(page.value), pageSize: String(pageSize.value), accountId: accountId.value === 'All' ? undefined : accountId.value, siteId: siteId.value === 'All' ? undefined : siteId.value, owner: owner.value === 'All' ? undefined : owner.value, contactStatus: contactStatus.value === 'Active' ? undefined : contactStatus.value } }) }
+function syncUrl() { if (!restoringRoute) void router.replace({ name: 'contacts', query: { ...route.query, page: String(page.value), pageSize: String(pageSize.value), search: search.value.trim() || undefined, accountId: accountId.value === 'All' ? undefined : accountId.value, siteId: siteId.value === 'All' ? undefined : siteId.value, owner: owner.value === 'All' ? undefined : owner.value, contactStatus: contactStatus.value === 'Active' ? undefined : contactStatus.value } }) }
 function changeFilters() { if (restoringRoute) return; page.value = 1; syncUrl(); void load() }
+// The search runs on Enter and is written into the URL, as a change of a filter is: a list is what its URL says
+// (back, a reload and the link bring the search back). A reload per keystroke would rebuild the page under the
+// cursor (the shell keys a page by its URL), and one that left the URL alone left the list and the address apart.
+function submitSearch(event: KeyboardEvent) {
+  // An Enter that ends an IME composition commits the characters; it is not the search, and the input keeps them
+  // (WebKit sends that Enter after the composition, with keyCode 229 and `isComposing` false).
+  if (event.isComposing || event.keyCode === 229) return
+  event.preventDefault()
+  search.value = searchDraft.value.trim()
+  changeFilters()
+}
 function goPage(target: number) { page.value = target; syncUrl(); void load() }
 function changePageSize(value: number) { pageSize.value = value; page.value = 1; syncUrl(); void load() }
 function openCreate() {
@@ -162,6 +203,10 @@ async function deleteContact() {
   modalError.value = ''
   try {
     await props.apiClient.deleteContact(deleteTarget.value.id)
+    // Out of the cache at once: a deleted Contact is no reporting line, whatever becomes of the read below; a read
+    // still out is stale now.
+    allContactsRequest += 1
+    allContacts.value = allContacts.value.filter((item) => item.id !== deleteTarget.value?.id)
     deleteOpen.value = false
     deleteTarget.value = null
     editing.value = null
@@ -170,7 +215,7 @@ async function deleteContact() {
     try {
       await loadAllContacts()
     } catch {
-      allContacts.value = rows.value
+      // The cache stays what the load above made of it.
     }
   } catch (reason) {
     const mapped = mapRequestError(reason); modalError.value = mapped.localizedMessage ?? mapped.message
@@ -182,15 +227,20 @@ async function saveContact(payload: CreateContactInput) {
   busy.value = true
   modalError.value = ''
   try {
-    if (editing.value) await props.apiClient.updateContact(editing.value.id, payload, editing.value.modified)
-    else await props.apiClient.createContact(payload)
+    const saved = editing.value
+      ? await props.apiClient.updateContact(editing.value.id, payload, editing.value.modified)
+      : await props.apiClient.createContact(payload)
+    // Into the cache at once, as saved — out of it when no longer Active (a reporting line is an Active Contact) —
+    // whatever becomes of the reads below; a read still out is stale now.
+    allContactsRequest += 1
+    allContacts.value = [...allContacts.value.filter((item) => item.id !== saved.data.id), ...(saved.data.status === 'Active' ? [saved.data] : [])]
     modalOpen.value = false
     editing.value = null
     await load()
     try {
       await loadAllContacts()
     } catch {
-      allContacts.value = rows.value
+      // The cache stays what the load above made of it.
     }
   } catch (reason) {
     const mapped = mapRequestError(reason); modalError.value = mapped.localizedMessage ?? mapped.message
@@ -199,16 +249,19 @@ async function saveContact(payload: CreateContactInput) {
   }
 }
 async function openDetail(contact: ContactSummaryDto) {
-  await router.push({ name: 'contact-detail', params: { contactId: contact.id } })
+  // The record carries the list's URL, for its "Back to Contacts" control.
+  await router.push({ name: 'contact-detail', params: { contactId: contact.id }, query: { from: route.fullPath } })
 }
 
+// Synchronous, so that a reset or a route restore (which set `restoringRoute` around their assignments) is one reload.
 watch([accountId, siteId, owner, contactStatus], changeFilters, { flush: 'sync' })
-watch(() => [route.query.page, route.query.pageSize, route.query.accountId, route.query.siteId, route.query.owner, route.query.contactStatus], ([nextPage, nextSize, nextAccount, nextSite, nextOwner, nextStatus]) => {
+watch(() => [route.query.page, route.query.pageSize, route.query.search, route.query.accountId, route.query.siteId, route.query.owner, route.query.contactStatus], ([nextPage, nextSize, nextSearch, nextAccount, nextSite, nextOwner, nextStatus]) => {
   const restoredPage = typeof nextPage === 'string' && Number(nextPage) > 0 ? Number(nextPage) : 1
   const restoredSize = typeof nextSize === 'string' && [10, 12, 25, 50].includes(Number(nextSize)) ? Number(nextSize) : 12
+  const restoredSearch = typeof nextSearch === 'string' ? nextSearch : ''
   const values = [typeof nextAccount === 'string' ? nextAccount : 'All', typeof nextSite === 'string' ? nextSite : 'All', typeof nextOwner === 'string' ? nextOwner : 'All', typeof nextStatus === 'string' ? nextStatus : 'Active']
-  if (restoredPage === page.value && restoredSize === pageSize.value && values[0] === accountId.value && values[1] === siteId.value && values[2] === owner.value && values[3] === contactStatus.value) return
-  restoringRoute = true; page.value = restoredPage; pageSize.value = restoredSize; accountId.value = values[0]!; siteId.value = values[1]!; owner.value = values[2]!; contactStatus.value = values[3] as ContactStatus | 'All'; restoringRoute = false; void load()
+  if (restoredPage === page.value && restoredSize === pageSize.value && restoredSearch === search.value.trim() && values[0] === accountId.value && values[1] === siteId.value && values[2] === owner.value && values[3] === contactStatus.value) return
+  restoringRoute = true; page.value = restoredPage; pageSize.value = restoredSize; search.value = restoredSearch; searchDraft.value = restoredSearch; accountId.value = values[0]!; siteId.value = values[1]!; owner.value = values[2]!; contactStatus.value = values[3] as ContactStatus | 'All'; restoringRoute = false; void load()
 })
 watch(accountId, () => {
   if (!visibleSites.value.some((item) => item.id === siteId.value)) siteId.value = 'All'
@@ -221,7 +274,7 @@ onMounted(async () => {
     // Contact permissions remain the authority; reference data is optional for read-only rendering.
   }
   await load()
-  if (!allContacts.value.length) try { await loadAllContacts() } catch { allContacts.value = rows.value }
+  if (!wholeSetSeen) try { await loadAllContacts() } catch { /* the cache stays what the load above made of it */ }
 })
 onBeforeUnmount(() => {
   sequence += 1
@@ -235,6 +288,7 @@ onBeforeUnmount(() => {
     </PageHeader>
 
     <FilterBar :result-label="t('contacts.result', { count: total })" @reset="resetFilters">
+      <input v-model="searchDraft" class="filter-control filter-search" type="search" data-contact-search :placeholder="t('contacts.searchPlaceholder')" :aria-label="t('contacts.searchPlaceholder')" @keydown.enter="submitSearch" />
       <select v-model="accountId" class="filter-control" :aria-label="locale === 'en-US' ? 'Account filter' : '客户筛选'"><option value="All">{{ t('contacts.allAccounts') }}</option><option v-for="account in accounts" :key="account.id" :value="account.id">{{ account.shortName }}</option></select>
       <select v-model="siteId" class="filter-control" :aria-label="locale === 'en-US' ? 'Site filter' : '厂区筛选'"><option value="All">{{ t('contacts.allSites') }}</option><option v-for="site in visibleSites" :key="site.id" :value="site.id">{{ site.name }}</option></select>
       <select v-model="owner" class="filter-control" :aria-label="locale === 'en-US' ? 'Owner filter' : '负责人筛选'"><option value="All">{{ t('contacts.allOwners') }}</option><option v-for="item in owners" :key="item" :value="item">{{ personnelDisplayName(item) }}</option></select>

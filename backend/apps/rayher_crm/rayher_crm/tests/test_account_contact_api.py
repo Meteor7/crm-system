@@ -257,11 +257,22 @@ class TestAccountContactApi(FrappeTestCase):
         public_input = self._account_input("Foreign Account")
         public_input["visibility"] = "Public"
         foreign = update_account(foreign["id"], public_input, foreign["modified"])
+        self.assertEqual((foreign["visibility"], foreign["metricsRestricted"], foreign["siteCount"]), ("Public", False, 1))
 
         frappe.set_user(self.sales)
         detail = get_account_360(foreign["id"])
         self.assertEqual(detail["account"]["id"], foreign["id"])
         self.assertEqual(detail["sites"], [])
+        # The zeroes the other Sales user gets are said to be no numbers (F1-11).
+        self.assertEqual((detail["account"]["metricsRestricted"], detail["account"]["siteCount"]), (True, 0))
+        listed = list_accounts({"accountId": foreign["id"], "page": 1, "pageSize": 10})[0]
+        self.assertEqual([(row["id"], row["metricsRestricted"]) for row in listed], [(foreign["id"], True)])
+        # The search finds the owner by the name the pages show, and takes `%` and `_` as letters (F1-09).
+        frappe.db.set_value("User", self.other_sales, {"first_name": "Foreign Owner", "full_name": "Foreign Owner"}, update_modified=False)
+        by_owner = list_accounts({"search": "Foreign Own", "page": 1, "pageSize": 50})[0]
+        self.assertIn(foreign["id"], [row["id"] for row in by_owner])
+        self.assertEqual(list_accounts({"search": "%", "page": 1, "pageSize": 50})[1], 0)
+        self.assertEqual(list_accounts({"search": "_", "page": 1, "pageSize": 50})[1], 0)
         with self.assertRaises(CrmApiException) as site_denied:
             sites_for_account(foreign["id"])
         self.assertEqual(site_denied.exception.code, "SCOPE_DENIED")
@@ -407,6 +418,18 @@ class TestAccountContactApi(FrappeTestCase):
         self.assertEqual(detail["requirements"], [])
         self.assertEqual(frappe.db.get_value("Customer", account["id"], "modified"), account_modified)
         self.assertEqual(frappe.db.get_value("Contact", contact["id"], "modified"), contact_modified)
+
+    def test_contact_search_finds_the_name_the_pages_show(self):
+        # A standard Frappe Contact keeps its name in first_name and last_name; the pages show them joined (F1-09).
+        frappe.set_user(self.sales)
+        account = create_account(self._account_input("Full Name Search"))
+        contact = create_contact(self._contact_input(account["id"], "Search Placeholder"))
+        frappe.db.set_value("Contact", contact["id"], {"first_name": "John", "last_name": "Smith"}, update_modified=False)
+        for search in ("John Smith", "ohn Smi", "John", "Smith"):
+            with self.subTest(search=search):
+                items, total, _, _ = list_contacts({"accountId": account["id"], "search": search, "page": 1, "pageSize": 20})
+                self.assertEqual(([row["id"] for row in items], total), ([contact["id"]], 1))
+                self.assertEqual(items[0]["name"], "John Smith")
 
     def test_contact_rejects_site_from_another_account(self):
         frappe.set_user(self.sales)

@@ -2,7 +2,7 @@
 import { systemValueLabel } from '@/features/shared/system-labels'
 import { computed, onMounted, ref, watch } from 'vue'
 import { ArrowLeft, Cpu, Edit3, ExternalLink, MapPin, Wrench } from '@lucide/vue'
-import { RouterLink, useRoute } from 'vue-router'
+import { RouterLink, useRoute, useRouter } from 'vue-router'
 import { api as defaultApi, type CrmApi } from '@/api'
 import { mapRequestError } from '@/api/request-state'
 import { useAppStore } from '@/stores/app'
@@ -19,9 +19,13 @@ import SectionCard from '@/design-system/SectionCard.vue'
 import StatusBadge from '@/design-system/StatusBadge.vue'
 import { useI18n, useLocaleMessage } from '@/i18n'
 import { salesEnumLabel } from '@/features/shared/sales-i18n'
+import { listReturnTarget } from '@/features/shared/list-return'
 
 const props = withDefaults(defineProps<{ apiClient?: CrmApi }>(), { apiClient: () => defaultApi })
 const route = useRoute()
+const router = useRouter()
+// Back to the list as it was (its search, filters and page) when the Account was opened from it.
+const backTo = computed(() => listReturnTarget(router, route.query, 'accounts'))
 const app = useAppStore()
 const { locale, t } = useI18n()
 const tools = ref<InstalledToolDto[]>([])
@@ -158,7 +162,7 @@ onMounted(() => { void loadEquipment(); void loadSegments(); void loadRegions() 
 
 <template>
   <div class="account-detail-page">
-    <div class="detail-actions"><RouterLink class="detail-back-button" :to="{ name: 'accounts' }"><ArrowLeft :size="14" />{{ t('detail.backAccounts') }}</RouterLink><button v-if="canWrite" class="primary-button" type="button" data-testid="edit-account" :disabled="!accountDetail" @click="openEdit"><Edit3 :size="14" />{{ t('detail.editProfile') }}</button></div>
+    <div class="detail-actions"><RouterLink class="detail-back-button" :to="backTo"><ArrowLeft :size="14" />{{ t('detail.backAccounts') }}</RouterLink><button v-if="canWrite" class="primary-button" type="button" data-testid="edit-account" :disabled="!accountDetail" @click="openEdit"><Edit3 :size="14" />{{ t('detail.editProfile') }}</button></div>
     <div class="account-detail-layout">
       <AccountProfile :key="profileVersion" :account-id="accountId" :api-client="props.apiClient" @loaded="captureAccount" @manage-sites="openEdit" />
       <aside class="equipment-column">

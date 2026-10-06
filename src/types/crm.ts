@@ -113,6 +113,8 @@ export interface AccountSummaryDto {
   region: string
   owner: string
   visibility?: 'Private' | 'Public'
+  /** A Sales user who does not own the Account gets its Sites, pipeline, intent, next step and risk zeroed: no numbers, not zeroes. */
+  metricsRestricted?: boolean
   /** Known open Opportunity amounts only. */
   pipelineAmount: number
   /** Open Opportunities whose amount is not entered yet, left out of pipelineAmount. */
