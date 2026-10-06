@@ -265,6 +265,180 @@ describe('DemoRequestForm', () => {
     expect(submission).not.toHaveProperty('questionAssignment')
   })
 
+  it('does not send a wafer row left empty, as it does not count it', async () => {
+    const wrapper = mount(DemoRequestModal, {
+      props: {
+        mode: 'edit',
+        request: {
+          ...demoRequests[0],
+          salesOwner: 'person002@crm.example.invalid',
+          engineerOwner: 'person077@crm.example.invalid',
+          customerExpectedDate: '2026-09-08',
+          formData: demoRequests[0].formData
+            ? { ...demoRequests[0].formData, salesContact: 'person002@crm.example.invalid', demoOwner: 'person077@crm.example.invalid' }
+            : undefined,
+        },
+        accounts,
+      },
+    })
+    const before = wrapper.findAll('[data-wafer-row]').length
+
+    await wrapper.get('[data-add-wafer]').trigger('click')
+    expect(wrapper.findAll('[data-wafer-row]')).toHaveLength(before + 1)
+    await wrapper.get('.modal-card form').trigger('submit')
+
+    const submission = wrapper.emitted('submit')?.[0]?.[0] as { formData: { wafers: unknown[] } }
+    expect(submission.formData.wafers).toHaveLength(before)
+    expect(wrapper.find('[data-field-error="wafers"]').exists()).toBe(false)
+  })
+
+  it('shows the refusal of a save in the dialog and flags the fields it names', () => {
+    const wrapper = mount(DemoRequestModal, {
+      props: {
+        mode: 'edit',
+        request: { ...demoRequests[0], salesOwner: 'person002@crm.example.invalid', engineerOwner: 'person077@crm.example.invalid', customerExpectedDate: '2026-09-08' },
+        accounts,
+        error: 'Demo Request form is incomplete.',
+        requestId: 'req_demo_refused',
+        fieldErrors: { 'wafers.0.slotId': 'Required', sizeShape: 'Required', timing: 'formData.timing must use YYYY-MM-DD.' },
+      },
+    })
+
+    expect(wrapper.get('[data-modal-error]').text()).toContain('Demo Request form is incomplete.')
+    expect(wrapper.get('[data-modal-error]').text()).toContain('req_demo_refused')
+    expect(wrapper.get('[data-field-error="wafers.0.slotId"]').text()).toBe('请填写此项')
+    expect(wrapper.get('[data-field-error="sizeShape"]').text()).toBe('请填写此项')
+    expect(wrapper.get('[data-field-error="timing"]').text()).toBe('formData.timing must use YYYY-MM-DD.')
+  })
+
+  it('flags the server\'s wafer errors on the rows it sent, not on an empty row left before them', async () => {
+    const wrapper = mount(DemoRequestModal, {
+      props: {
+        mode: 'edit',
+        request: {
+          ...demoRequests[0],
+          salesOwner: 'person002@crm.example.invalid',
+          engineerOwner: 'person077@crm.example.invalid',
+          customerExpectedDate: '2026-09-08',
+          formData: demoRequests[0].formData
+            ? { ...demoRequests[0].formData, salesContact: 'person002@crm.example.invalid', demoOwner: 'person077@crm.example.invalid' }
+            : undefined,
+        },
+        accounts,
+      },
+    })
+    // The second row holds the data (the first row's cells are cleared): the first is not sent, the second is `wafers.0`.
+    await wrapper.get('[data-add-wafer]').trigger('click')
+    const fields = ['slotId', 'wid', 'waferSpecificity', 'notchFlat', 'doiMetrologyItems', 'resultFileProvided']
+    for (const field of fields) {
+      await wrapper.get(`[name="wafer-1-${field}"]`).setValue((wrapper.get(`[name="wafer-0-${field}"]`).element as HTMLInputElement).value || 'x')
+      await wrapper.get(`[name="wafer-0-${field}"]`).setValue('')
+    }
+    await wrapper.get('.modal-card form').trigger('submit')
+    expect(wrapper.findAll('[data-field-error]').map((item) => `${item.attributes('data-field-error')}: ${item.text()}`)).toEqual([])
+    const submission = wrapper.emitted('submit')?.[0]?.[0] as { formData: { wafers: unknown[] } }
+    expect(submission.formData.wafers).toHaveLength(1)
+
+    await wrapper.setProps({ error: 'Demo Request form is incomplete.', fieldErrors: { 'wafers.0.slotId': 'Required' } })
+    expect(wrapper.find('[data-field-error="wafers.0.slotId"]').exists()).toBe(false)
+    expect(wrapper.get('[data-field-error="wafers.1.slotId"]').text()).toBe('请填写此项')
+    // The server's hint follows the language, as the editor's own do.
+    setLocale('en-US')
+    await flushPromises()
+    expect(wrapper.get('[data-field-error="wafers.1.slotId"]').text()).toBe('Enter this field')
+    setLocale('zh-CN')
+    await flushPromises()
+    expect(wrapper.get('[data-field-error="wafers.1.slotId"]').text()).toBe('请填写此项')
+
+    // The empty first row removed after the refusal: the hint follows its row up; a row added afterwards gets none,
+    // and a language change keeps it so.
+    await wrapper.get('[data-remove-wafer="0"]').trigger('click')
+    expect(wrapper.find('[data-field-error="wafers.1.slotId"]').exists()).toBe(false)
+    expect(wrapper.get('[data-field-error="wafers.0.slotId"]').text()).toBe('请填写此项')
+    await wrapper.get('[data-add-wafer]').trigger('click')
+    expect(wrapper.find('[data-field-error="wafers.1.slotId"]').exists()).toBe(false)
+    setLocale('en-US')
+    await flushPromises()
+    expect(wrapper.get('[data-field-error="wafers.0.slotId"]').text()).toBe('Enter this field')
+    expect(wrapper.find('[data-field-error="wafers.1.slotId"]').exists()).toBe(false)
+    setLocale('zh-CN')
+    await flushPromises()
+    // The flagged row itself removed: its hint goes with it.
+    await wrapper.get('[data-remove-wafer="0"]').trigger('click')
+    expect(wrapper.findAll('[data-field-error]')).toHaveLength(0)
+    setLocale('en-US')
+    await flushPromises()
+    expect(wrapper.findAll('[data-field-error]')).toHaveLength(0)
+    setLocale('zh-CN')
+  })
+
+  it('keeps the wafer rows in their places while a save is out', async () => {
+    const wrapper = mount(DemoRequestModal, {
+      props: { mode: 'edit', request: { ...demoRequests[0], salesOwner: 'person002@crm.example.invalid', engineerOwner: 'person077@crm.example.invalid', customerExpectedDate: '2026-09-08' }, accounts, busy: true },
+    })
+    await wrapper.get('[data-add-wafer]').trigger('click')
+    expect(wrapper.get('[data-add-wafer]').attributes('disabled')).toBeDefined()
+    expect(wrapper.findAll('[data-wafer-row]')).toHaveLength(demoRequests[0].formData?.wafers.length ?? 1)
+    await wrapper.setProps({ busy: false })
+    expect(wrapper.get('[data-add-wafer]').attributes('disabled')).toBeUndefined()
+    await wrapper.get('[data-add-wafer]').trigger('click')
+    expect(wrapper.get('[data-remove-wafer="1"]').attributes('disabled')).toBeUndefined()
+    await wrapper.setProps({ busy: true })
+    expect(wrapper.get('[data-remove-wafer="1"]').attributes('disabled')).toBeDefined()
+  })
+
+  it('holds the save while a form is being read, and does not apply a form read while a save is out', async () => {
+    const baseApi = createMockApi({ latency: 0 })
+    const held: { resolve: (value: unknown) => void } = { resolve: () => undefined }
+    const importDemoRequestForm = vi.fn().mockImplementation(() => new Promise((resolve) => { held.resolve = resolve }))
+    const contacts = (await baseApi.listContacts({ accountId: accounts[0].id })).data.items
+    const wrapper = mount(DemoRequestModal, {
+      props: { mode: 'create', accounts, contacts, currentSalesContact: 'person002@crm.example.invalid', apiClient: { ...baseApi, importDemoRequestForm } },
+    })
+    const input = wrapper.get('[data-import-demo-request-input]')
+    Object.defineProperty(input.element, 'files', { value: [new File(['pdf'], 'completed-drf.pdf', { type: 'application/pdf' })] })
+    await input.trigger('change')
+    expect(importDemoRequestForm).toHaveBeenCalledOnce()
+    // Being read: the save waits for it (the rows it would count are about to change).
+    expect(wrapper.get('[data-modal-submit]').attributes('disabled')).toBeDefined()
+
+    // A save out all the same (the page's doing) when the form arrives: the form is not applied, and says so.
+    await wrapper.setProps({ busy: true })
+    held.resolve({ data: { fileName: 'completed-drf.pdf', companyName: accounts[0].name, formData: { ...createEmptyDemoRequestFormData('person002@crm.example.invalid'), primaryTool: 'Aconca FS Edge' }, detectedFields: ['primaryTool'] } })
+    await flushPromises()
+    expect((wrapper.get('[name="primaryTool"]').element as HTMLInputElement).value).toBe('')
+    expect(wrapper.find('[data-demo-request-import-success]').exists()).toBe(false)
+    expect(wrapper.get('[data-demo-request-import-error]').text()).toContain('识别结果未应用')
+    await wrapper.setProps({ busy: false })
+    expect(wrapper.get('[data-modal-submit]').attributes('disabled')).toBeUndefined()
+  })
+
+  it('translates only the errors in force when the language changes', async () => {
+    const wrapper = mount(DemoRequestModal, {
+      props: {
+        mode: 'edit',
+        request: {
+          ...demoRequests[0], salesOwner: 'person002@crm.example.invalid', engineerOwner: 'person077@crm.example.invalid', customerExpectedDate: '2026-09-08',
+          formData: demoRequests[0].formData ? { ...demoRequests[0].formData, salesContact: 'person002@crm.example.invalid', demoOwner: 'person077@crm.example.invalid' } : undefined,
+        },
+        accounts,
+      },
+    })
+    await wrapper.setProps({ error: 'Demo Request form is incomplete.', fieldErrors: { 'wafers.0.slotId': 'Required' } })
+    expect(wrapper.get('[data-field-error="wafers.0.slotId"]').text()).toBe('请填写此项')
+    // The next submit checks the draft anew: its own errors replace the server's, and a language change keeps it so.
+    await wrapper.get('input[type="date"][aria-label="客户期望时间"]').setValue('')
+    await wrapper.get('.modal-card form').trigger('submit')
+    expect(wrapper.findAll('[data-field-error]').map((item) => item.attributes('data-field-error'))).toEqual(['customerExpectedDate'])
+    setLocale('en-US')
+    await flushPromises()
+    expect(wrapper.findAll('[data-field-error]').map((item) => item.attributes('data-field-error'))).toEqual(['customerExpectedDate'])
+    expect(wrapper.get('[data-field-error="customerExpectedDate"]').text()).toBe('Enter the customer expected date')
+    setLocale('zh-CN')
+    await flushPromises()
+    expect(wrapper.find('[data-field-error="wafers.0.slotId"]').exists()).toBe(false)
+  })
+
   it('keeps the linked Opportunity visible when editing a progressed Request', async () => {
     const apiClient = createMockApi({ latency: 0 })
     const linked = (await apiClient.getStrategyOpportunity('OPP-001')).data

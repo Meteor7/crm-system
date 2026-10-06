@@ -157,8 +157,18 @@ function hasWaferContent(wafer: DemoWaferDetailDto) {
   return Object.values(wafer).some((value) => value.trim())
 }
 
+/** The positions of the wafer rows that hold data: what the form counts, and what it sends (a row left empty is nothing). */
+export function activeDemoWaferIndexes(form: DemoRequestFormData) {
+  return form.wafers.map((wafer, index) => (hasWaferContent(wafer) ? index : -1)).filter((index) => index >= 0)
+}
+
+/** The wafer rows that hold data, in order. */
+export function activeDemoWafers(form: DemoRequestFormData) {
+  return activeDemoWaferIndexes(form).map((index) => ({ ...form.wafers[index]! }))
+}
+
 export function countDemoWafers(form: DemoRequestFormData) {
-  return form.wafers.filter(hasWaferContent).length
+  return activeDemoWafers(form).length
 }
 
 export function validateDemoRequestFormData(

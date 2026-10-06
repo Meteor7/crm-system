@@ -19,10 +19,14 @@ const props = withDefaults(defineProps<{
   disableAccount?: boolean
   showRequiredMarks?: boolean
   hideCustomerInformation?: boolean
-}>(), { contacts: () => [], primaryContactId: '', errors: () => ({}), disableAccount: false, showRequiredMarks: false, hideCustomerInformation: false })
+  /** While a save is out: the rows keep their places, so that a refusal lands on the rows that were sent. */
+  busy?: boolean
+}>(), { contacts: () => [], primaryContactId: '', errors: () => ({}), disableAccount: false, showRequiredMarks: false, hideCustomerInformation: false, busy: false })
 
 const emit = defineEmits<{
   'update:modelValue': [value: DemoRequestFormData]
+  /** A wafer row removed: the rows below it moved up (whoever keys anything by row follows). */
+  'remove-wafer': [index: number]
   'update:accountId': [value: string]
   'update:primaryContactId': [value: string]
   'create-contact': []
@@ -66,6 +70,7 @@ function removeWafer(index: number) {
   if (draft.value.wafers.length === 1) return
   draft.value = { ...draft.value, wafers: draft.value.wafers.filter((_, waferIndex) => waferIndex !== index) }
   emit('update:modelValue', cloneDemoRequestFormData(draft.value))
+  emit('remove-wafer', index)
 }
 
 function setAccount(event: Event) {
@@ -201,12 +206,12 @@ function setAccount(event: Event) {
     <section class="form-section wafer-section">
       <div class="section-heading">
          <div><h3>{{ copy('Wafer Details', '晶圆详情') }}</h3><p>{{ copy('Number of Wafers is calculated from rows containing data.', '晶圆数量根据有数据的行自动计算。') }}</p></div>
-         <button class="secondary-button" data-add-wafer type="button" @click="addWafer">+ {{ copy('Add Wafer', '添加晶圆') }}</button>
+         <button class="secondary-button" data-add-wafer type="button" :disabled="busy" @click="addWafer">+ {{ copy('Add Wafer', '添加晶圆') }}</button>
       </div>
       <small v-if="errors.wafers" data-field-error="wafers">{{ errors.wafers }}</small>
       <div class="wafer-table">
         <div v-for="(wafer, index) in draft.wafers" :key="index" class="wafer-row" data-wafer-row>
-           <div class="wafer-row-heading"><strong>{{ copy('Wafer', '晶圆') }} {{ index + 1 }}</strong><button v-if="draft.wafers.length > 1" type="button" :data-remove-wafer="index" @click="removeWafer(index)">{{ copy('Remove', '移除') }}</button></div>
+           <div class="wafer-row-heading"><strong>{{ copy('Wafer', '晶圆') }} {{ index + 1 }}</strong><button v-if="draft.wafers.length > 1" type="button" :data-remove-wafer="index" :disabled="busy" @click="removeWafer(index)">{{ copy('Remove', '移除') }}</button></div>
           <div class="wafer-grid">
                <label>{{ copy('Slot ID', '槽位 ID') }}<RequiredMark :show="showRequiredMarks" /><input :name="`wafer-${index}-slotId`" :value="wafer.slotId" :placeholder="hints.slotId" @input="setWafer(index, 'slotId', $event)" /><small v-if="errors[`wafers.${index}.slotId`]" :data-field-error="`wafers.${index}.slotId`">{{ errors[`wafers.${index}.slotId`] }}</small></label>
                <label>WID<RequiredMark :show="showRequiredMarks" /><input :name="`wafer-${index}-wid`" :value="wafer.wid" :placeholder="hints.wid" @input="setWafer(index, 'wid', $event)" /><small v-if="errors[`wafers.${index}.wid`]" :data-field-error="`wafers.${index}.wid`">{{ errors[`wafers.${index}.wid`] }}</small></label>

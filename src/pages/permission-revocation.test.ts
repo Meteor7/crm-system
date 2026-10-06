@@ -189,7 +189,8 @@ describe('permission revocation', () => {
     // The refusal is shown as the error of that write; the page is not taken for one the user may no longer see,
     // and the dialog stays open with what was typed.
     expect(wrapper.find('.state-denied').exists()).toBe(false)
-    expect(wrapper.get('[data-api-error]').text()).toContain('销售只能把记录分配给自己，请把负责人选为本人。')
+    expect(wrapper.get('[data-modal-error]').text()).toContain('销售只能把记录分配给自己，请把负责人选为本人。')
+    expect(wrapper.find('[data-api-error]').exists()).toBe(false)
     expect(wrapper.findComponent({ name: 'DemoRequestModal' }).exists()).toBe(true)
     expect(wrapper.find('[data-demo-request="DR-101"]').exists()).toBe(true)
   })

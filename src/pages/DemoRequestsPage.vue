@@ -24,7 +24,14 @@ const router = useRouter()
 const { t, locale, message } = useI18n()
 const rows = ref<DemoRequestDto[]>([]), accounts = ref<AccountSummaryDto[]>([]), loading = ref(false), error = useLocaleMessage(), requestId = ref(''), denied = ref(false), meta = ref<RequestMetaState | null>(null)
 const actionError = useLocaleMessage(), actionRequestId = ref('')
+// The dialog's own refusal (a save the server refused), apart from the page's actions, and bound to the dialog it was
+// answered to: each opening is a session, and a refusal that comes back after the dialog was closed goes to the page's
+// banner instead of the next dialog.
+const modalError = useLocaleMessage(), modalRequestId = ref(''), modalFieldErrors = ref<Record<string, string>>({})
+let modalSession = 0
 const processing = ref(''), modalMode = ref<'create'|'edit'|'engineer'|'manager'|''>(''), selected = ref<DemoRequestDto | null>(null)
+// The dialog's own save, out or not: the page's other actions (`processing`) do not stand for it.
+const modalSaving = ref(false)
 const activeView = ref<DemoRequestView>('overview')
 const selectedRequestId = ref('')
 const downloadingId = ref(''), downloadError = useLocaleMessage()
@@ -65,7 +72,9 @@ async function load() {
   } catch (reason) { if (current !== sequence) return; const mapped = mapRequestError(reason); error.value = mapped.localizedMessage ?? mapped.message; requestId.value = mapped.requestId; denied.value = mapped.denied; if (mapped.denied) rows.value = [] }
   finally { if (current === sequence) loading.value = false }
 }
-function open(mode: 'create'|'edit'|'engineer'|'manager', request: DemoRequestDto | null = null) { modalMode.value = mode; selected.value = request }
+function open(mode: 'create'|'edit'|'engineer'|'manager', request: DemoRequestDto | null = null) { modalSession += 1; clearModalError(); modalSaving.value = false; modalMode.value = mode; selected.value = request }
+function closeModal() { modalSession += 1; clearModalError(); modalSaving.value = false; modalMode.value = '' }
+function clearModalError() { modalError.value = ''; modalRequestId.value = ''; modalFieldErrors.value = {} }
 function openDetail(request: DemoRequestDto) {
   router.push({ name: 'demo-detail', params: { demoId: request.id }, query: { from: 'demo-requests' } })
 }
@@ -96,7 +105,10 @@ async function submitRequest(id: string) { processing.value = id; clearActionErr
 async function cancelRequest(id: string) { processing.value = id; clearActionError(); try { const request = rows.value.find((item) => item.id === id); await props.apiClient.transitionDemoRequest(id, { type: 'cancel', comment: 'Sales 取消申请' }, request?.modified); await load() } catch (reason) { await handleWriteError(reason) } finally { processing.value = '' } }
 async function submitModal(payload: CreateDemoRequestInput | DemoRequestCommand) {
   processing.value = selected.value?.id || 'create'
-  clearActionError()
+  const session = modalSession
+  modalSaving.value = true
+  clearModalError()
+  let handoff: { requestId: string; evaluationId: string } | null = null
   try {
     if (modalMode.value === 'create') {
       // The new request becomes the selected one, so the workspace shows the page it is on.
@@ -105,19 +117,25 @@ async function submitModal(payload: CreateDemoRequestInput | DemoRequestCommand)
       await props.apiClient.updateDemoRequest(selected.value!.id, payload as CreateDemoRequestInput, selected.value!.modified)
     } else {
       const result = await props.apiClient.transitionDemoRequest(selected.value!.id, payload as DemoRequestCommand, selected.value!.modified)
-      if (result.data.evaluation) {
-        demoTestHandoff.value = {
-          requestId: result.data.request.id,
-          evaluationId: result.data.evaluation.id,
-        }
-      }
+      if (result.data.evaluation) handoff = { requestId: result.data.request.id, evaluationId: result.data.evaluation.id }
     }
-    modalMode.value = ''
+    // Answered to a dialog since closed (another may be open, saving): the list is read anew, that dialog left alone.
+    if (session !== modalSession) { await load(); return }
+    if (handoff) demoTestHandoff.value = handoff
+    closeModal()
     selected.value = null
     await load()
   }
-  catch (reason) { await handleWriteError(reason) }
-  finally { processing.value = '' }
+  catch (reason) {
+    const mapped = mapRequestError(reason)
+    // Denied for who asks, or answered to a dialog since closed: the page's business. Otherwise the dialog's.
+    if (mapped.denied || !(reason instanceof CrmApiError) || session !== modalSession) { await handleWriteError(reason); return }
+    modalError.value = reason.code === 'VERSION_CONFLICT' ? message('demoRequests.versionConflict') : mapped.localizedMessage ?? mapped.message
+    modalRequestId.value = mapped.requestId
+    modalFieldErrors.value = reason.fieldErrors
+    if (reason.code === 'VERSION_CONFLICT') await load()
+  }
+  finally { processing.value = ''; if (session === modalSession) modalSaving.value = false }
 }
 async function downloadRequest(request: DemoRequestDto) {
   downloadingId.value = request.id
@@ -204,7 +222,7 @@ onBeforeUnmount(clearPreparedDownload)
       @manager="open('manager', $event)"
       @download="downloadRequest"
     />
-    <DemoRequestModal v-if="modalMode" :mode="modalMode" :request="selected" :accounts="accounts" :contacts="contacts" :selected-contact-id="modalContactId" :current-sales-contact="app.bootstrap?.user.id || ''" :busy="Boolean(processing)" :api-client="props.apiClient" @close="modalMode = ''" @create-contact="openContact" @submit="submitModal" />
+    <DemoRequestModal v-if="modalMode" :mode="modalMode" :request="selected" :accounts="accounts" :contacts="contacts" :selected-contact-id="modalContactId" :current-sales-contact="app.bootstrap?.user.id || ''" :busy="modalSaving" :api-client="props.apiClient" :error="modalError" :request-id="modalRequestId" :field-errors="modalFieldErrors" @close="closeModal" @create-contact="openContact" @submit="submitModal" />
     <ContactModal v-if="contactModal" :accounts="accounts" :sites="[]" :contacts="contacts" :fixed-account-id="contactAccountId" @close="contactModal = false" @submit="saveContact" />
   </div>
 </template>

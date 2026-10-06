@@ -4,7 +4,7 @@ import { computed, reactive, ref, watch } from 'vue'
 import { api as defaultApi, type CrmApi } from '@/api'
 import type { AccountSummaryDto, ContactSummaryDto, CreateDemoRequestInput, DemoRequestCommand, DemoRequestDto, DemoRequestFormData } from '@/types/crm'
 import type { StrategyOpportunityDto } from '@/types/workspaces'
-import { applyDemoRequestImport, cloneDemoRequestFormData, createEmptyDemoRequestFormData, getDemoRequestFormData, validateDemoRequestFormData } from '@/domain/demo-request-form'
+import { activeDemoWaferIndexes, activeDemoWafers, applyDemoRequestImport, cloneDemoRequestFormData, createEmptyDemoRequestFormData, getDemoRequestFormData, validateDemoRequestFormData } from '@/domain/demo-request-form'
 import { requestErrorMessage } from '@/api/request-state'
 import ModalShell from '@/design-system/ModalShell.vue'
 import RequiredMark from '@/design-system/RequiredMark.vue'
@@ -23,6 +23,10 @@ const props = defineProps<{
   currentSalesContact?: string
   busy?: boolean
   apiClient?: CrmApi
+  /** The server's refusal of the last save, shown in the dialog; the fields it names are flagged inline. */
+  error?: string
+  requestId?: string
+  fieldErrors?: Record<string, string>
 }>()
 const emit = defineEmits<{ close: []; submit: [payload: CreateDemoRequestInput | DemoRequestCommand]; 'create-contact': [accountId: string] }>()
 const { locale } = useI18n()
@@ -42,7 +46,11 @@ type ValidationSnapshot = Record<'en-US' | 'zh-CN', Record<string, string>>
 const validationSnapshot = ref<ValidationSnapshot | null>(null)
 const submitImmediately = ref(true)
 const customerExpectedDate = ref('')
+// The visible row each wafer row sent came from: the server names the rows it got (`wafers.0`), the form shows them all.
+const sentWaferRows = ref<number[]>([])
 const importBusy = ref(false)
+// Whether the errors shown include the server's (they are replaced by the editor's own at the next submit or import).
+let serverErrorsShown = false
 const importError = useLocaleMessage()
 const importNotice = useLocaleMessage()
 const isSelfTest = computed(() => opportunityId.value === SELF_TEST_OPTION)
@@ -86,7 +94,9 @@ async function loadOpportunities() {
   }
 }
 
-watch(() => [props.mode, props.request, props.accounts, props.currentSalesContact] as const, () => {
+// The Accounts are not watched: they are reference data, read again by the page after each of its actions, and
+// their refresh must not start the form over under the user.
+watch(() => [props.mode, props.request, props.currentSalesContact] as const, () => {
   accountId.value = props.request?.accountId || ''
   opportunityId.value = props.request?.requestMode === 'Self Test' ? SELF_TEST_OPTION : props.request?.opportunityId || ''
   primaryContactId.value = props.request?.primaryContactId || props.selectedContactId || ''
@@ -94,6 +104,7 @@ watch(() => [props.mode, props.request, props.accounts, props.currentSalesContac
     ? getDemoRequestFormData(props.request)
     : createEmptyDemoRequestFormData(props.currentSalesContact || '')
   errors.value = {}
+  serverErrorsShown = false
   opportunityLoadError.value = ''
   validationSnapshot.value = null
   submitImmediately.value = true
@@ -155,6 +166,11 @@ async function importCompletedForm(event: Event) {
         : 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'),
       size: file.size,
     })
+    // A save that went out while the form was being read counted the rows as they were: the form read is not applied.
+    if (props.busy) {
+      importError.value = localeMessage('The form was not applied: a save is in progress. Import it again once the save is answered.', '识别结果未应用：保存进行中，等保存返回后再导入。')
+      return
+    }
     const applied = applyDemoRequestImport(
       formData.value,
       response.data,
@@ -168,6 +184,7 @@ async function importCompletedForm(event: Event) {
     if (applied.primaryContactId) primaryContactId.value = applied.primaryContactId
     if (applied.customerExpectedDate) customerExpectedDate.value = applied.customerExpectedDate
     errors.value = {}
+    serverErrorsShown = false
     validationSnapshot.value = null
     importNotice.value = localeMessage(`Detected ${response.data.detectedFields.length} fields from ${response.data.fileName}; review before saving.`, `已从 ${response.data.fileName} 识别并回填 ${response.data.detectedFields.length} 个字段，请检查后再保存。`)
   } catch (reason) {
@@ -193,13 +210,16 @@ function submit() {
     addModalValidation(validationSnapshotValue['zh-CN'], 'zh-CN')
     validationSnapshot.value = validationSnapshotValue
     errors.value = { ...validationSnapshotValue[locale.value] }
+    serverErrorsShown = false
     if (Object.keys(errors.value).length) return
+    sentWaferRows.value = activeDemoWaferIndexes(formData.value)
     emit('submit', {
       accountId: isSelfTest.value ? '' : accountId.value,
       opportunityId: opportunityId.value === SELF_TEST_OPTION ? undefined : opportunityId.value,
       requestMode: opportunityId.value === SELF_TEST_OPTION ? 'Self Test' : 'Opportunity',
       primaryContactId: primaryContactId.value,
-      formData: cloneDemoRequestFormData(formData.value),
+      // The rows that hold data, as counted: a row left empty is not sent (the server asks for every cell of a row it gets).
+      formData: { ...cloneDemoRequestFormData(formData.value), wafers: activeDemoWafers(formData.value) },
       customerExpectedDate: customerExpectedDate.value,
       submit: submitImmediately.value,
     })
@@ -213,6 +233,50 @@ function submit() {
       : { type: 'manager_approve', comment: review.comment })
   }
 }
+
+// The fields the server named in its refusal are flagged as the editor's own checks flag them (the next submit
+// checks the draft anew and replaces them), in the language of the moment, and translated again with the language
+// only while they are still the errors shown. Declared last: the form's own set-up above clears the errors first.
+function flagServerErrors() {
+  const fieldErrors = props.fieldErrors
+  if (!fieldErrors || !Object.keys(fieldErrors).length) return
+  const flagged: Record<string, string> = {}
+  for (const [key, text] of Object.entries(fieldErrors)) {
+    // `wafers.<n>` counts the rows sent; the row shown is the one it came from (the rows keep their places while
+    // the save is out: the form's row buttons are disabled then), as moved by the rows removed since; a row removed
+    // takes its hint with it.
+    const sent = /^wafers\.(\d+)(\..*)?$/.exec(key)
+    const row = sent ? (sentWaferRows.value[Number(sent[1])] ?? Number(sent[1])) : null
+    if (row === -1) continue
+    const visibleKey = sent ? `wafers.${row}${sent[2] ?? ''}` : key
+    flagged[visibleKey] = text === 'Required' ? (locale.value === 'en-US' ? 'Enter this field' : '请填写此项') : text
+  }
+  errors.value = { ...errors.value, ...flagged }
+  serverErrorsShown = true
+}
+
+// A wafer row removed after a refusal: the hints of the rows below it move up with them, the removed row's go, and
+// the rows the server counted are remembered as they stand now (a language change re-reads its hints from there).
+function rowsMovedUp(messages: Record<string, string>, removed: number): Record<string, string> {
+  const moved: Record<string, string> = {}
+  for (const [key, text] of Object.entries(messages)) {
+    const keyed = /^wafers\.(\d+)(\..*)?$/.exec(key)
+    if (!keyed) { moved[key] = text; continue }
+    const row = Number(keyed[1])
+    if (row === removed) continue
+    moved[row > removed ? `wafers.${row - 1}${keyed[2] ?? ''}` : key] = text
+  }
+  return moved
+}
+function waferRowRemoved(removed: number) {
+  sentWaferRows.value = sentWaferRows.value.map((row) => row === removed ? -1 : row > removed ? row - 1 : row)
+  errors.value = rowsMovedUp(errors.value, removed)
+  if (validationSnapshot.value) {
+    validationSnapshot.value = { 'en-US': rowsMovedUp(validationSnapshot.value['en-US'], removed), 'zh-CN': rowsMovedUp(validationSnapshot.value['zh-CN'], removed) }
+  }
+}
+watch(() => props.fieldErrors, flagServerErrors, { immediate: true })
+watch(locale, () => { if (serverErrorsShown) flagServerErrors() })
 </script>
 
 <template>
@@ -220,10 +284,12 @@ function submit() {
     :title="mode === 'create' ? (locale === 'en-US' ? 'New Demo Request' : '新建 Demo Request') : mode === 'edit' ? (locale === 'en-US' ? 'Edit Demo Request' : '修改 Demo Request') : mode === 'engineer' ? (locale === 'en-US' ? 'FAE Review' : '工程评估') : (locale === 'en-US' ? 'Boss Approval' : '经理审批')"
     :eyebrow="mode === 'create' || mode === 'edit' ? (locale === 'en-US' ? 'DEMO REQUEST FORM' : 'DEMO REQUEST 表单') : mode === 'engineer' ? (locale === 'en-US' ? 'FAE REVIEW' : '工程评估') : (locale === 'en-US' ? 'BOSS APPROVAL' : '经理审批')"
     :busy="busy"
+    :submit-disabled="importBusy"
     :wide="mode === 'create' || mode === 'edit'"
     @close="$emit('close')"
     @submit="submit"
   >
+    <p v-if="error" class="save-error" data-modal-error role="alert"><span>{{ error }}</span><small v-if="requestId">Request ID · {{ requestId }}</small></p>
     <template v-if="mode === 'create' || mode === 'edit'">
       <section class="drf-import-panel" data-demo-request-import>
         <div>
@@ -263,11 +329,13 @@ function submit() {
       </div>
       <DemoRequestForm
         v-model="formData"
+        @remove-wafer="waferRowRemoved"
         v-model:account-id="accountId"
         :accounts="accounts || []"
         :contacts="contacts || []"
         v-model:primary-contact-id="primaryContactId"
         :errors="errors"
+        :busy="busy"
         :disable-account="mode === 'edit'"
         :show-required-marks="mode === 'create'"
         :hide-customer-information="isSelfTest"
@@ -295,4 +363,5 @@ function submit() {
 <style scoped>
 .drf-import-panel{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;gap:8px 16px;padding:14px 16px;margin-bottom:14px;background:#f3f8f7;border:1px solid #cfe1dd;border-radius:10px}.drf-import-panel>div{display:grid;gap:4px}.drf-import-panel strong{color:var(--crm-navy);font-size:11px}.drf-import-panel span{color:var(--crm-text-muted);font-size:9px;line-height:1.5}.drf-import-button{display:inline-flex;align-items:center;justify-content:center;min-height:34px;padding:8px 12px;color:#fff;background:var(--crm-teal);border-radius:8px;font-size:9px;font-weight:800;cursor:pointer}.drf-import-button.disabled{opacity:.55;cursor:not-allowed}.drf-import-button input{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}.drf-import-panel p{grid-column:1/-1;margin:0;color:#27794a;font-size:9px}.drf-import-panel .import-error{color:#b64545}
 .form-grid,.request-meta-grid{display:grid;gap:13px}.form-grid{grid-template-columns:1fr 1fr}.request-meta-grid{grid-template-columns:1fr}.form-grid label,.request-meta-grid label{display:grid;gap:6px;color:var(--crm-text-muted);font-size:9px;font-weight:700}.form-grid .full{grid-column:1/-1}.form-grid input,.form-grid select,.form-grid textarea,.request-meta-grid input,.request-meta-grid select{width:100%;min-height:36px;padding:8px 10px;color:var(--crm-text);background:#fff;border:1px solid var(--crm-line);border-radius:8px;outline:0}.form-grid textarea{min-height:76px;resize:vertical}.form-grid input:focus,.form-grid select:focus,.form-grid textarea:focus,.request-meta-grid input:focus,.request-meta-grid select:focus{border-color:var(--crm-teal)}.request-meta-grid small{color:#9aa6a8;font-size:8px;font-weight:400}.request-meta-grid [data-field-error]{color:#b64545;font-weight:600}.submit-choice{display:flex;align-items:center;gap:8px;margin-top:14px;color:var(--crm-text-muted);font-size:9px;font-weight:700}.submit-choice input{width:16px;height:16px}@media(max-width:560px){.form-grid{grid-template-columns:1fr}.form-grid .full{grid-column:auto}}
+.save-error{display:grid;gap:4px;margin:0 0 12px;padding:10px;color:var(--crm-danger);background:var(--crm-danger-soft);border-radius:8px;font-size:9px}.save-error small{color:var(--crm-text-muted);font-size:8px}
 </style>
