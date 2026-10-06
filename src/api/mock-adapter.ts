@@ -3815,6 +3815,12 @@ export function createMockApi(options: {
       return response({ id: actionId })
     },
 
+    async getDemoResources() { throw new CrmApiError('BACKEND_NOT_CONNECTED', 'Demo resources require Frappe.', 'demo-resources') },
+    async saveDemoResource() { throw new CrmApiError('BACKEND_NOT_CONNECTED', 'Demo resources require Frappe.', 'demo-resources') },
+    async getDemoUnavailability() { throw new CrmApiError('BACKEND_NOT_CONNECTED', 'Demo resources require Frappe.', 'demo-resources') },
+    async saveDemoUnavailability() { throw new CrmApiError('BACKEND_NOT_CONNECTED', 'Demo resources require Frappe.', 'demo-resources') },
+    async getDemoResourceSchedule() { throw new CrmApiError('BACKEND_NOT_CONNECTED', 'Demo resources require Frappe.', 'demo-resources') },
+    async saveDemoResourceSchedule() { throw new CrmApiError('BACKEND_NOT_CONNECTED', 'Demo resources require Frappe.', 'demo-resources') },
     async listDemoWorkflows(query: ListQuery = {}) {
       await ensureDemoPrimaryContacts()
       await wait()

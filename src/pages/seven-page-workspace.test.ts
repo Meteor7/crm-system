@@ -73,12 +73,13 @@ describe('P1 business workspace', () => {
     ]))
   })
 
-  it('publishes Demo, Demo Request and Demo Test as separate navigation modules', () => {
+  it('publishes Demo, Demo Request, resources and Demo Test as separate navigation modules', () => {
     const demoGroup = navigation.find((group) => group.label === 'Demo 中心')
 
     expect(demoGroup?.items.map(({ key, label, path }) => ({ key, label, path }))).toEqual([
       { key: 'demo-workflow', label: 'Demo 档案', path: '/demo-workflow' },
       { key: 'demo-requests', label: 'Demo Request', path: '/demo-requests' },
+      { key: 'demo-resources', label: 'Demo 设备资源', path: '/demo-resources' },
       { key: 'demo-test', label: 'Demo Test', path: '/evaluations' },
     ])
   })

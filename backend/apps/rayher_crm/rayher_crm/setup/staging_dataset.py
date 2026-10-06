@@ -46,6 +46,7 @@ ALLOWED_SITES = {"rayher-crm.test", "203.0.113.58"}
 
 # Deleted with raw SQL, dependents first. Child tables and immutable history rows included.
 WIPE_ORDER = (
+    "CRM Demo Resource Impact", "CRM Demo Unavailability", "CRM Demo Resource",
     "CRM Quotation Item", "CRM Quotation Payment Term",
     "CRM Notification Event", "CRM File Access Audit",
     "CRM Warning Handling Revision", "CRM Warning Handling",

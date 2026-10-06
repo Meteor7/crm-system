@@ -177,5 +177,6 @@ scheduler_events = {
         "rayher_crm.services.ddl_reminders.send_ddl_reminders",
         # Frappe runs each daily job on its own, in no set order; quotation_expiry itself skips versions past valid_until.
         "rayher_crm.services.warning_notifications.send_warning_notifications",
+        "rayher_crm.services.demo_resources.capture_impacts",
     ],
 }

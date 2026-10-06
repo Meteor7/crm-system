@@ -1,5 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
+import { api as defaultApi, type CrmApi } from '@/api'
+import DemoResourceSchedulePanel from '@/features/demo-resources/DemoResourceSchedulePanel.vue'
 import { salesEnumLabel } from '@/features/shared/sales-i18n'
 import type { DemoWorkflowDto } from '@/types/workspaces'
 import DemoProjectTimeline from './DemoProjectTimeline.vue'
@@ -10,10 +12,12 @@ import { formatDisplayDate } from '@/domain/time'
 import { useI18n } from '@/i18n'
 
 const props = withDefaults(defineProps<{
+  apiClient?: CrmApi
   item: DemoWorkflowDto
   showOverview?: boolean
   showTimeline?: boolean
 }>(), {
+  apiClient: () => defaultApi,
   showOverview: true,
   showTimeline: true,
 })
@@ -79,6 +83,8 @@ const customerReviewLabel = (status: string) => status === 'Pending' ? t('evalua
         <span v-for="wafer in item.request.wafers" :key="wafer.id">{{ wafer.id }} · {{ wafer.specificity }} · {{ wafer.detail }}</span>
       </div>
     </section>
+
+    <DemoResourceSchedulePanel v-if="item.evaluation" :evaluation-id="item.evaluation.id" :api-client="apiClient" :refresh-token="item.evaluation.modified ?? item.status" />
 
     <section v-if="item.evaluation" class="workspace-panel test-summary" data-demo-sensitive="test-runs">
        <header><h2>{{ copy('Demo Test', 'Demo 测试') }}</h2><span>{{ processLabel(item.evaluation.status) }}</span></header>

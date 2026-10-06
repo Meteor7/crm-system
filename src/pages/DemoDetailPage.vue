@@ -231,7 +231,7 @@ onMounted(load)
       <p v-if="artifactError" class="inline-error" data-artifact-error>{{ artifactError }}<small v-if="artifactRequestId">Request ID {{ artifactRequestId }}</small></p>
 
       <div v-if="tab === 'information'" class="detail-content-grid" data-demo-detail-information>
-        <DemoArchiveDetail
+        <DemoArchiveDetail :api-client="apiClient"
           :item="project"
           :show-overview="false"
           :show-timeline="false"

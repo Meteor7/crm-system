@@ -51,6 +51,7 @@ export const navigation: NavigationGroup[] = [
     items: [
       { key: 'demo-workflow', label: 'Demo 档案', i18nKey: 'nav.demoArchive', path: '/demo-workflow', icon: ClipboardCheck, capabilities: ['demo_request:view', 'evaluation:view'] },
       { key: 'demo-requests', label: 'Demo Request', i18nKey: 'nav.demoRequests', path: '/demo-requests', icon: FileText, capabilities: ['demo_request:view'] },
+      { key: 'demo-resources', label: 'Demo 设备资源', i18nKey: 'nav.demoResources', path: '/demo-resources', icon: Cpu, capabilities: ['evaluation:view'] },
       { key: 'demo-test', label: 'Demo Test', i18nKey: 'nav.demoTest', path: '/evaluations', icon: FlaskConical, capabilities: ['evaluation:view'] },
     ],
   },

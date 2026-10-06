@@ -64,6 +64,15 @@ def _lock_evaluation(name: str):
     return frappe.get_doc("CRM Evaluation", name)
 
 
+def _lock_status_change(name: str, expected_modified: Any):
+    # Resource capture scans the status index before locking Evaluation rows.
+    # Take its mutex before our primary-key lock so a status-index update cannot
+    # deadlock against a concurrent capture waiting for this same Evaluation.
+    from rayher_crm.services.demo_resources import lock_catalogue
+    lock_catalogue()
+    return lock_document("CRM Evaluation", name, expected_modified, "NOT_FOUND")
+
+
 def serialize_test_run(doc) -> dict[str, Any]:
     return {
         "id": doc.name, "date": str(doc.run_date or ""), "lot": doc.lot,
@@ -290,7 +299,7 @@ def update_evaluation_status(name: str, command: dict[str, Any], expected_modifi
     assert_capability("evaluation:write")
     _require_evaluation(name)
     next_status = command.get("status") if isinstance(command, Mapping) else None
-    doc = lock_document("CRM Evaluation", name, expected_modified, "NOT_FOUND")
+    doc = _lock_status_change(name, expected_modified)
     if not frappe.has_permission("CRM Evaluation", "read", doc=doc, user=frappe.session.user):
         raise CrmApiException("SCOPE_DENIED", "The Evaluation is outside the current user scope.")
     if next_status == "Testing" and not all(
@@ -348,6 +357,7 @@ def update_evaluation_status(name: str, command: dict[str, Any], expected_modifi
         doc.acceptance = next_status if next_status in TERMINAL_STATUSES else "Pending"
         commented_round = int(doc.test_round or 1)
         previous_deadline = str(doc.test_run_deadline or "")
+        previous_resource = (doc.demo_resource or "", str(doc.resource_start or ""), str(doc.resource_end or ""))
         if is_retest:
             # A retest opens a new round. Artifacts are append-only and stay exactly
             # where they are; clearing the pointers re-arms the Internal Review gate so
@@ -357,6 +367,10 @@ def update_evaluation_status(name: str, command: dict[str, Any], expected_modifi
             # The previous round's deadline is history too: left in place it would flag
             # the new round as overdue and keep the DDL reminders firing for it.
             doc.test_run_deadline = None
+            doc.demo_resource = None
+            doc.resource_start = None
+            doc.resource_end = None
+            doc.resource_revision = int(doc.resource_revision or 0) + 1
             doc.report_status = "Not Ready"
             doc.report_artifact_id = None
             doc.internal_report_artifact_id = None
@@ -373,6 +387,8 @@ def update_evaluation_status(name: str, command: dict[str, Any], expected_modifi
                 "author": frappe.session.user,
                 "at": frappe.utils.now_datetime(),
             }).insert(ignore_permissions=True)
+        if is_retest and any(previous_resource):
+            append_evaluation_history(doc, "Resource Schedule", f"Cleared round {commented_round} resource arrangement for retest", frappe.as_json(previous_resource), "")
         if is_retest and previous_deadline:
             # Mirror set_evaluation_test_run_deadline: every deadline change leaves a
             # Deadline row. Written before the Status row so the retest stays newest.
@@ -422,7 +438,7 @@ def terminate_evaluation(name: str, payload: Mapping[str, Any], expected_modifie
             f"reason must be at most {TERMINATION_REASON_MAX_LENGTH} characters.",
             field_errors={"reason": "Too long"},
         )
-    doc = lock_document("CRM Evaluation", name, expected_modified, "NOT_FOUND")
+    doc = _lock_status_change(name, expected_modified)
     if not frappe.has_permission("CRM Evaluation", "read", doc=doc, user=frappe.session.user):
         raise CrmApiException("SCOPE_DENIED", "The Evaluation is outside the current user scope.")
     if doc.status in TERMINAL_STATUSES:
@@ -455,7 +471,7 @@ def complete_evaluation_preparation(
     if branch not in {"wafer", "test"}:
         raise CrmApiException("VALIDATION_ERROR", "branch must be wafer or test.")
     _require_evaluation(name)
-    doc = lock_document("CRM Evaluation", name, expected_modified, "NOT_FOUND")
+    doc = _lock_status_change(name, expected_modified)
     if not frappe.has_permission("CRM Evaluation", "read", doc=doc, user=frappe.session.user):
         raise CrmApiException("SCOPE_DENIED", "The Evaluation is outside the current user scope.")
     if doc.status not in PREPARATION_STATUSES:
@@ -901,7 +917,7 @@ def list_demo_workflows(query: dict[str, Any] | None = None):
                 "managerDecision": request.manager_decision or "", "managerComment": request.manager_comment or "",
             },
             "evaluation": ({
-                "id": evaluation["id"], "status": evaluation["status"], "owner": evaluation["owner"],
+                "id": evaluation["id"], "modified": evaluation["modified"], "status": evaluation["status"], "owner": evaluation["owner"],
                 "testRunDeadline": evaluation["testRunDeadline"], "runs": evaluation["runs"],
                 "waferPreparationStatus": evaluation["waferPreparationStatus"],
                 "waferPreparationCompletedBy": evaluation.get("waferPreparationCompletedBy", ""),

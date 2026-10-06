@@ -175,6 +175,11 @@ def calculate(query):
         data, query, now, coverage, frappe.conf.get("crm_cockpit_conversion_threshold", 45))
     result["_details"].update(conversion_details)
     result["pipelineCoverage"] = pipeline_coverage(result)
+    from rayher_crm.services.demo_resources import warning_summary
+    result["demoResources"] = warning_summary(query)
+    resource_risks = result["demoResources"]
+    result["warnings"].append({"key": "demo_resources", "count": metric(resource_risks["count"],
+        "insufficient" if resource_risks["unknown"] else "ready", "missing_resource_schedule" if resource_risks["unknown"] else None)})
     return result
 
 
@@ -232,6 +237,7 @@ def get_warnings(query):
               "stage6NoPoItems": details["stage6_no_po"],
               "closeDateSlipItems": details["close_date_slip"],
               "closeDateSlipHandledItems": details["close_date_slip_handled"],
+              "demoResources": result["demoResources"],
               # S6 deals with a recorded action whose follow-up day is still ahead: listed, never counted.
               "stage6NoPoHandledItems": details["stage6_no_po_handled"]}
     result["names"] = _names(result)

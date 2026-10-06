@@ -40,6 +40,23 @@ async function setup(role: UserRole = 'Manager', attach = false) {
 }
 
 describe('Warnings page', () => {
+  it('separates currently affected Demos from unknown schedules and links to the archive', async () => {
+    const { wrapper, api } = await setup()
+    const data = warningsFixture()
+    data.demoResources = { count: 1, unknown: 1, items: [
+      { id: 'E1', demoRequestId: 'DR1', title: 'Affected sample', customer: 'Customer', owner: 'alice', engineer: 'eng', resourceName: 'M1', state: 'blocked', impacts: [] },
+      { id: 'E2', demoRequestId: 'DR2', title: 'Missing arrangement', customer: 'Customer', owner: 'alice', engineer: 'eng', resourceName: '', state: 'unknown', impacts: [] },
+    ] }
+    api.getWarnings = vi.fn(async () => ({ data, warnings: [], meta }))
+    await wrapper.get('select[aria-label="Market"]').setValue('Frontend'); await flushPromises()
+    const zone = wrapper.get('[data-demo-resource-warnings]')
+    expect(zone.text()).toContain('不按所选历史周期回溯')
+    expect(zone.text()).toContain('1 个 Demo 受影响')
+    expect(zone.text()).toContain('1 个 Demo 设备／时间资料不完整')
+    expect(zone.get('a[href="/demo-workflow/DR1"]').text()).toContain('Affected sample')
+    wrapper.unmount()
+  })
+
   it('shows a quarter postponement and saves the action against its own event type', async () => {
     const { wrapper, api } = await setup()
     const data = warningsFixture()

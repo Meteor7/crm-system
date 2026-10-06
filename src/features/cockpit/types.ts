@@ -1,3 +1,4 @@
+import type { DemoResourceWarnings } from '@/features/demo-resources/types'
 export type PeriodKind = 'week' | 'month' | 'quarter' | 'year'
 export type ActivityKey = 'visits' | 'leads' | 'tests' | 'quotes'
 export interface ReviewQuery { period?: PeriodKind; anchor?: string; sales?: string; market?: string; region?: string; equipment?: string }
@@ -67,6 +68,7 @@ export interface PipelineCoverage {
   openPipeline: Metric; remainingTarget: Metric; ratio: Metric; referenceMin: number; referenceMax: number
 }
 export interface ReviewDto {
+  demoResources?: DemoResourceWarnings
   period: { kind: PeriodKind; start: string; end: string; asOf: string; previousStart: string; previousEnd: string; complete: boolean; previousAnchor: string; nextAnchor: string; hasNext: boolean }
   // equipment: the Opportunities board catalog; a record matches through the opportunity it is linked to.
   filters: { sales: { id: string; name: string }[]; markets: string[]; regions: string[]; regionParents?: Record<string, string>; regionReady: boolean; equipment?: string[] }
@@ -86,6 +88,7 @@ export interface ReviewDto {
   targets: Target[]
 }
 export interface WarningsDto {
+  demoResources?: DemoResourceWarnings
   period: ReviewDto['period']
   filters: ReviewDto['filters']
   warnings: ReviewDto['warnings']

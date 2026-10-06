@@ -220,6 +220,7 @@ function showAnchor(event: Event) { dateDraft.value = null; (event.target as HTM
 // The period before the earliest one the cockpit shows (the one that reaches into 2000) cannot be asked for.
 const atEarliestPeriod = computed(() => Boolean(data.value) && data.value!.period.start <= EARLIEST_COCKPIT_DATE)
 async function details(key: string, page = 1) {
+  if (key === 'demo_resources') { await router.push(warningsRoute.value); return }
   const id = ++detailRevision
   detailKey.value = key
   detailData.value = null

@@ -112,3 +112,10 @@ def install_stage5f_indexes() -> None:
         frappe.db.add_index(
             "CRM Warning Handling Revision", ["handling", "recorded_at"], WARNING_HANDLING_REVISION_INDEX,
         )
+    if frappe.db.table_exists("CRM Evaluation") and frappe.db.has_column("CRM Evaluation", "demo_resource"):
+        frappe.db.add_index("CRM Evaluation", ["demo_resource", "name"], "crm_demo_resource_schedule")
+        frappe.db.add_index("CRM Evaluation", ["status", "demo_resource", "name"], "crm_active_demo_resource_schedule")
+    if frappe.db.table_exists("CRM Demo Unavailability"):
+        frappe.db.add_index("CRM Demo Unavailability", ["resource", "status"], "crm_demo_resource_availability")
+    if frappe.db.table_exists("CRM Demo Resource Impact"):
+        frappe.db.add_index("CRM Demo Resource Impact", ["evaluation", "detected_at"], "crm_demo_resource_history")

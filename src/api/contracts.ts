@@ -1,4 +1,5 @@
 import type { BoardFilters, BoardQuery, BoardResult, SavedBoardQuery, SaveBoardQueryInput } from '@/features/opportunity-board/types'
+import type { DemoResource, DemoResourceInput, DemoResourceCatalogue, DemoUnavailability, DemoUnavailabilityInput, DemoResourceSchedule, DemoResourceScheduleInput } from '@/features/demo-resources/types'
 /**
  * ============================================================================
  *  CRM 后端数据库对接契约(BINDING)— Frappe / MariaDB
@@ -330,6 +331,12 @@ export interface CrmApi {
   deleteOpportunityAction(opportunityId: string, actionId: string): Promise<ApiResponse<{ id: string }>>
   listDemoWorkflows(query?: ListQuery): Promise<ApiResponse<PageData<DemoWorkflowDto>>>
   getDemoWorkflow(id: string): Promise<ApiResponse<DemoWorkflowDto>>
+  getDemoResources(): Promise<ApiResponse<DemoResourceCatalogue>>
+  saveDemoResource(input: DemoResourceInput, id?: string, expectedModified?: string): Promise<ApiResponse<DemoResource>>
+  getDemoUnavailability(resourceId: string): Promise<ApiResponse<DemoUnavailability[]>>
+  saveDemoUnavailability(resourceId: string, input: DemoUnavailabilityInput, id?: string, expectedModified?: string): Promise<ApiResponse<DemoUnavailability>>
+  getDemoResourceSchedule(evaluationId: string): Promise<ApiResponse<DemoResourceSchedule>>
+  saveDemoResourceSchedule(evaluationId: string, input: DemoResourceScheduleInput, expectedModified: string): Promise<ApiResponse<DemoResourceSchedule>>
   listDemoComments(demoRequestId: string, query?: ListQuery): Promise<ApiResponse<PageData<DemoCommentDto>>>
   addDemoComment(demoRequestId: string, input: { body: string; mentionedPersonIds?: string[] }): Promise<ApiResponse<DemoCommentDto>>
   listInstalledTools(query?: ListQuery): Promise<ApiResponse<PageData<InstalledToolDto>>>

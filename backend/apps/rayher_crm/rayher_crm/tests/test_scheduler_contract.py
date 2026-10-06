@@ -28,6 +28,7 @@ class TestSchedulerContract(FrappeTestCase):
             "rayher_crm.services.quotations.expire_quotations",
             "rayher_crm.services.ddl_reminders.send_ddl_reminders",
             "rayher_crm.services.warning_notifications.send_warning_notifications",
+            "rayher_crm.services.demo_resources.capture_impacts",
         ))
         for method in DAILY_JOBS:
             rows = frappe.get_all(

@@ -10,7 +10,7 @@
     {"fieldname": "demo_request", "fieldtype": "Link", "label": "Demo Request", "options": "CRM Demo Request", "reqd": 1},
     {"fieldname": "actor", "fieldtype": "Link", "label": "Actor", "options": "User", "reqd": 1},
     {"fieldname": "at", "fieldtype": "Datetime", "label": "At", "reqd": 1},
-    {"fieldname": "event_type", "fieldtype": "Select", "label": "Event Type", "options": "Created\nStatus\nPreparation\nTest Run\nDeadline\nReport", "reqd": 1, "in_list_view": 1},
+    {"fieldname": "event_type", "fieldtype": "Select", "label": "Event Type", "options": "Created\nStatus\nPreparation\nTest Run\nDeadline\nReport\nResource Schedule", "reqd": 1, "in_list_view": 1},
     {"fieldname": "from_value", "fieldtype": "Small Text", "label": "From Value"},
     {"fieldname": "to_value", "fieldtype": "Small Text", "label": "To Value"},
     {"fieldname": "summary", "fieldtype": "Small Text", "label": "Summary", "reqd": 1}

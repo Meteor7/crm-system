@@ -30,6 +30,19 @@ async function setup(role: UserRole = 'Manager') {
   return { wrapper, api, router, app: useAppStore(pinia) }
 }
 describe('Manager Review', () => {
+  it('opens current Demo resource warnings instead of an unsupported historic drilldown', async () => {
+    const { wrapper, api, router } = await setup()
+    const data = reviewFixture()
+    data.warnings.push({ key: 'demo_resources', count: { value: 1, state: 'insufficient', reason: 'missing_resource_schedule' } })
+    api.getReview = vi.fn(async () => ({ data, warnings: [], meta: { requestId: 'resources', generatedAt: '' } }))
+    await wrapper.get('select[aria-label="Market"]').setValue('Frontend'); await flushPromises()
+    const button = wrapper.findAll('.warning-links button').find(row => row.text().includes('Demo 设备风险'))!
+    await button.trigger('click'); await flushPromises()
+    await vi.waitFor(() => expect(router.currentRoute.value.path).toBe('/warnings'))
+    expect(api.getReviewDetails).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
   it('asks for a period only when the date field holds a whole date it can show', async () => {
     // Noon on 2026-10-04 in Shanghai.
     vi.useFakeTimers({ toFake: ['Date'] }); vi.setSystemTime(new Date('2026-10-04T04:00:00Z'))

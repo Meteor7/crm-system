@@ -52,6 +52,7 @@ export const routes: RouteRecordRaw[] = [
   { path: '/opportunities-booking', redirect: retiredCombinedRedirect },
   { path: '/opportunity-strategy', redirect: retiredSalesRedirect },
   { path: '/demo-requests', name: 'demo-requests', component: () => import('@/pages/DemoRequestsPage.vue') },
+  { path: '/demo-resources', name: 'demo-resources', component: () => import('@/pages/DemoResourcesPage.vue') },
   { path: '/evaluations', name: 'evaluations', component: () => import('@/pages/EvaluationsPage.vue') },
   { path: '/demo-workflow/:demoId', name: 'demo-detail', component: () => import('@/pages/DemoDetailPage.vue'), meta: { navigationPath: '/demo-workflow' } },
   { path: '/demo-workflow', name: 'demo-workflow', component: () => import('@/pages/DemoWorkflowPage.vue') },

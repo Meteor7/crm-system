@@ -303,7 +303,7 @@ onMounted(load)
       @open="openDetail"
     />
 
-    <DemoArchiveDetail
+    <DemoArchiveDetail :api-client="apiClient"
       v-else-if="(surface === 'board' || surface === 'project') && selected"
       :item="selected"
       @download="downloadArtifact"
@@ -323,7 +323,7 @@ onMounted(load)
         @group-change="updateGroupBy"
         @open="openDetail"
       />
-      <DemoArchiveDetail
+      <DemoArchiveDetail :api-client="apiClient"
         v-if="selected"
         :item="selected"
         @download="downloadArtifact"

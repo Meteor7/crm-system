@@ -460,6 +460,7 @@ export interface DemoWorkflowDto {
     wafers?: Array<{ id: string; specificity: string; detail: string }>
   }
   evaluation?: {
+    modified?: string
     id: string
     status: string
     owner: string
