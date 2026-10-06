@@ -21,6 +21,21 @@ afterEach(() => {
 })
 
 describe('Frappe method contract', () => {
+  it('reads the opportunity library and saves links with the exact parent version', async () => {
+    const fetchMock = vi.fn().mockImplementation(async () => success({}))
+    const api = createFrappeApi({ fetchImpl: fetchMock })
+    await api.getOpportunityDocuments('OPP-1')
+    const input = { productScorecard: 'https://example.com/card', dealScorecard: '' }
+    await api.saveOpportunityDocumentLinks('OPP-1', input, '2026-10-01T00:00:00Z')
+    const readUrl = new URL(fetchMock.mock.calls[0][0], 'http://localhost')
+    expect(readUrl.pathname).toBe('/api/method/rayher_crm.api.v1.opportunity_documents.get_documents')
+    expect(readUrl.searchParams.get('opportunityId')).toBe('OPP-1')
+    const [url, init] = fetchMock.mock.calls[1] as [string, RequestInit]
+    expect(url).toBe('/api/method/rayher_crm.api.v1.opportunity_documents.save_links')
+    expect(init.method).toBe('POST')
+    expect(Object.fromEntries(new URLSearchParams(init.body as string))).toEqual({ opportunityId: 'OPP-1', input: JSON.stringify(input), expectedModified: '2026-10-01T00:00:00Z' })
+  })
+
   it('posts recovery edits with both parent and recovery versions', async () => {
     const fetchMock = vi.fn().mockResolvedValue(success({ id: 'REC-1', plan: 'Meet buyer' }))
     const api = createFrappeApi({ fetchImpl: fetchMock })
@@ -166,6 +181,8 @@ describe('Frappe method contract', () => {
       updateOpportunityStakeholder: 'opportunities.update_opportunity_stakeholder',
       deleteOpportunityStakeholder: 'opportunities.delete_opportunity_stakeholder',
       listOpportunityStatuses: 'opportunity_status.list_records',
+      getOpportunityDocuments: 'opportunity_documents.get_documents',
+      saveOpportunityDocumentLinks: 'opportunity_documents.save_links',
       saveOpportunityStatus: 'opportunity_status.save_record',
       getOpportunityStatusFile: 'opportunity_status.download_file',
       createOpportunityAction: 'opportunities.create_opportunity_action',

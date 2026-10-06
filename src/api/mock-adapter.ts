@@ -1630,6 +1630,12 @@ export function createMockApi(options: {
     assertCapability(capabilities, 'cockpit:view')
     throw new CrmApiError('BACKEND_NOT_CONNECTED', 'Review requires the business API.', 'review_unavailable', false)
   }
+  // Contract-only placeholders for the document library: no capability of their own is asserted, so a Sales or
+  // Engineer test client is refused for this reason and not for cockpit:view, and a Manager is not told that
+  // Review is unavailable.
+  const documentsUnavailable = async (): Promise<never> => {
+    throw new CrmApiError('BACKEND_NOT_CONNECTED', 'Opportunity documents require the business API.', 'documents_unavailable', false)
+  }
   const boardUnavailable = async (): Promise<never> => {
     assertCapability(capabilities, "deal:view")
     throw new CrmApiError("BACKEND_NOT_CONNECTED", "Opportunities board requires the business API.", "board_unavailable", false)
@@ -1649,6 +1655,8 @@ export function createMockApi(options: {
       throw new CrmApiError('BACKEND_NOT_CONNECTED', 'Plan requires the business API.', 'plan_unavailable', false)
     },
     getReview: reviewUnavailable,
+    getOpportunityDocuments: documentsUnavailable,
+    saveOpportunityDocumentLinks: documentsUnavailable,
     getReviewDetails: reviewUnavailable,
     saveReviewTarget: reviewUnavailable,
     getWarnings: reviewUnavailable,

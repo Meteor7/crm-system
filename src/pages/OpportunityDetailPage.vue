@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { systemValueLabel } from '@/features/shared/system-labels'
 import { personnelDisplayName } from '@/demo/personnel'
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { ArrowLeft, Building2, CircleDollarSign, ClipboardCheck, FileCheck2, FileText, PackageCheck, Pencil, Plus, RotateCcw, ShieldCheck, Target, Trash2, Users } from '@lucide/vue'
 import { useRoute, useRouter } from 'vue-router'
 import { api as defaultApi, CrmApiError, type CrmApi } from '@/api'
@@ -146,6 +146,12 @@ async function deleteOpportunity() {
   }
 }
 const routeOpportunityId = computed(() => typeof route.params.opportunityId === 'string' ? route.params.opportunityId : '')
+watch([loading, () => route.hash], async ([pending, hash]) => {
+  if (!pending && hash === '#blue-sheet') {
+    await nextTick()
+    document.getElementById('blue-sheet')?.scrollIntoView?.({ block: 'start' })
+  }
+})
 const contactSites = computed(() => Object.entries(sitesByAccount.value).flatMap(([accountId, sites]) =>
   sites.map((site) => ({ ...site, accountId })),
 ))
@@ -464,6 +470,7 @@ onMounted(async () => {
           <div><small>Opportunity · {{ selected.id }}</small><h1>{{ selected.title }}</h1><p>{{ selected.account }} · {{ siteDisplay }}</p></div>
         </div>
         <div class="record-actions">
+          <RouterLink class="secondary-button" data-testid="opportunity-documents-link" :to="{ name: 'opportunity-documents', params: { opportunityId: selected.id } }"><FileText :size="14" />{{ locale === 'en-US' ? 'Documents' : '商机资料' }}</RouterLink>
           <RouterLink v-if="quotationId" class="secondary-button" data-testid="opportunity-quotation-link" :to="{ name: 'quotation-detail', params: { quotationId } }"><FileText :size="14" />{{ t('detail.viewQuotation') }}</RouterLink>
           <RouterLink v-else-if="app.can('quotation:write') && canMutateOpportunity && canWorkQuotationAt(selected.stage)" class="secondary-button" data-testid="create-quotation-from-opportunity" :to="{ name: 'quotations', query: { opportunityId: selected.id } }"><FileText :size="14" />{{ t('detail.newQuotation') }}</RouterLink>
           <RouterLink v-if="rfqId" class="secondary-button" data-testid="opportunity-rfq-link" :to="{ name: 'rfq-detail', params: { rfqId } }"><FileText :size="14" />RFQ · {{ salesEnumLabel(rfqStatus, locale) }}</RouterLink>
@@ -536,10 +543,11 @@ onMounted(async () => {
         <ProbabilityRecoveryPanel :opportunity="selected" :api-client="apiClient" :highlight-event-id="typeof route.query.probabilityEvent === 'string' ? route.query.probabilityEvent : undefined" @updated="selected = $event" @denied="selected = null; denied = true; opportunityRequest++" />
         <LossReviewCard :opportunity="selected" />
         </div>
-        <section class="opportunity-strategy-shell" data-testid="blue-sheet">
+        <section id="blue-sheet" class="opportunity-strategy-shell" data-testid="blue-sheet">
           <header class="strategy-shell-header">
             <Target :size="16" />
             <h2 data-testid="blue-sheet-title">{{ locale === 'en-US' ? 'Blue Sheet' : '战略分析' }}</h2>
+            <RouterLink :to="{ name: 'opportunity-documents', params: { opportunityId: selected.id } }">{{ locale === 'en-US' ? 'Documents and scorecards' : '资料与评分卡' }}</RouterLink>
           </header>
           <div class="strategy-shell-grid">
 

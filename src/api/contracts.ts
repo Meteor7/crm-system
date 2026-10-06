@@ -321,6 +321,8 @@ export interface CrmApi {
   updateOpportunityStakeholder(opportunityId: string, stakeholderId: string, input: UpdateOpportunityStakeholderInput): Promise<ApiResponse<OpportunityStakeholderDto>>
   deleteOpportunityStakeholder(opportunityId: string, stakeholderId: string): Promise<ApiResponse<{ id: string }>>
   listOpportunityStatuses(opportunityId: string): Promise<ApiResponse<import('@/features/opportunities/status-types').OpportunityStatusRecord[]>>
+  getOpportunityDocuments(opportunityId: string): Promise<ApiResponse<import('@/features/opportunities/document-types').OpportunityDocuments>>
+  saveOpportunityDocumentLinks(opportunityId: string, input: Partial<Record<import('@/features/opportunities/document-types').ScorecardKey, string>>, expectedModified: string): Promise<ApiResponse<import('@/features/opportunities/document-types').OpportunityDocumentLinks>>
   saveOpportunityStatus(opportunityId: string, input: import('@/features/opportunities/status-types').SaveOpportunityStatusInput, files: MultipartFilePart[]): Promise<ApiResponse<import('@/features/opportunities/status-types').OpportunityStatusRecord>>
   getOpportunityStatusFile(opportunityId: string, recordId: string, fileId: string): Promise<BinaryDownload>
   createOpportunityAction(opportunityId: string, input: CreateOpportunityActionInput): Promise<ApiResponse<OpportunityActionDto>>

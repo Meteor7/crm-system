@@ -40,6 +40,7 @@ export const routes: RouteRecordRaw[] = [
   { path: '/leads', name: 'leads', component: () => import('@/pages/LeadsOpportunitiesPage.vue'), props: { fixedView: 'leads' } },
   { path: '/leads/:leadId', name: 'lead-detail', component: () => import('@/pages/LeadDetailPage.vue'), meta: { navigationPath: '/leads' } },
   { path: '/opportunities', name: 'opportunities', component: () => import('@/pages/LeadsOpportunitiesPage.vue'), props: { fixedView: 'opportunities' } },
+  { path: '/opportunities/:opportunityId/documents', name: 'opportunity-documents', component: () => import('@/pages/OpportunityDocumentsPage.vue'), meta: { navigationPath: '/opportunities' } },
   { path: '/opportunities/:opportunityId', name: 'opportunity-detail', component: () => import('@/pages/OpportunityDetailPage.vue'), meta: { navigationPath: '/opportunities' } },
   { path: '/booking', name: 'booking', component: () => import('@/pages/BookingPage.vue') },
   { path: '/booking/:bookingId', name: 'booking-detail', component: () => import('@/pages/BookingDetailPage.vue'), meta: { navigationPath: '/booking' } },

@@ -132,6 +132,8 @@ export const FRAPPE_METHODS = {
   updateOpportunityStakeholder: 'opportunities.update_opportunity_stakeholder',
   deleteOpportunityStakeholder: 'opportunities.delete_opportunity_stakeholder',
   listOpportunityStatuses: 'opportunity_status.list_records',
+  getOpportunityDocuments: 'opportunity_documents.get_documents',
+  saveOpportunityDocumentLinks: 'opportunity_documents.save_links',
   saveOpportunityStatus: 'opportunity_status.save_record',
   getOpportunityStatusFile: 'opportunity_status.download_file',
   createOpportunityAction: 'opportunities.create_opportunity_action',
@@ -598,6 +600,8 @@ export function createFrappeApi(options: FrappeApiOptions = {}): CrmApi {
     updateOpportunityStakeholder: (opportunityId, stakeholderId, input) => post('updateOpportunityStakeholder', { opportunityId, stakeholderId, input }),
     deleteOpportunityStakeholder: (opportunityId, stakeholderId) => post('deleteOpportunityStakeholder', { opportunityId, stakeholderId }),
     listOpportunityStatuses: (opportunityId) => get('listOpportunityStatuses', { opportunityId }),
+    getOpportunityDocuments: (opportunityId) => get('getOpportunityDocuments', { opportunityId }),
+    saveOpportunityDocumentLinks: (opportunityId, input, expectedModified) => post('saveOpportunityDocumentLinks', { opportunityId, input, expectedModified }),
     saveOpportunityStatus(opportunityId, input, files) {
       const form = new FormData()
       form.append('opportunityId', opportunityId)

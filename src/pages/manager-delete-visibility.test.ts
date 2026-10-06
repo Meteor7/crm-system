@@ -26,6 +26,7 @@ async function context(role: UserRole, path: string) {
       { path: '/leads/:leadId', name: 'lead-detail', component: { template: '<div />' } },
       { path: '/opportunities', name: 'opportunities', component: { template: '<div />' } },
       { path: '/opportunities/:opportunityId', name: 'opportunity-detail', component: { template: '<div />' } },
+      { path: '/opportunities/:opportunityId/documents', name: 'opportunity-documents', component: { template: '<div />' } },
       { path: '/booking', name: 'booking', component: { template: '<div />' } },
       { path: '/booking/:bookingId', name: 'booking-detail', component: { template: '<div />' } },
       { path: '/visits', name: 'visits', component: { template: '<div />' } },
