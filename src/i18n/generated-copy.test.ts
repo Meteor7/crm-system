@@ -116,6 +116,46 @@ it('changes existing shell notification copy without rewriting business content'
 })
 
 
+it.each([
+  ['Opportunity', '预警：丢单待复盘', 'Edge inspection（长飞先进）已丢单，请完成复盘。', 'Warning: lost deal awaiting review', 'Edge inspection（长飞先进） was lost; please complete the loss review.'],
+  ['Action', '预警：行动逾期', 'Edge inspection（长飞先进）的行动「送样确认」原定 2026-09-30 完成，已逾期。', 'Warning: action overdue', 'Edge inspection（长飞先进）: the action "送样确认" was due 2026-09-30 and is overdue.'],
+  ['Quotation', '预警：报价即将到期', '报价 Edge inspection（长飞先进）V2 将于 2026-10-12 到期，还剩 7 天。', 'Warning: quotation expiring', 'Quotation Edge inspection（长飞先进）V2 expires on 2026-10-12; 7 days remain.'],
+  ['Quotation', '预警：报价即将到期', '报价 Edge inspection（长飞先进）V2 将于 2026-10-06 到期，还剩 1 天。', 'Warning: quotation expiring', 'Quotation Edge inspection（长飞先进）V2 expires on 2026-10-06; 1 day remains.'],
+  ['Opportunity', '预警：第 6 阶段超期无 PO', 'Edge inspection（长飞先进）已在第 6 阶段 1 天，仍未收到 PO。', 'Warning: stage 6 overdue without PO', 'Edge inspection（长飞先进） has been at stage 6 for 1 day with no PO received.'],
+  ['Opportunity', '预警：第 6 阶段超期无 PO', 'Edge inspection（长飞先进）已在第 6 阶段 45 天以上，仍未收到 PO。', 'Warning: stage 6 overdue without PO', 'Edge inspection（长飞先进） has been at stage 6 for 45 days or more with no PO received.'],
+] as const)('reads the server\'s %s warning notice in English, keeping its data', (category, title, message, englishTitle, englishMessage) => {
+  const item: NotificationInput = { category, title, message, route: '/opportunities/OP-1' }
+  expect(notificationCopy(item, 'en-US')).toEqual({ title: englishTitle, message: englishMessage })
+  expect(notificationCopy(item, 'zh-CN')).toEqual({ title, message })
+  // A body the server did not write this way (an older format) keeps its text; the title still reads in English.
+  const other = { ...item, message: '自定义正文' }
+  expect(notificationCopy(other, 'en-US')).toEqual({ title: englishTitle, message: '自定义正文' })
+})
+
+it('keeps the brackets and line breaks of the data inside a warning notice', () => {
+  // An action's title may hold the notice's own brackets, even its "的行动「"; a record's title may break a line.
+  const action: NotificationInput = { category: 'Action', title: '预警：行动逾期', message: 'Edge inspection（长飞先进）的行动「复核客户的行动「送样确认」」原定 2026-09-30 完成，已逾期。', route: '/opportunities/OP-1' }
+  expect(notificationCopy(action, 'en-US').message).toBe('Edge inspection（长飞先进）: the action "复核客户的行动「送样确认」" was due 2026-09-30 and is overdue.')
+  const broken = { ...action, message: 'Edge\ninspection（长飞先进）的行动「送样\n确认」原定 2026-09-30 完成，已逾期。' }
+  expect(notificationCopy(broken, 'en-US').message).toBe('Edge\ninspection（长飞先进）: the action "送样\n确认" was due 2026-09-30 and is overdue.')
+  const lost: NotificationInput = { category: 'Opportunity', title: '预警：丢单待复盘', message: 'Edge\ninspection（长飞先进）已丢单，请完成复盘。', route: '/opportunities/OP-1' }
+  expect(notificationCopy(lost, 'en-US').message).toBe('Edge\ninspection（长飞先进） was lost; please complete the loss review.')
+})
+
+it('keeps an action notice as written when its record or customer could be split in more than one place', () => {
+  const base = { category: 'Action' as const, title: '预警：行动逾期', route: '/opportunities/OP-1' }
+  // The Opportunity's title holds the notice's own separator: two places to split, no reading.
+  const record = { ...base, message: '复核客户（旧厂）的行动「送样确认」（长飞先进）的行动「联系采购」原定 2026-09-30 完成，已逾期。' }
+  expect(notificationCopy(record, 'en-US')).toEqual({ title: 'Warning: action overdue', message: record.message })
+  // The customer holds it.
+  const customer = { ...base, message: 'Edge inspection（长飞（旧厂）的行动「x」）的行动「联系采购」原定 2026-09-30 完成，已逾期。' }
+  expect(notificationCopy(customer, 'en-US')).toEqual({ title: 'Warning: action overdue', message: customer.message })
+  // Brackets of their own, one place to split: read.
+  const plain = { ...base, message: '复核客户（旧厂）（长飞先进）的行动「联系采购」原定 2026-09-30 完成，已逾期。' }
+  expect(notificationCopy(plain, 'en-US').message).toBe('复核客户（旧厂）（长飞先进）: the action "联系采购" was due 2026-09-30 and is overdue.')
+  expect(notificationCopy(plain, 'zh-CN')).toEqual({ title: plain.title, message: plain.message })
+})
+
 it('keeps unrelated server notification text intact even when its title matches local copy', () => {
   const item: NotificationInput = { category: 'Action', title: '新增推进 Action', message: '客户自定义正文 · 截止 2026-09-14', route: '/opportunities/OP-1' }
   expect(notificationCopy(item, 'en-US')).toEqual({ title: item.title, message: item.message })

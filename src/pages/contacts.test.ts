@@ -5,6 +5,7 @@ import { createMockApi } from '@/api/mock-adapter'
 import { CrmApiError, type CrmApi } from '@/api'
 import { useAppStore } from '@/stores/app'
 import { createAppRouter } from '@/app/router'
+import { setLocale } from '@/i18n'
 import ContactsPage from './ContactsPage.vue'
 import ContactDetailPage from './ContactDetailPage.vue'
 import ContactModal from '@/features/contacts/ContactModal.vue'
@@ -249,8 +250,10 @@ describe('Contacts pages', () => {
     expect(wrapper.text()).not.toContain('联系人文件接口尚未加载')
   })
 
-  it('confirms administrator hard delete and returns to the list', async () => {
+  it('confirms the archive from the detail page and returns to the list', async () => {
     const { api, pinia, router } = await pageContext()
+    // The server marks the Contact Archived and keeps it; what the page does is ask for that and leave for the list.
+    const deleteContact = vi.spyOn(api, 'deleteContact').mockResolvedValue({ data: { id: 'CON-001', status: 'Deleted' } } as Awaited<ReturnType<CrmApi['deleteContact']>>)
     await router.push('/contacts/CON-001')
     const activeDetail = mount(ContactDetailPage, { props: { apiClient: api }, global: { plugins: [pinia, router] } })
     await flushPromises()
@@ -259,11 +262,11 @@ describe('Contacts pages', () => {
     expect(activeDetail.find('[data-testid="delete-contact-from-edit"]').exists()).toBe(true)
     await activeDetail.get('[data-testid="delete-contact-from-edit"]').trigger('click')
     expect(activeDetail.find('[role="dialog"]').exists()).toBe(true)
-    expect(activeDetail.get('[role="dialog"]').text()).toContain('不可恢复')
+    expect(activeDetail.get('[role="dialog"]').text()).toContain('将标记为“已归档”')
     await activeDetail.get('[data-modal-submit]').trigger('submit')
     await flushPromises()
     expect(router.currentRoute.value.path).toBe('/contacts')
-    await expect(api.getContact('CON-001')).rejects.toMatchObject({ code: 'NOT_FOUND' })
+    expect(deleteContact).toHaveBeenCalledWith('CON-001')
   })
 
   it('removes the retired Needs Review migration records from local Contacts', async () => {
@@ -278,8 +281,16 @@ describe('Contacts pages', () => {
     expect(wrapper.find('[data-testid="needs-review"]').exists()).toBe(false)
   })
 
-  it('offers hard delete from the list edit modal and refreshes the list', async () => {
+  it('offers the archive from the list edit modal and refreshes the list', async () => {
     const { api, pinia, router } = await pageContext()
+    // The archive as the server answers it: the Contact stays, and the Active list read afterwards no longer holds it.
+    const archived = new Set<string>()
+    const listContacts = api.listContacts.bind(api)
+    vi.spyOn(api, 'deleteContact').mockImplementation(async (id) => { archived.add(id); return { data: { id, status: 'Deleted' } } as Awaited<ReturnType<CrmApi['deleteContact']>> })
+    vi.spyOn(api, 'listContacts').mockImplementation(async (...args: Parameters<CrmApi['listContacts']>) => {
+      const result = await listContacts(...args)
+      return { ...result, data: { ...result.data, items: result.data.items.filter((item) => !archived.has(item.id)) } }
+    })
     await router.push('/contacts')
     const wrapper = mount(ContactsPage, { props: { apiClient: api }, global: { plugins: [pinia, router] } })
     await flushPromises()
@@ -290,12 +301,13 @@ describe('Contacts pages', () => {
     await editButton!.trigger('click')
     expect(wrapper.find('[data-testid="delete-contact-from-edit"]').exists()).toBe(true)
     await wrapper.get('[data-testid="delete-contact-from-edit"]').trigger('click')
-    expect(wrapper.get('[role="dialog"]').text()).toContain('不可恢复')
+    expect(wrapper.get('[role="dialog"]').text()).toContain('将标记为“已归档”')
     await wrapper.get('[data-modal-submit]').trigger('submit')
     await flushPromises()
 
     expect(wrapper.find('[data-contact-id="CON-001"]').exists()).toBe(false)
-    await expect(api.getContact('CON-001')).rejects.toMatchObject({ code: 'NOT_FOUND' })
+    expect(archived.has('CON-001')).toBe(true)
+    await expect(api.getContact('CON-001')).resolves.toBeTruthy()
   })
 
   it('keeps Contact detail content available when reference loading fails', async () => {
@@ -362,11 +374,36 @@ describe('Contacts pages', () => {
 
     await wrapper.get('[data-testid="merge-contact"]').trigger('click')
     await wrapper.get('select').setValue('CON-002')
+    // The confirm button says the action, not "保存并继续"; the note says what the server does (the links stay, #188).
+    expect(wrapper.get('[data-modal-submit]').text()).toBe('合并')
+    expect(wrapper.get('[role="dialog"]').text()).toContain('留在它名下，不迁移')
+    expect(wrapper.get('[role="dialog"]').text()).not.toContain('所有业务关联会迁移')
     await wrapper.get('[data-modal-submit]').trigger('submit')
     await flushPromises()
 
     expect(router.currentRoute.value.path).toBe('/contacts/CON-001')
     expect((await api.getContact('CON-002')).data.contact.status).toBe('Archived')
+  })
+
+  it('names the archive on the confirm button of the Contact\'s archive, in the danger colour', async () => {
+    const { api, pinia, router } = await pageContext()
+    await router.push('/contacts/CON-001')
+    const wrapper = mount(ContactDetailPage, { props: { apiClient: api }, global: { plugins: [pinia, router] } })
+    await flushPromises()
+
+    await wrapper.get('[data-testid="delete-contact"]').trigger('click')
+    const confirm = wrapper.get('[role="dialog"] [data-modal-submit]')
+    expect(confirm.text()).toBe('归档')
+    expect(confirm.classes()).toContain('danger-action')
+    // The dialog says what the server does (the Contact is marked Archived, its links kept), not a physical delete.
+    expect(wrapper.get('[role="dialog"]').text()).toContain('归档联系人')
+    expect(wrapper.get('[role="dialog"]').text()).not.toContain('物理删除')
+    setLocale('en-US')
+    await flushPromises()
+    expect(wrapper.get('[role="dialog"] [data-modal-submit]').text()).toBe('Archive')
+    expect(wrapper.get('[role="dialog"]').text()).toContain('is marked Archived')
+    setLocale('zh-CN')
+    wrapper.unmount()
   })
 
   it('keeps the current Contact visible when merge reports a conflict', async () => {

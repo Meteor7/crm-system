@@ -17,8 +17,8 @@ function submit() {
 </script>
 
 <template>
-  <ModalShell :title="locale === 'en-US' ? 'Merge duplicate contact' : '合并重复联系人'" eyebrow="DATA QUALITY" :busy="busy" @close="emit('close')" @submit="submit">
-    <p class="merge-note">{{ locale === 'en-US' ? 'Current contact ' : '当前联系人 ' }}<strong>{{ contact.name }}</strong>{{ locale === 'en-US' ? ' will be kept as the master. All business links move to it; the duplicate is marked Archived, not hard-deleted.' : ' 将作为保留主档。所有业务关联会迁移到主档，重复联系人会被标记为 Archived，不会被硬删除。' }}</p>
+  <ModalShell :title="locale === 'en-US' ? 'Merge duplicate contact' : '合并重复联系人'" eyebrow="DATA QUALITY" :busy="busy" :submit-label="locale === 'en-US' ? 'Merge' : '合并'" @close="emit('close')" @submit="submit">
+    <p class="merge-note">{{ locale === 'en-US' ? 'Current contact ' : '当前联系人 ' }}<strong>{{ contact.name }}</strong>{{ locale === 'en-US' ? ' is kept as the master. The duplicate is marked Archived and noted as merged into it, and its direct reports report to the master; its Opportunities, Bookings, Demo Requests and Visits stay in its name (not moved).' : ' 将作为保留主档。重复联系人会被标记为“已归档”并记下合并到主档，其直属下属改为汇报给主档；它名下的 Opportunity、Booking、Demo Request 和拜访留在它名下，不迁移。' }}</p>
     <p v-if="error" class="form-error">{{ error }}</p>
     <label class="merge-field"><span>{{ locale === 'en-US' ? 'Select duplicate contact' : '选择重复联系人' }}</span><select v-model="duplicateId" :aria-label="locale === 'en-US' ? 'Duplicate contact' : '重复联系人'" required><option value="">{{ locale === 'en-US' ? 'Select' : '请选择' }}</option><option v-for="item in candidates" :key="item.id" :value="item.id" :data-merge-candidate="item.id">{{ item.name }} · {{ item.title }}</option></select></label>
   </ModalShell>

@@ -204,7 +204,7 @@ onMounted(async () => {
         <button v-if="isActive && canCreateVisit" class="secondary-button" type="button" data-testid="record-visit" @click="createVisit"><CalendarPlus :size="14" />{{ locale === 'en-US' ? 'Record visit' : '记录拜访' }}</button>
         <button v-if="isActive && canWrite" class="primary-button" type="button" data-testid="edit-contact" :disabled="!referencesReady" @click="actionError = ''; editOpen = true"><Edit3 :size="14" />{{ locale === 'en-US' ? 'Edit contact' : '编辑联系人' }}</button>
         <button v-if="isActive && canMerge" class="secondary-button merge-action" type="button" data-testid="merge-contact" @click="actionError = ''; mergeOpen = true"><GitMerge :size="14" />{{ locale === 'en-US' ? 'Merge duplicate' : '合并重复联系人' }}</button>
-        <button v-if="canDelete" class="delete-button" type="button" data-testid="delete-contact" @click="actionError = ''; deleteOpen = true"><Trash2 :size="14" />{{ locale === 'en-US' ? 'Delete contact' : '删除联系人' }}</button>
+        <button v-if="canDelete" class="delete-button" type="button" data-testid="delete-contact" @click="actionError = ''; deleteOpen = true"><Trash2 :size="14" />{{ t('detail.archiveContact') }}</button>
       </PageHeader>
 
       <div class="contact-summary">
@@ -251,8 +251,8 @@ onMounted(async () => {
 
       <ContactModal v-if="editOpen" :contact="detail.contact" :accounts="accounts" :sites="sites" :contacts="contacts" :busy="busy" :error="actionError" :can-delete="canDelete" @close="editOpen = false" @submit="saveContact" @delete="requestDeleteFromEdit" />
       <ContactMergeModal v-if="mergeOpen" :contact="detail.contact" :contacts="contacts" :busy="busy" :error="actionError" @close="mergeOpen = false" @submit="mergeContact" />
-      <ModalShell v-if="deleteOpen" :title="t('detail.permanentDeleteContact')" eyebrow="HARD DELETE" :busy="busy" @close="deleteOpen = false" @submit="deleteContact">
-        <p class="delete-note">{{ t('detail.deleteContactWarning') }}</p>
+      <ModalShell v-if="deleteOpen" :title="t('detail.archiveContact')" eyebrow="ARCHIVE" :busy="busy" :submit-label="t('detail.archiveContactAction')" danger @close="deleteOpen = false" @submit="deleteContact">
+        <p class="delete-note">{{ t('detail.archiveContactWarning', { name: detail.contact.name }) }}</p>
         <p v-if="actionError" class="form-error">{{ actionError }}</p>
       </ModalShell>
     </template>

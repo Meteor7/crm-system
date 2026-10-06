@@ -39,6 +39,17 @@ describe('ModalShell', () => {
     wrapper.unmount()
   })
 
+  it('colours the confirm button of a dangerous action, and says the action', () => {
+    const plain = mount(ModalShell, { props: { title: 'Test', submitLabel: '合并' } })
+    expect(plain.get('[data-modal-submit]').classes()).not.toContain('danger-action')
+    expect(plain.get('[data-modal-submit]').text()).toBe('合并')
+    const dangerous = mount(ModalShell, { props: { title: 'Test', submitLabel: '删除', danger: true } })
+    expect(dangerous.get('[data-modal-submit]').classes()).toContain('danger-action')
+    expect(dangerous.get('[data-modal-submit]').text()).toBe('删除')
+    plain.unmount()
+    dangerous.unmount()
+  })
+
   it('submits through the native form so required and numeric constraints apply', () => {
     const wrapper = mount(ModalShell, { props: { title: 'Test' }, slots: { default: '<input required />' } })
 

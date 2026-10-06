@@ -571,6 +571,9 @@ describe('Opportunity detail', () => {
     await wrapper.get('[data-testid="mark-opportunity-lost"]').trigger('click')
     expect(wrapper.get('[data-testid="lost-blocked-by-booking"]').text()).toBe('该商机有未取消的 Booking，请先取消 Booking 再标记丢单。')
     expect(wrapper.get('[role="dialog"] [data-modal-submit]').attributes('disabled')).toBeDefined()
+    // The confirm button says the action, in the danger colour, not "保存并继续".
+    expect(wrapper.get('[role="dialog"] [data-modal-submit]').text()).toBe('标记丢单')
+    expect(wrapper.get('[role="dialog"] [data-modal-submit]').classes()).toContain('danger-action')
   })
 
   it('lets only the Opportunity owner change the success probability and shows each recorded change', async () => {
@@ -653,6 +656,8 @@ describe('Opportunity detail', () => {
     await flushPromises()
 
     await wrapper.get('[data-testid="rollback-opportunity-stage"]').trigger('click')
+    expect(wrapper.get('[role="dialog"] [data-modal-submit]').text()).toBe('回退')
+    expect(wrapper.get('[role="dialog"] [data-modal-submit]').classes()).not.toContain('danger-action')
     const target = wrapper.get('[aria-label="阶段回退目标"]')
     expect(target.findAll('option').map((option) => option.attributes('value'))).toEqual([
       'qualified_opportunity', 'demo_done', 'customer_budget_approved', 'rfq_validated',

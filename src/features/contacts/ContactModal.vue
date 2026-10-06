@@ -104,7 +104,7 @@ function submit() {
       :disabled="busy"
       @click="emit('delete')"
     >
-      <Trash2 :size="14" />{{ locale === 'en-US' ? 'Delete contact' : '删除联系人' }}
+      <Trash2 :size="14" />{{ t('detail.archiveContact') }}
     </button>
   </ModalShell>
 </template>

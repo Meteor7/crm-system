@@ -656,7 +656,7 @@ onMounted(async () => {
         @create-contact="openBookingContact"
         @submit="confirmPo"
       />
-      <ModalShell v-if="lostModal" :title="t('detail.markLostTitle')" eyebrow="OPPORTUNITY RESULT" :busy="busy" :submit-disabled="Boolean(liveBooking)" @close="lostModal = false" @submit="markLost">
+      <ModalShell v-if="lostModal" :title="t('detail.markLostTitle')" eyebrow="OPPORTUNITY RESULT" :busy="busy" :submit-disabled="Boolean(liveBooking)" :submit-label="t('detail.markLostAction')" danger @close="lostModal = false" @submit="markLost">
         <p v-if="modalError" class="form-error">{{ modalError }}</p>
         <p v-if="liveBooking" class="form-warning" data-testid="lost-blocked-by-booking">{{ t('detail.lostBlockedBooking') }}</p>
         <div class="lost-form">
@@ -664,7 +664,7 @@ onMounted(async () => {
           <label><span>{{ t('detail.lostReason') }}<RequiredMark /></span><textarea v-model="lostReason" :aria-label="t('detail.lostReason')" rows="4" required :placeholder="locale === 'en-US' ? 'Enter the main reason the customer did not close' : '请填写客户未成交的主要原因'" /></label>
         </div>
       </ModalShell>
-      <ModalShell v-if="rollbackModal" :title="t('detail.rollbackOpportunity')" eyebrow="MANAGER CONTROL" :busy="busy" :submit-disabled="!rollbackOptions.targets.length" @close="rollbackModal = false" @submit="rollbackStage">
+      <ModalShell v-if="rollbackModal" :title="t('detail.rollbackOpportunity')" eyebrow="MANAGER CONTROL" :busy="busy" :submit-disabled="!rollbackOptions.targets.length" :submit-label="t('detail.rollbackAction')" @close="rollbackModal = false" @submit="rollbackStage">
         <p v-if="modalError" class="form-error">{{ modalError }}</p>
         <p v-if="selected.stage === 'lost'" class="form-hint" data-testid="rollback-reopen-hint">{{ t('detail.reopenHint') }}</p>
         <p v-if="rollbackOptions.blocker" class="form-warning" :data-rollback-blocker="rollbackOptions.blocker">{{ rollbackOptions.blocker === 'completed_booking' ? t('detail.rollbackBlockedCompleted') : t('detail.rollbackBlockedBooking') }}</p>

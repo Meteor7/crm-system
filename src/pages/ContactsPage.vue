@@ -266,8 +266,8 @@ onBeforeUnmount(() => {
     </section>
 
     <ContactModal v-if="modalOpen" :contact="editing" :accounts="writableAccounts" :sites="writableSites" :contacts="allContacts" :busy="busy" :error="modalError" :can-delete="Boolean(editing && canDelete)" @close="modalOpen = false" @submit="saveContact" @delete="requestDeleteFromEdit" />
-    <ModalShell v-if="deleteOpen && deleteTarget" :title="locale === 'en-US' ? 'Permanently delete contact' : '永久删除联系人'" eyebrow="HARD DELETE" :busy="busy" @close="deleteOpen = false" @submit="deleteContact">
-      <p class="delete-note">{{ locale === 'en-US' ? 'This cannot be undone. “' : '此操作不可恢复。“' }}{{ deleteTarget.name }}{{ locale === 'en-US' ? '” will be physically removed. Linked stakeholders are removed; Booking and Demo Request are rebound to another contact at the same account when possible.' : '”会从本地数据中物理删除；Opportunity 中对应关键人关联会移除，Booking 与 Demo Request 会优先改绑到同客户的现有联系人。' }}</p>
+    <ModalShell v-if="deleteOpen && deleteTarget" :title="t('detail.archiveContact')" eyebrow="ARCHIVE" :busy="busy" :submit-label="t('detail.archiveContactAction')" danger @close="deleteOpen = false" @submit="deleteContact">
+      <p class="delete-note">{{ t('detail.archiveContactWarning', { name: deleteTarget.name }) }}</p>
       <p v-if="modalError" class="form-error">{{ modalError }}</p>
     </ModalShell>
   </div>
