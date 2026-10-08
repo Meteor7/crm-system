@@ -94,6 +94,7 @@ try {
     $binDirectory = Join-Path $repositoryRoot 'node_modules/.bin'
     $powerShellCommand = Join-Path $PSHOME $(if ($IsWindows) { 'pwsh.exe' } else { 'pwsh' })
     $composeContract = Join-Path $repositoryRoot 'backend/tests/compose-contract.ps1'
+    $httpsProxyContract = Join-Path $repositoryRoot 'backend/tests/https-proxy-contract.ps1'
     $frontendContract = Join-Path $repositoryRoot 'backend/tests/frappe-frontend-contract.ps1'
     $packageContract = Join-Path $repositoryRoot 'backend/tests/app-package-contract.ps1'
     $prepareArchive = Join-Path $repositoryRoot 'backend/scripts/prepare-app-build-context.ps1'
@@ -113,6 +114,7 @@ try {
     )
 
     Invoke-CheckedCommand 'Compose contract' $powerShellCommand @('-NoProfile', '-File', $composeContract)
+    Invoke-CheckedCommand 'HTTPS proxy contract' $powerShellCommand @('-NoProfile', '-File', $httpsProxyContract)
     Invoke-CheckedCommand 'Frappe frontend contract' $powerShellCommand @('-NoProfile', '-File', $frontendContract)
     Invoke-CheckedCommand 'App package contract' $powerShellCommand @('-NoProfile', '-File', $packageContract)
     Invoke-CheckedCommand 'Production archive preparation' $powerShellCommand @('-NoProfile', '-File', $prepareArchive, '-OutputArchive', $productionArchive)

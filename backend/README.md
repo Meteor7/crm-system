@@ -30,6 +30,8 @@ The first start creates two random credentials inside the new `rayher-crm-stage1
 
 Both templates explicitly set `ALLOW_TESTS=false`; production is never a test runner. Isolated integration tests use `test.env.example`, loopback port `2225`, and the dedicated `.test` site.
 
+Production serves the CRM at `https://crm.example.invalid`. Nginx on the host terminates TLS on ports 80 and 443 and proxies to the Compose frontend, which production binds to `127.0.0.1:4174` so that no plain-HTTP path to the CRM reaches the LAN. The backend trusts the scheme the frontend forwards (`FORWARDED_ALLOW_IPS`), so Frappe marks its cookies `Secure` behind that proxy. The Nginx template, the production values and the certificate procedure are in `deploy/nginx/README.md` and `docs/HTTPS-内网部署方案.md`.
+
 The unified release gate and archive builder require PowerShell 7 (`pwsh`). Run the full gate with `pwsh -NoProfile -File backend/tests/run-release-gate.ps1 -StartBackend`; omitting `-StartBackend` fails closed instead of testing a stale stack. The gate recreates only the dedicated `rayher-crm-stage1-tests` volumes, builds test code as `rayher-crm-stage1:v15-test`, and verifies the production package as `rayher-crm-release-gate:v15`, so it cannot overwrite the LAN image tag.
 
 ## Safe inspection

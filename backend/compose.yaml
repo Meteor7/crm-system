@@ -271,6 +271,11 @@ services:
       GUNICORN_THREADS: "4"
       GUNICORN_WORKERS: "2"
       GUNICORN_TIMEOUT: "120"
+      # gunicorn honours X-Forwarded-Proto only from trusted peers, by default loopback alone.
+      # Requests arrive from the frontend container, so behind the host TLS proxy Frappe saw
+      # http and sent its session cookie without Secure. The backend publishes no port, and
+      # the frontend passes "https" on only when its own client sent it.
+      FORWARDED_ALLOW_IPS: "*"
       SITE_NAME: ${SITE_NAME:-rayher-crm.localhost}
       CRM_CLAMD_HOST: clamav
       CRM_CLAMD_PORT: "3310"

@@ -124,6 +124,7 @@ Assert-Contract ($localRendered.services.backend.build.args.CRM_APP_ARCHIVE -eq 
 Assert-Contract ([string]::IsNullOrEmpty($localRendered.services.backend.build.args.CRM_APP_ARCHIVE_SHA256)) 'the local template must require a package hash at build time'
 Assert-Contract ($localRendered.services.migrate.environment.ALLOW_TESTS -eq 'false') 'the local template must disable Frappe tests'
 Assert-Contract ($localRendered.services.migrate.environment.CRM_TEST_SITE -eq 'false') 'the local template must never be marked as a CRM test site'
+Assert-Contract ($localRendered.services.backend.environment.FORWARDED_ALLOW_IPS -eq '*') 'the backend must trust the scheme the frontend forwards, or Frappe drops Secure from its cookies behind the HTTPS proxy'
 
 $lanRendered = $lanRenderedJson | ConvertFrom-Json
 Assert-Contract ($lanRendered.name -eq 'rayher-crm-stage1-local') 'the opt-in LAN template must stay inside the isolated project namespace'
@@ -142,6 +143,7 @@ Assert-Contract ($testRendered.services.migrate.environment.SITE_NAME -eq 'rayhe
 Assert-Contract ($testRendered.services.migrate.environment.ALLOW_TESTS -eq 'true') 'dedicated test site must enable Frappe tests'
 Assert-Contract ($testRendered.services.migrate.environment.CRM_TEST_SITE -eq 'true') 'dedicated test site must carry the CRM test-site marker'
 Assert-Contract ($testRendered.services.backend.image -eq 'rayher-crm-stage1:v15-test') 'backend tests must use a dedicated image tag'
+Assert-Contract ($testRendered.services.backend.environment.FORWARDED_ALLOW_IPS -eq '*') 'the test stack must trust the forwarded scheme that the CI cookie check sends'
 Assert-Contract ($testRendered.services.backend.build.args.CRM_APP_ARCHIVE -eq 'build/rayher_crm.zip') 'test config must remain production-safe until the gate explicitly supplies the test build argument'
 Assert-Contract ($testRendered.services.frontend.ports.Count -eq 1) 'test mode must publish only the frontend port'
 Assert-Contract ($testRendered.services.frontend.ports[0].host_ip -eq '127.0.0.1') 'test frontend must only bind to loopback'

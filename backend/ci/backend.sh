@@ -45,6 +45,7 @@ phase pin-http-port "${compose[@]}" up -d --no-build --no-deps --force-recreate 
 [[ $("${compose[@]}" port frontend 8080) == "$endpoint" ]] || { echo 'CI HTTP port changed while pinning it.' >&2; exit 1; }
 printf '%s\n' "$endpoint" > "$reports/http-endpoint.txt"
 base_url="http://$endpoint"
+phase forwarded-https bash backend/ci/forwarded-https.sh "$base_url"
 phase frappe-tests pwsh -NoProfile -File backend/tests/run-backend-tests.ps1 -ProjectName "$CRM_CI_PROJECT" -ReportDirectory "$reports"
 acceptance=(
   http-stage5b-acceptance.ps1

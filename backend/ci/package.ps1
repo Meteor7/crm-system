@@ -5,6 +5,7 @@ function Checked([string]$Script, [string[]]$Arguments = @()) {
     if ($LASTEXITCODE -ne 0) { throw "$Script failed with exit code $LASTEXITCODE." }
 }
 Checked backend/tests/compose-contract.ps1
+Checked backend/tests/https-proxy-contract.ps1
 Checked backend/tests/frappe-frontend-contract.ps1
 Checked backend/tests/app-package-contract.ps1
 Checked backend/tests/backend-test-report-contract.ps1
