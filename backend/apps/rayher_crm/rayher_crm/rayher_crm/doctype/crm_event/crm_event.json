@@ -1,0 +1,20 @@
+{
+ "doctype": "DocType", "name": "CRM Event", "module": "Rayher CRM", "autoname": "hash", "engine": "InnoDB",
+ "track_changes": 1, "modified": "2026-10-05 00:00:00", "permissions": [], "sort_field": "modified", "sort_order": "DESC",
+ "field_order": ["title", "event_owner", "start_date", "end_date", "status", "account", "opportunity", "region", "market", "equipment", "note", "completed_at", "completed_owner"],
+ "fields": [
+  {"fieldname": "title", "label": "Title", "fieldtype": "Data", "reqd": 1},
+  {"fieldname": "event_owner", "label": "Sales Owner", "fieldtype": "Link", "options": "User", "reqd": 1},
+  {"fieldname": "start_date", "label": "Start Date", "fieldtype": "Date", "reqd": 1},
+  {"fieldname": "end_date", "label": "End Date", "fieldtype": "Date", "reqd": 1},
+  {"fieldname": "status", "label": "Status", "fieldtype": "Select", "options": "Planned\nDone\nCancelled", "default": "Planned", "reqd": 1},
+  {"fieldname": "account", "label": "Account", "fieldtype": "Link", "options": "Customer"},
+  {"fieldname": "opportunity", "label": "Opportunity", "fieldtype": "Link", "options": "CRM Opportunity"},
+  {"fieldname": "region", "label": "Standalone Region", "fieldtype": "Data"},
+  {"fieldname": "market", "label": "Standalone Market", "fieldtype": "Data"},
+  {"fieldname": "equipment", "label": "Standalone Equipment", "fieldtype": "Data"},
+  {"fieldname": "note", "label": "Note", "fieldtype": "Text"},
+  {"fieldname": "completed_at", "label": "Completed At", "fieldtype": "Datetime", "read_only": 1},
+  {"fieldname": "completed_owner", "label": "Completed Owner", "fieldtype": "Link", "options": "User", "read_only": 1}
+ ]
+}

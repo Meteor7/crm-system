@@ -14,13 +14,14 @@ from rayher_crm.api.v1.errors import CrmApiException
 from rayher_crm.permissions.roles import assert_capability, resolve_crm_role
 from rayher_crm.services.common import to_iso_timestamp, validate_choice
 from rayher_crm.services.concurrency import lock_document
+from rayher_crm.services.review_breakdowns import LOSS_CATEGORIES
 
 LOSS_REVIEW = "CRM Opportunity Loss Review"
 LOSS_REVIEW_REVISION = "CRM Opportunity Loss Review Revision"
 REVIEW_STATUSES = ("Pending", "Reviewed")
 REVIEW_FIELDS = [
     "name", "opportunity", "stage_event", "lost_at", "lost_at_stage", "lost_by", "lost_reason",
-    "review_status", "review_note", "reviewed_by", "reviewed_at", "reopened_at", "modified",
+    "review_status", "review_category", "review_note", "reviewed_by", "reviewed_at", "reopened_at", "modified",
 ]
 
 
@@ -34,7 +35,7 @@ def _text(value, field: str, message: str) -> str:
 def _append_revision(doc, kind: str, *, actor: str | None = None, at=None, reason: str = "") -> None:
     frappe.get_doc({
         "doctype": LOSS_REVIEW_REVISION, "loss_review": doc.name, "opportunity": doc.opportunity,
-        "kind": kind, "review_status": doc.review_status, "review_note": doc.review_note or "", "reason": reason,
+        "kind": kind, "review_status": doc.review_status, "review_category": doc.review_category or "", "review_note": doc.review_note or "", "reason": reason,
         "actor": actor or frappe.session.user, "recorded_at": at or frappe.utils.now_datetime(),
     }).insert(ignore_permissions=True)
 
@@ -68,7 +69,7 @@ def _dto(row, history) -> dict:
         "lostAt": to_iso_timestamp(row.lost_at) if row.lost_at else "",
         "lostAtStage": row.lost_at_stage or "", "lostBy": row.lost_by or "", "lostReason": row.lost_reason or "",
         "status": "reviewed" if row.review_status == "Reviewed" else "pending",
-        "reviewNote": row.review_note or "", "reviewedBy": row.reviewed_by or None,
+        "reviewCategory": row.review_category or "", "reviewNote": row.review_note or "", "reviewedBy": row.reviewed_by or None,
         "reviewedAt": to_iso_timestamp(row.reviewed_at) if row.reviewed_at else None,
         "reopenedAt": to_iso_timestamp(row.reopened_at) if row.reopened_at else None,
         "modified": to_iso_timestamp(row.modified), "history": history,
@@ -86,12 +87,12 @@ def reviews_for_opportunities(opportunity_ids: list[str]) -> dict[str, list[dict
     histories: dict[str, list[dict]] = {}
     for row in frappe.get_all(
         LOSS_REVIEW_REVISION, filters=filters,
-        fields=["name", "loss_review", "kind", "review_status", "review_note", "reason", "actor", "recorded_at"],
+        fields=["name", "loss_review", "kind", "review_status", "review_category", "review_note", "reason", "actor", "recorded_at"],
         order_by="recorded_at desc, creation desc, name desc",
     ):
         histories.setdefault(row.loss_review, []).append({
             "id": row.name, "kind": row.kind, "status": "reviewed" if row.review_status == "Reviewed" else "pending",
-            "note": row.review_note or "", "reason": row.reason or "", "actor": row.actor, "at": to_iso_timestamp(row.recorded_at),
+            "category": row.review_category or "", "note": row.review_note or "", "reason": row.reason or "", "actor": row.actor, "at": to_iso_timestamp(row.recorded_at),
         })
     result: dict[str, list[dict]] = {}
     for row in rows:
@@ -123,18 +124,25 @@ def review_loss(opportunity_id: str, review_id: str, payload: dict, expected_mod
     doc = lock_document(LOSS_REVIEW, review_id, expected_modified, "NOT_FOUND")
     if doc.opportunity != opportunity_id:
         raise CrmApiException("NOT_FOUND", "The loss review was not found.")
+    category = doc.review_category or ""
+    if status == "Reviewed" and "reviewCategory" in payload:
+        category = "" if payload.get("reviewCategory") == "" else validate_choice(payload.get("reviewCategory"), "reviewCategory", set(LOSS_CATEGORIES))
+    if status == "Reviewed" and doc.review_status != "Reviewed" and not category:
+        raise CrmApiException("VALIDATION_ERROR", "Choose a confirmed loss category before completing the post-mortem.",
+                              field_errors={"reviewCategory": "Choose a confirmed loss category"})
     if status == "Pending":
         if doc.review_status != "Reviewed":
             raise CrmApiException("INVALID_TRANSITION", "Only a reviewed loss can be reverted to pending.")
         note = doc.review_note or ""
         kind = "ReviewReverted"
-    elif doc.review_status == "Reviewed" and (doc.review_note or "") == note:
+    elif doc.review_status == "Reviewed" and (doc.review_note or "") == note and (doc.review_category or "") == category:
         return _current(doc)
     else:
         kind = "Reviewed" if doc.review_status != "Reviewed" else "ReviewUpdated"
     savepoint = f"crm_loss_review_{frappe.generate_hash(length=8)}"
     frappe.db.savepoint(savepoint)
     try:
+        doc.review_category = category
         doc.review_note = note
         doc.review_status = status
         if status == "Reviewed":

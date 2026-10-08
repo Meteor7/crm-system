@@ -24,6 +24,10 @@ const FIXED_MESSAGES: Partial<Record<string, Record<string, CopyPair>>> = {
     'The currency of a confirmed order cannot change through an ordinary edit.': ['The currency of a confirmed order cannot change through an ordinary edit.', '已确认订单的币种不能通过普通编辑修改。'],
     'Only a Confirmed or Completed Booking has an actual PO date.': ['Only a Confirmed or Completed Booking has an actual PO date.', '只有已确认或已完成的 Booking 才有实际 PO 日期。'],
     'Only a Confirmed or Completed Booking has a CNY amount to record.': ['Only a Confirmed or Completed Booking has an amount in CNY to record.', '只有已确认或已完成的订单需要补录人民币金额。'],
+    'This Demo is no longer awaiting testing.': ['This Demo is no longer being prepared or tested, so its resources cannot be arranged.', '这个 Demo 已不在测试准备或测试阶段，不能再安排设备。'],
+    // The Warnings page's handling records (services/warning_handling.py).
+    'Only stage 6 and postponed PO warnings take a recorded action; the others clear through their own records.': ['Only stage 6 and postponed PO warnings take a recorded action; the others clear through their own records.', '只有“第 6 阶段超期无 PO”和“预计 PO 跨季度推迟”预警可以记录处理行动，其他预警通过各自的记录解除。'],
+    'This warning has changed or cleared. Reload the page.': ['This warning has changed or cleared. Reload the page.', '这条预警已变化或已解除，请刷新页面。'],
   },
   VALIDATION_ERROR: {
     'Invalid Review period or anchor.': ['This period cannot be shown. Choose another date.', '无法显示这个周期，请重新选择日期。'],
@@ -38,6 +42,8 @@ const FIXED_MESSAGES: Partial<Record<string, Record<string, CopyPair>>> = {
     'approvedOn cannot be in the future.': ['The budget approval date cannot be in the future.', '预算批准日期不能晚于今天。'],
     'expectedPoDate is required.': ['Enter the expected PO date.', '请填写预计 PO 日期。'],
     'A comment is required to reject an internal validation.': ['A comment is required to reject an internal validation.', '驳回内部生产审批时必须填写审批意见。'],
+    // A controlled-document approval (services/document_access.py): the page refuses the same before sending.
+    'An approval carries no note: clear it, or reject the request or ask for more information.': ['An approval carries no note to the applicant. Clear the note, or reject the request or ask for more information instead.', '批准时不会把说明发给申请人。请清空说明，或改为拒绝/要求补充信息。'],
     'booking is required.': ['Enter the Booking details.', '请填写 Booking 信息。'],
     'amountCny is required.': ['Enter the amount in CNY.', '请填写人民币金额。'],
     'The amount and the amount in CNY are required from Demo done.': ['Enter the amount and the amount in CNY on the Opportunity first: they are required from Demo done on.', '请先在商机上填写金额和人民币金额：从 Demo 完成阶段起必须有金额。'],
@@ -78,6 +84,39 @@ const FIXED_MESSAGES: Partial<Record<string, Record<string, CopyPair>>> = {
     'The Visit owner cannot see this Account: it is Private and not theirs.': ['The visit owner cannot see this account: it is private and belongs to someone else. Choose the account owner, or make the account public first.', '拜访负责人看不到这个客户：客户是私有的，负责人不是他。请选客户负责人，或先把客户改为公开。'],
     'The action owner cannot see this Account: it is Private and not theirs.': ['The action owner cannot see this account: it is private and belongs to someone else. Choose the account owner, or make the account public first.', '行动负责人看不到这个客户：客户是私有的，负责人不是他。请选客户负责人，或先把客户改为公开。'],
     'Mentioned user must have access to this Demo Request.': ['Only someone who can read this Demo Request can be mentioned.', '只能 @ 能看到这条 Demo Request 的人。'],
+    // Demo resources: the catalogue, the unavailable intervals and a Demo's schedule (services/demo_resources.py).
+    'Provide start and end with an explicit time zone.': ['Enter a valid start and end time (Shanghai time).', '请填写有效的开始和结束时间（上海时间）。'],
+    'End must be later than start.': ['The end must be later than the start.', '结束时间必须晚于开始时间。'],
+    'Equipment ID cannot be changed.': ['The equipment ID cannot be changed.', '设备编号不能修改。'],
+    'Equipment ID already exists.': ['This equipment ID exists already.', '这个设备编号已存在。'],
+    'Choose an active Manager or Engineer as maintainer.': ['Choose an active Manager or Engineer as the maintainer.', '维护负责人请选择在职的经理或工程师。'],
+    'Status must be Active or Resolved.': ['The status must be Unavailable or Resolved.', '状态只能是“不可用”或“已恢复”。'],
+    'Clear dates together with the resource.': ['Clear the dates together with the resource.', '清除设备时请一并清除开始和结束时间。'],
+    'Choose a resource accepting new assignments.': ['Choose a resource that allows new assignments.', '请选择允许新安排的设备资源。'],
+    'New equipment must not provide a previous version.': ['New equipment has no previous version to name. Reload the page and try again.', '新增设备时不应带版本号，请刷新页面后重试。'],
+    'New intervals must not provide a previous version.': ['A new interval has no previous version to name. Reload the page and try again.', '新增不可用时段时不应带版本号，请刷新页面后重试。'],
+    'enabled must be true or false.': ['Say whether the equipment allows new assignments.', '请选择设备是否允许新安排。'],
+    // Controlled documents: the Manager's decision and note (services/document_access.py).
+    'Say what the applicant should add.': ['Say what the applicant should add.', '请写明需要申请人补充什么。'],
+    'The note must be text.': ['The note must be text.', '给申请人的说明必须是文字。'],
+    'The note may hold at most 1000 characters.': ['The note may hold at most 1000 characters.', '给申请人的说明最多 1000 个字符。'],
+    'Unknown controlled-document decision.': ['Unknown decision. Reload the page and try again.', '未知的审批操作，请刷新页面后重试。'],
+    // An Opportunity's scorecard links (services/document_links.py, opportunity_documents.py).
+    'Enter an absolute HTTP or HTTPS URL.': ['Enter a complete http:// or https:// link.', '请填写完整的 http:// 或 https:// 链接。'],
+    'Enter an absolute HTTP or HTTPS URL without credentials.': ['Enter a complete http:// or https:// link, without a user name or password in it.', '请填写完整的 http:// 或 https:// 链接，链接里不能带用户名或密码。'],
+    'Enter a URL without spaces, at most 2048 characters.': ['Enter a link without spaces, of at most 2048 characters.', '链接不能含空格，最多 2048 个字符。'],
+    // Answered to a request without the two link keys, which the page always sends: a fault of the client, not of the user.
+    'Supply productScorecard or dealScorecard.': ['The request was not understood. Reload the page and try again.', '请求格式不正确，请刷新页面后重试。'],
+    // The Warnings page's handling records (services/warning_handling.py).
+    'Pick a follow-up day after today, at most a year ahead.': ['Pick a review day after today, at most a year ahead.', '复核日期请选今天之后、一年以内的日子。'],
+    'Unknown warning type.': ['Unknown warning type. Reload the page.', '未知的预警类型，请刷新页面。'],
+    'sourceId and sourceEvent are required.': ['The warning to handle was not named. Reload the page.', '没有指明要处理的预警，请刷新页面。'],
+    // A Lead's arrangements (services/leads.py): the list sent in full, and one arrangement added to a full Lead.
+    'activities may hold at most 200 entries.': ['The Lead can hold at most 200 activities.', '一个 Lead 最多 200 条安排。'],
+    'The Lead holds 200 arrangements, the most it can; remove one before adding another.': ['The Lead holds 200 activities, the most it can.', '这个 Lead 已有 200 条安排，达到上限。'],
+    // Files uploaded several at a time (services/contact_files.py, api/v1/contact_files.py, opportunity_status.py).
+    'Upload must contain between 1 and 10 files.': ['Upload 1 to 10 files at a time.', '一次上传 1 到 10 个文件。'],
+    'Upload exceeds the 100 MiB request limit.': ['The files of one upload may not exceed 100 MiB together.', '一次上传的文件总大小不能超过 100 MiB。'],
   },
   CONFLICT: {
     'A Contact merged or archived already cannot be merged.': ['A Contact merged or archived already cannot be merged.', '已被合并或已归档的联系人不能再合并。'],
@@ -90,8 +129,18 @@ const FIXED_MESSAGES: Partial<Record<string, Record<string, CopyPair>>> = {
     'Cancel the Booking before marking the Opportunity lost.': ['Cancel the Booking before marking the Opportunity lost.', '请先取消 Booking，再标记丢单。'],
     'A completed Booking blocks stage rollback.': ['A completed Booking blocks stage rollback.', 'Booking 已完成，不能回退商机阶段。'],
     'Cancel the Booking before rolling the Opportunity back.': ['Cancel the Booking before rolling the Opportunity back.', '请先取消 Booking，再回退商机阶段。'],
+    'This controlled-document request has already been decided.': ['This access request has already been decided.', '这条访问申请已经审批过了。'],
+    // CONTACT_MERGE_CONFLICT and QUOTATION_VERSION_LOCKED are read as CONFLICT (contracts.ts).
+    'Contacts from different accounts cannot be merged.': ['Contacts of different accounts cannot be merged.', '不同客户的联系人不能合并。'],
+    'Only the current draft can be discarded.': ['Only the current draft can be discarded.', '只能放弃当前的草稿版本。'],
+    'A quotation pending approval cannot be discarded.': ['A quotation pending approval cannot be discarded.', '待审批的报价不能放弃。'],
+    'A draft that has been through approval cannot be discarded. Revise it and submit it again.': ['A draft that has been through approval cannot be discarded. Revise it and submit it again.', '经过审批的草稿不能放弃，请修改后重新提交。'],
   },
   PERMISSION_DENIED: {
+    'Only Managers maintain the resource catalogue.': ['Only a Manager maintains the resource catalogue.', '只有经理可以维护设备目录。'],
+    'Approved document access is required.': ['This document can be opened only with an approved access request.', '需要先获得批准才能访问这份文档。'],
+    'This document does not accept access requests.': ['This document does not accept access requests.', '这份文档不接受访问申请。'],
+    'Warnings handling is available to CRM Managers only.': ['Only a Manager can record the handling of a warning.', '只有经理可以记录预警的处理。'],
     'Only the Opportunity owner can set the probability level.': ['Only the Opportunity owner can set the success probability.', '只有商机负责人可以设置成功概率。'],
     'Managers cannot review their own internal validation.': ['Managers cannot review their own internal validation.', 'Manager 不能审批自己提交的内部生产审批申请。'],
     'Only a Manager can fill in or correct the actual PO date.': ['Only a Manager can fill in or correct the actual PO date.', '只有经理可以补录或更正实际 PO 日期。'],
@@ -103,9 +152,33 @@ const FIXED_MESSAGES: Partial<Record<string, Record<string, CopyPair>>> = {
     'Account was not found, or you have no access to it.': ['The account was not found, or you have no access to it.', '找不到这个客户，或者你没有查看权限。'],
     'Contact was not found, or you have no access to it.': ['The contact was not found, or you have no access to it.', '找不到这个联系人，或者你没有查看权限。'],
     'Site was not found, or you have no access to it.': ['The site was not found, or you have no access to it.', '找不到这个厂区，或者你没有查看权限。'],
+    'Resource was not found.': ['The resource was not found.', '找不到这个设备资源。'],
+    'Record was not found.': ['The record was not found. Reload the page.', '找不到这条记录，请刷新页面。'],
+    'The controlled-document request was not found.': ['The access request was not found.', '找不到这条访问申请。'],
+    'The controlled-document version is unavailable.': ['This document version is no longer available.', '这个文档版本已不可用。'],
+    'Quotation version was not found.': ['The quotation version was not found.', '找不到这个报价版本。'],
+    // CONTACT_FILE_NOT_FOUND is read as NOT_FOUND (contracts.ts).
+    'Contact file was not found.': ['The file was not found.', '找不到这个文件。'],
   },
   SCOPE_DENIED: {
     'Sales users can only assign records to themselves.': ['A Sales user can assign records only to themselves. Choose yourself as the owner.', '销售只能把记录分配给自己，请把负责人选为本人。'],
+    'Only the Account owner or a Manager may edit this Account.': ['Only the account owner or a Manager may edit this account.', '只有客户负责人或经理可以编辑这个客户。'],
+    'Only the Account owner or a Manager may edit contacts.': ['Only the account owner or a Manager may edit its contacts.', '只有客户负责人或经理可以编辑这个客户的联系人。'],
+    'Only the Account owner or a Manager may upload files.': ['Only the account owner or a Manager may upload files.', '只有客户负责人或经理可以上传文件。'],
+    'The file is outside the current user scope.': ['This file is outside your scope.', '这个文件不在你的权限范围内。'],
+    'Demo is outside your current scope.': ['This Demo is outside your scope.', '这个 Demo 不在你的权限范围内。'],
+    'Only the resource maintainer or a Manager can edit availability.': ['Only the resource maintainer or a Manager can edit its availability.', '只有设备的维护负责人或经理可以编辑不可用时段。'],
+    'Unavailability belongs to another resource.': ['This interval belongs to another resource.', '这个不可用时段属于另一台设备。'],
+    'Only the current Demo Engineer or a Manager may arrange resources.': ['Only the current Demo Engineer or a Manager may arrange resources.', '只有当前负责的 Demo 工程师或经理可以安排设备资源。'],
+    'Resource is outside your permitted Demo scope.': ['This resource is outside your Demo scope.', '这个设备资源不在你的 Demo 权限范围内。'],
+  },
+  VERSION_CONFLICT: {
+    // The shared check of every versioned write (services/concurrency.py), and the Demo resource services' own.
+    'The record was changed by another request.': ['This record was changed by another user. Refresh and try again.', '记录已被其他用户修改，请刷新后重试。'],
+    'Record changed; reload before saving.': ['This record changed meanwhile. Reload it before saving.', '记录已被修改，请刷新后再保存。'],
+    'Someone else already saved this warning. Reload before editing.': ['Someone else already saved this warning. Reload before editing.', '这条预警已被他人保存，请刷新后再编辑。'],
+    'Someone else saved this warning at the same time. Reload.': ['Someone else saved this warning at the same time. Reload.', '这条预警刚被他人同时保存，请刷新。'],
+    "This warning's handling is no longer there. Reload before editing.": ["This warning's handling is no longer there. Reload before editing.", '这条预警的处理记录已不存在，请刷新后再编辑。'],
   },
 }
 
@@ -133,6 +206,18 @@ const TOO_LONG_FIELDS: Record<string, CopyPair> = {
   'City/Town': ['The city', '城市'],
   'Requested Equipment': ['The primary tool', '主要设备'],
   'Sample Type': ['The material (substrate)', '材料（基底）'],
+}
+
+// "<key> must be at most <n> characters." and "<key> is required." name a field by its payload key: the Demo resource
+// forms (services/demo_resources.py), and the other forms that raise the same text for `reason` (a termination, a
+// rollback, a rejection, an access request: "原因" fits each) and for `reason`'s length (the Demo Test termination).
+const RESOURCE_FIELDS: Record<string, CopyPair> = {
+  code: ['The equipment ID', '设备编号'],
+  title: ['The name', '名称'],
+  platform: ['The platform / model', '平台／型号'],
+  maintainer: ['The maintainer', '维护负责人'],
+  reason: ['The reason', '原因'],
+  resourceId: ['The resource', '设备资源'],
 }
 
 const stageLabels = (stage: string) => [opportunityStageLabel(stage, 'en-US'), opportunityStageLabel(stage, 'zh-CN')] as const
@@ -165,6 +250,24 @@ export function generatedErrorMessage(code: string, message: string) {
     if (tooLong) {
       const [english, chinese] = TOO_LONG_FIELDS[tooLong[1]] ?? [`"${tooLong[1]}"`, `“${tooLong[1]}”`]
       return localeMessage(`${english} is too long: at most ${tooLong[2]} characters.`, `${chinese}过长：最多 ${tooLong[2]} 个字符。`)
+    }
+    const fieldLimit = /^(\w+) must be at most (\d+) characters\.$/.exec(message)
+    const limitLabel = fieldLimit ? RESOURCE_FIELDS[fieldLimit[1]!] : undefined
+    if (fieldLimit && limitLabel) {
+      return localeMessage(`${limitLabel[0]} may hold at most ${fieldLimit[2]} characters.`, `${limitLabel[1]}最多 ${fieldLimit[2]} 个字符。`)
+    }
+    // Not `title`: Contact and Lead raise the same text for a job title, Opportunity, Action and document uploads for
+    // their own titles; and `resourceId` is never required.
+    const fieldRequired = /^(code|platform|maintainer|reason) is required\.$/.exec(message)
+    const requiredLabel = fieldRequired ? RESOURCE_FIELDS[fieldRequired[1]!] : undefined
+    if (fieldRequired && requiredLabel) return localeMessage(`${requiredLabel[0]} is required.`, `${requiredLabel[1]}不能为空。`)
+    // A Lead's arrangements, sent as a list (services/leads.py): the one at fault is named by its place.
+    const activity = /^activities\[(\d+)\]\.action (?:is required|may hold at most (\d+) characters)\.$/.exec(message)
+    if (activity) {
+      const ordinal = Number(activity[1]) + 1
+      return activity[2]
+        ? localeMessage(`Activity ${ordinal} may hold at most ${activity[2]} characters.`, `第 ${ordinal} 条安排的内容最多 ${activity[2]} 个字符。`)
+        : localeMessage(`Activity ${ordinal} needs its text.`, `第 ${ordinal} 条安排未填写内容。`)
     }
   }
   if (code === 'CONFLICT') {

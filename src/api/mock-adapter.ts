@@ -1642,6 +1642,9 @@ export function createMockApi(options: {
   }
   const mockApi: CrmApi = {
     queryOpportunities: boardUnavailable,
+    exportOpportunities: boardUnavailable,
+    getQueryRecipients: boardUnavailable,
+    shareOpportunityQuery: boardUnavailable,
     getOpportunityFilters: boardUnavailable,
     listOpportunityQueries: boardUnavailable,
     saveOpportunityQuery: boardUnavailable,
@@ -1659,7 +1662,12 @@ export function createMockApi(options: {
     saveOpportunityDocumentLinks: documentsUnavailable,
     getReviewDetails: reviewUnavailable,
     saveReviewTarget: reviewUnavailable,
+    async savePlanCommitment() { throw new CrmApiError('BACKEND_NOT_CONNECTED', 'Plan commitments require Frappe', requestId(), false) },
+    getReviewTarget: reviewUnavailable,
     getWarnings: reviewUnavailable,
+    getTerritoryCatalogue: reviewUnavailable,
+    saveTerritory: reviewUnavailable,
+    saveTerritoryAssignment: reviewUnavailable,
     getCockpitSettings: reviewUnavailable,
     saveCockpitSettings: reviewUnavailable,
     saveWarningPlan: reviewUnavailable,
@@ -3289,6 +3297,12 @@ export function createMockApi(options: {
 
     async listQuotationCatalog() { throw new CrmApiError('BACKEND_NOT_CONNECTED', 'Quotation 仅支持 Frappe 运行时', requestId(), false) },
     async listQuotations() { throw new CrmApiError('BACKEND_NOT_CONNECTED', 'Quotation 仅支持 Frappe 运行时', requestId(), false) },
+    async getQuotationPlanning() { throw new CrmApiError('BACKEND_NOT_CONNECTED', 'Quotation planning requires Frappe', requestId(), false) },
+    async listEvents() { throw new CrmApiError('BACKEND_NOT_CONNECTED', 'Events require Frappe', requestId(), false) },
+    async getEvent() { throw new CrmApiError('BACKEND_NOT_CONNECTED', 'Events require Frappe', requestId(), false) },
+    async saveEvent() { throw new CrmApiError('BACKEND_NOT_CONNECTED', 'Events require Frappe', requestId(), false) },
+    async saveQuotationSchedule() { throw new CrmApiError('BACKEND_NOT_CONNECTED', 'Quotation planning requires Frappe', requestId(), false) },
+    async saveQuotationFollowUp() { throw new CrmApiError('BACKEND_NOT_CONNECTED', 'Quotation planning requires Frappe', requestId(), false) },
     async getQuotation() { throw new CrmApiError('BACKEND_NOT_CONNECTED', 'Quotation 仅支持 Frappe 运行时', requestId(), false) },
     async createQuotation() { throw new CrmApiError('BACKEND_NOT_CONNECTED', 'Quotation 仅支持 Frappe 运行时', requestId(), false) },
     async linkQuotationOpportunity() { throw new CrmApiError('BACKEND_NOT_CONNECTED', 'Quotation 仅支持 Frappe 运行时', requestId(), false) },
@@ -3325,6 +3339,9 @@ export function createMockApi(options: {
       assertCapability(capabilities, 'deal:view')
       return opportunityResponse(assertOpportunity(id))
     },
+    saveBlueSheetFlags: reviewUnavailable,
+    getBlueSheetAssessment: reviewUnavailable,
+    applyBlueSheetSuggestion: reviewUnavailable,
 
     async createStrategyOpportunity(input: CreateStrategyOpportunityInput) {
       await wait()

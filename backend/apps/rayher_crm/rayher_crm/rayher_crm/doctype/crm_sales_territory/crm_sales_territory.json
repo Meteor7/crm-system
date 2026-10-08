@@ -1,11 +1,13 @@
 {
   "doctype": "DocType", "name": "CRM Sales Territory", "module": "Rayher CRM", "engine": "InnoDB",
-  "creation": "2026-10-03 12:00:00.000000", "modified": "2026-10-03 12:00:00.000000",
+  "creation": "2026-10-03 12:00:00.000000", "modified": "2026-10-05 12:00:00.000000",
   "owner": "Administrator", "modified_by": "Administrator", "naming_rule": "By fieldname",
-  "autoname": "field:territory_name", "allow_rename": 0, "track_changes": 0, "sort_field": "creation", "sort_order": "ASC",
+  "autoname": "field:territory_name", "allow_rename": 0, "track_changes": 1, "sort_field": "creation", "sort_order": "ASC",
   "description": "The sales territory tree over the Customer regions (World > continent > country > region). A territory is named like the region it stands for, or groups the territories below it. It classifies and totals; it is in no permission rule. Only rayher_crm.services.territories reads or writes it.",
-  "field_order": ["territory_name", "parent_territory", "sort_order"],
+  "field_order": ["territory_name", "parent_territory", "sort_order", "is_group", "enabled"],
   "fields": [
+    {"fieldname": "is_group", "fieldtype": "Check", "label": "Group Territory", "default": "0"},
+    {"fieldname": "enabled", "fieldtype": "Check", "label": "Active for New Assignments", "default": "1"},
     {"fieldname": "territory_name", "fieldtype": "Data", "label": "Territory", "reqd": 1, "unique": 1, "in_list_view": 1},
     {"fieldname": "parent_territory", "fieldtype": "Link", "label": "Parent Territory", "options": "CRM Sales Territory", "in_list_view": 1},
     {"description": "Order among the territories with the same parent; ties go by name.", "fieldname": "sort_order", "fieldtype": "Int", "label": "Sort Order"}

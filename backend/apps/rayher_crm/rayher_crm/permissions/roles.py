@@ -17,6 +17,8 @@ CRM_ROLE_TO_PROFILE = {
 }
 
 ALL_CAPABILITIES = (
+    "event:view",
+    "event:write",
     "cockpit:view",
     "dashboard:view",
     "account:view",
@@ -59,6 +61,8 @@ ALL_CAPABILITIES = (
 ROLE_CAPABILITIES = {
     "Manager": ALL_CAPABILITIES,
     "Sales": (
+        "event:view",
+        "event:write",
         "dashboard:view",
         "account:view",
         "account:write",

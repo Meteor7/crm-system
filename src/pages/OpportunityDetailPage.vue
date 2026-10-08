@@ -21,6 +21,7 @@ import OpportunityMilestoneBar from '@/features/opportunities/OpportunityMilesto
 import OpportunityStageTimeline from '@/features/opportunities/OpportunityStageTimeline.vue'
 import ProbabilityRecoveryPanel from '@/features/opportunities/ProbabilityRecoveryPanel.vue'
 import LossReviewCard from '@/features/opportunities/LossReviewCard.vue'
+import BlueSheetPanel from '@/features/opportunities/BlueSheetPanel.vue'
 import PoConfirmationModal from '@/features/opportunities/PoConfirmationModal.vue'
 import StakeholderEditorModal from '@/features/opportunities/StakeholderEditorModal.vue'
 import { useAppStore } from '@/stores/app'
@@ -608,10 +609,7 @@ onMounted(async () => {
             <header><h2>{{ t('oppEditor.strength') }}</h2><span>{{ selected.strengths.length }}</span></header>
             <ul><li v-for="item in selected.strengths" :key="item">{{ item }}</li></ul>
           </section>
-          <section class="detail-card evidence-card risk-card">
-            <header><h2>{{ t('oppEditor.redFlag') }}</h2><span>{{ selected.redFlags.length }}</span></header>
-            <ul><li v-for="item in selected.redFlags" :key="item">{{ item }}</li></ul>
-          </section>
+          <BlueSheetPanel :opportunity="selected" :api-client="apiClient" @updated="selected = $event" @denied="selected = null; denied = true; opportunityRequest++" />
           <section class="detail-card evidence-card competitor-card" data-testid="opportunity-competitors">
             <header><h2>{{ t('oppEditor.competitors') }}</h2><span>{{ selected.competitors?.length ?? 0 }}</span></header>
             <div v-if="selected.competitors?.length" class="competitor-list">

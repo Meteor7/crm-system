@@ -34,3 +34,7 @@ rayher_crm.patches.v1_0.add_notification_scope_indexes
 rayher_crm.patches.v1_0.backfill_demo_request_submissions
 rayher_crm.patches.v1_0.backfill_action_completion
 rayher_crm.patches.v1_0.clear_self_reporting_contacts
+rayher_crm.patches.v1_0.initialize_territory_administration
+rayher_crm.patches.v1_0.reconcile_territory_region_identity
+rayher_crm.patches.v1_0.backfill_blue_sheet_flags
+rayher_crm.patches.v1_0.backfill_opportunity_owner_identity

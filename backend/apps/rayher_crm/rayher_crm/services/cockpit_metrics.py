@@ -15,7 +15,9 @@ from rayher_crm.services.cockpit_history import (
 )
 from rayher_crm.services.opportunity_stages import INTERNAL_VALIDATION, OPEN_STAGES, PROBABILITY_LEVELS
 
-ACTIVITIES = ("visits", "leads", "tests", "quotes")
+from rayher_crm.services.review_breakdowns import activity_breakdown, visit_kind, loss_breakdown, loss_category, LOSS_CATEGORIES
+
+ACTIVITIES = ("visits", "leads", "tests", "quotes", "followups")
 
 
 def month_shift(day, months):
@@ -266,7 +268,7 @@ def quotation_expiry(data, query, reference, days=14, now=None):
 LOST_WINDOW_DAYS = 28
 
 
-def build_review(data, query, now, coverage, quotation_expiry_days=14, stage6_no_po_days=56):
+def build_review(data, query, now, coverage, quotation_expiry_days=14, stage6_no_po_days=56, stalled_days=21, stall_escalation_days=35):
     now = stamp(now)
     window = period(query, now)
     at = window["as_of"]
@@ -294,11 +296,13 @@ def build_review(data, query, now, coverage, quotation_expiry_days=14, stage6_no
     details = {key: [] for key in (*ACTIVITIES, *OPEN_STAGES, "po", "po_missing_date", "po_missing_amount", "lost", "lost_backlog", "overdue", "downgrade", "downgrade_history", "stalled", "losses", "stage6_no_po", "stage6_no_po_handled")}
     details.update(close_date_slip=[], close_date_slip_handled=[])
 
-    def in_scope(account, owner):
+    def in_customer_scope(account):
         customer = customers.get(account)
-        return bool(customer and (not owner_filter or owner == owner_filter)
-                    and (not query.get("market") or customer.get("custom_crm_segment") == query["market"])
+        return bool(customer and (not query.get("market") or customer.get("custom_crm_segment") == query["market"])
                     and in_region(query, customer))
+
+    def in_scope(account, owner):
+        return in_customer_scope(account) and (not owner_filter or owner == owner_filter)
 
     def entry(record, account, owner, when, kind, **extra):
         return {"id": record["name"], "title": record.get("title") or record.get("subject") or record.get("ref_no") or record["name"],
@@ -322,7 +326,7 @@ def build_review(data, query, now, coverage, quotation_expiry_days=14, stage6_no
     facts = activity_facts(data, coverage, now)
     facts_by_opportunity = grouped(facts, "opportunityId")
     events = {key: [] for key in ACTIVITIES}
-    missing = set()
+    missing = {key: [] for key in ACTIVITIES}
     for fact in facts:
         key = fact["metric"]
         if not fact["done"] or key not in events:
@@ -336,9 +340,11 @@ def build_review(data, query, now, coverage, quotation_expiry_days=14, stage6_no
         opportunity_id = fact.get("opportunityId")
         when = fact["occurredAt"]
         row = {**fact, "at": when, "customer": customer.get("customer_name", account)}
+        if key == "quotes":
+            row.update(amount=fact.get("amountCny"), currency="CNY", quotationVersionId=fact.get("eventId"))
         owner_required = bool(owner_filter) or key == "tests"
         if not owner and owner_required and equipment_ok(opportunity_id):
-            missing.add(key)
+            missing[key].append(when)
         if not in_scope(account, owner):
             continue
         if equipment_filter and not opportunity_id:
@@ -350,25 +356,38 @@ def build_review(data, query, now, coverage, quotation_expiry_days=14, stage6_no
         if when and (owner or not owner_required):
             events[key].append(row)
         else:
-            missing.add(key)
+            missing[key].append(when)
 
     def during(rows, start, end):
         return [r for r in rows if start <= stamp(r["at"]) < end]
 
+    def missing_during(key, start, end):
+        # A known event date confines uncertain attribution to its own period.
+        # Only an undated completed fact can affect both comparison periods.
+        return any(not when or start <= stamp(when) < end for when in missing[key])
+
+    current_missing = {key for key in ACTIVITIES if missing_during(key, window["start"], window["cutoff"])}
+    previous_missing = {key for key in ACTIVITIES if missing_during(key, window["previous_start"], window["previous_end"])}
     activity = []
     for key, rows in events.items():
         details[key] = during(rows, window["start"], window["cutoff"])
         current = len(details[key])
         previous = len(during(rows, window["previous_start"], window["previous_end"]))
         activity.append({"key": key, "unclassified": len(during(unclassified[key], window["start"], window["cutoff"])) if equipment_filter else None,
-                         "actual": insufficient("missing_event_or_owner") if key in missing else metric(current),
-                         "previous": insufficient("missing_event_or_owner") if key in missing else metric(previous),
-                         "delta": None if key in missing else current - previous})
+                         "actual": insufficient("missing_event_or_owner") if key in current_missing else metric(current),
+                         "previous": insufficient("missing_event_or_owner") if key in previous_missing else metric(previous),
+                         "delta": None if key in current_missing or key in previous_missing else current - previous,
+                         **activity_breakdown(key, details[key], during(rows, window["previous_start"], window["previous_end"]), key not in current_missing, key not in previous_missing)})
+    for kind in ("existing", "prospect", "unclassified"):
+        details[f"visits_{kind}"] = [row for row in details["visits"] if visit_kind(row) == kind]
 
     stage_complete = not window["historical"] or covered(coverage, "stage", at)
     fields_complete = not window["historical"] or covered(coverage, "fields", at)
     actions_complete = not window["historical"] or covered(coverage, "actions", at)
-    stalled_complete = covered(coverage, "actions", at - timedelta(days=35))
+    stalled_complete = covered(coverage, "actions", at - timedelta(days=stall_escalation_days))
+    pipeline_owner_unknown = set()
+    overdue_owner_unknown = False
+    stalled_owner_unknown = False
     stage_unknown = False
     stage6_unknown = False
     stalled_unknown = False
@@ -377,8 +396,10 @@ def build_review(data, query, now, coverage, quotation_expiry_days=14, stage6_no
             continue
         history = histories.get(opp["name"], [])
         owner = field_at(opp, "opportunity_owner", at, history, coverage, now)
-        if not in_scope(opp["account"], owner) or not equipment_ok(opp["name"]):
+        if (not in_customer_scope(opp["account"]) or not equipment_ok(opp["name"])
+                or (owner_filter and owner and owner != owner_filter)):
             continue
+        owner_uncertain = bool(owner_filter and not owner)
         stage = stage_at(opp, at, stages.get(opp["name"], []), coverage, now)
         if stage is None:
             stage_unknown = True
@@ -389,7 +410,10 @@ def build_review(data, query, now, coverage, quotation_expiry_days=14, stage6_no
             continue
         row = entry(opp, opp["account"], owner, at, "opportunity", stage=stage,
                     amount=cny_amount_at(opp, at, history), currency="CNY")
-        details[stage].append(row)
+        if owner_uncertain:
+            pipeline_owner_unknown.add(stage)
+        else:
+            details[stage].append(row)
         # Which actions were overdue follows the viewed period; whether they still are is current state,
         # like post-mortems and downgrade actions: done, archived, moved past the period end, or the deal
         # closed since (warning_handling._source takes no next step on a closed deal) clears the row.
@@ -402,6 +426,9 @@ def build_review(data, query, now, coverage, quotation_expiry_days=14, stage6_no
                 continue
             due = str(now_action["due"])[:10]
             if date.fromisoformat(due) >= at.date():
+                continue
+            if owner_uncertain:
+                overdue_owner_unknown = True
                 continue
             details["overdue"].append({**row, "actionId": action["id"], "actionTitle": now_action.get("title") or action["title"], "due": due,
                                        "actionStatus": now_action.get("status"), "actionOwner": now_action.get("action_owner") or action.get("owner"),
@@ -420,8 +447,11 @@ def build_review(data, query, now, coverage, quotation_expiry_days=14, stage6_no
                 entry_row = last_entry(stages.get(opp["name"], []), INTERNAL_VALIDATION, now)
                 handling = handling_for(data, "stage6_no_po", opp["name"], (entry_row or {}).get("name") or BEFORE_HISTORY, today)
                 # A recorded action takes the deal out of the count until its follow-up day; it stays listed apart.
-                details["stage6_no_po_handled" if handling["state"] == "handled" else "stage6_no_po"].append(
-                    {**row, "at": exact, "enteredAt": exact, "daysInStage": days, "daysAtLeast": at_least, "handling": handling})
+                if owner_uncertain:
+                    stage6_unknown |= handling["state"] != "handled"
+                else:
+                    details["stage6_no_po_handled" if handling["state"] == "handled" else "stage6_no_po"].append(
+                        {**row, "at": exact, "enteredAt": exact, "daysInStage": days, "daysAtLeast": at_least, "handling": handling})
         opportunity_facts = facts_by_opportunity.get(opp["name"], [])
         actual_last = last_activity_at(opportunity_facts, opp["name"], at, history)
         last = max(stamp(opp["creation"]), actual_last) if actual_last else stamp(opp["creation"])
@@ -432,9 +462,12 @@ def build_review(data, query, now, coverage, quotation_expiry_days=14, stage6_no
                            and (not f.get("createdAt") or stamp(f["createdAt"]) <= at)
                            and not completion_before_coverage(f, coverage, history) for f in opportunity_facts)
         # An undated completed activity might be recent. Do not assert inactivity.
-        stalled_unknown = stalled_unknown or (time_unknown and age >= 21)
-        if age >= 21 and stalled_complete and not time_unknown:
-            details["stalled"].append({**row, "lastActionAt": None if lower_bound else iso(last), "days": age, "daysAtLeast": lower_bound, "severity": "high" if age >= 35 else "warning"})
+        stalled_unknown = stalled_unknown or (time_unknown and age >= stalled_days)
+        if age >= stalled_days and stalled_complete and not time_unknown:
+            if owner_uncertain:
+                stalled_owner_unknown = True
+            else:
+                details["stalled"].append({**row, "lastActionAt": None if lower_bound else iso(last), "days": age, "daysAtLeast": lower_bound, "severity": "high" if age >= stall_escalation_days else "warning"})
 
     year_start = datetime(at.year, 1, 1)
     # Current responsibility and resolution, as for downgrade handling. Historical
@@ -483,6 +516,9 @@ def build_review(data, query, now, coverage, quotation_expiry_days=14, stage6_no
     # Four calendar weeks ending on the as_of day (Shanghai dates), for current and completed periods alike.
     lost_start = datetime.combine(at.date() - timedelta(days=LOST_WINDOW_DAYS - 1), time.min)
     reviews = {r["stage_event"]: r for r in data.get("loss_reviews", [])}
+    lost_owner_unknown = False
+    loss_owner_categories = set()
+    reviewed_owner_unknown = pending_owner_unknown = False
     for event in data["stages"]:
         if event["event"] != "marked_lost":
             continue
@@ -493,8 +529,10 @@ def build_review(data, query, now, coverage, quotation_expiry_days=14, stage6_no
         if not opp or not equipment_ok(opp["name"]):
             continue
         owner = field_at(opp, "opportunity_owner", when, histories.get(opp["name"], []), coverage, now)
-        if not in_scope(opp["account"], owner):
+        if (not in_customer_scope(opp["account"])
+                or (owner_filter and owner and owner != owner_filter)):
             continue
+        owner_uncertain = bool(owner_filter and not owner)
         row = entry(opp, opp["account"], owner, when, "opportunity", reason=event.get("reason"), stage=event.get("from_stage"), eventId=event["name"])
         row["amount"] = cny_amount_at(opp, when, histories.get(opp["name"], []))
         row["currency"] = "CNY"
@@ -507,8 +545,16 @@ def build_review(data, query, now, coverage, quotation_expiry_days=14, stage6_no
         # clears the warning when a completed period is viewed.
         reviewed = bool(review and review.get("review_status") == "Reviewed")
         pending = not reviewed and reopened_at is None
+        if owner_uncertain:
+            if when >= loss_start:
+                loss_owner_categories.add(loss_category({"review": {"status": "reviewed" if reviewed else "pending",
+                                                                     "category": (review or {}).get("review_category")}}))
+                reviewed_owner_unknown |= reviewed
+                pending_owner_unknown |= pending
+            lost_owner_unknown |= when >= lost_start and pending
+            continue
         row["review"] = ({"id": review["name"], "status": "reviewed" if reviewed else "pending",
-                          "note": review.get("review_note") or "", "reviewedBy": review.get("reviewed_by") or None,
+                          "category": review.get("review_category") or "", "note": review.get("review_note") or "", "reviewedBy": review.get("reviewed_by") or None,
                           "reviewedAt": iso(stamp(review["reviewed_at"])) if review.get("reviewed_at") else None,
                           "modified": iso(stamp(review["modified"])) if review.get("modified") else None} if review else None)
         row["reviewPending"] = pending
@@ -595,27 +641,29 @@ def build_review(data, query, now, coverage, quotation_expiry_days=14, stage6_no
         # The zone lists actions, so an opportunity with two overdue actions counts twice.
         return metric(len({(r["id"], r["actionId"]) for r in rows})) if ready else insufficient()
 
-    lost_ready = covered(coverage, "stage", lost_start) and (not owner_filter or covered(coverage, "fields", lost_start))
+    lost_ready = covered(coverage, "stage", lost_start) and (not owner_filter or covered(coverage, "fields", lost_start)) and not lost_owner_unknown
     warnings = [
         {"key": "lost", "count": count([r for r in details["lost"] if r["reviewPending"]], lost_ready)},
-        {"key": "overdue", "count": action_count(details["overdue"], stages_ready and actions_complete)},
+        {"key": "overdue", "count": action_count(details["overdue"], stages_ready and actions_complete and not overdue_owner_unknown)},
         {"key": "downgrade", "count": count(details["downgrade"], covered(coverage, "probability", window["start"]))},
     ]
     warnings.append({"key": "quotation_expiry", "count": expiring["count"]})
     warnings.append({"key": "stage6_no_po", "count": count(details["stage6_no_po"], not stage6_unknown and (not owner_filter or fields_complete))})
     warnings.append({"key": "close_date_slip", "count": count(details["close_date_slip"], covered(coverage, "fields", at))})
-    pipeline = [{"key": key, "count": count(details[key], stages_ready),
-                 "amount": metric(None, "not_applicable") if i == 0 else amount(details[key], stages_ready and fields_complete)} for i, key in enumerate(OPEN_STAGES)]
+    pipeline = [{"key": key, "count": count(details[key], stages_ready and key not in pipeline_owner_unknown),
+                 "amount": metric(None, "not_applicable") if i == 0 else amount(details[key], stages_ready and fields_complete and key not in pipeline_owner_unknown)} for i, key in enumerate(OPEN_STAGES)]
     pipeline.append({"key": "po", "count": po_count(details["po"]), "amount": po_amount(details["po"])})
     people = {r["name"]: r.get("full_name") or r["name"] for r in data["people"]}
     all_rows = [r for key in (*ACTIVITIES, *OPEN_STAGES, "po", "po_missing_date") for r in details[key]]
     owners = sorted({r["owner"] for r in all_rows if r.get("owner")} | ({owner_filter} if owner_filter else set(people)))
+    rep_pipeline_unknown = bool(pipeline_owner_unknown.intersection(OPEN_STAGES[1:])) or any(
+        not row.get("owner") for key in OPEN_STAGES[1:] for row in details[key])
     reps = []
     for owner in owners:
         select = lambda key: [r for r in details[key] if r.get("owner") == owner]
         reps.append({"id": owner, "name": people.get(owner, owner),
-                     "activities": {key: insufficient("missing_event_or_owner") if key in missing or any(not r.get("owner") for r in details[key]) else metric(len(select(key))) for key in ACTIVITIES},
-                     "pipeline": amount([r for key in OPEN_STAGES[1:] for r in select(key)], stages_ready and fields_complete),
+                     "activities": {key: insufficient("missing_event_or_owner") if key in current_missing or any(not r.get("owner") for r in details[key]) else metric(len(select(key))) for key in ACTIVITIES},
+                     "pipeline": amount([r for key in OPEN_STAGES[1:] for r in select(key)], stages_ready and fields_complete and not rep_pipeline_unknown),
                      "poCount": po_count(select("po")),
                      "orders": po_amount(select("po"))})
     for key in details:
@@ -624,7 +672,10 @@ def build_review(data, query, now, coverage, quotation_expiry_days=14, stage6_no
     details["stalled"].sort(key=lambda r: (-r["days"], r["id"]))
     details["stage6_no_po"].sort(key=lambda r: (-r["daysInStage"], r["id"]))
     details["stage6_no_po_handled"].sort(key=lambda r: (-r["daysInStage"], r["id"]))
-    losses_ready = covered(coverage, "stage", loss_start) and (not owner_filter or covered(coverage, "fields", loss_start))
+    losses_coverage_ready = covered(coverage, "stage", loss_start) and (not owner_filter or covered(coverage, "fields", loss_start))
+    losses_ready = losses_coverage_ready and not loss_owner_categories
+    for category in (*LOSS_CATEGORIES, "unclassified", "pending"):
+        details[f"loss_reason:{category}"] = [row for row in details["losses"] if loss_category(row) == category]
     public_window = {"kind": window["kind"], "start": window["start"].date().isoformat(),
                      "end": (window["end"] - timedelta(days=1)).date().isoformat(), "asOf": iso(at),
                      "previousStart": window["previous_start"].date().isoformat(), "previousEnd": iso(window["previous_end"]),
@@ -635,8 +686,8 @@ def build_review(data, query, now, coverage, quotation_expiry_days=14, stage6_no
             "stage6NoPo": {"thresholdDays": stage6_no_po_days},
             "orders": {"actual": po_amount(details["po"]), "series": po_series(), "count": po_count(details["po"]),
                        "missingDate": po_count(details["po_missing_date"]), "missingAmount": po_count(details["po_missing_amount"])},
-            "stalled": {"count": insufficient("missing_date") if stalled_unknown else count(details["stalled"], stages_ready and stalled_complete), "items": details["stalled"][:5]},
-            "losses": {"count": event_count(details["losses"], losses_ready), "items": details["losses"][:5],
-                       "reviewed": event_count([r for r in details["losses"] if r["review"] and r["review"]["status"] == "reviewed"], losses_ready),
-                       "pending": event_count([r for r in details["losses"] if r["reviewPending"]], losses_ready)},
+            "stalled": {"thresholdDays": stalled_days, "escalationDays": stall_escalation_days, "count": insufficient("missing_date") if stalled_unknown else count(details["stalled"], stages_ready and stalled_complete and not stalled_owner_unknown), "items": details["stalled"][:5]},
+            "losses": {**loss_breakdown(details["losses"], losses_coverage_ready, loss_owner_categories), "count": event_count(details["losses"], losses_ready), "items": details["losses"][:5],
+                       "reviewed": event_count([r for r in details["losses"] if r["review"] and r["review"]["status"] == "reviewed"], losses_coverage_ready and not reviewed_owner_unknown),
+                       "pending": event_count([r for r in details["losses"] if r["reviewPending"]], losses_coverage_ready and not pending_owner_unknown)},
             "_details": details}

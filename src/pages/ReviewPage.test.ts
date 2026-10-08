@@ -21,6 +21,7 @@ beforeEach(() => {
 async function setup(role: UserRole = 'Manager') {
   const api = createMockApi({ role, latency: 0 })
   api.getReview = vi.fn(async () => ({ data: reviewFixture(), warnings: [], meta: { requestId: 'review-test', generatedAt: '' } }))
+  api.getReviewTarget = vi.fn(async () => ({ data: null, warnings: [], meta: { requestId: 'target-test' } }))
   api.getReviewDetails = vi.fn(async () => ({ data: { items: [], page: 1, pageSize: 20, total: 0, asOf: '' }, warnings: [], meta: { requestId: 'detail-test', generatedAt: '' } }))
   const pinia = createPinia()
   const router = createAppRouter()
@@ -30,6 +31,113 @@ async function setup(role: UserRole = 'Manager') {
   return { wrapper, api, router, app: useAppStore(pinia) }
 }
 describe('Manager Review', () => {
+  it('shows visit snapshots, incomplete quote value and completed follow-ups with matching details', async () => {
+    const { wrapper, api } = await setup()
+    const data = reviewFixture()
+    const ready = (value: number | string) => ({ state: 'ready' as const, value })
+    data.activities[0].customerKinds = [
+      { key: 'existing', actual: ready(7), previous: ready(6), delta: 1 },
+      { key: 'prospect', actual: ready(3), previous: ready(3), delta: 0 },
+      { key: 'unclassified', actual: ready(2), previous: ready(1), delta: 1 },
+    ]
+    data.activities.find(row => row.key === 'quotes')!.quoteAmount = { actual: { state: 'insufficient', value: null }, previous: ready('1000000'), delta: null, known: '1500000', missing: 1, previousKnown: '1000000', previousMissing: 0 }
+    data.activities.push({ key: 'followups', actual: ready(2), previous: ready(1), delta: 1, target: { value: 3, state: 'ready', record: null } })
+    api.getReview = vi.fn(async () => ({ data, warnings: [], meta: { requestId: 'breakdowns' } }))
+    api.getReviewDetails = vi.fn(async q => ({ data: { items: [{ id: 'followup-1', quotationId: 'quote-1', quotationVersionId: 'version-1', kind: 'followup' as const, title: 'Call buyer', customer: 'Customer', owner: 'alice', at: '2026-09-10', accountId: 'c' }], page: 1, pageSize: 20, total: 1, asOf: '' }, warnings: [], meta: { requestId: q.metric } }))
+    await wrapper.get('input[type="date"]').setValue('2026-09-14'); await flushPromises()
+    expect(wrapper.findAll('.activity-grid article')).toHaveLength(5)
+    const breakdown = wrapper.get('[data-visit-classification]')
+    expect(breakdown.text()).toContain('按拜访完成时保存')
+    expect(breakdown.text()).toContain('未分类')
+    await breakdown.findAll('button')[2].trigger('click'); await flushPromises()
+    expect(api.getReviewDetails).toHaveBeenLastCalledWith(expect.objectContaining({ metric: 'visits_unclassified' }))
+    const quote = wrapper.get('[data-quote-amount]')
+    expect(quote.text()).toContain('数据不足')
+    expect(quote.text()).toContain('¥1.5M')
+    expect(quote.text()).toContain('1 份报价缺少人民币快照')
+    await wrapper.findAll('.activity-grid article').find(row => row.text().includes('报价跟进'))!.get('button').trigger('click'); await flushPromises()
+    expect(api.getReviewDetails).toHaveBeenLastCalledWith(expect.objectContaining({ metric: 'followups' }))
+    expect(wrapper.get('.detail-dialog tbody a').attributes('href')).toContain('/quotations/quote-1')
+    expect(wrapper.get('.detail-dialog tbody a').attributes('href')).toContain('version=version-1')
+    wrapper.unmount()
+  })
+
+  it('shows confirmed loss categories and opens their exact filtered records', async () => {
+    const { wrapper, api } = await setup()
+    const data = reviewFixture()
+    data.losses.completionPercent = { value: '66.67', state: 'ready' }
+    data.losses.categories = ['Price', 'pending', 'unclassified'].map(key => ({ key, count: { state: 'ready', value: 1 } }))
+    data.stalled.thresholdDays = 12; data.stalled.escalationDays = 20
+    api.getReview = vi.fn(async () => ({ data, warnings: [], meta: { requestId: 'loss-categories' } }))
+    await wrapper.get('input[type="date"]').setValue('2026-09-14'); await flushPromises()
+    expect(wrapper.get('[data-loss-breakdown]').text()).toContain('66.7%')
+    expect(wrapper.get('[data-loss-breakdown]').text()).toContain('已复盘，分类待补全')
+    expect(wrapper.get('.stalled-panel').text()).toContain('12 天提醒 / 20 天升级')
+    await wrapper.get('[data-loss-breakdown] button').trigger('click'); await flushPromises()
+    expect(api.getReviewDetails).toHaveBeenLastCalledWith(expect.objectContaining({ metric: 'loss_reason:Price' }))
+    expect(wrapper.get('.detail-dialog h2').text()).toBe('价格')
+    wrapper.unmount()
+  })
+  it('keeps historical owners visible while excluding them from new target assignments', async () => {
+    const { wrapper, api } = await setup()
+    const data = reviewFixture()
+    data.targetOptions = { territories: [], teamMembers: ['alice'] }
+    data.activities[0].target = { state: 'insufficient', value: null, record: null, scope: 'sales',
+      sources: [{ member: 'bob', state: 'insufficient', value: null, record: null, assignable: false }] }
+    api.getReview = vi.fn(async () => ({ data, warnings: [], meta: { requestId: 'roster' } }))
+    await wrapper.get('input[type="date"]').setValue('2026-09-14'); await flushPromises()
+    expect(wrapper.get('[data-target-sources]').text()).toContain('保留实际活动，无法分配新目标')
+    await wrapper.get('.target-button').trigger('click'); await flushPromises()
+    expect(wrapper.get('[data-testid="target-sales"]').findAll('option').map(option => option.attributes('value'))).toEqual(['', 'alice'])
+    expect(wrapper.text()).toContain('Bob')
+    wrapper.unmount()
+  })
+  it('shows incomplete team and region target sources without inventing a total or plan line', async () => {
+    const { wrapper, api } = await setup()
+    const data = reviewFixture()
+    data.activities[0].target = { state: 'insufficient', value: null, record: null, scope: 'sales', missing: ['bob'],
+      sources: [{ member: 'alice', state: 'ready', value: '0', record: null }, { member: 'bob', state: 'not_set', value: null, record: null }] }
+    data.orders.target = { state: 'insufficient', value: null, record: null, scope: 'territory', missing: ['West China'],
+      sources: [{ member: 'East China', state: 'ready', value: '1500000', record: null }, { member: 'West China', state: 'not_set', value: null, record: null }] }
+    api.getReview = vi.fn(async () => ({ data, warnings: [], meta: { requestId: 'target-sources' } }))
+    await wrapper.get('input[type="date"]').setValue('2026-09-14'); await flushPromises()
+    const sources = wrapper.get('.activity-grid [data-target-sources]')
+    expect(sources.get('summary').text()).toContain('1 / 2')
+    expect(sources.findAll('li').map(row => row.text())).toEqual(['Alice0', 'Bob未设置'])
+    expect(wrapper.get('.activity-target').text()).toContain('数据不足')
+    expect(wrapper.get('.annual-target-sources').text()).toContain('West China')
+    expect(wrapper.find('.plan-line').exists()).toBe(false)
+    expect(wrapper.find('.actual-line').exists()).toBe(true)
+    expect(wrapper.get('.heading-order').text()).toContain('数据不足')
+    wrapper.unmount()
+  })
+
+  it('edits the as-of year leaf target across a New Year week and clears the sales identity', async () => {
+    const { wrapper, api } = await setup()
+    const data = reviewFixture()
+    data.period = { ...data.period, start: '2025-12-29', end: '2026-01-04', asOf: '2026-01-04T15:59:59Z' }
+    const record = { id: 'region-target', modified: 'region-v1', scope: 'territory' as const, territory: 'East China',
+      sales: '', metric: 'orders' as const, period: 'year' as const, anchor: '2026-01-01', value: '1500000' }
+    data.targetOptions = { territories: ['East China'], teamMembers: ['alice', 'bob'] }
+    data.targets = [record]
+    api.getReviewTarget = vi.fn(async () => ({ data: record, warnings: [], meta: { requestId: 'target-test' } }))
+    api.getReview = vi.fn(async () => ({ data, warnings: [], meta: { requestId: 'region-target' } }))
+    api.saveReviewTarget = vi.fn(async input => ({ data: { ...record, ...input, modified: 'region-v2' }, warnings: [], meta: { requestId: 'saved' } }))
+    await wrapper.get('input[type="date"]').setValue('2026-09-14'); await flushPromises()
+    await wrapper.get('.target-button').trigger('click'); await flushPromises()
+    await wrapper.get('[data-testid="target-scope"]').setValue('territory')
+    await wrapper.get('[data-testid="target-territory"]').setValue('East China'); await flushPromises()
+    expect(wrapper.get('[data-testid="target-metric"]').attributes('disabled')).toBeDefined()
+    expect(wrapper.get('[data-testid="target-period"]').attributes('disabled')).toBeDefined()
+    expect((wrapper.get('.target-dialog input[type="number"]').element as HTMLInputElement).value).toBe('1500000')
+    await wrapper.get('.target-dialog input[type="number"]').setValue('2000000')
+    await wrapper.get('.target-dialog form').trigger('submit'); await flushPromises()
+    expect(api.saveReviewTarget).toHaveBeenCalledWith({ sales: '', scope: 'territory', territory: 'East China', metric: 'orders',
+      period: 'year', anchor: '2026-01-01', value: '2000000' }, 'region-v1')
+    expect(wrapper.get('.target-dialog').text()).toContain('目标已保存')
+    wrapper.unmount()
+  })
+
   it('opens current Demo resource warnings instead of an unsupported historic drilldown', async () => {
     const { wrapper, api, router } = await setup()
     const data = reviewFixture()
@@ -350,20 +458,20 @@ describe('Manager Review', () => {
     wrapper.unmount()
   })
 
-  it('renders four activities and seven stages, with no team target or fabricated orders', async () => {
+  it('renders four activities and seven stages with the API annual scope and target state', async () => {
     const { wrapper } = await setup()
     expect(wrapper.findAll('.activity-grid article')).toHaveLength(4)
     expect(wrapper.findAll('.stage-row')).toHaveLength(7)
-    expect(wrapper.get('.heading-order').text()).toContain('— / —')
-    expect(wrapper.get('.target-button').text()).toBe('设置个人目标')
+    expect(wrapper.get('.heading-order').text()).toContain('9,500,000 / 不适用')
+    expect(wrapper.get('.target-button').text()).toBe('设置目标')
     expect(wrapper.get('.pipeline-panel').text()).not.toContain('S1–S6')
     expect(wrapper.find('.chart-target-button').exists()).toBe(false)
-    expect(wrapper.get('.chart-owner').text()).toBe('未筛选销售')
+    expect(wrapper.get('.chart-owner').text()).toBe('全部地域')
     expect(wrapper.find('.orders-panel select').exists()).toBe(false)
     expect(wrapper.text()).not.toContain('团队目标')
     expect(wrapper.text()).not.toContain('转化率')
     expect(wrapper.find('select[aria-label="Region"]').attributes('disabled')).toBeDefined()
-    expect(wrapper.get('.target-button').attributes('disabled')).toBeDefined()
+    expect(wrapper.get('.target-button').attributes('disabled')).toBeUndefined()
     setLocale('en-US'); await flushPromises()
     expect(wrapper.get('h1').text()).toBe('Week 37')
     wrapper.unmount()
@@ -506,10 +614,10 @@ describe('Approved Review integration', () => {
     await wrapper.get('select[aria-label="Market"]').setValue('Frontend'); await flushPromises()
     await wrapper.get('select[aria-label="Sales"]').setValue('alice'); await flushPromises()
     expect(api.getReview).toHaveBeenLastCalledWith(expect.objectContaining({ sales: 'alice', region: 'East China', market: 'Frontend' }))
-    expect(wrapper.get('.target-button').attributes('disabled')).toBeDefined()
+    expect(wrapper.get('.target-button').attributes('disabled')).toBeUndefined()
     expect(wrapper.find('.plan-line').exists()).toBe(false)
     expect(wrapper.find('.actual-line').exists()).toBe(true)
-    expect(wrapper.get('.chart-caption').text()).toContain('不按区域、市场或设备拆分')
+    expect(wrapper.get('.chart-caption').text()).toContain('目标未分配到当前销售、地域、市场或设备的组合范围')
     wrapper.unmount()
   })
 
@@ -517,6 +625,7 @@ describe('Approved Review integration', () => {
     const { wrapper, api } = await setup()
     let amount = '40000000'
     const record = { id: 'target-1', modified: 'version-1', sales: 'alice', metric: 'orders' as const, period: 'year' as const, anchor: '2026-01-01', value: amount }
+    api.getReviewTarget = vi.fn(async query => ({ data: query.metric === 'orders' ? record : null, warnings: [], meta: { requestId: 'target-test' } }))
     api.getReview = vi.fn(async () => {
       const data = reviewFixture()
       data.targets = [{ ...record, value: amount }]
@@ -531,10 +640,10 @@ describe('Approved Review integration', () => {
     expect(wrapper.find('.plan-line').exists()).toBe(true)
     expect(wrapper.get('.heading-order').text()).toContain('达成率 23.8%')
     await wrapper.get('.target-button').trigger('click'); await flushPromises()
-    await wrapper.get('.target-dialog select').setValue('orders'); await flushPromises()
+    await wrapper.get('[data-testid="target-metric"]').setValue('orders'); await flushPromises()
     await wrapper.get('.target-dialog input[type="number"]').setValue('45000000')
     await wrapper.get('.target-dialog form').trigger('submit'); await flushPromises()
-    expect(api.saveReviewTarget).toHaveBeenCalledWith({ sales: 'alice', metric: 'orders', period: 'year', anchor: '2026-01-01', value: '45000000' }, 'version-1')
+    expect(api.saveReviewTarget).toHaveBeenCalledWith({ sales: 'alice', scope: 'sales', territory: '', metric: 'orders', period: 'year', anchor: '2026-01-01', value: '45000000' }, 'version-1')
     expect(wrapper.get('.target-dialog').text()).toContain('目标已保存')
     expect(wrapper.get('.heading-order').text()).toContain('45,000,000')
     wrapper.unmount()
@@ -572,6 +681,81 @@ describe('Approved Review integration', () => {
     expect(wrapper.get('.target-dialog [role="alert"]').text()).toContain('Target changed')
     expect(wrapper.find('.target-dialog [role="status"]').exists()).toBe(false)
     expect((wrapper.get('.target-dialog input[type="number"]').element as HTMLInputElement).value).toBe('9')
+    wrapper.unmount()
+  })
+
+  it('loads an arbitrary default target outside Review and retains the saved CAS after Review refresh', async () => {
+    const { wrapper, api } = await setup()
+    const record = { id: 'future-default', modified: 'default-v1', sales: 'alice', scope: 'sales' as const, territory: '',
+      metric: 'visits' as const, period: 'weekly_default' as const, anchor: '2030-08-26', value: '6' }
+    api.getReviewTarget = vi.fn(async query => ({ data: query.anchor === record.anchor ? record : null, warnings: [], meta: { requestId: 'target' } }))
+    api.saveReviewTarget = vi.fn(async input => ({ data: { ...record, ...input, modified: 'default-v2' }, warnings: [], meta: { requestId: 'saved' } }))
+    await wrapper.get('select[aria-label="Sales"]').setValue('alice'); await flushPromises()
+    await wrapper.get('.target-button').trigger('click'); await flushPromises()
+    await wrapper.get('[data-testid="target-period"]').setValue('weekly_default'); await flushPromises()
+    await wrapper.get('.target-dialog input[type="date"]').setValue(record.anchor); await flushPromises()
+    expect(wrapper.get<HTMLInputElement>('.target-dialog input[type="number"]').element.value).toBe('6')
+    await wrapper.get('.target-dialog input[type="number"]').setValue('8')
+    await wrapper.get('.target-dialog form').trigger('submit'); await flushPromises()
+    expect(api.saveReviewTarget).toHaveBeenLastCalledWith({ sales: 'alice', scope: 'sales', territory: '', metric: 'visits',
+      period: 'weekly_default', anchor: record.anchor, value: '8' }, 'default-v1')
+    await wrapper.get('.target-dialog input[type="number"]').setValue('9')
+    await wrapper.get('.target-dialog form').trigger('submit'); await flushPromises()
+    expect(vi.mocked(api.saveReviewTarget).mock.calls[1][1]).toBe('default-v2')
+    expect(api.getReviewTarget).toHaveBeenLastCalledWith({ sales: 'alice', scope: 'sales', territory: '', metric: 'visits', period: 'weekly_default', anchor: record.anchor })
+    wrapper.unmount()
+  })
+
+  it('ignores earlier target responses and blocks saving until the selected key is loaded', async () => {
+    const { wrapper, api } = await setup()
+    const pending: Array<(value: Awaited<ReturnType<typeof api.getReviewTarget>>) => void> = []
+    api.getReviewTarget = vi.fn(() => new Promise<Awaited<ReturnType<typeof api.getReviewTarget>>>(resolve => pending.push(resolve)))
+    api.saveReviewTarget = vi.fn()
+    await wrapper.get('select[aria-label="Sales"]').setValue('alice'); await flushPromises()
+    await wrapper.get('.target-button').trigger('click'); await flushPromises()
+    await wrapper.get('.target-dialog input[type="date"]').setValue('2030-09-02'); await flushPromises()
+    expect(pending).toHaveLength(2)
+    await wrapper.get('.target-dialog form').trigger('submit')
+    expect(api.saveReviewTarget).not.toHaveBeenCalled()
+    const response = (value: string) => ({ data: { id: value, modified: value, sales: 'alice', metric: 'visits' as const, period: 'week' as const, anchor: '2030-09-02', value }, warnings: [], meta: { requestId: value } })
+    pending[1](response('7')); await flushPromises()
+    pending[0](response('3')); await flushPromises()
+    expect(wrapper.get<HTMLInputElement>('.target-dialog input[type="number"]').element.value).toBe('7')
+    expect(wrapper.get('.save-target').attributes('disabled')).toBeUndefined()
+    wrapper.unmount()
+  })
+
+  it('keeps failed lookup distinct from an unset target and recovers through retry', async () => {
+    const { wrapper, api } = await setup()
+    api.getReviewTarget = vi.fn().mockRejectedValueOnce(new Error('Read failed')).mockResolvedValue({ data: null, warnings: [], meta: { requestId: 'retry' } })
+    api.saveReviewTarget = vi.fn()
+    await wrapper.get('select[aria-label="Sales"]').setValue('alice'); await flushPromises()
+    await wrapper.get('.target-button').trigger('click'); await flushPromises()
+    expect(wrapper.get('.target-dialog [role="alert"]').text()).toContain('Read failed')
+    expect(wrapper.get('.save-target').attributes('disabled')).toBeDefined()
+    await wrapper.get('.target-dialog form').trigger('submit'); await flushPromises()
+    expect(api.saveReviewTarget).not.toHaveBeenCalled()
+    await wrapper.get('[data-target-retry]').trigger('click'); await flushPromises()
+    expect(wrapper.get('.save-target').attributes('disabled')).toBeUndefined()
+    expect(wrapper.find('.target-dialog [role="alert"]').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('invalidates a lookup on close and after the manager identity changes', async () => {
+    const { wrapper, api, app } = await setup()
+    const pending: Array<(value: Awaited<ReturnType<typeof api.getReviewTarget>>) => void> = []
+    api.getReviewTarget = vi.fn(() => new Promise<Awaited<ReturnType<typeof api.getReviewTarget>>>(resolve => pending.push(resolve)))
+    await wrapper.get('select[aria-label="Sales"]').setValue('alice'); await flushPromises()
+    await wrapper.get('.target-button').trigger('click'); await flushPromises()
+    await wrapper.get('.target-dialog header button').trigger('click')
+    await wrapper.get('.target-button').trigger('click'); await flushPromises()
+    pending[0]({ data: null, warnings: [], meta: { requestId: 'closed' } }); await flushPromises()
+    expect(wrapper.get('.save-target').attributes('disabled')).toBeDefined()
+    app.identityRevision++
+    await flushPromises()
+    pending[1]({ data: null, warnings: [], meta: { requestId: 'old-identity' } }); await flushPromises()
+    expect(wrapper.get('.target-dialog').attributes('open')).toBeUndefined()
+    expect(wrapper.get('.save-target').attributes('disabled')).toBeDefined()
     wrapper.unmount()
   })
 })
@@ -825,7 +1009,7 @@ it('filters by equipment, keeps targets per person and reports activity without 
   await wrapper.get('select[aria-label="Sales"]').setValue('alice'); await flushPromises()
   await wrapper.get('select[aria-label="Equipment"]').setValue('Kibo'); await flushPromises()
   expect(api.getReview).toHaveBeenLastCalledWith(expect.objectContaining({ sales: 'alice', equipment: 'Kibo' }))
-  expect(wrapper.get('.target-button').attributes('disabled')).toBeDefined()
+  expect(wrapper.get('.target-button').attributes('disabled')).toBeUndefined()
   expect(wrapper.get('[data-unclassified]').text()).toContain('2 条未关联商机，未计入')
   expect(wrapper.get('.chart-caption').text()).toContain('设备')
   wrapper.unmount()

@@ -35,7 +35,7 @@ SCOPED_DOCTYPES = (
     "CRM Opportunity Loss Review Revision", "CRM Opportunity Stage History", "CRM Opportunity Internal Validation",
     "CRM Opportunity Action", "CRM Opportunity History", "CRM Booking",
     "CRM Installed Tool", "CRM Demo Request", "CRM Evaluation",
-    "CRM Evaluation Customer Review", "CRM Visit", "CRM Visit Meeting Record",
+    "CRM Evaluation Customer Review", "CRM Visit", "CRM Visit Meeting Record", "CRM Event",
     "CRM Contact File", "CRM Status Attachment", "CRM Demo Artifact",
     "CRM Notification Event", "CRM Opportunity Stakeholder", "CRM Installed Tool Lifecycle History",
     "CRM Installed Tool Service History", "CRM Installed Tool Version History", "CRM Demo Comment",
@@ -77,6 +77,26 @@ SCOPED_CHILD_RELATIONSHIPS = {
         ("Event", "links"),
     ),
     "CRM Note": (("Lead", "notes"), ("Opportunity", "notes"), ("Prospect", "notes")),
+    # Frappe lists a child table on the parent's DocType-level read alone, which every desk user has
+    # for User (select, and the self-share): without their own hook, User's child tables handed a
+    # Sales user every user's address and roles (#219). Each parent keeps its own native scope.
+    "Has Role": (
+        ("Custom HTML Block", "roles"),
+        ("Custom Role", "roles"),
+        ("Dashboard Chart", "roles"),
+        ("Page", "roles"),
+        ("Report", "roles"),
+        ("Role Permission for Page and Report", "roles"),
+        ("Role Profile", "roles"),
+        ("User", "roles"),
+        ("Workspace", "roles"),
+    ),
+    "DefaultValue": (("User", "defaults"),),
+    "User Email": (("User", "user_emails"),),
+    "User Social Login": (("User", "social_logins"),),
+    "Block Module": (("Module Profile", "block_modules"), ("User", "block_modules")),
+    "CRM Quotation Follow Up": (("CRM Quotation", "follow_ups"),),
+    "CRM Query Recipient": (("CRM Opportunity Saved Query", "recipients"),),
     "CRM Quotation Item": (("CRM Quotation Version", "items"),),
     "CRM Quotation Payment Term": (("CRM Quotation Version", "payment_terms"),),
 }
@@ -260,6 +280,7 @@ DOCPERMS_BY_DOCTYPE = {
     "CRM Evaluation History": AUDIT_DOCPERMS,
     "CRM Test Run": AUDIT_DOCPERMS,
     "CRM Visit": VISIT_DOCPERMS,
+    "CRM Event": VISIT_DOCPERMS,
     "CRM Contact File": AUDIT_DOCPERMS,
     "CRM Demo Artifact": AUDIT_DOCPERMS,
     "CRM Status Attachment": STATUS_ATTACHMENT_DOCPERMS,
@@ -292,6 +313,7 @@ DOCTYPES_TO_VIEW_CAPABILITY = {
     "CRM Evaluation": "evaluation:view",
     "CRM Evaluation Customer Review": "evaluation:view",
     "CRM Visit": "visit:view",
+    "CRM Event": "event:view",
     "CRM Contact File": "stakeholder:view",
     "CRM Status Attachment": "deal:view",
     "CRM Demo Artifact": "demo_request:view",
@@ -355,6 +377,11 @@ def install_crm_doc_permissions() -> None:
                 )
         frappe.clear_cache(doctype=doctype)
 
+    from rayher_crm.permissions.native_lists import reconcile_user_shares
+    from rayher_crm.services.managed_file_access import reconcile_ordinary_file_shares
+
+    reconcile_user_shares()
+    reconcile_ordinary_file_shares()
     # A read share overrides a failed controller detail check, and DBQuery may OR a
     # share with owner/User Permission scope. Remove every legacy share for the new
     # sensitive records so loss of parent access also revokes old child IDs.
@@ -644,6 +671,9 @@ def _lock_address(address_name: str | None):
 
 
 def _delete_address_shares(address_names: list[str] | tuple[str, ...]) -> None:
+    from rayher_crm.services.managed_file_access import revoke_address_file_shares
+
+    revoke_address_file_shares(address_names)
     _delete_docshares("Address", address_names)
 
 
@@ -832,6 +862,9 @@ def revoke_shares_when_user_enters_crm(doc, method: str | None = None) -> None:
         return
     if not doc.is_new():
         frappe.db.sql("SELECT `name` FROM `tabUser` WHERE `name` = %s FOR UPDATE", (doc.name,))
+    from rayher_crm.permissions.native_lists import reconcile_user_shares
+
+    reconcile_user_shares(doc)
     frappe.db.sql(
         "DELETE `crm_share` FROM `tabDocShare` AS `crm_share` "
         "LEFT JOIN `tabDocType` AS `crm_doctype` "
@@ -1044,7 +1077,9 @@ def prevent_scoped_docshare(doc, method: str | None = None) -> None:
     """Keep explicit shares from overriding CRM parent and site scope."""
 
     del method
-    blocked = _is_rayher_crm_doctype(doc.share_doctype) or _standard_docshare_is_blocked(doc)
+    from rayher_crm.permissions.native_lists import user_share_is_blocked
+
+    blocked = user_share_is_blocked(doc) or _is_rayher_crm_doctype(doc.share_doctype) or _standard_docshare_is_blocked(doc)
     if doc.share_doctype == "Address":
         # Share creation follows the same target -> Customer order as Address
         # save. A concurrent save is rejected immediately instead of reading its
@@ -1247,6 +1282,10 @@ def _native_parent_scope_condition(
 ) -> str | None:
     """Correlate a child-table list with the parent's complete native row scope."""
 
+    # A Single DocType keeps its child rows under its own name but has no table of
+    # its own to correlate with: its rows belong to the form alone and are not listed.
+    if frappe.get_meta(parent_doctype).issingle:
+        return None
     # ``build_match_conditions`` assumes its caller already performed the
     # DocType-level read check. Without it, a User Permission on a parent the
     # user cannot read can bypass the share-only branch and leave it unscoped.
@@ -1570,6 +1609,14 @@ def conditions_for_doctype(
             "WHERE `crm_demo_request`.`name` = `tabCRM Evaluation`.`demo_request` "
             f"AND ({request_scope}))"
         )
+    if doctype == "CRM Event":
+        if role != "Sales":
+            return "1=0"
+        owner_scope = _sales_child_condition(f"`tabCRM Event`.`event_owner` = {escaped_user}", "`tabCRM Event`.`account`", escaped_user, allow_unlinked=True)
+        opportunity_scope = conditions_for_doctype("CRM Opportunity", resolved_user)
+        return (f"({owner_scope}) AND (COALESCE(`tabCRM Event`.`opportunity`, '') = '' OR EXISTS "
+                "(SELECT 1 FROM `tabCRM Opportunity` WHERE `tabCRM Opportunity`.`name` = `tabCRM Event`.`opportunity` "
+                f"AND `tabCRM Opportunity`.`account` = `tabCRM Event`.`account` AND ({opportunity_scope})))")
     if doctype == "CRM Visit":
         if role == "Sales":
             owner_scope = (
@@ -1791,6 +1838,10 @@ def document_access_request_query(user: str | None = None) -> str:
 
 def visit_query(user: str | None = None) -> str:
     return conditions_for_doctype("CRM Visit", user)
+
+
+def event_query(user: str | None = None) -> str:
+    return conditions_for_doctype("CRM Event", user)
 
 
 def visit_meeting_record_query(user: str | None = None) -> str:

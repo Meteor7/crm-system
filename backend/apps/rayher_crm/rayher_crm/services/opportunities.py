@@ -8,6 +8,7 @@ from decimal import Decimal
 from typing import Any
 
 import frappe
+from rayher_crm.services import blue_sheet_rules
 from rayher_crm.services.action_statuses import ACTION_STATUSES
 
 from rayher_crm.api.v1.errors import CrmApiException
@@ -190,7 +191,9 @@ def _string_list(value: Any, fieldname: str) -> list[str]:
         return []
     if not isinstance(value, list) or any(not isinstance(item, str) or not item.strip() for item in value):
         raise CrmApiException("VALIDATION_ERROR", f"{fieldname} must be an array of non-empty strings.")
-    return [item.strip() for item in value]
+    # Red flag identity is matched by exact text. Preserve whitespace/newlines
+    # so an unrelated edit or probability confirmation cannot reopen a flag.
+    return list(value) if fieldname == "redFlags" else [item.strip() for item in value]
 
 
 def _decode_list(value: Any) -> list[str]:
@@ -589,6 +592,7 @@ def serialize_opportunity(doc, recoveries=None, loss_reviews=None) -> dict[str, 
         "liveBooking": _live_booking_summary(doc.name),
         "strengths": _decode_list(doc.strengths),
         "redFlags": _decode_list(doc.red_flags),
+        "redFlagRecords": blue_sheet_rules.red_flags(doc.name, doc.get("red_flag_records"), doc.red_flags),
         "informationNeeded": _decode_list(doc.information_needed),
         # Engineers can work the opportunity but do not have contact/stakeholder access.
         "stakeholders": _stakeholders_for_opportunity(doc.name) if role in {"Manager", "Sales"} else [],
@@ -722,6 +726,14 @@ def opportunities_for_account(account_id: str) -> list[dict[str, Any]]:
     return [item for item in list_strategy_opportunities() if item["accountId"] == account_id]
 
 
+def _reconcile_red_flags(records, texts):
+    try:
+        return blue_sheet_rules.reconcile_legacy(records, texts, lambda: frappe.generate_hash(length=32),
+            to_iso_timestamp(frappe.utils.now_datetime()), frappe.session.user)
+    except ValueError as exc:
+        raise CrmApiException("VALIDATION_ERROR", str(exc), field_errors={"redFlags": str(exc)}) from exc
+
+
 def create_strategy_opportunity(payload: dict[str, Any]) -> dict[str, Any]:
     assert_capability("deal:write")
     ensure_server_generated_id(payload)
@@ -733,6 +745,7 @@ def create_strategy_opportunity(payload: dict[str, Any]) -> dict[str, Any]:
     if values["stage"] != QUALIFIED_OPPORTUNITY:
         raise CrmApiException("INVALID_TRANSITION", f"New Opportunity must start at {QUALIFIED_OPPORTUNITY}.")
     assert_initial_probability_level(values["probability_level"])
+    values["red_flag_records"] = json.dumps(_reconcile_red_flags([], values["red_flags"]), ensure_ascii=False)
     for fieldname in LIST_FIELDS:
         values[fieldname] = json.dumps(values[fieldname], ensure_ascii=False)
     savepoint = f"crm_opportunity_create_{frappe.generate_hash(length=8)}"
@@ -789,9 +802,17 @@ def _history_value(value: Any) -> str:
 
 
 def update_strategy_opportunity(name: str, payload: dict[str, Any], expected_modified: Any) -> dict[str, Any]:
+    from rayher_crm.services.opportunity_status import _lock_write_scope
+    from rayher_crm.services.cockpit_identity import lock_opportunity_owners, check_current_opportunity_owner
+
     assert_capability("deal:write")
     _require_opportunity(name)
-    doc = lock_document("CRM Opportunity", name, expected_modified, "NOT_FOUND")
+    identities = lock_opportunity_owners(name, payload)
+    _lock_write_scope(name)
+    lock_document("CRM Opportunity", name, expected_modified, "NOT_FOUND")
+    doc = frappe.get_doc("CRM Opportunity", name, for_update=True)
+    check_current_opportunity_owner(name, identities)
+    payload = {**payload, "owner": identities["target"]}
     if not has_crm_permission(doc, user=frappe.session.user, permission_type="read"):
         raise CrmApiException("SCOPE_DENIED", "The Opportunity is outside the current user scope.")
 
@@ -868,6 +889,13 @@ def update_strategy_opportunity(name: str, payload: dict[str, Any], expected_mod
         if values["tool_type"] != doc.tool_type:
             values["tool_type"] = register_equipment(values["tool_type"])
         changes: list[tuple[str, Any, Any]] = []
+        # An old text-only editor must retain state/severity on unchanged flags.
+        before_flags = blue_sheet_rules.red_flags(doc.name, doc.get("red_flag_records"), doc.red_flags)
+        after_flags = _reconcile_red_flags(before_flags, values["red_flags"]) if "redFlags" in payload else before_flags
+        values["red_flags"] = [row["text"] for row in after_flags]
+        if before_flags != after_flags:
+            doc.red_flag_records = json.dumps(after_flags, ensure_ascii=False)
+            changes.append(("red_flag_records", before_flags, after_flags))
         for fieldname, value in values.items():
             if fieldname in MONEY_FIELDS:
                 if stored_money[fieldname] != value:

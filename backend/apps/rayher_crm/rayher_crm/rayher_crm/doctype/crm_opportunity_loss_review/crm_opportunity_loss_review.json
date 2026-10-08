@@ -20,7 +20,7 @@
     "review_note",
     "reviewed_by",
     "reviewed_at",
-    "reopened_at"
+    "reopened_at", "review_category"
   ],
   "fields": [
     {"fieldname": "opportunity", "fieldtype": "Link", "options": "CRM Opportunity", "label": "Opportunity", "reqd": 1},
@@ -33,7 +33,8 @@
     {"fieldname": "review_note", "fieldtype": "Small Text", "label": "Post-mortem Conclusion"},
     {"fieldname": "reviewed_by", "fieldtype": "Link", "options": "User", "label": "Reviewed By"},
     {"fieldname": "reviewed_at", "fieldtype": "Datetime", "label": "Reviewed At"},
-    {"fieldname": "reopened_at", "fieldtype": "Datetime", "label": "Opportunity Reopened At"}
+    {"fieldname": "reopened_at", "fieldtype": "Datetime", "label": "Opportunity Reopened At"},
+    {"fieldname": "review_category", "fieldtype": "Select", "label": "Post-mortem Category", "options": "\nPrice\nLocal competitor preferred\nSpecs / throughput\nBudget cancelled or delayed\nDelivery lead time\nOther"}
   ],
   "permissions": [
     {"role": "CRM Manager", "read": 1},

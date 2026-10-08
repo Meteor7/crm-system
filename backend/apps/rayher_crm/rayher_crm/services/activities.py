@@ -173,7 +173,29 @@ def activity_facts(data, coverage, now):
             first = min(published, key=lambda r: (stamp(r["published_at"]), r["version_no"]))
         add(quote, "CRM Quotation", "quotes", "quotation", first.get("account") if first else quote.get("account"),
             first.get("quotation_owner") if first else quote.get("quotation_owner"), quote.get("opportunity"), done=True,
-            occurred=first.get("published_at"), event=first.get("name"), recorded=first.get("published_at"), amountCny=cny_quote_value(first))
+            occurred=first.get("published_at"), event=first.get("name"), recorded=first.get("published_at"), amountCny=cny_quote_value(first), quotationVersionId=first.get("name"), quotationVersionNo=first.get("version_no"))
+
+    quotes = {r["name"]: r for r in data.get("quotes", [])}
+    for followup in unique_records(data.get("followups", [])):
+        if followup.get("status") not in {"Open", "Done"}:
+            continue
+        quote = quotes.get(followup.get("parent"))
+        if not quote:
+            continue
+        done = followup.get("status") == "Done"
+        add(followup, "CRM Quotation Follow Up", "followups", "followup", quote.get("account"),
+            followup.get("completed_owner") if done else quote.get("quotation_owner"), quote.get("opportunity"),
+            done=done, occurred=followup.get("completed_at"), planned=followup.get("due"),
+            quotationId=quote["name"], quotationVersionId=followup.get("completed_version"))
+
+    for event in unique_records(data.get("events", [])):
+        if event.get("status") not in {"Planned", "Done"}:
+            continue
+        done = event.get("status") == "Done"
+        add(event, "CRM Event", "events", "event", event.get("account"),
+            event.get("completed_owner") if done else event.get("event_owner"), event.get("opportunity"),
+            done=done, occurred=event.get("completed_at"), planned=event.get("start_date"),
+            endDate=event.get("end_date"), region=event.get("region"), market=event.get("market"), equipment=event.get("equipment"))
 
     for action in unique_records(data.get("actions", [])):
         if action.get("archived"):

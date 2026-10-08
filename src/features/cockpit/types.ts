@@ -1,25 +1,27 @@
 import type { DemoResourceWarnings } from '@/features/demo-resources/types'
 export type PeriodKind = 'week' | 'month' | 'quarter' | 'year'
-export type ActivityKey = 'visits' | 'leads' | 'tests' | 'quotes'
+export type ActivityKey = 'visits' | 'leads' | 'tests' | 'quotes' | 'followups'
 export interface ReviewQuery { period?: PeriodKind; anchor?: string; sales?: string; market?: string; region?: string; equipment?: string }
 export interface Metric { value: number | string | null; state: 'ready' | 'insufficient' | 'not_applicable' | 'not_set'; reason?: string | null }
-export interface TargetInput { sales: string; metric: ActivityKey | 'orders'; period: PeriodKind | 'weekly_default'; anchor: string; value: string }
+export interface TargetInput { sales: string; scope?: 'sales' | 'territory'; territory?: string; metric: ActivityKey | 'orders'; period: PeriodKind | 'weekly_default'; anchor: string; value: string }
 export interface Target extends TargetInput { id: string; modified: string }
-export interface TargetMetric extends Metric { record: Target | null }
+export interface TargetMetric extends Metric { record: Target | null; scope?: 'sales' | 'territory'; missing?: string[]; sources?: (Metric & { member: string; record: Target | null; assignable?: boolean })[] }
 export interface ReviewRow {
   id: string; title: string; accountId: string; customer: string; owner: string | null; at: string | null
-  kind: 'visit' | 'lead' | 'test' | 'quotation' | 'opportunity' | 'booking'; stage?: string
+  kind: 'visit' | 'lead' | 'test' | 'quotation' | 'opportunity' | 'booking' | 'followup'; stage?: string
   status?: string; opportunityId?: string; reason?: string | null; fromLevel?: string; toLevel?: string; eventId?: string
   actionId?: string; actionTitle?: string; due?: string; days?: number; daysAtLeast?: boolean; severity?: string
   previousPoDate?: string; postponedPoDate?: string; currentPoDate?: string; actionStatus?: string
   currentOwner?: string | null
+  redFlagText?: string; redFlagSeverity?: '' | 'Low' | 'Medium' | 'High'; redFlagUpdatedAt?: string | null
   // Lost rows: the post-mortem state (null until the loss review row exists), whether one is still owed,
   // whether it is older than the four-week window, and when the deal reopened (no post-mortem owed).
-  review?: { id: string; status: 'pending' | 'reviewed'; note: string; reviewedBy: string | null; reviewedAt: string | null; modified: string | null } | null
+  review?: { category?: string; id: string; status: 'pending' | 'reviewed'; note: string; reviewedBy: string | null; reviewedAt: string | null; modified: string | null } | null
   reviewPending?: boolean; reviewOverdue?: boolean; reopenedAt?: string | null
   // Overdue rows on the Warnings page: the opportunity is also stalled (null when stall history is insufficient),
   // and who owns the action (the row owner stays the opportunity owner used by the filters).
   stalled?: boolean | null; actionOwner?: string | null
+  quotationId?: string; customerKind?: string | null;
   quotationVersionId?: string; quotationVersionNo?: number; validUntil?: string; daysToExpiry?: number
   // Stage 6 without PO: days in internal validation (a minimum when daysAtLeast) and when it began (null when only bounded).
   daysInStage?: number; enteredAt?: string | null
@@ -53,9 +55,9 @@ export interface WarningHandling {
 export interface WarningPlanInput { warningType: WarningHandlingType; sourceId: string; sourceEvent: string; nextStep: string }
 export interface WarningActionInput { warningType: 'stage6_no_po' | 'close_date_slip'; sourceId: string; sourceEvent: string; actionTaken: string; followUpOn: string }
 export type CockpitSettingSource = 'settings' | 'site_config' | 'default'
-export interface CockpitSettingsInput { quoteExpiryDays: number; stage6NoPoDays: number }
+export interface CockpitSettingsInput { quoteExpiryDays: number; stage6NoPoDays: number; stalledDays?: number; stallEscalationDays?: number }
 export interface CockpitSettings extends CockpitSettingsInput {
-  sources: Record<keyof CockpitSettingsInput, CockpitSettingSource>
+  sources: Record<'quoteExpiryDays' | 'stage6NoPoDays', CockpitSettingSource> & Partial<Record<'stalledDays' | 'stallEscalationDays', CockpitSettingSource>>
   // modifiedByName: the saver's display name (null for an unknown user; show the id then).
   modified: string | null; modifiedBy: string | null; modifiedByName: string | null
 }
@@ -66,6 +68,7 @@ export interface StageConversions {
 }
 export interface PipelineCoverage {
   openPipeline: Metric; remainingTarget: Metric; ratio: Metric; referenceMin: number; referenceMax: number
+  targetScope?: 'sales' | 'territory' | null; targetState?: Metric['state']
 }
 export interface ReviewDto {
   demoResources?: DemoResourceWarnings
@@ -73,7 +76,10 @@ export interface ReviewDto {
   // equipment: the Opportunities board catalog; a record matches through the opportunity it is linked to.
   filters: { sales: { id: string; name: string }[]; markets: string[]; regions: string[]; regionParents?: Record<string, string>; regionReady: boolean; equipment?: string[] }
   // unclassified: under an equipment filter, records in the period with no opportunity (left out, not guessed).
-  activities: { key: ActivityKey; actual: Metric; previous: Metric; delta: number | null; target: TargetMetric; unclassified?: number | null }[]
+  activities: { key: ActivityKey; actual: Metric; previous: Metric; delta: number | null; target: TargetMetric; unclassified?: number | null
+    customerKinds?: { key: 'existing' | 'prospect' | 'unclassified'; actual: Metric; previous: Metric; delta: number | null }[]
+    quoteAmount?: { actual: Metric; previous: Metric; delta: string | null; known: string; missing: number; previousKnown: string; previousMissing: number }
+  }[]
   pipeline: { key: string; count: Metric; amount: Metric }[]
   conversions?: StageConversions
   pipelineCoverage?: PipelineCoverage
@@ -83,9 +89,10 @@ export interface ReviewDto {
   sales: { id: string; name: string; activities: Record<ActivityKey, Metric>; pipeline: Metric; poCount: Metric; orders: Metric }[]
   // series: the year's PO bookings as cumulative CNY by actual PO date; fraction is that day's share of the year, like elapsedFraction.
   orders: { actual: Metric; series?: { date: string; amount: string; cumulative: string; fraction: number }[]; count: Metric; missingDate?: Metric; missingAmount?: Metric; target: TargetMetric; planned: Metric; elapsedFraction: number }
-  stalled: { count: Metric; items: ReviewRow[] }
-  losses: { count: Metric; items: ReviewRow[]; reviewed?: Metric; pending?: Metric }
+  stalled: { thresholdDays?: number; escalationDays?: number; count: Metric; items: ReviewRow[] }
+  losses: { completionPercent?: Metric; categories?: { key: string; count: Metric }[]; count: Metric; items: ReviewRow[]; reviewed?: Metric; pending?: Metric }
   targets: Target[]
+  targetOptions?: { territories: string[]; teamMembers: string[]; unmappedRegions?: string[] }
 }
 export interface WarningsDto {
   demoResources?: DemoResourceWarnings
@@ -105,6 +112,7 @@ export interface WarningsDto {
   // Stage 6 rows with an action recorded and a follow-up date still ahead: listed apart, never counted.
   stage6NoPoHandledItems?: ReviewRow[]
   closeDateSlipItems?: ReviewRow[]
+  redFlagItems?: ReviewRow[]
   closeDateSlipHandledItems?: ReviewRow[]
   // Display names for users on the page (reviewers and editors are often Managers, not in filters.sales).
   names?: Record<string, string>

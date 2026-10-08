@@ -27,8 +27,12 @@ const props = defineProps<{
   error?: string
   requestId?: string
   fieldErrors?: Record<string, string>
+  /** The refusal is for the record's version: the draft is kept, and the latest version can be loaded in its place. */
+  conflict?: boolean
+  /** The latest version is being read: every field waits, since the form starts over when it arrives. */
+  reloading?: boolean
 }>()
-const emit = defineEmits<{ close: []; submit: [payload: CreateDemoRequestInput | DemoRequestCommand]; 'create-contact': [accountId: string] }>()
+const emit = defineEmits<{ close: []; submit: [payload: CreateDemoRequestInput | DemoRequestCommand]; 'create-contact': [accountId: string]; reload: [] }>()
 const { locale } = useI18n()
 const ownOwnerOnly = useOwnOwnerOnly()
 
@@ -96,7 +100,13 @@ async function loadOpportunities() {
 
 // The Accounts are not watched: they are reference data, read again by the page after each of its actions, and
 // their refresh must not start the form over under the user.
+// The record the form was last started from: the same record read anew (the latest version loaded) starts the
+// record's fields over, not what the user chose to do with it (the submit choice, the review decision and comment).
+let startedFrom = ''
 watch(() => [props.mode, props.request, props.currentSalesContact] as const, () => {
+  const key = `${props.mode}:${props.request?.id ?? ''}`
+  const sameRecord = key === startedFrom
+  startedFrom = key
   accountId.value = props.request?.accountId || ''
   opportunityId.value = props.request?.requestMode === 'Self Test' ? SELF_TEST_OPTION : props.request?.opportunityId || ''
   primaryContactId.value = props.request?.primaryContactId || props.selectedContactId || ''
@@ -106,17 +116,20 @@ watch(() => [props.mode, props.request, props.currentSalesContact] as const, () 
   errors.value = {}
   serverErrorsShown = false
   opportunityLoadError.value = ''
+  // A form started over (the latest version loaded) holds nothing of an import done before.
+  importError.value = ''
+  importNotice.value = ''
   validationSnapshot.value = null
-  submitImmediately.value = true
+  if (!sameRecord) submitImmediately.value = true
   customerExpectedDate.value = props.request?.customerExpectedDate || ''
-  review.decision = 'approve'
+  if (!sameRecord) review.decision = 'approve'
   review.engineerOwner = props.request?.engineerOwner || ''
   review.testPlan = props.request?.testPlan || ''
   review.assignedEquipment = props.request?.assignedEquipment || props.request?.requestedEquipment || ''
   review.resourceWindow = props.request?.resourceWindow || ''
   review.estimatedCompletionDate = props.request?.estimatedCompletionDate || props.request?.targetDate || '2026-08-15'
   review.technicalRisk = props.request?.technicalRisk || ''
-  review.comment = ''
+  if (!sameRecord) review.comment = ''
   void loadOpportunities()
 }, { immediate: true })
 watch(() => props.selectedContactId, (value) => {
@@ -289,7 +302,10 @@ watch(locale, () => { if (serverErrorsShown) flagServerErrors() })
     @close="$emit('close')"
     @submit="submit"
   >
-    <p v-if="error" class="save-error" data-modal-error role="alert"><span>{{ error }}</span><small v-if="requestId">Request ID · {{ requestId }}</small></p>
+    <template #feedback>
+    <p v-if="error" class="save-error" data-modal-error role="alert"><span>{{ error }}</span><small v-if="requestId">Request ID · {{ requestId }}</small><button v-if="conflict" class="secondary-button" type="button" data-reload-demo-request :disabled="busy || importBusy" @click="emit('reload')">{{ locale === 'en-US' ? 'Load the latest version' : '载入最新版本' }}</button></p>
+    </template>
+    <fieldset class="dialog-fields" :disabled="reloading">
     <template v-if="mode === 'create' || mode === 'edit'">
       <section class="drf-import-panel" data-demo-request-import>
         <div>
@@ -357,11 +373,13 @@ watch(locale, () => { if (serverErrorsShown) flagServerErrors() })
       <label>{{ locale === 'en-US' ? 'Approval decision' : '审批决定' }}<select v-model="review.decision"><option value="approve">{{ locale === 'en-US' ? 'Approve and convert to Demo' : '批准并转 Demo' }}</option><option value="reject">{{ locale === 'en-US' ? 'Reject Sales' : '驳回 Sales' }}</option></select></label>
       <label class="full"><span>{{ locale === 'en-US' ? 'Boss approval comment' : 'Boss 审批意见' }}<RequiredMark :show="review.decision === 'reject'" /></span><textarea v-model="review.comment" :aria-label="locale === 'en-US' ? 'Boss approval comment' : 'Boss 审批意见'" :required="review.decision === 'reject'" /></label>
     </div>
+    </fieldset>
   </ModalShell>
 </template>
 
 <style scoped>
 .drf-import-panel{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;gap:8px 16px;padding:14px 16px;margin-bottom:14px;background:#f3f8f7;border:1px solid #cfe1dd;border-radius:10px}.drf-import-panel>div{display:grid;gap:4px}.drf-import-panel strong{color:var(--crm-navy);font-size:11px}.drf-import-panel span{color:var(--crm-text-muted);font-size:9px;line-height:1.5}.drf-import-button{display:inline-flex;align-items:center;justify-content:center;min-height:34px;padding:8px 12px;color:#fff;background:var(--crm-teal);border-radius:8px;font-size:9px;font-weight:800;cursor:pointer}.drf-import-button.disabled{opacity:.55;cursor:not-allowed}.drf-import-button input{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}.drf-import-panel p{grid-column:1/-1;margin:0;color:#27794a;font-size:9px}.drf-import-panel .import-error{color:#b64545}
 .form-grid,.request-meta-grid{display:grid;gap:13px}.form-grid{grid-template-columns:1fr 1fr}.request-meta-grid{grid-template-columns:1fr}.form-grid label,.request-meta-grid label{display:grid;gap:6px;color:var(--crm-text-muted);font-size:9px;font-weight:700}.form-grid .full{grid-column:1/-1}.form-grid input,.form-grid select,.form-grid textarea,.request-meta-grid input,.request-meta-grid select{width:100%;min-height:36px;padding:8px 10px;color:var(--crm-text);background:#fff;border:1px solid var(--crm-line);border-radius:8px;outline:0}.form-grid textarea{min-height:76px;resize:vertical}.form-grid input:focus,.form-grid select:focus,.form-grid textarea:focus,.request-meta-grid input:focus,.request-meta-grid select:focus{border-color:var(--crm-teal)}.request-meta-grid small{color:#9aa6a8;font-size:8px;font-weight:400}.request-meta-grid [data-field-error]{color:#b64545;font-weight:600}.submit-choice{display:flex;align-items:center;gap:8px;margin-top:14px;color:var(--crm-text-muted);font-size:9px;font-weight:700}.submit-choice input{width:16px;height:16px}@media(max-width:560px){.form-grid{grid-template-columns:1fr}.form-grid .full{grid-column:auto}}
-.save-error{display:grid;gap:4px;margin:0 0 12px;padding:10px;color:var(--crm-danger);background:var(--crm-danger-soft);border-radius:8px;font-size:9px}.save-error small{color:var(--crm-text-muted);font-size:8px}
+.save-error{display:grid;gap:4px;margin:0 0 12px;padding:10px;color:var(--crm-danger);background:var(--crm-danger-soft);border-radius:8px;font-size:9px}.save-error small{color:var(--crm-text-muted);font-size:8px}.save-error button{justify-self:start;margin-top:4px}
+.dialog-fields{display:contents;border:0;margin:0;padding:0;min-width:0}
 </style>

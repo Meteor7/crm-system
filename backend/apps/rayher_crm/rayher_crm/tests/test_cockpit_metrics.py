@@ -34,6 +34,7 @@ def booking(day="2026-09-13", **extra):
 
 def history(field, when, before, after):
     return {"name": field + when, "opportunity": "opp", "field": field, "at": when,
+            **({"from_owner": before, "to_owner": after} if field == "opportunity_owner" else {}),
             "from_value": json.dumps(before) if isinstance(before, dict) else before,
             "to_value": json.dumps(after) if isinstance(after, dict) else after}
 
@@ -520,10 +521,10 @@ class TestCockpitMetrics(unittest.TestCase):
                             for q in ("q1", "q2", "q3")]
         data["bookings"] = [booking(), booking(name="b2", source_opportunity="opp2")]
         everything = build_review(data, QUERY, NOW, COVERAGE)
-        self.assertEqual({a["key"]: a["actual"]["value"] for a in everything["activities"]}, {"visits": 0, "leads": 2, "tests": 2, "quotes": 3})
+        self.assertEqual({a["key"]: a["actual"]["value"] for a in everything["activities"]}, {"visits": 0, "leads": 2, "tests": 2, "quotes": 3, "followups": 0})
         self.assertEqual(everything["orders"]["count"]["value"], 2)
         kibo = build_review(data, {**QUERY, "equipment": "Kibo"}, NOW, COVERAGE)
-        self.assertEqual({a["key"]: a["actual"]["value"] for a in kibo["activities"]}, {"visits": 0, "leads": 1, "tests": 1, "quotes": 2})
+        self.assertEqual({a["key"]: a["actual"]["value"] for a in kibo["activities"]}, {"visits": 0, "leads": 1, "tests": 1, "quotes": 2, "followups": 0})
         self.assertEqual({r["id"] for r in kibo["_details"]["quotes"]}, {"q1", "q3"})
         self.assertEqual({r["id"] for r in kibo["_details"]["tests"]}, {"run1"})
         self.assertEqual(kibo["orders"]["count"]["value"], 1)
@@ -751,7 +752,7 @@ class TestCockpitMetrics(unittest.TestCase):
         data["quotes"] = [{"name": "quote", "account": "c", "quotation_owner": "alice", "status": "Published"}]
         data["versions"] = [{"quotation": "quote", "version_no": i, "published_at": day, "account": "c", "quotation_owner": "alice", "status": status} for i, day, status in [(1, "2026-09-08", "Superseded"), (2, "2026-09-09", "Published")]]
         result = build_review(data, QUERY, NOW, COVERAGE)
-        self.assertEqual([r["actual"]["value"] for r in result["activities"]], [3, 1, 1, 1])
+        self.assertEqual([r["actual"]["value"] for r in result["activities"]], [3, 1, 1, 1, 0])
         self.assertEqual(result["_details"]["tests"][0]["owner"], "alice")
         data["leads"][0]["custom_crm_converted_at"] = None
         self.assertEqual(build_review(data, QUERY, NOW, COVERAGE)["activities"][1]["actual"]["value"], 1)

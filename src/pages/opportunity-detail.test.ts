@@ -217,9 +217,11 @@ describe('Opportunity detail', () => {
     const local = card.get('[data-competitor-name="本地竞争对手"]')
     expect(local.find('[data-competitor-field="strengths"]').exists()).toBe(false)
     expect(local.get('[data-competitor-field="response"]').text()).toBe('我方应对样片测试指标领先')
-    // The card sits with the other Blue Sheet lists, after the red flags.
-    const cards = wrapper.findAll('.detail-right > section').map((section) => section.classes().find((name) => name.endsWith('-card') && !['detail-card', 'evidence-card'].includes(name)))
-    expect(cards).toEqual(['influence-card', 'strength-card', 'risk-card', 'competitor-card', 'information-card'])
+    // Keep competitors beside the structured red flags and information needed,
+    // without depending on the removed static risk-card styling.
+    expect(card.element.parentElement?.classList.contains('detail-right')).toBe(true)
+    expect(card.element.previousElementSibling?.getAttribute('data-testid')).toBe('blue-sheet-panel')
+    expect(card.element.nextElementSibling?.classList.contains('information-card')).toBe(true)
     setLocale('en-US'); await flushPromises()
     expect(card.get('header').text()).toBe('Competitors2')
     expect(acme.get('[data-competitor-field="strengths"]').text()).toBe('Their strengthsInstalled base at the fab')
@@ -484,6 +486,28 @@ describe('Opportunity detail', () => {
       actualPoDate: '2026-07-15',
     }])
     expect(managerPage.get('[data-testid="opportunity-stage"]').text()).toBe('收到 PO')
+  })
+
+  it('gives Tab and Escape to the contact dialog opened from the PO confirmation, and keeps the PO draft', async () => {
+    const setup = await context('OPP-003')
+    const wrapper = mount(OpportunityDetailPage, { props: { apiClient: setup.api }, global: { plugins: [setup.pinia, setup.router] }, attachTo: document.body })
+    await flushPromises()
+    await wrapper.get('[data-testid="confirm-po"]').trigger('click')
+    await flushPromises()
+    await wrapper.get('[aria-label="实际 PO 日期"]').setValue('2026-07-15')
+    const confirmation = wrapper.get('[aria-label="实际 PO 日期"]').element.closest<HTMLElement>('.modal-host')!
+
+    await wrapper.get('[data-testid="create-contact"]').trigger('click')
+    await flushPromises()
+    const contact = wrapper.get('[role="dialog"][aria-label="新增联系人"]')
+    expect(contact.element.contains(document.activeElement)).toBe(true)
+    expect(Number(getComputedStyle(contact.element.parentElement!).zIndex)).toBeGreaterThan(Number(getComputedStyle(confirmation).zIndex))
+
+    await contact.get('[aria-label="联系人姓名"]').trigger('keydown', { key: 'Escape' })
+    await flushPromises()
+    expect(wrapper.find('[role="dialog"][aria-label="新增联系人"]').exists()).toBe(false)
+    expect((wrapper.get('[aria-label="实际 PO 日期"]').element as HTMLInputElement).value).toBe('2026-07-15')
+    wrapper.unmount()
   })
 
   it('confirms the PO at quotation sent into a Confirmed Booking and links it from the Opportunity', async () => {

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { requestErrorMessage } from '@/api/request-state'
 import { personnelDisplayName } from '@/demo/personnel'
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import RequiredMark from '@/design-system/RequiredMark.vue'
 import {
@@ -25,7 +25,7 @@ import {
 } from '@lucide/vue'
 import { api as defaultApi, usingMock } from '@/api'
 import type { CrmApi } from '@/api'
-import { useI18n, useLocaleMessage, localeMessage } from '@/i18n'
+import { useI18n, useLocaleMessage, localeMessage, type LocaleMessage } from '@/i18n'
 import type { UserRole } from '@/types/crm'
 import type { ControlledDocumentAccessRequestDto, ControlledDocumentDto, DocumentUploadInput, DocumentUploadRequestDto } from '@/types/workspaces'
 import type { MultipartFilePart } from '@/api/binary-transport'
@@ -117,6 +117,16 @@ const error = useLocaleMessage()
 const accessApprovalError = useLocaleMessage()
 const uploadApprovalError = useLocaleMessage()
 const notice = useLocaleMessage()
+const noticeIsError = ref(false)
+const noticeElement = ref<HTMLElement | null>(null)
+function setNotice(message: LocaleMessage, failed = false) {
+  notice.value = message
+  noticeIsError.value = failed
+  if (failed) void nextTick(() => {
+    noticeElement.value?.focus({ preventScroll: true })
+    noticeElement.value?.scrollIntoView?.({ block: 'nearest' })
+  })
+}
 const previewUrl = ref('')
 const previewLoading = ref(false)
 const previewError = useLocaleMessage()
@@ -167,8 +177,8 @@ const approvalVersions = computed(() => {
 const approvalAudit = computed(() => approvalDocument.value?.audit ?? selectedRequest.value?.documentAudit ?? [])
 // The decision of a Manager on an access request: what the applicant should add, or why it was refused.
 const decisionNote = ref('')
-// The note is the selected request's: another request chosen starts it afresh.
-watch(selectedRequestId, () => { decisionNote.value = '' })
+// The note and the upload's rejection reason are the selected request's: another request chosen starts them afresh.
+watch(selectedRequestId, () => { decisionNote.value = ''; uploadDecisionReason.value = '' })
 const filteredDocuments = computed(() => {
   return controlledDocuments.value.filter((document) => libraryFilter.value === 'All' || document.category === libraryFilter.value)
 })
@@ -275,7 +285,7 @@ async function submitDocumentUpload() {
     const part: MultipartFilePart = { blob: file, fileName: file.name, mimeType: file.type, size: file.size }
     const result = await props.apiClient.submitControlledDocumentUpload(uploadForm.value, part)
     uploadOpen.value = false
-    notice.value = result.data.status === 'Published' ? (localeMessage('Document published and archived.', '文档已直接发布并归档。')) : (localeMessage('Document submitted and waiting for Manager review.', '文档已提交，等待经理审核。'))
+    setNotice(result.data.status === 'Published' ? (localeMessage('Document published and archived.', '文档已直接发布并归档。')) : (localeMessage('Document submitted and waiting for Manager review.', '文档已提交，等待经理审核。')))
     // Published: the library has the document; read anew as every read is (sequenced, the selection kept).
     if (result.data.status === 'Published') await refreshDocumentLibrary()
   } catch (reason) {
@@ -298,7 +308,7 @@ function chooseDocument(documentId: string) {
   activeDetailTab.value = 'details'
   requestReason.value = ''
   requestError.value = ''
-  notice.value = ''
+  setNotice('')
 }
 
 async function submitAccessRequest() {
@@ -322,7 +332,7 @@ async function submitAccessRequest() {
     const known = current.accessRequest
     const supersedes = !known || (known.id === result.data.id ? known.status === 'Pending' : result.data.submittedAt > known.submittedAt)
     if (supersedes) current.accessRequest = result.data
-    notice.value = localeMessage('Access request submitted. Current status: Manager Review.', '访问申请已提交，当前状态为经理审核')
+    setNotice(localeMessage('Access request submitted. Current status: Manager Review.', '访问申请已提交，当前状态为经理审核'))
     void refreshDocumentLibrary()
   } catch (reasonError) {
     requestError.value = requestErrorMessage(reasonError, (localeMessage('Access request failed.', '访问申请提交失败')))
@@ -333,7 +343,7 @@ async function submitAccessRequest() {
 
 function showControlledDownloadNotice() {
   if (!selected.value || selected.value.access !== 'Direct') return
-  notice.value = localeMessage(`Demo: controlled download logged for ${selected.value.id} ${selected.value.version}/${selected.value.revision} by ${currentUserName.value}.`, `Demo：已为 ${currentUserName.value} 生成 ${selected.value.id} ${selected.value.version}/${selected.value.revision} 的受控下载记录`)
+  setNotice(localeMessage(`Demo: controlled download logged for ${selected.value.id} ${selected.value.version}/${selected.value.revision} by ${currentUserName.value}.`, `Demo：已为 ${currentUserName.value} 生成 ${selected.value.id} ${selected.value.version}/${selected.value.revision} 的受控下载记录`))
 }
 
 function releasePreviewUrl() {
@@ -364,7 +374,7 @@ async function downloadControlledDocument() {
   if (!selected.value?.canDownload || downloading.value) return
   const document = selected.value
   downloading.value = true
-  notice.value = ''
+  setNotice('')
   try {
     const file = await props.apiClient.downloadControlledDocument(document.id)
     const expectedMime = document.deliveryMode === 'Original'
@@ -374,9 +384,9 @@ async function downloadControlledDocument() {
     downloadBlob(file.blob, file.fileName)
     // The audit's new row comes with the library read anew; the download itself is done.
     void refreshDocumentLibrary()
-    notice.value = role.value === 'Manager' ? (localeMessage(`Clean original for ${document.id} downloaded; action logged.`, `已下载 ${document.id} 的无水印原件，下载行为已记录`)) : document.deliveryMode === 'Original' ? (localeMessage(`Approved original for ${document.id} downloaded; action logged.`, `已下载 ${document.id} 的批准原件，下载行为已记录`)) : (localeMessage(`Personal watermarked PDF for ${document.id} generated; action logged.`, `已生成 ${document.id} 的个人水印 PDF，下载行为已记录`))
+    setNotice(role.value === 'Manager' ? (localeMessage(`Clean original for ${document.id} downloaded; action logged.`, `已下载 ${document.id} 的无水印原件，下载行为已记录`)) : document.deliveryMode === 'Original' ? (localeMessage(`Approved original for ${document.id} downloaded; action logged.`, `已下载 ${document.id} 的批准原件，下载行为已记录`)) : (localeMessage(`Personal watermarked PDF for ${document.id} generated; action logged.`, `已生成 ${document.id} 的个人水印 PDF，下载行为已记录`)))
   } catch (reason) {
-    notice.value = reason === invalidDownload ? localeMessage('The server returned an invalid controlled file type.', '服务端返回的受控文件类型不正确') : requestErrorMessage(reason, (localeMessage('Controlled download failed.', '受控下载生成失败')))
+    setNotice(reason === invalidDownload ? localeMessage('The server returned an invalid controlled file type.', '服务端返回的受控文件类型不正确') : requestErrorMessage(reason, (localeMessage('Controlled download failed.', '受控下载生成失败'))), true)
   } finally {
     downloading.value = false
   }
@@ -392,16 +402,16 @@ async function decideRequest(decision: ApprovalDecision) {
         ? { decision: 'reject' as const, reason: uploadDecisionReason.value.trim() }
         : { decision: 'approve' as const, category: request.upload.category, confidentiality: request.upload.confidentiality, accessMode: request.upload.accessMode }
       if (input.decision === 'reject' && !input.reason) {
-        notice.value = localeMessage('A reason is required when rejecting an upload.', '拒绝上传时必须填写原因。')
+        setNotice(localeMessage('A reason is required when rejecting an upload.', '拒绝上传时必须填写原因。'), true)
         return
       }
       const result = await props.apiClient.decideControlledDocumentUploadRequest(request.id, input)
       request.status = result.data.status === 'Published' ? 'Approved' : 'Rejected'
-      notice.value = result.data.status === 'Published' ? (localeMessage('Uploaded document approved and archived.', '上传文档已批准归档。')) : (localeMessage('Uploaded document rejected.', '上传文档已拒绝。'))
+      setNotice(result.data.status === 'Published' ? (localeMessage('Uploaded document approved and archived.', '上传文档已批准归档。')) : (localeMessage('Uploaded document rejected.', '上传文档已拒绝。')))
       approvalRequests.value = approvalRequests.value.filter((item) => item.id !== request.id)
       if (!approvalRequests.value.some((item) => item.id === selectedRequestId.value)) selectedRequestId.value = approvalRequests.value[0]?.id ?? ''
     } catch (decisionError) {
-      notice.value = requestErrorMessage(decisionError, (localeMessage('Approval action failed.', '审批操作失败')))
+      setNotice(requestErrorMessage(decisionError, (localeMessage('Approval action failed.', '审批操作失败'))), true)
     } finally {
       decidingRequestId.value = ''
     }
@@ -409,7 +419,14 @@ async function decideRequest(decision: ApprovalDecision) {
   }
   const note = decisionNote.value.trim()
   if (decision === 'more-info' && !note) {
-    notice.value = localeMessage('Say what the applicant should add before asking for more information.', '请先写明需要申请人补充什么。')
+    setNotice(localeMessage('Say what the applicant should add before asking for more information.', '请先写明需要申请人补充什么。'), true)
+    decidingRequestId.value = ''
+    return
+  }
+  // A note goes with a rejection or a request for more information only; `document_access.py` refuses an approval
+  // sent with one (VALIDATION_ERROR), and the page refuses it first, with the way out, rather than after a round trip.
+  if (decision.startsWith('approve-') && note) {
+    setNotice(localeMessage('An approval carries no note to the applicant. Clear the note, or reject the request or ask for more information instead.', '批准时不会把说明发给申请人。请清空说明，或改为拒绝/要求补充信息。'), true)
     decidingRequestId.value = ''
     return
   }
@@ -419,7 +436,7 @@ async function decideRequest(decision: ApprovalDecision) {
       const mapped = mapApprovalRequest(result.data)
       Object.assign(request, mapped)
     } catch (decisionError) {
-      notice.value = requestErrorMessage(decisionError, (localeMessage('Approval action failed.', '审批操作失败')))
+      setNotice(requestErrorMessage(decisionError, (localeMessage('Approval action failed.', '审批操作失败'))), true)
       decidingRequestId.value = ''
       return
     }
@@ -432,7 +449,7 @@ async function decideRequest(decision: ApprovalDecision) {
   // The decision lands on the request it was made for: another selected meanwhile keeps its selection and its note.
   request.status = nextStatus
   if (selectedRequestId.value === request.id) decisionNote.value = ''
-  notice.value = decision === 'approve-watermarked' ? (localeMessage('Watermarked PDF preview and download approved.', '已批准水印 PDF 预览与下载')) : decision === 'approve-original' ? (localeMessage('Original PPTX download approved; preview still uses a personal watermarked PDF.', '已批准原始 PPTX 下载；预览仍使用个人水印 PDF')) : decision === 'reject' ? (localeMessage('Access request rejected.', '已拒绝该访问申请')) : (localeMessage('Applicant asked to provide more information.', '已要求申请人补充信息'))
+  setNotice(decision === 'approve-watermarked' ? (localeMessage('Watermarked PDF preview and download approved.', '已批准水印 PDF 预览与下载')) : decision === 'approve-original' ? (localeMessage('Original PPTX download approved; preview still uses a personal watermarked PDF.', '已批准原始 PPTX 下载；预览仍使用个人水印 PDF')) : decision === 'reject' ? (localeMessage('Access request rejected.', '已拒绝该访问申请')) : (localeMessage('Applicant asked to provide more information.', '已要求申请人补充信息')))
   approvalRequests.value = approvalRequests.value.filter((item) => item.id !== request.id)
   if (!approvalRequests.value.some((item) => item.id === selectedRequestId.value)) selectedRequestId.value = approvalRequests.value[0]?.id ?? ''
   decidingRequestId.value = ''
@@ -583,8 +600,8 @@ onBeforeUnmount(() => {
       <button type="button" data-workspace-tab="approvals" :class="{ active: workspaceMode === 'approvals' }" :aria-pressed="workspaceMode === 'approvals'" @click="workspaceMode = 'approvals'">{{ t('documents.approvals') }} <b>{{ approvalRequests.length }}</b></button>
     </nav>
 
-    <p v-if="notice" class="document-notice" role="status">
-      <Check :size="15" />
+    <p v-if="notice" ref="noticeElement" tabindex="-1" class="document-notice" :class="{ 'notice-error': noticeIsError }" :role="noticeIsError ? 'alert' : 'status'">
+      <Check v-if="!noticeIsError" :size="15" />
       {{ notice }}
     </p>
     <p v-if="isApprovalWorkspace && accessApprovalError" class="document-notice approval-load-error" data-approval-load-error="access" role="alert">
@@ -688,7 +705,7 @@ onBeforeUnmount(() => {
               <label>{{ locale === 'en-US' ? 'Archive section' : '归档板块' }}<select v-model="selectedRequest.upload.category"><option value="Technical">{{ locale === 'en-US' ? 'Technical documents' : '技术文档' }}</option><option value="Commercial">{{ locale === 'en-US' ? 'Commercial documents' : '商务文档' }}</option></select></label>
               <label>{{ locale === 'en-US' ? 'Confidentiality' : '密级' }}<select v-model="selectedRequest.upload.confidentiality"><option v-for="level in ['Internal', 'Confidential', 'Restricted']" :key="level" :value="level">{{ documentLabel(level) }}</option></select></label>
               <label>{{ locale === 'en-US' ? 'Access mode' : '访问方式' }}<select v-model="selectedRequest.upload.accessMode"><option value="Direct">{{ locale === 'en-US' ? 'Direct access' : '直接访问' }}</option><option value="Request">{{ locale === 'en-US' ? 'Request access' : '申请后访问' }}</option></select></label>
-              <label class="wide">{{ locale === 'en-US' ? 'Rejection reason' : '拒绝原因' }}<textarea v-model="uploadDecisionReason" :placeholder="locale === 'en-US' ? 'Required when rejecting' : '拒绝时必填'"></textarea></label>
+              <label class="wide">{{ locale === 'en-US' ? 'Rejection reason' : '拒绝原因' }}<textarea v-model="uploadDecisionReason" data-upload-decision-reason :placeholder="locale === 'en-US' ? 'Required when rejecting' : '拒绝时必填'"></textarea></label>
             </section>
 
             <section class="decision-bar">
@@ -697,7 +714,7 @@ onBeforeUnmount(() => {
                 <strong>{{ locale === 'en-US' ? 'Choose watermarked PDF or original PPTX during approval' : '审批时明确选择水印 PDF 或原始 PPTX' }}</strong>
               </div>
               <label v-if="selectedRequest.kind === 'access'" class="decision-note">
-                <span>{{ locale === 'en-US' ? 'Note to the applicant (required to request more information)' : '给申请人的说明（补充信息时必填）' }}</span>
+                <span>{{ locale === 'en-US' ? 'Note to the applicant (required to request more information; cannot go with an approval)' : '给申请人的说明（补充信息时必填；批准时不能附带）' }}</span>
                 <textarea v-model="decisionNote" data-decision-note rows="2" :disabled="isManagementReadonly || selectedRequest.status !== 'Manager Review'" :placeholder="locale === 'en-US' ? 'e.g. Name the customer and the meeting' : '例如：请写明客户和会议场合'"></textarea>
               </label>
               <div class="approval-actions">
@@ -1078,6 +1095,7 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
+.document-notice.notice-error{color:var(--crm-danger);background:var(--crm-danger-soft);border-color:var(--crm-danger)}
 .document-workspace-tabs{margin-bottom:12px}.document-workspace-tabs b{display:inline-grid;min-width:20px;height:20px;place-items:center;margin-left:5px;border-radius:10px;background:#f28a24;color:#fff}.document-header-actions{display:flex;align-items:center;gap:10px}.upload-document-button{display:inline-flex;align-items:center;gap:7px;white-space:nowrap}.document-upload-backdrop{position:fixed;inset:0;z-index:80;display:grid;place-items:center;padding:24px;background:#08192eb8}.document-upload-modal{width:min(720px,100%);padding:0;background:#fff}.document-upload-modal>header{display:flex;justify-content:space-between;padding:20px;border-bottom:1px solid #ddd}.document-upload-modal h2,.document-upload-modal p{margin:0}.document-upload-modal p{margin-top:5px;color:#6f747a;font-size:12px}.document-upload-modal>header button{border:0;background:none;font-size:24px}.upload-form-grid,.upload-approval-fields{display:grid;grid-template-columns:1fr 1fr;gap:14px;padding:20px}.upload-form-grid label,.upload-approval-fields label{display:grid;gap:6px;font-size:11px;font-weight:700}.upload-form-grid .wide,.upload-approval-fields .wide{grid-column:1/-1}.upload-form-grid input,.upload-form-grid select,.upload-approval-fields select,.upload-approval-fields textarea{min-height:38px;padding:8px;border:1px solid #d6d3ce;border-radius:5px;background:#fff}.document-upload-modal footer{display:flex;justify-content:flex-end;gap:10px;padding:16px 20px;border-top:1px solid #ddd}.upload-error{padding:0 20px;color:#a83232}@media(max-width:760px){.document-header-actions{width:100%;align-items:stretch;flex-direction:column}.upload-document-button{justify-content:center}.upload-form-grid,.upload-approval-fields{grid-template-columns:1fr}.upload-form-grid .wide,.upload-approval-fields .wide{grid-column:auto}}
 .document-notice {
   display: flex;

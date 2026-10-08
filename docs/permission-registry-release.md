@@ -9,7 +9,11 @@ request. The writer list is documentation, not a runtime service allowlist.
 The existing backend test/release gate now checks missing registrations, child-table
 classification, replaced/missing hooks, duplicate dictionary keys, both DocShare
 guards, the managed File override, unsafe JSON grants and installed effective
-DocPerm/Custom DocPerm drift. Replaced/missing hooks include the write guards in
+DocPerm/Custom DocPerm drift. On an installed site it also checks that every table
+field of a DocType with a CRM list hook names a registered child table: Frappe lists
+a child table on the parent's DocType-level read alone, so an unregistered one lists
+every row (User's `Has Role` and `DefaultValue` did, #219), whoever owns the parent.
+Replaced/missing hooks include the write guards in
 `doc_events` (Customer, Contact, Lead, Address and User `before_save`, Customer,
 Contact, Lead, Address and Customer Group `before_rename`, User `after_rename`,
 and File `before_insert`/`before_validate`) and the private file content deletion hook. The

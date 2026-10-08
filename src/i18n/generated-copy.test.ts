@@ -123,6 +123,9 @@ it.each([
   ['Quotation', '预警：报价即将到期', '报价 Edge inspection（长飞先进）V2 将于 2026-10-06 到期，还剩 1 天。', 'Warning: quotation expiring', 'Quotation Edge inspection（长飞先进）V2 expires on 2026-10-06; 1 day remains.'],
   ['Opportunity', '预警：第 6 阶段超期无 PO', 'Edge inspection（长飞先进）已在第 6 阶段 1 天，仍未收到 PO。', 'Warning: stage 6 overdue without PO', 'Edge inspection（长飞先进） has been at stage 6 for 1 day with no PO received.'],
   ['Opportunity', '预警：第 6 阶段超期无 PO', 'Edge inspection（长飞先进）已在第 6 阶段 45 天以上，仍未收到 PO。', 'Warning: stage 6 overdue without PO', 'Edge inspection（长飞先进） has been at stage 6 for 45 days or more with no PO received.'],
+  ['Opportunity', '预警：预计 PO 日期跨季度推迟', 'Edge inspection（长飞先进）预计 PO 日期由 2026-09-28 推迟至 2026-10-15，请跟进并记录行动。', 'Warning: expected PO postponed to a later quarter', 'Edge inspection（长飞先进）: the expected PO date moved from 2026-09-28 to 2026-10-15; please follow up and record an action.'],
+  // The Demo's title is "<customer> - <equipment> Demo" and the resource is written "<code> · <name>" (demo_resources.py).
+  ['Evaluation', 'Demo 设备不可用', '长飞先进 - Edge inspection Demo 的安排与 FSBS-01 · 边缘检测机 不可用时段相交，请调整设备或时间。', 'Demo resource unavailable', '长飞先进 - Edge inspection Demo: its schedule overlaps an unavailable period of FSBS-01 · 边缘检测机; change the resource or the time.'],
 ] as const)('reads the server\'s %s warning notice in English, keeping its data', (category, title, message, englishTitle, englishMessage) => {
   const item: NotificationInput = { category, title, message, route: '/opportunities/OP-1' }
   expect(notificationCopy(item, 'en-US')).toEqual({ title: englishTitle, message: englishMessage })
@@ -154,6 +157,28 @@ it('keeps an action notice as written when its record or customer could be split
   const plain = { ...base, message: '复核客户（旧厂）（长飞先进）的行动「联系采购」原定 2026-09-30 完成，已逾期。' }
   expect(notificationCopy(plain, 'en-US').message).toBe('复核客户（旧厂）（长飞先进）: the action "联系采购" was due 2026-09-30 and is overdue.')
   expect(notificationCopy(plain, 'zh-CN')).toEqual({ title: plain.title, message: plain.message })
+})
+
+it('keeps a Demo resource notice as written when it could be split in more than one place or was cut short', () => {
+  const base = { category: 'Evaluation' as const, title: 'Demo 设备不可用', route: '/demo-workflow/DR-1' }
+  // The resource's name holds the separator: two places to split, no reading.
+  const resource = { ...base, message: '长飞先进 - X Demo 的安排与 FSBS-01 的安排与 B 不可用时段相交，请调整设备或时间。' }
+  expect(notificationCopy(resource, 'en-US')).toEqual({ title: 'Demo resource unavailable', message: resource.message })
+  // The Demo's title ends with the separator's text, so the two share a space: still two places, no reading.
+  const shared = { ...base, message: '长飞先进 - X 的安排与 的安排与 FSBS-01 · B 不可用时段相交，请调整设备或时间。' }
+  expect(notificationCopy(shared, 'en-US')).toEqual({ title: 'Demo resource unavailable', message: shared.message })
+  // The resource's name ends with the separator's text without a space after it: one place, read as the server wrote it.
+  const trailing = { ...base, message: '长飞先进 - X Demo 的安排与 FSBS-01 · B 的安排与 不可用时段相交，请调整设备或时间。' }
+  expect(notificationCopy(trailing, 'en-US').message).toBe('长飞先进 - X Demo: its schedule overlaps an unavailable period of FSBS-01 · B 的安排与; change the resource or the time.')
+  // The server keeps a notice's message to 1000 characters (its 140-character fields keep this one well under, but a
+  // message cut short would no longer end as written and is kept as it is).
+  const cut = { ...base, message: `${'x'.repeat(995)} 的安排与 FSBS-01 · B 不可用时段相交，请调整设备或时间。`.slice(0, 1000) }
+  expect(cut.message).toHaveLength(1000)
+  expect(notificationCopy(cut, 'en-US')).toEqual({ title: 'Demo resource unavailable', message: cut.message })
+  // A line break inside the Demo's title is data.
+  const broken = { ...base, message: '长飞先进 - Edge\ninspection Demo 的安排与 FSBS-01 · 边缘检测机 不可用时段相交，请调整设备或时间。' }
+  expect(notificationCopy(broken, 'en-US').message).toBe('长飞先进 - Edge\ninspection Demo: its schedule overlaps an unavailable period of FSBS-01 · 边缘检测机; change the resource or the time.')
+  expect(notificationCopy(broken, 'zh-CN')).toEqual({ title: broken.title, message: broken.message })
 })
 
 it('keeps unrelated server notification text intact even when its title matches local copy', () => {

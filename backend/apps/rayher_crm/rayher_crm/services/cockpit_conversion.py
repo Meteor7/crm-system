@@ -126,4 +126,5 @@ def pipeline_coverage(review):
             ratio = insufficient("pipeline_amount_incomplete")
         else:
             ratio = metric(format(Decimal(total["value"]) / difference, ".2f"))
-    return {"openPipeline": total, "remainingTarget": remaining, "ratio": ratio, "referenceMin": 3, "referenceMax": 4}
+    return {"openPipeline": total, "remainingTarget": remaining, "ratio": ratio, "referenceMin": 3, "referenceMax": 4,
+            "targetScope": target.get("scope"), "targetState": target["state"]}

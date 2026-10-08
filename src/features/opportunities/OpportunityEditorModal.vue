@@ -30,6 +30,8 @@ const props = defineProps<{
 }>()
 const emit = defineEmits<{ close: []; submit: [value: CreateStrategyOpportunityInput] }>()
 const { t, locale, message } = useI18n()
+const copy = (english: string, chinese: string) => locale.value === 'en-US' ? english : chinese
+const structuredRedFlags = computed(() => props.opportunity?.redFlagRecords !== undefined)
 
 const SALE_TYPE_OPTIONS = ['New Equipment', 'Repeat Order', 'Service'] as const
 
@@ -212,6 +214,9 @@ function submit() {
     paymentMilestones: lines(paymentText.value), strengths: lines(strengthsText.value), redFlags: lines(redFlagsText.value), informationNeeded: lines(informationText.value),
     competitors,
   }
+  // The structured editor owns IDs, handling state and multiline text. General
+  // edits must not round-trip those records through the old line-based field.
+  if (structuredRedFlags.value || (props.opportunity && redFlagsText.value === props.opportunity.redFlags.join('\n'))) delete value.redFlags
   // A non-owner or frozen edit leaves the level untouched.
   if (canSetProbabilityLevel.value) value.probabilityLevel = probabilityLevel ?? ''
   if (lowersLevel.value) {
@@ -301,7 +306,8 @@ const equipmentChoices = computed(() => props.equipmentTypes ?? EQUIPMENT_PRESET
       <label class="wide"><span>{{ t('oppEditor.singleSalesObjective') }}</span><textarea v-model="form.singleSalesObjective" :aria-label="t('oppEditor.singleSalesObjective')" rows="3" /><small v-if="objectiveError" class="field-error" data-field-error="singleSalesObjective">{{ objectiveError }}</small></label>
       <label><span>{{ t('oppEditor.payment') }}</span><textarea v-model="paymentText" :aria-label="t('oppEditor.payment')" rows="3" /></label>
       <label><span>{{ t('oppEditor.strength') }}</span><textarea v-model="strengthsText" :aria-label="t('oppEditor.strength')" rows="3" /></label>
-      <label><span>{{ t('oppEditor.redFlag') }}</span><textarea v-model="redFlagsText" :aria-label="t('oppEditor.redFlag')" rows="3" /></label>
+      <p v-if="structuredRedFlags" data-testid="structured-red-flags-note">{{ copy('Manage red flags and their status in the Blue Sheet section of the opportunity detail.', '请在商机详情的 Blue Sheet 中维护红旗及处理状态。') }}</p>
+      <label v-else><span>{{ t('oppEditor.redFlag') }}</span><textarea v-model="redFlagsText" :aria-label="t('oppEditor.redFlag')" rows="3" /></label>
       <label><span>{{ t('oppEditor.infoNeeded') }}</span><textarea v-model="informationText" :aria-label="t('oppEditor.infoNeeded')" rows="3" /></label>
     </div>
   </ModalShell>

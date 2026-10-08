@@ -17,7 +17,7 @@
     "review_note",
     "reason",
     "actor",
-    "recorded_at"
+    "recorded_at", "review_category"
   ],
   "fields": [
     {
@@ -69,7 +69,8 @@
       "fieldtype": "Datetime",
       "label": "Recorded At",
       "reqd": 1
-    }
+    },
+    {"fieldname": "review_category", "fieldtype": "Select", "label": "Post-mortem Category", "options": "\nPrice\nLocal competitor preferred\nSpecs / throughput\nBudget cancelled or delayed\nDelivery lead time\nOther"}
   ],
   "permissions": [
     {

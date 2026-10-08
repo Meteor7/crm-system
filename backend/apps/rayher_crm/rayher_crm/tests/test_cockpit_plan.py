@@ -54,6 +54,34 @@ def ids(rows):
 
 class TestPlanPeriod(unittest.TestCase):
 
+    def test_equipment_groups_partition_current_plans_and_keep_unknown_amounts(self):
+        data = fixture()
+        data["opportunities"][0]["tool_type"] = "Inspection"
+        data["equipment_labels"] = ["Inspection"]
+        data["visits"][0]["opportunity"] = "opp1"
+        result = build_plan(data, WEEK, NOW)
+        groups = {row["id"]: row for row in result["equipmentGroups"]}
+        self.assertEqual(groups["equipment:inspection"]["name"], "Inspection")
+        self.assertTrue(groups["unclassified"]["poAmountIncomplete"])
+        self.assertEqual(groups["equipment:inspection"]["poAmounts"][0]["value"], "6800000.00")
+        for group in groups.values():
+            matching = [row for row in result["_details"]["scheduled_activities"] if row["equipmentGroup"] == group["id"]]
+            self.assertEqual(len(matching), group["activities"]["value"])
+            self.assertTrue(all(not row["carryover"] and row["kind"] != "po" for row in matching))
+        data["visits"][0]["visit_date"] = None
+        changed = build_plan(data, WEEK, NOW)
+        self.assertEqual(next(row for row in changed["equipmentGroups"] if row["id"] == "equipment:inspection")["activities"]["state"], "insufficient")
+
+    def test_standalone_event_equipment_does_not_duplicate_across_platforms(self):
+        data = fixture()
+        data["events"] = [{"name": "event", "title": "Trade show", "event_owner": "alice", "equipment": "Inspection", "region": "East China",
+                           "market": "Frontend", "status": "Planned", "start_date": "2026-09-19", "end_date": "2026-09-30"}]
+        result = build_plan(data, WEEK, NOW)
+        self.assertEqual(len(result["_details"]["events"]), 1)
+        self.assertEqual(result["_details"]["events"][0]["equipmentGroup"], "equipment:inspection")
+        data["events"][0]["status"] = "Cancelled"
+        self.assertFalse(build_plan(data, WEEK, NOW)["_details"]["events"])
+
     def test_equipment_filter_keeps_only_linked_records_of_that_equipment(self):
         data = fixture()
         data["opportunities"][0]["tool_type"] = "Inspection"
@@ -105,7 +133,7 @@ class TestPlanRules(unittest.TestCase):
                                           "previousAnchor": "2026-09-14", "nextAnchor": "2026-09-28"})
         self.assertEqual(plan["asOf"], "2026-09-18T03:00:00Z")
         self.assertEqual({key: value["value"] for key, value in plan["summary"].items()},
-                         {"visits": 2, "tests": 1, "actions": 2, "po": 2})
+                         {"visits": 2, "tests": 1, "quotes": 0, "followups": 0, "actions": 2, "po": 2, "events": 0})
         self.assertEqual(plan["overdue"], {"value": 1, "state": "ready", "reason": None})
         details = plan["_details"]
         self.assertEqual(ids(details["visits"]), ["v1", "v2"])
@@ -188,19 +216,22 @@ class TestPlanRules(unittest.TestCase):
         self.assertEqual(build_plan(data, WEEK, NOW)["summary"]["tests"]["value"], 0)
         data["evaluations"][0]["status"] = "Testing"
         data["evaluations"][0]["test_run_deadline"] = None
-        self.assertEqual(build_plan(data, WEEK, NOW)["summary"]["tests"]["value"], 1)
+        self.assertEqual(build_plan(data, WEEK, NOW)["summary"]["tests"]["value"], 0)
+        self.assertEqual(build_plan(data, WEEK, NOW)["otherDemos"]["value"], 1)
 
-    def test_active_demo_deadline_never_gates_counting_or_invents_a_calendar_day(self):
+    def test_demo_schedule_count_uses_period_and_preserves_other_ongoing_without_inventing_dates(self):
         for deadline in (None, "2026-09-18", "2026-09-23", "2027-02-01"):
             for period in ("week", "month", "quarter", "year"):
                 data = fixture()
                 data["evaluations"][0]["test_run_deadline"] = deadline
                 plan = build_plan(data, {**WEEK, "period": period, "includeOverdue": False}, NOW)
-                self.assertEqual(plan["summary"]["tests"], {"value": 1, "state": "ready", "reason": None})
-                self.assertEqual(plan["_details"]["tests"][0]["date"], deadline)
+                expected = int(deadline == "2026-09-23" or (deadline == "2026-09-18" and period != "week"))
+                self.assertEqual(plan["summary"]["tests"], {"value": expected, "state": "ready", "reason": None})
+                self.assertEqual(plan["otherDemos"]["value"], 1 - expected)
+                self.assertEqual(plan["_details"]["tests" if expected else "tests_other"][0]["date"], deadline)
                 self.assertEqual(plan["sales"][0]["tests"], plan["summary"]["tests"])
                 self.assertEqual(plan["markets"][0]["activities"]["state"], "ready")
-                self.assertEqual(len(plan["_details"]["all"]), sum(m["value"] for m in plan["summary"].values()))
+                self.assertEqual(len(plan["_details"]["all"]), sum(m["value"] for m in plan["summary"].values()) + plan["otherDemos"]["value"])
                 filtered = build_plan(data, {**WEEK, "sales": "bob"}, NOW)
                 self.assertEqual(filtered["summary"]["tests"]["value"], 0)
 
@@ -250,7 +281,7 @@ class TestPlanRules(unittest.TestCase):
 
     def test_filters_apply_to_summary_and_details_alike(self):
         plan = build_plan(fixture(), {**WEEK, "sales": "bob"}, NOW)
-        self.assertEqual({key: value["value"] for key, value in plan["summary"].items()}, {"visits": 1, "tests": 0, "actions": 0, "po": 1})
+        self.assertEqual({key: value["value"] for key, value in plan["summary"].items()}, {"visits": 1, "tests": 0, "quotes": 0, "followups": 0, "actions": 0, "po": 1, "events": 0})
         self.assertEqual((plan["overdue"]["value"], ids(plan["_details"]["all"])), (0, ["v2", "opp2"]))
         plan = build_plan(fixture(), {**WEEK, "market": "Frontend"}, NOW)
         self.assertEqual(ids(plan["_details"]["all"]), ["a-old", "v1", "ev1", "a1", "a2", "opp1"])

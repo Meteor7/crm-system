@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { useI18n } from '@/i18n'
-import { condition, fields, fieldLabel, fieldOptions, operators, operatorLabels, text } from './model'
+import { condition, dateFields, fields, fieldLabel, fieldOptions, operators, operatorLabels, text } from './model'
 import type { BoardCondition, BoardField, BoardFilters, BoardOperator } from './types'
 import BoardMultiSelect from './BoardMultiSelect.vue'
 const props = defineProps<{ modelValue: BoardCondition; filters: BoardFilters; index: number; match: 'all' | 'any' }>()
@@ -25,9 +25,9 @@ function bound(index: number, next: string) { const values = [...props.modelValu
     </select>
     <BoardMultiSelect v-if="modelValue.operator === 'in' || modelValue.operator === 'not_in'" :model-value="modelValue.value as string[]" :options="fieldOptions(modelValue.field, filters, locale)" :label="copy('Condition values', '条件值')" :placeholder="copy('Select values…', '请选择…')" @update:model-value="value" />
     <div v-else-if="modelValue.operator === 'between'" class="condition-range">
-      <input v-for="n in [0, 1]" :key="n" :value="(modelValue.value as string[])[n]" :type="modelValue.field === 'stageChangedAt' ? 'date' : 'text'" :inputmode="modelValue.field === 'amountCny' ? 'decimal' : undefined" :aria-label="n ? copy('Range end', '结束值') : copy('Range start', '起始值')" @input="bound(n, ($event.target as HTMLInputElement).value)" />
+      <input v-for="n in [0, 1]" :key="n" :value="(modelValue.value as string[])[n]" :type="dateFields.includes(modelValue.field) ? 'date' : 'text'" :inputmode="modelValue.field === 'amountCny' ? 'decimal' : undefined" :aria-label="n ? copy('Range end', '结束值') : copy('Range start', '起始值')" @input="bound(n, ($event.target as HTMLInputElement).value)" />
     </div>
-    <input v-else :value="modelValue.value" :type="modelValue.field === 'stageChangedAt' ? 'date' : modelValue.field === 'stageAgeDays' ? 'number' : 'text'" :inputmode="modelValue.field === 'amountCny' ? 'decimal' : undefined" :min="modelValue.field === 'stageAgeDays' ? 0 : undefined" :max="modelValue.field === 'stageAgeDays' ? 36500 : undefined" maxlength="140" :aria-label="copy('Condition value', '条件值')" :placeholder="modelValue.field === 'amountCny' ? 'CNY' : ''" @input="value(modelValue.field === 'stageAgeDays' ? (($event.target as HTMLInputElement).value === '' ? '' : Number(($event.target as HTMLInputElement).value)) : ($event.target as HTMLInputElement).value)" />
+    <input v-else :value="modelValue.value" :type="dateFields.includes(modelValue.field) ? 'date' : modelValue.field === 'stageAgeDays' ? 'number' : 'text'" :inputmode="modelValue.field === 'amountCny' ? 'decimal' : undefined" :min="modelValue.field === 'stageAgeDays' ? 0 : undefined" :max="modelValue.field === 'stageAgeDays' ? 36500 : undefined" maxlength="140" :aria-label="copy('Condition value', '条件值')" :placeholder="modelValue.field === 'amountCny' ? 'CNY' : ''" @input="value(modelValue.field === 'stageAgeDays' ? (($event.target as HTMLInputElement).value === '' ? '' : Number(($event.target as HTMLInputElement).value)) : ($event.target as HTMLInputElement).value)" />
     <button type="button" class="condition-remove" :aria-label="copy('Remove condition', '删除条件')" @click="emit('remove')">×</button>
   </div>
 </template>

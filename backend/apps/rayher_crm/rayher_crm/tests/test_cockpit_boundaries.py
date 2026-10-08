@@ -90,7 +90,7 @@ class TestCockpitBoundaries(unittest.TestCase):
                 scoped = {**data, "customers": []} if label == "no customers" else data
                 result = build_review(scoped, {"period": "week", "anchor": "2026-09-14", **query}, now, COVERAGE)
                 self.assertEqual({a["key"]: a["actual"] for a in result["activities"]},
-                                 {k: {"value": 0, "state": "ready", "reason": None} for k in ("visits", "leads", "tests", "quotes")})
+                                 {k: {"value": 0, "state": "ready", "reason": None} for k in ("visits", "leads", "tests", "quotes", "followups")})
                 self.assertEqual({w["key"]: (w["count"]["value"], w["count"]["state"]) for w in result["warnings"]},
                                  {k: (0, "ready") for k in ("lost", "overdue", "downgrade", "quotation_expiry", "stage6_no_po", "close_date_slip")})
                 self.assertTrue(all((p["count"]["value"], p["count"]["state"]) == (0, "ready") for p in result["pipeline"]))

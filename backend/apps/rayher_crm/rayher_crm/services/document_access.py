@@ -179,10 +179,17 @@ def decide_request(request_id: Any, decision: Any, note: Any = None) -> dict[str
     decision_name = required_text({"decision": decision}, "decision")
     if decision_name not in APPROVAL_DECISIONS:
         raise CrmApiException("VALIDATION_ERROR", "Unknown controlled-document decision.")
-    # The applicant is told what to add: a request for more information carries a note; a rejection may.
+    # The applicant is told what to add: a request for more information carries a note; a rejection may. An approval
+    # carries none, and one sent with it is refused rather than dropped unseen.
     if note is not None and not isinstance(note, str):
         raise CrmApiException("VALIDATION_ERROR", "The note must be text.", field_errors={"note": "Must be text"})
-    note_text = (note or "").strip() if decision_name in {"more-info", "reject"} else ""
+    note_text = (note or "").strip()
+    if note_text and decision_name not in {"more-info", "reject"}:
+        raise CrmApiException(
+            "VALIDATION_ERROR",
+            "An approval carries no note: clear it, or reject the request or ask for more information.",
+            field_errors={"note": "Not with an approval"},
+        )
     if decision_name == "more-info" and not note_text:
         raise CrmApiException(
             "VALIDATION_ERROR", "Say what the applicant should add.", field_errors={"note": "Required"},

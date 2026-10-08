@@ -14,6 +14,7 @@ export type Capability =
   | 'requirement:view'
   | 'deal:view' | 'deal:write' | 'deal:rollback' | 'deal:internal_validation_approve'
   | 'visit:view' | 'visit:create' | 'visit:write' | 'visit:review'
+  | 'event:view' | 'event:write'
   | 'demo_request:view' | 'demo_request:create' | 'demo_request:engineering_review' | 'demo_request:manager_approve'
   | 'evaluation:view' | 'evaluation:write'
   | 'installed_tool:write'

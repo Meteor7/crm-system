@@ -152,6 +152,19 @@ class TestPermissionRegistry(FrappeTestCase):
             with self.assertRaisesRegex(ValueError, "Installed child relationships differ.*crm_owned"):
                 registry.validate_permission_registry()
 
+    def test_a_table_field_of_a_hooked_parent_cannot_be_left_unregistered(self):
+        # A list hook on a parent is only as tight as the hooks on its child tables: Frappe lists a child
+        # table on the parent's DocType-level read alone (#219). An ERP-owned pair that drops out of the
+        # registry used to be reported only; on a parent the CRM hooks it leaves the child table open.
+        from rayher_crm.permissions import scope
+
+        child, pair = "Contact Email", ("Contact", "email_ids")
+        self.assertIn(pair, scope.SCOPED_CHILD_RELATIONSHIPS[child])
+        narrowed = tuple(item for item in scope.SCOPED_CHILD_RELATIONSHIPS[child] if item != pair)
+        with patch.dict(scope.SCOPED_CHILD_RELATIONSHIPS, {child: narrowed}):
+            with self.assertRaisesRegex(ValueError, r"Contact Email.*Contact\.email_ids"):
+                registry.validate_permission_registry()
+
     def test_unregistered_site_custom_object_is_detected(self):
         original_get_all = frappe.get_all
 
@@ -172,7 +185,7 @@ class TestPermissionRegistry(FrappeTestCase):
                 values.pop(key)
                 with self.assertRaisesRegex(ValueError, "scope hook"):
                     registry.validate_source_registry(**{attribute: values})
-        for key in ("Contact Email", "CRM Quotation Item"):
+        for key in ("Contact Email", "CRM Quotation Item", "User"):
             query_hooks = dict(hooks.permission_query_conditions)
             query_hooks.pop(key)
             with self.assertRaisesRegex(ValueError, "scope hook"):
@@ -196,7 +209,7 @@ class TestPermissionRegistry(FrappeTestCase):
         # reopens a share, file provenance or private upload path.
         guards = (
             ("Customer", "before_save"), ("Contact", "before_save"), ("Lead", "before_save"),
-            ("Address", "before_save"), ("User", "before_save"),
+            ("Address", "before_save"), ("User", "before_save"), ("User", "before_rename"),
             ("File", "before_insert"), ("File", "before_validate"),
         )
         for doctype, event in guards:
@@ -231,6 +244,7 @@ class TestPermissionRegistry(FrappeTestCase):
             ("permission_query_conditions", lambda values: {**values, "CRM Visit": [*values.get("CRM Visit", []), later]}),
             ("permission_query_conditions", lambda values: {**values, "*": [later]}),
             ("permission_query_conditions", lambda values: {**values, "File": list(reversed(values.get("File", [])))}),
+            ("permission_query_conditions", lambda values: {**values, "User": list(reversed(values.get("User", [])))}),
             ("permission_query_conditions", lambda values: {**values, "Contact": [hooks.permission_query_conditions["Contact"]]}),
             ("has_permission", lambda values: {**values, "CRM Visit": [*values.get("CRM Visit", []), later]}),
             ("has_permission", lambda values: {**values, "*": [*values.get("*", []), later]}),

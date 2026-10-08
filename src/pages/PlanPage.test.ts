@@ -24,9 +24,52 @@ async function setup(role: UserRole = 'Manager', plan = planFixture(), details =
   return { api, wrapper, router, app: useAppStore(pinia) }
 }
 describe('Plan business interface', () => {
-  it('shows four approved metrics, CNY estimates, seven days without carryover', async () => {
+  it('drills into the equipment group with the same metric and clears it when scope changes', async () => {
+    const data = planFixture()
+    data.equipmentGroups = [{ id: 'unclassified', name: null, activities: { value: 2, state: 'ready' }, po: { value: 1, state: 'ready' }, poAmounts: [], poAmountIncomplete: true }]
+    const { wrapper, api } = await setup('Manager', data)
+    expect(wrapper.get('[data-equipment-summary]').text()).toContain('未分类')
+    expect(wrapper.get('[data-equipment-summary]').text()).toContain('部分金额数据不足')
+    await wrapper.get('[data-equipment-summary] button').trigger('click'); await flushPromises()
+    expect(api.getPlanDetails).toHaveBeenLastCalledWith(expect.objectContaining({ metric: 'scheduled_activities', equipmentGroup: 'unclassified', includeOverdue: false }))
+    expect(wrapper.get('[data-equipment-group-filter]').text()).toContain('未分类')
+    await wrapper.get('[data-equipment-group-filter] button').trigger('click'); await flushPromises()
+    expect(vi.mocked(api.getPlanDetails).mock.lastCall![0].equipmentGroup).toBeUndefined()
+    wrapper.unmount()
+  })
+  it('shows quote amounts only on quotes and PO amounts only on PO', async () => {
+    const plan = planFixture()
+    plan.quoteAmounts = [{ currency: 'CNY', value: '125000.00' }]
+    plan.quoteAmountIncomplete = false
+    const { wrapper } = await setup('Manager', plan)
+    expect(wrapper.get('.kpi.quotes').text()).toContain('CNY 125,000')
+    expect(wrapper.get('.kpi.quotes').text()).not.toContain('6,800,000')
+    expect(wrapper.get('.kpi.po').text()).toContain('CNY 6,800,000')
+    expect(wrapper.get('.kpi.followups').text()).not.toContain('CNY')
+    expect(wrapper.get('.kpi.events').text()).not.toContain('CNY')
+    wrapper.unmount()
+  })
+
+  it('opens carried-over quotation work with original dates and source links', async () => {
+    const plan = planFixture()
+    plan.otherDemos = { state: 'ready', value: 0 }
+    plan.quotationCarryover = { state: 'ready', value: 1 }
+    const details = planDetailsFixture()
+    const { wrapper, api } = await setup('Manager', plan, details)
+    api.getPlanDetails = vi.fn(async () => response({ ...details, total: 1, items: [{
+      id: 'followup-1', quotationId: 'quote-1', title: 'Confirm quote', kind: 'followups' as const, date: '2026-09-01',
+      accountId: 'customer-1', customer: 'Customer', salesOwner: 'alice', market: null, status: 'Open', carryover: true,
+    }] }))
+    await wrapper.get('select[aria-label="Activity type"]').setValue('quotation_carryover'); await flushPromises()
+    expect(api.getPlanDetails).toHaveBeenCalledWith(expect.objectContaining({ metric: 'quotation_carryover' }))
+    expect(wrapper.get('.agenda-item.followups').attributes('href')).toContain('/quotations/quote-1')
+    expect(wrapper.findAll('.agenda-day')).toHaveLength(1)
+    expect(wrapper.get('.agenda-item.followups').text()).toContain('Confirm quote')
+    wrapper.unmount()
+  })
+  it('shows scheduled metrics, CNY estimates and seven days without carryover', async () => {
     const { wrapper, router } = await setup()
-    expect(wrapper.findAll('.kpi')).toHaveLength(4)
+    expect(wrapper.findAll('.kpi')).toHaveLength(7)
     expect(wrapper.findAll('.agenda-day:not(.carryover)')).toHaveLength(7)
     expect(wrapper.find('.carryover').exists()).toBe(false)
     expect(wrapper.find('.overdue-link').exists()).toBe(false)
@@ -35,7 +78,9 @@ describe('Plan business interface', () => {
     expect(wrapper.get('.kpi.po').text()).toContain('CNY 6,800,000')
     expect(wrapper.get('.kpi.po').text()).not.toContain('USD')
     expect(wrapper.get('.kpi.po').text()).toContain('部分金额数据不足')
-    expect(wrapper.text()).not.toMatch(/待发送报价|团队目标|展会|内部会议/)
+    expect(wrapper.text()).toContain('展会活动')
+    expect(wrapper.text()).toContain('待发报价')
+    expect(wrapper.text()).not.toMatch(/团队目标|内部会议/)
     // The equipment filter uses the Opportunities board catalog (#18).
     expect(wrapper.find('select[aria-label="Equipment"]').exists()).toBe(true)
     expect(router.currentRoute.value.meta.navigationPath).toBe('/dashboard')
@@ -47,8 +92,11 @@ describe('Plan business interface', () => {
   it('keeps active Demos without a date or outside the period below the seven days', async () => {
     const details = planDetailsFixture()
     const test = details.items.find(row => row.kind === 'tests')!
-    test.date = null
-    details.items.push({ ...test, id: 'old-demo', date: '2026-09-01' }, { ...test, id: 'future-demo', date: '2026-10-01' })
+    details.items.push(
+      { ...test, id: 'undated-demo', title: 'Undated Demo', date: null },
+      { ...test, id: 'old-demo', title: 'Earlier Demo', date: '2026-09-01' },
+      { ...test, id: 'future-demo', title: 'Later Demo', date: '2026-10-01' },
+    )
     const { wrapper } = await setup('Manager', planFixture(), details)
     expect(wrapper.findAll('.agenda-day:not(.outside-period)')).toHaveLength(7)
     const extra = wrapper.get('.agenda-day.outside-period')
@@ -59,12 +107,24 @@ describe('Plan business interface', () => {
     expect(extra.text()).toContain('测试截止：2026-10-01')
     expect(extra.text()).not.toContain('Invalid Date')
     expect(wrapper.get('.kpi.tests').text()).toContain('两项准备完成，尚未进入内部审核')
-    await wrapper.get('select[aria-label="Group by"]').setValue('sales'); await flushPromises()
-    expect(wrapper.findAll('.agenda-item.tests')).toHaveLength(3)
-    expect(wrapper.find('.outside-period').exists()).toBe(false)
-    expect(wrapper.text()).toContain('尚未排期')
-    setLocale('en-US'); await flushPromises()
-    expect(wrapper.text()).toContain('Date not set')
+    for (const locale of ['zh-CN', 'en-US'] as const) {
+      setLocale(locale); await flushPromises()
+      for (const grouping of ['day', 'sales', 'market']) {
+        await wrapper.get('select[aria-label="Group by"]').setValue(grouping); await flushPromises()
+        const rows = wrapper.findAll('.agenda-item.tests')
+        expect(rows).toHaveLength(4)
+        const scheduledLabel = locale === 'en-US' ? 'Demos scheduled this period' : '本期安排 Demo'
+        const otherLabel = locale === 'en-US' ? 'Other ongoing Demos' : '其他进行中 Demo'
+        for (const row of rows) {
+          const scheduled = row.get('strong').text() === test.title
+          expect(row.text()).toContain(scheduled ? scheduledLabel : otherLabel)
+          expect(row.text()).not.toContain(scheduled ? otherLabel : scheduledLabel)
+        }
+        expect(wrapper.get('.kpi.tests strong').text()).toBe('1')
+        if (grouping !== 'day') expect(wrapper.find('.outside-period').exists()).toBe(false)
+        expect(wrapper.text()).toContain(locale === 'en-US' ? 'Date not set' : '尚未排期')
+      }
+    }
     expect(wrapper.get('.kpi.tests').text()).toContain('Preparation complete, before Internal Review')
     wrapper.unmount()
   })

@@ -1,6 +1,8 @@
 import type { Metric, ReviewRow } from './types'
 
 export const labels: Record<string, [string, string]> = {
+  followups: ['完成报价跟进', 'Quote follow-ups completed'],
+  visits_existing: ['老客户拜访', 'Existing customer visits'], visits_prospect: ['潜在客户拜访', 'Prospect visits'], visits_unclassified: ['未分类拜访', 'Unclassified visits'],
   visits: ['客户沟通', 'Customer visits'], leads: ['新增合格线索', 'New qualified leads'],
   tests: ['完成测试', 'Test runs'], quotes: ['首次发布报价', 'Quotes sent'], orders: ['年度订单金额', 'Annual orders'],
   qualified_opportunity: ['合格商机', 'Qualified opportunity'], demo_done: ['Demo 完成', 'Demo done'],
@@ -12,6 +14,7 @@ export const labels: Record<string, [string, string]> = {
   quotation_expiry: ['报价即将到期', 'Quotes expiring soon'], warnings: ['预警', 'Warnings'],
   demo_resources: ['Demo 设备风险 · 当前', 'Demo resource risks · current'],
   close_date_slip: ['预计 PO 跨季度推迟', 'Expected PO postponed to a later quarter'],
+  red_flags: ['当前未解决红旗', 'Current open red flags'],
   other_alerts: ['其他提醒', 'Other alerts'], stage6_no_po: ['第 6 阶段超期无 PO', 'Stage 6 overdue, no PO'],
   downgrade: ['待处理降档', 'Pending downgrades'], downgrade_history: ['本期降档记录', 'Downgrade history'], stalled: ['行动久未更新', 'Stalled opportunities'], losses: ['近 12 个月丢单', 'Losses · last 12 months'],
   low_probability: ['Low probability', 'Low probability'], pipeline: ['Pipeline', 'Pipeline'], upside: ['Upside', 'Upside'], committed: ['Committed', 'Committed'],
@@ -25,13 +28,14 @@ export function metricText(metric: Metric, locale: string, money = false): strin
   return `${money ? '¥' : ''}${Number(metric.value).toLocaleString(locale, { maximumFractionDigits: money ? 2 : 0 })}`
 }
 export function detailRoute(row: ReviewRow) {
+  if (row.kind === 'followup' && row.quotationId) return { path: `/quotations/${encodeURIComponent(row.quotationId)}`, query: row.quotationVersionId ? { version: row.quotationVersionId } : {} }
   if (row.kind === 'quotation' && row.quotationVersionId) {
     return { path: `/quotations/${encodeURIComponent(row.id)}`, query: { version: row.quotationVersionId } }
   }
   if (row.kind === 'opportunity' && row.fromLevel && row.eventId) {
     return { path: `/opportunities/${encodeURIComponent(row.id)}`, query: { probabilityEvent: row.eventId } }
   }
-  const path = { visit: '/visits/', lead: '/leads/', quotation: '/quotations/', opportunity: '/opportunities/', booking: '/booking/' }[row.kind as Exclude<ReviewRow['kind'], 'test'>]
+  const path = { visit: '/visits/', lead: '/leads/', quotation: '/quotations/', opportunity: '/opportunities/', booking: '/booking/' }[row.kind as Exclude<ReviewRow['kind'], 'test' | 'followup'>]
   return row.kind === 'test' ? { path: '/evaluations', query: { evaluationId: row.evaluationId } } : { path: `${path}${encodeURIComponent(row.id)}` }
 }
 const shanghaiToday = (now: Date) => new Date(now.toLocaleString('en-US', { timeZone: 'Asia/Shanghai' }))

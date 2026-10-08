@@ -12,15 +12,15 @@ import frappe
 
 from rayher_crm.api.v1.errors import CrmApiException
 from rayher_crm.permissions.roles import assert_capability, capabilities_for_user
+from rayher_crm.permissions.scope import conditions_for_doctype
 from rayher_crm.services.accounts import list_accounts
+from rayher_crm.services.bookings import list_bookings
 from rayher_crm.services.demo_requests import list_demo_requests
 from rayher_crm.services.evaluations import list_evaluations
-from rayher_crm.services.opportunities import list_strategy_opportunities
 from rayher_crm.services.opportunity_stages import OPEN_STAGES, PO_RECEIVED
-from rayher_crm.services.pipeline import actions_for_account, list_pipeline
 from rayher_crm.services.common import to_iso_timestamp
 from rayher_crm.services.visits import list_visits
-from rayher_crm.services.money import as_decimal
+from rayher_crm.services.money import as_decimal, optional_money_text
 
 PAGE_SIZE = 200
 
@@ -74,6 +74,45 @@ def _amount_by(rows: list[dict], read_label: Callable[[dict], str], read_amount:
     ]
 
 
+def _opportunities_and_actions(account_ids: set[str]) -> tuple[list[dict], list[dict]]:
+    """Read only dashboard inputs, with the canonical opportunity scope.
+
+    The full opportunity serializer also reads histories, stakeholders, and
+    workflow details. None of those are used here; loading them twice per deal
+    made the dashboard take tens of seconds for a few thousand opportunities.
+    """
+    assert_capability("deal:view")
+    if not account_ids:
+        return [], []
+    rows = frappe.db.sql(
+        f"""SELECT name, account, opportunity_owner, stage, currency,
+                   CAST(amount AS CHAR) AS amount
+            FROM `tabCRM Opportunity`
+            WHERE ({conditions_for_doctype('CRM Opportunity')}) AND account IN %(accounts)s
+            ORDER BY modified DESC, name DESC""",
+        {"accounts": tuple(sorted(account_ids))}, as_dict=True,
+    )
+    opportunities = [{
+        "id": row.name, "accountId": row.account, "owner": row.opportunity_owner,
+        "stage": row.stage, "currency": row.currency, "amount": optional_money_text(row.amount or 0),
+    } for row in rows]
+    by_id = {row["id"]: row for row in opportunities}
+    actions_by_opportunity: dict[str, list[dict]] = defaultdict(list)
+    ids = list(by_id)
+    for start in range(0, len(ids), PAGE_SIZE):
+        actions = frappe.get_all(
+            "CRM Opportunity Action", filters={"opportunity": ["in", ids[start:start + PAGE_SIZE]], "archived": 0},
+            fields=["name", "opportunity", "title", "action_owner", "due", "status"], order_by="creation asc",
+        )
+        for row in actions:
+            actions_by_opportunity[row.opportunity].append({
+                "id": row.name, "accountId": by_id[row.opportunity]["accountId"], "opportunityId": row.opportunity,
+                "title": row.title, "owner": row.action_owner, "due": str(row.due or ""),
+                "status": row.status, "sourceType": "Deal",
+            })
+    return opportunities, [action for id in ids for action in actions_by_opportunity[id]]
+
+
 def get_dashboard(query: dict[str, Any]) -> dict[str, Any]:
     assert_capability("dashboard:view")
     dashboard_range = str(query.get("range") or "").strip()
@@ -82,18 +121,13 @@ def get_dashboard(query: dict[str, Any]) -> dict[str, Any]:
     segment = str(query.get("segment") or "").strip()
     accounts = _read_all_pages(list_accounts, {"segment": segment or "All"})
     account_ids = {item["id"] for item in accounts}
-    pipeline = list_pipeline({})
-    opportunities = [item for item in pipeline["opportunities"] if item["accountId"] in account_ids]
+    opportunities, actions = _opportunities_and_actions(account_ids)
     # An Opportunity whose amount is still unknown ("", allowed at S1) counts like any other in its stage,
     # owner, account, segment and currency group, but money sums add known amounts only: it adds no value,
     # never a 0, and each group that shows money reports how many amounts it leaves out.
     unpriced = [item for item in opportunities if not item["amount"]]
     priced = [item for item in opportunities if item["amount"]]
-    bookings = [item for item in pipeline["bookings"] if item["accountId"] in account_ids]
-    strategy = [item for item in list_strategy_opportunities() if item["accountId"] in account_ids]
-    actions = []
-    for account_id in account_ids:
-        actions.extend(actions_for_account(account_id, strategy))
+    bookings = [item for item in _read_all_pages(list_bookings) if item["accountId"] in account_ids]
     demos = [item for item in _read_all_pages(list_demo_requests) if item["accountId"] in account_ids]
     evaluations = [item for item in _read_all_pages(list_evaluations) if item["accountId"] in account_ids]
     visits = (

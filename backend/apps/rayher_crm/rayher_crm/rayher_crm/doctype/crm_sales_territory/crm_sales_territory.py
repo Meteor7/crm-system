@@ -1,17 +1,19 @@
-import frappe
 from frappe.model.document import Document
-
-from rayher_crm.services.territory_tree import ancestors
 
 
 class CRMSalesTerritory(Document):
+    def insert(self, *args, **kwargs):
+        from rayher_crm.services.territory_admin import lock_catalogue
+        lock_catalogue()
+        return super().insert(*args, **kwargs)
+
+    def _save(self, *args, **kwargs):
+        # Keep the same catalogue-before-row order as the administration API.
+        from rayher_crm.services.territory_admin import lock_catalogue
+        lock_catalogue()
+        return super()._save(*args, **kwargs)
+
     def validate(self):
+        from rayher_crm.services.territory_admin import validate_territory_document
         self.territory_name = (self.territory_name or "").strip()
-        if not self.parent_territory:
-            return
-        parents = dict(frappe.get_all(
-            self.doctype, filters={"parent_territory": ["is", "set"]}, fields=["name", "parent_territory"],
-            as_list=True, limit_page_length=0,
-        ))
-        if self.parent_territory == self.name or self.name in ancestors(self.parent_territory, parents):
-            frappe.throw("A territory cannot be its own parent or sit below itself.")
+        validate_territory_document(self)

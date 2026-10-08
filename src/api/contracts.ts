@@ -1,3 +1,4 @@
+import type { Territory, TerritoryInput, TerritoryAssignment, TerritoryAssignmentInput, TerritoryCatalogue } from '@/features/territories/types'
 import type { BoardFilters, BoardQuery, BoardResult, SavedBoardQuery, SaveBoardQueryInput } from '@/features/opportunity-board/types'
 import type { DemoResource, DemoResourceInput, DemoResourceCatalogue, DemoUnavailability, DemoUnavailabilityInput, DemoResourceSchedule, DemoResourceScheduleInput } from '@/features/demo-resources/types'
 /**
@@ -21,7 +22,8 @@ import type { DemoResource, DemoResourceInput, DemoResourceCatalogue, DemoUnavai
  *  合规门(Go/No-Go Checklist)必须全绿后才可作为 Stage/Production 后端验收依据。
  * ============================================================================
  */
-import type { PlanDto, PlanQuery, PlanDetails, PlanDetailQuery } from '@/features/cockpit/plan-types'
+import type { PlanDto, PlanQuery, PlanDetails, PlanDetailQuery, PlanCommitment, PlanCommitmentInput } from '@/features/cockpit/plan-types'
+import type { EventDto, EventInput } from '@/features/events/types'
 import type { CockpitSettings, CockpitSettingsInput, ReviewDto, ReviewQuery, ReviewDetails, Target, TargetInput, WarningActionInput, WarningHandling, WarningPlanInput, WarningsDto } from '@/features/cockpit/types'
 import type {
   Account360Dto,
@@ -117,7 +119,7 @@ import type {
 } from '@/types/workspaces'
 import type { BinaryDownload, DemoArtifactUploadInput, MultipartFilePart } from './binary-transport'
 import type { NotificationDto, NotificationListQuery } from '@/types/notifications'
-import type { CreateQuotationInput, QuotationApprovalDecisionInput, QuotationDecisionInput, QuotationCatalogItemDto, QuotationDetailDto, QuotationDraftInput, QuotationListQuery, QuotationSummaryDto } from '@/features/quotations/types'
+import type { QuotationFollowUpInput, QuotationPlanning, CreateQuotationInput, QuotationApprovalDecisionInput, QuotationDecisionInput, QuotationCatalogItemDto, QuotationDetailDto, QuotationDraftInput, QuotationListQuery, QuotationSummaryDto } from '@/features/quotations/types'
 import type { CreateRfqInput, ReviewRfqInput, RfqDetailDto, RfqListQuery, RfqSummaryDto } from '@/features/rfqs/types'
 
 export type CrmApiErrorCode =
@@ -182,18 +184,26 @@ export interface DashboardQuery {
 
 export interface CrmApi {
   queryOpportunities(input: BoardQuery): Promise<ApiResponse<BoardResult>>
+  exportOpportunities(input: BoardQuery): Promise<ApiResponse<BoardResult>>
+  getQueryRecipients(): Promise<ApiResponse<{ items: Array<{ value: string; label: string }> }>>
+  shareOpportunityQuery(id: string, recipients: string[], expectedModified: string): Promise<ApiResponse<SavedBoardQuery>>
   getOpportunityFilters(): Promise<ApiResponse<BoardFilters>>
   listOpportunityQueries(): Promise<ApiResponse<{ items: SavedBoardQuery[] }>>
   saveOpportunityQuery(input: SaveBoardQueryInput, id?: string, expectedModified?: string): Promise<ApiResponse<SavedBoardQuery>>
   deleteOpportunityQuery(id: string, expectedModified: string): Promise<ApiResponse<{ id: string; status: 'Deleted' }>>
   getPlan(query: PlanQuery): Promise<ApiResponse<PlanDto>>
+  savePlanCommitment(input: PlanCommitmentInput, expectedModified?: string): Promise<ApiResponse<PlanCommitment>>
   getPlanDetails(query: PlanDetailQuery): Promise<ApiResponse<PlanDetails>>
   getReview(query: ReviewQuery): Promise<ApiResponse<ReviewDto>>
   getReviewDetails(query: ReviewQuery & { metric: string; page?: number; pageSize?: number }): Promise<ApiResponse<ReviewDetails>>
   getWarnings(query: ReviewQuery): Promise<ApiResponse<WarningsDto>>
   saveReviewTarget(input: TargetInput, expectedModified?: string): Promise<ApiResponse<Target>>
+  getReviewTarget(query: Omit<TargetInput, 'value'>): Promise<ApiResponse<Target | null>>
   // Warnings handling (Manager): thresholds, a warning's next step, and the action taken on a stage 6 row.
   // expectedModified is null until the record exists.
+  getTerritoryCatalogue(): Promise<ApiResponse<TerritoryCatalogue>>
+  saveTerritory(input: TerritoryInput, name?: string, expectedModified?: string): Promise<ApiResponse<Territory>>
+  saveTerritoryAssignment(input: TerritoryAssignmentInput, name?: string, expectedModified?: string): Promise<ApiResponse<TerritoryAssignment>>
   getCockpitSettings(): Promise<ApiResponse<CockpitSettings>>
   saveCockpitSettings(input: CockpitSettingsInput, expectedModified: string | null): Promise<ApiResponse<CockpitSettings>>
   saveWarningPlan(input: WarningPlanInput, expectedModified: string | null): Promise<ApiResponse<WarningHandling>>
@@ -219,6 +229,9 @@ export interface CrmApi {
   createAccountSite(accountId: string, input: Omit<SiteDto, 'id'>): Promise<ApiResponse<SiteDto>>
   updateAccountSite(accountId: string, siteId: string, input: Omit<SiteDto, 'id'>): Promise<ApiResponse<SiteDto>>
   deleteAccountSite(accountId: string, siteId: string): Promise<ApiResponse<{ id: string }>>
+  listEvents(query: ListQuery): Promise<ApiResponse<PageData<EventDto>>>
+  getEvent(id: string): Promise<ApiResponse<EventDto>>
+  saveEvent(input: EventInput, id?: string, expectedModified?: string): Promise<ApiResponse<EventDto>>
   listVisits(query: ListQuery): Promise<ApiResponse<PageData<VisitDto>>>
   getVisit(id: string): Promise<ApiResponse<VisitDto>>
   getVisitDetail(id: string): Promise<ApiResponse<VisitDetailDto>>
@@ -276,6 +289,9 @@ export interface CrmApi {
   listContracts(query: ListQuery): Promise<ApiResponse<PageData<ContractDto>>>
   listQuotationCatalog(): Promise<ApiResponse<QuotationCatalogItemDto[]>>
   listQuotations(query?: QuotationListQuery): Promise<ApiResponse<PageData<QuotationSummaryDto>>>
+  getQuotationPlanning(quotationId: string): Promise<ApiResponse<QuotationPlanning>>
+  saveQuotationSchedule(quotationId: string, input: { plannedSendDate: string | null }, expectedModified: string): Promise<ApiResponse<QuotationPlanning>>
+  saveQuotationFollowUp(quotationId: string, input: QuotationFollowUpInput, id: string | undefined, expectedModified: string): Promise<ApiResponse<QuotationPlanning>>
   getQuotation(id: string, versionId?: string): Promise<ApiResponse<QuotationDetailDto>>
   createQuotation(input: CreateQuotationInput): Promise<ApiResponse<QuotationDetailDto>>
   linkQuotationOpportunity(id: string, opportunityId: string, expectedModified: string): Promise<ApiResponse<QuotationDetailDto>>
@@ -300,6 +316,9 @@ export interface CrmApi {
   /** Equipment type options: the five presets, then custom types in the order they were added. */
   listEquipmentTypes(): Promise<ApiResponse<string[]>>
   getStrategyOpportunity(id: string): Promise<ApiResponse<StrategyOpportunityDto>>
+  saveBlueSheetFlags(id: string, input: { items: import('@/types/workspaces').BlueSheetRedFlagInput[] }, expectedModified: string): Promise<ApiResponse<StrategyOpportunityDto>>
+  getBlueSheetAssessment(id: string): Promise<ApiResponse<import('@/types/workspaces').BlueSheetAssessment>>
+  applyBlueSheetSuggestion(id: string, input: import('@/types/workspaces').BlueSheetConfirmation, expectedModified: string): Promise<ApiResponse<StrategyOpportunityDto>>
   createStrategyOpportunity(input: CreateStrategyOpportunityInput): Promise<ApiResponse<StrategyOpportunityDto>>
   updateStrategyOpportunity(id: string, input: UpdateStrategyOpportunityInput, expectedModified?: string): Promise<ApiResponse<StrategyOpportunityDto>>
   saveProbabilityRecovery(id: string, eventId: string, input: import('@/types/workspaces').SaveProbabilityRecoveryInput, expectedModified: string): Promise<ApiResponse<import('@/types/workspaces').ProbabilityRecoveryDto>>

@@ -56,7 +56,7 @@ const localTitles: Partial<Record<NotificationInput['category'], Record<string, 
   }
 }
 
-/** The server's warning notices (`warning_notifications.py`), title and message, for en-US; null for anything else. */
+/** The server's warning notices (`warning_notifications.py`, and the Demo resource notice of `demo_resources.py`), title and message, for en-US; null for anything else. */
 function warningCopy(title: string, message: string, category: NotificationInput['category']): { title: string; message: string } | null {
   if (category === 'Opportunity' && title === '预警：丢单待复盘') {
     const body = /^(.+)已丢单，请完成复盘。$/s.exec(message)
@@ -83,6 +83,24 @@ function warningCopy(title: string, message: string, category: NotificationInput
     const body = /^(.+)已在第 6 阶段 (\d+) 天(以上)?，仍未收到 PO。$/s.exec(message)
     return { title: 'Warning: stage 6 overdue without PO', message: body ? `${body[1]} has been at stage 6 for ${body[2]} ${body[2] === '1' ? 'day' : 'days'}${body[3] ? ' or more' : ''} with no PO received.` : message }
   }
+  if (category === 'Opportunity' && title === '预警：预计 PO 日期跨季度推迟') {
+    const body = /^(.+)预计 PO 日期由 (\d{4}-\d{2}-\d{2}) 推迟至 (\d{4}-\d{2}-\d{2})，请跟进并记录行动。$/s.exec(message)
+    return { title: 'Warning: expected PO postponed to a later quarter', message: body ? `${body[1]}: the expected PO date moved from ${body[2]} to ${body[3]}; please follow up and record an action.` : message }
+  }
+  if (category === 'Evaluation' && title === 'Demo 设备不可用') {
+    // "<demo> 的安排与 <resource> 不可用时段相交，…" (`demo_resources.py`): the Demo's title or the resource's name may
+    // hold the separator (two of them may even share a space, so they are counted where each begins), and the server
+    // would cut a long message short, so the body is read only where it ends as written and has one place to split,
+    // and kept as written otherwise.
+    const ending = ' 不可用时段相交，请调整设备或时间。'
+    const head = message.endsWith(ending) ? message.slice(0, -ending.length) : ''
+    const separator = ' 的安排与 '
+    const splits = [...head.matchAll(/(?= 的安排与 )/g)].map((found) => found.index ?? 0)
+    const body = splits.length === 1 && splits[0]! >= 1 && head.length > splits[0]! + separator.length
+      ? { demo: head.slice(0, splits[0]!), resource: head.slice(splits[0]! + separator.length) }
+      : null
+    return { title: 'Demo resource unavailable', message: body ? `${body.demo}: its schedule overlaps an unavailable period of ${body.resource}; change the resource or the time.` : message }
+  }
   return null
 }
 
@@ -103,8 +121,8 @@ export function notificationCopy(notification: NotificationInput, locale: Locale
     }
     return { title, message }
   }
-  // The warning notices the server writes (the daily checks), in their complete formats; the data (the record's
-  // title, the customer, the dates) stays as written.
+  // The warning notices the server writes (the daily checks, and the Demo resource check on a save and daily), in
+  // their complete formats; the data (the record's title, the customer, the dates, the resource) stays as written.
   const warning = warningCopy(title, message, notification.category)
   if (warning) return warning
   // Existing server DDL rows have no kind, so both complete generated formats are required above.

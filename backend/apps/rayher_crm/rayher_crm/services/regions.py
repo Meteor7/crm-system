@@ -126,8 +126,8 @@ def _region_field(*, for_update: bool = False) -> dict[str, Any]:
     return rows[0]
 
 
-def list_regions() -> list[str]:
-    return region_options(_region_field().get("options"))
+def list_regions(*, for_update: bool = False) -> list[str]:
+    return region_options(_region_field(for_update=for_update).get("options"))
 
 
 def _require_region_text(value: Any, fieldname: str) -> str:
@@ -162,11 +162,21 @@ def register_region(value: Any, fieldname: str = "region") -> str:
             f"{fieldname} must be an English region name.",
             field_errors={fieldname: "Use an English region name"},
         )
+    # Tree creation and new region registration share the same first lock. A group
+    # must not claim a name between this check and the Custom Field update.
+    frappe.db.sql("SELECT name FROM `tabDocType` WHERE name='CRM Sales Territory' FOR UPDATE")
     field = _region_field(for_update=True)
     options = region_options(field.get("options"))
     match = matching_region(text, options)
     if match:
         return match
+    # Match MariaDB identity, including case, but allow differently punctuated
+    # leaf names below a group. Existing legacy options above remain readable.
+    if frappe.db.sql("SELECT name FROM `tabCRM Sales Territory` WHERE name=%s AND is_group=1 FOR UPDATE", (text,)):
+        raise CrmApiException(
+            "VALIDATION_ERROR", f"{fieldname} names a territory group. Choose a more specific region.",
+            field_errors={fieldname: "Choose a leaf region, not a territory group"},
+        )
     frappe.db.set_value("Custom Field", field["name"], "options", options_text([*options, text]), update_modified=False)
     frappe.clear_cache(doctype="Customer")
     return text

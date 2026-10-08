@@ -9,12 +9,12 @@ import { useI18n, useLocaleMessage } from '@/i18n'
 import { useAppStore } from '@/stores/app'
 import PaginationControls from '@/features/shared/PaginationControls.vue'
 import BoardMultiSelect from '@/features/opportunity-board/BoardMultiSelect.vue'
-import BoardConditionRow from '@/features/opportunity-board/BoardConditionRow.vue'
-import { allColumns, cellText, condition, defaultDefinition, fieldLabel, fieldOptions, groupFields, groupKey, money, optionLabel, presets, text, toQuery, validateDefinition } from '@/features/opportunity-board/model'
+import BoardConditionGroupEditor from '@/features/opportunity-board/BoardConditionGroupEditor.vue'
+import { allColumns, cellText, condition, leafConditions, periodRange, defaultDefinition, fieldLabel, fieldOptions, groupFields, groupKey, money, optionLabel, presets, text, toQuery, validateDefinition } from '@/features/opportunity-board/model'
 import { boardWorkbook, readBoardExport } from '@/features/opportunity-board/export'
 import { downloadCustomerReport } from '@/features/accounts/xlsx-writer'
-import { cockpitRoute, fromBoardScope, readCockpitQuery, toBoardScope } from '@/features/cockpit/scope'
-import type { BoardColumn, BoardDefinition, BoardFilters, BoardResult, SavedBoardQuery } from '@/features/opportunity-board/types'
+import { cockpitRoute, fromBoardScope, readCockpitQuery, toBoardScope, shanghaiDate } from '@/features/cockpit/scope'
+import type { BoardColumn, BoardDefinition, BoardFilters, BoardResult, BoardPeriodFilter, SavedBoardQuery } from '@/features/opportunity-board/types'
 
 const props = withDefaults(defineProps<{ apiClient?: CrmApi }>(), { apiClient: () => defaultApi })
 const app = useAppStore()
@@ -31,7 +31,7 @@ function initialDefinition(): BoardDefinition {
   return { ...defaultDefinition(), scope: toBoardScope(readCockpitQuery(route.query).scope) }
 }
 const definition = ref<BoardDefinition>(initialDefinition())
-// This board has no period of its own: the Review period it was opened with goes along to the other tabs.
+// Review navigation context is retained independently from the optional explicit query period.
 const periodContext = computed(() => { const incoming = readCockpitQuery(route.query); return { period: incoming.period ?? 'week', reviewAnchor: incoming.reviewAnchor } })
 // A dimension with several values selected cannot be shown on the single-value tabs: navigation waits for one value or all.
 const outgoing = computed(() => fromBoardScope(definition.value.scope))
@@ -39,7 +39,9 @@ const tabRoute = (page: 'review' | 'plan' | 'warnings') => cockpitRoute(page, { 
 const tabNames = { review: 'Review', plan: 'Plan', warnings: 'Warnings' } as const
 const blockedScope = computed(() => outgoing.value.blocked.map(key => fieldLabel(key, locale.value)).join(copy(', ', '、')))
 const filters = ref<BoardFilters | null>(null), data = ref<BoardResult | null>(null)
-const saved = ref<SavedBoardQuery[]>([]), selectedId = ref('')
+const saved = ref<SavedBoardQuery[]>([]), selectedId = ref(''), activeSaved = ref<SavedBoardQuery | null>(null)
+const shareDialog = ref<HTMLDialogElement | null>(null), shareTarget = ref<SavedBoardQuery | null>(null)
+const recipients = ref<string[]>([]), recipientOptions = ref<Array<{ value: string; label: string }>>([])
 const page = ref(1), pageSize = ref(25), total = ref(0)
 const loading = ref(false), initializing = ref(false), exporting = ref(false), busy = ref(false)
 const error = useLocaleMessage(), savedError = useLocaleMessage(), mutationError = useLocaleMessage(), exportError = useLocaleMessage()
@@ -48,8 +50,16 @@ const requestId = ref('')
 const saveDialog = ref<HTMLDialogElement | null>(null), deleteDialog = ref<HTMLDialogElement | null>(null)
 const queryName = ref(''), editTarget = ref<SavedBoardQuery | null>(null)
 let revision = 0, identity = 0, timer: ReturnType<typeof setTimeout> | undefined
+const conditionCount = computed(() => leafConditions(definition.value.conditions).length)
+function setPeriodField(field: string) {
+  if (!field) { delete definition.value.periodFilter; return }
+  definition.value.periodFilter = { field: field as BoardPeriodFilter['field'], kind: definition.value.periodFilter?.kind ?? periodContext.value.period, anchor: definition.value.periodFilter?.anchor ?? (periodContext.value.reviewAnchor || shanghaiDate()) }
+}
 const invalid = computed(() => filters.value ? validateDefinition(definition.value, filters.value, locale.value) : '')
-const selected = computed(() => saved.value.find(q => q.id === selectedId.value))
+const selected = computed(() => activeSaved.value)
+function currentQuery(pageNumber = 1, size = 25) {
+  return { ...toQuery(definition.value, pageNumber, size), ...(selected.value ? { savedQuery: { id: selected.value.id, modified: selected.value.modified } } : {}) }
+}
 const dirty = computed(() => selected.value && JSON.stringify(selected.value.definition) !== JSON.stringify(definition.value))
 const scopeControls = [{ key: 'regions', field: 'region' }, { key: 'sales', field: 'sales' }, { key: 'equipment', field: 'equipment' }, { key: 'markets', field: 'market' }] as const
 const visibleGroups = computed(() => {
@@ -72,7 +82,7 @@ async function load() {
   if (!filters.value || !canView.value || invalid.value) { loading.value = false; return }
   loading.value = true
   try {
-    const response = await props.apiClient.queryOpportunities(toQuery(definition.value, page.value, pageSize.value))
+    const response = await props.apiClient.queryOpportunities(currentQuery(page.value, pageSize.value))
     if (id !== revision || session !== identity) return
     data.value = response.data; total.value = response.meta?.total ?? response.data.summary.count
     page.value = response.meta?.page ?? page.value
@@ -87,10 +97,18 @@ function schedule() {
   loading.value = true
   timer = setTimeout(() => void load(), 300)
 }
-watch(() => JSON.stringify(toQuery(definition.value)), schedule)
-async function loadSaved(session = identity) {
+watch(() => JSON.stringify(currentQuery()), schedule)
+async function loadSaved(session = identity, refreshActive = false) {
   savedError.value = ''
-  try { const result = await props.apiClient.listOpportunityQueries(); if (session === identity) saved.value = result.data.items }
+  try {
+    const result = await props.apiClient.listOpportunityQueries()
+    if (session !== identity) return
+    saved.value = result.data.items
+    if (refreshActive && selected.value) {
+      if (saved.value.some(item => item.id === selected.value!.id)) applySaved(selected.value.id)
+      else { revision++; data.value = null; total.value = 0; loading.value = false; clearTimeout(timer); error.value = copy('The saved query was deleted or its access was revoked. Clear or choose another query.', '该查询已删除或共享已撤销，请清空或选择其他查询。') }
+    }
+  }
   catch (reason) { if (session === identity) savedError.value = requestErrorMessage(reason) }
 }
 async function initialize() {
@@ -108,10 +126,10 @@ async function initialize() {
 }
 watch(() => [app.bootstrap?.user.id, app.identityRevision, canView.value], () => {
   identity++; revision++; clearTimeout(timer)
-  filters.value = null; data.value = null; saved.value = []; selectedId.value = ''; total.value = 0
+  filters.value = null; data.value = null; saved.value = []; selectedId.value = ''; activeSaved.value = null; total.value = 0
   definition.value = initialDefinition(); error.value = ''; savedError.value = ''; exportError.value = ''; fieldErrors.value = {}
   loading.value = false; initializing.value = false; busy.value = false; exporting.value = false
-  saveDialog.value?.close(); deleteDialog.value?.close()
+  saveDialog.value?.close(); deleteDialog.value?.close(); shareDialog.value?.close()
   if (canView.value) void initialize()
 }, { immediate: true, flush: 'sync' })
 onMounted(() => app.loadBootstrap(props.apiClient))
@@ -119,13 +137,14 @@ onBeforeUnmount(() => { identity++; revision++; clearTimeout(timer) })
 function applySaved(id: string) {
   const item = saved.value.find(q => q.id === id)
   selectedId.value = id
+  activeSaved.value = item ? JSON.parse(JSON.stringify(item)) : null
   if (item) { definition.value = JSON.parse(JSON.stringify(item.definition)); page.value = 1 }
 }
 function applyPreset(index: number) {
-  selectedId.value = ''
-  definition.value = { ...defaultDefinition(), scope: JSON.parse(JSON.stringify(definition.value.scope)), conditions: JSON.parse(JSON.stringify(presets[index].conditions)) }
+  selectedId.value = ''; activeSaved.value = null
+  definition.value = { ...defaultDefinition(), scope: JSON.parse(JSON.stringify(definition.value.scope)), ...(definition.value.periodFilter ? { periodFilter: { ...definition.value.periodFilter } } : {}), conditions: JSON.parse(JSON.stringify(presets[index].conditions)) }
 }
-function clear() { selectedId.value = ''; definition.value = defaultDefinition() }
+function clear() { selectedId.value = ''; activeSaved.value = null; definition.value = defaultDefinition() }
 function sort(column: BoardColumn) {
   if (column === 'amount') return
   definition.value.sort = { field: column, direction: definition.value.sort.field === column && definition.value.sort.direction === 'asc' ? 'desc' : 'asc' }
@@ -136,7 +155,7 @@ function toggleColumn(column: BoardColumn, checked: boolean) {
   else if (columns.length > 1) definition.value.columns = columns.filter(c => c !== column)
 }
 async function openSave(update: boolean) {
-  editTarget.value = update && selected.value ? JSON.parse(JSON.stringify(selected.value)) : null
+  editTarget.value = update && selected.value && !selected.value.readOnly ? JSON.parse(JSON.stringify(selected.value)) : null
   queryName.value = editTarget.value?.name ?? ''
   mutationError.value = ''
   await nextTick(); saveDialog.value?.showModal()
@@ -144,14 +163,15 @@ async function openSave(update: boolean) {
 async function saveQuery() {
   if (!queryName.value.trim() || invalid.value || busy.value) return
   const session = identity
-  const input = { name: queryName.value.trim(), definition: JSON.parse(JSON.stringify(definition.value)) as BoardDefinition }
+  const input = { name: queryName.value.trim(), definition: JSON.parse(JSON.stringify(definition.value)) as BoardDefinition,
+    ...(selected.value ? { savedQuery: { id: selected.value.id, modified: selected.value.modified } } : {}) }
   const target = editTarget.value
   busy.value = true; mutationError.value = ''
   try {
     const response = await props.apiClient.saveOpportunityQuery(input, target?.id, target?.modified)
     if (session !== identity) return
     saved.value = [response.data, ...saved.value.filter(q => q.id !== response.data.id)]
-    selectedId.value = response.data.id
+    selectedId.value = response.data.id; activeSaved.value = response.data
     definition.value = JSON.parse(JSON.stringify(response.data.definition))
     saveDialog.value?.close()
   } catch (reason) {
@@ -162,7 +182,7 @@ async function saveQuery() {
   } finally { if (session === identity) busy.value = false }
 }
 async function openDelete() {
-  if (!selected.value) return
+  if (!selected.value || selected.value.readOnly) return
   editTarget.value = JSON.parse(JSON.stringify(selected.value)); mutationError.value = ''
   await nextTick(); deleteDialog.value?.showModal()
 }
@@ -173,7 +193,33 @@ async function deleteQuery() {
   try {
     await props.apiClient.deleteOpportunityQuery(target.id, target.modified)
     if (session !== identity) return
-    saved.value = saved.value.filter(q => q.id !== target.id); selectedId.value = ''; deleteDialog.value?.close()
+    saved.value = saved.value.filter(q => q.id !== target.id); selectedId.value = ''; activeSaved.value = null; deleteDialog.value?.close()
+  } catch (reason) { if (session === identity) mutationError.value = requestErrorMessage(reason) }
+  finally { if (session === identity) busy.value = false }
+}
+async function openShare() {
+  if (!selected.value || selected.value.readOnly) return
+  shareTarget.value = JSON.parse(JSON.stringify(selected.value)); recipients.value = [...(selected.value.recipients ?? [])]
+  mutationError.value = ''; busy.value = true
+  const session = identity
+  await nextTick(); shareDialog.value?.showModal()
+  try {
+    const response = await props.apiClient.getQueryRecipients()
+    if (session !== identity) return
+    recipientOptions.value = [...response.data.items, ...recipients.value.filter(value => !response.data.items.some(item => item.value === value)).map(value => ({ value, label: value + copy(' (unavailable — remove)', '（已不可用，请移除）') }))]
+  } catch (reason) { if (session === identity) mutationError.value = requestErrorMessage(reason) }
+  finally { if (session === identity) busy.value = false }
+}
+async function shareQuery() {
+  const target = shareTarget.value, session = identity
+  if (!target || busy.value) return
+  busy.value = true; mutationError.value = ''
+  try {
+    const response = await props.apiClient.shareOpportunityQuery(target.id, recipients.value, target.modified)
+    if (session !== identity) return
+    saved.value = saved.value.map(item => item.id === response.data.id ? response.data : item)
+    if (selected.value?.id === response.data.id) activeSaved.value = response.data
+    shareDialog.value?.close()
   } catch (reason) { if (session === identity) mutationError.value = requestErrorMessage(reason) }
   finally { if (session === identity) busy.value = false }
 }
@@ -181,11 +227,13 @@ async function exportRows() {
   if (!data.value || exporting.value) return
   const session = identity, language = locale.value
   const snapshot = JSON.parse(JSON.stringify(definition.value)) as BoardDefinition
+  const querySnapshot = JSON.parse(JSON.stringify(currentQuery()))
+  const name = selected.value?.name ?? copy('Opportunities', '商机查询')
   exporting.value = true; exportError.value = ''
   try {
-    const rows = await readBoardExport(props.apiClient, toQuery(snapshot), () => session !== identity)
+    const rows = await readBoardExport(props.apiClient, querySnapshot, () => session !== identity)
     if (session !== identity) return
-    downloadCustomerReport(boardWorkbook(rows, snapshot.columns, snapshot.groupBy, language))
+    downloadCustomerReport(boardWorkbook(rows, snapshot.columns, snapshot.groupBy, language, name, snapshot))
   } catch (reason) {
     if (session !== identity) return
     exportError.value = reason instanceof Error && reason.message === 'EXPORT_CHANGED'
@@ -215,18 +263,25 @@ async function exportRows() {
     </section>
 
     <section v-if="filters" class="board-query-panel">
-      <header class="board-panel-heading"><div><h2><SlidersHorizontal :size="17" />{{ copy('Query builder', '组合查询') }}</h2><p>{{ copy('Combine conditions. Results and totals update together.', '组合筛选条件，列表与汇总同步更新。') }}</p></div><div class="query-tools"><div class="board-segmented"><button :class="{ active: definition.match === 'all' }" :aria-pressed="definition.match === 'all'" @click="definition.match = 'all'">{{ copy('All (AND)', '全部满足 (AND)') }}</button><button :class="{ active: definition.match === 'any' }" :aria-pressed="definition.match === 'any'" @click="definition.match = 'any'">{{ copy('Any (OR)', '任一满足 (OR)') }}</button></div><button data-add-condition :disabled="definition.conditions.length >= 20" @click="definition.conditions.push(condition())"><Plus :size="14" />{{ copy('Add condition', '添加条件') }}</button><button @click="clear">{{ copy('Clear', '清空') }}</button></div></header>
+      <header class="board-panel-heading"><div><h2><SlidersHorizontal :size="17" />{{ copy('Query builder', '组合查询') }}</h2><p>{{ copy('Combine conditions. Results and totals update together.', '组合筛选条件，列表与汇总同步更新。') }}</p></div><div class="query-tools"><div class="board-segmented"><button :class="{ active: definition.match === 'all' }" :aria-pressed="definition.match === 'all'" @click="definition.match = 'all'">{{ copy('All (AND)', '全部满足 (AND)') }}</button><button :class="{ active: definition.match === 'any' }" :aria-pressed="definition.match === 'any'" @click="definition.match = 'any'">{{ copy('Any (OR)', '任一满足 (OR)') }}</button></div><button data-add-condition :disabled="conditionCount >= 30" @click="definition.conditions.push(condition())"><Plus :size="14" />{{ copy('Add condition', '添加条件') }}</button><button data-add-group :disabled="conditionCount >= 30" @click="definition.conditions.push({ match: 'any', conditions: [condition()] })">{{ copy('Add group', '添加条件组') }}</button><button @click="clear">{{ copy('Clear', '清空') }}</button></div></header>
+      <div class="board-period-filter">
+        <label>{{ copy('Period date field', '期间日期字段') }}<select :value="definition.periodFilter?.field ?? ''" data-period-field @change="setPeriodField(($event.target as HTMLSelectElement).value)"><option value="">{{ copy('No period filter', '未启用期间筛选') }}</option><option v-for="field in (['createdAt', 'stageChangedAt', 'poDate'] as const)" :key="field" :value="field">{{ fieldLabel(field, locale) }}</option></select></label>
+        <template v-if="definition.periodFilter"><select v-model="definition.periodFilter.kind" data-query-period :aria-label="copy('Query period', '查询期间')"><option value="week">{{ copy('Week', '周') }}</option><option value="month">{{ copy('Month', '月') }}</option><option value="quarter">{{ copy('Quarter', '季') }}</option><option value="year">{{ copy('Year', '年') }}</option></select><input v-model="definition.periodFilter.anchor" type="date" min="2000-01-01" max="2099-12-31" data-query-anchor :aria-label="copy('Query anchor date', '查询基准日期')" /><span data-period-range>{{ fieldLabel(definition.periodFilter.field, locale) }}: {{ periodRange(definition) }} · UTC+8</span></template>
+        <span v-else>{{ copy('Select a business date to apply the carried Review period. No date restriction is active.', '选择业务日期字段后才会应用传入的 Review 期间；当前未限制日期。') }}</span>
+      </div>
       <div class="board-presets"><span>{{ copy('Quick queries', '快捷查询') }}</span><button v-for="(preset, index) in presets" :key="preset.id" :data-preset="preset.id" @click="applyPreset(index)">{{ text(preset.label, locale) }}</button></div>
-      <div v-if="definition.conditions.length" class="board-conditions"><BoardConditionRow v-for="(_, index) in definition.conditions" :key="index" v-model="definition.conditions[index]" :filters="filters" :index="index" :match="definition.match" @remove="definition.conditions.splice(index, 1)" /></div>
+      <div v-if="definition.conditions.length" class="board-conditions"><BoardConditionGroupEditor v-model="definition.conditions" :filters="filters" :match="definition.match" :depth="1" :total="conditionCount" /></div>
       <p v-else class="board-query-empty">{{ copy('Showing all opportunities in your selected scope. Add a condition or choose a quick query.', '当前显示所选范围内的全部商机。添加条件或选择快捷查询开始筛选。') }}</p>
       <p v-if="invalid" class="board-validation" role="status">{{ invalid }}</p>
       <footer class="board-saved">
-        <label>{{ copy('My queries', '我的查询') }}<select :value="selectedId" data-saved-select @change="applySaved(($event.target as HTMLSelectElement).value)"><option value="">{{ copy('Choose a saved query', '选择已保存查询') }}</option><option v-for="item in saved" :key="item.id" :value="item.id">{{ item.name }}</option></select></label>
+        <label>{{ copy('Saved and shared queries', '个人与共享查询') }}<select :value="selectedId" data-saved-select @change="applySaved(($event.target as HTMLSelectElement).value)"><option value="">{{ copy('Choose a saved query', '选择已保存查询') }}</option><option v-for="item in saved" :key="item.id" :value="item.id">{{ item.name }}{{ item.readOnly ? copy(' · shared', ' · 共享') : '' }}</option></select></label>
         <span v-if="dirty" class="query-dirty">{{ copy('Unsaved changes', '有未保存修改') }}</span>
         <button :disabled="!!invalid" data-save-new @click="openSave(false)"><Save :size="14" />{{ copy('Save as new', '另存查询') }}</button>
-        <button v-if="selected" :disabled="!!invalid" data-update-query @click="openSave(true)">{{ copy('Update / rename', '更新／重命名') }}</button>
-        <button v-if="selected" data-delete-query @click="openDelete">{{ copy('Delete', '删除') }}</button>
-        <button class="icon-button" :aria-label="copy('Reload saved queries', '刷新个人查询')" @click="loadSaved()"><RefreshCw :size="14" /></button>
+        <button v-if="selected && !selected.readOnly" :disabled="!!invalid" data-update-query @click="openSave(true)">{{ copy('Update / rename', '更新／重命名') }}</button>
+        <button v-if="selected && !selected.readOnly" data-delete-query @click="openDelete">{{ copy('Delete', '删除') }}</button>
+        <span v-if="selected?.readOnly" data-shared-readonly>{{ copy('Shared read-only by', '只读共享，作者') }} {{ selected.owner }} · {{ copy('Save as new creates your own copy.', '另存后成为个人副本。') }}</span>
+        <button v-if="selected && !selected.readOnly" data-share-query @click="openShare">{{ copy('Share / revoke', '分享／撤销') }}</button>
+        <button class="icon-button" :aria-label="copy('Reload saved queries', '刷新个人查询')" :title="copy('Reload queries and discard local query edits', '刷新查询并放弃本地条件修改')" @click="loadSaved(identity, true)"><RefreshCw :size="14" /></button>
         <p v-if="savedError" class="board-error" role="alert">{{ savedError }}</p>
       </footer>
     </section>
@@ -260,12 +315,18 @@ async function exportRows() {
         </table></div>
         <div v-if="!data.items.length" class="board-state">{{ total ? copy('No records on this page.', '当前页没有记录。') : copy('No opportunities match. Try changing or clearing your filters.', '没有匹配的商机，请调整或清空筛选条件。') }}<button v-if="total" @click="page = 1; load()">{{ copy('First page', '返回第一页') }}</button></div>
         <PaginationControls :page="page" :page-size="pageSize" :total="total" @change="page = $event; load()" @page-size-change="pageSize = $event; page = 1; load()" />
-        <footer class="board-table-note">{{ copy('Amounts are unweighted opportunity estimates. Stage age does not measure customer follow-up activity.', '金额为未加权商机预计值；阶段停留时间不代表客户跟进间隔。') }}</footer>
+        <footer class="board-table-note">{{ copy('Amounts are unweighted opportunity estimates. Stage age does not measure customer follow-up activity. Last activity uses evidenced business dates from records you can read; incomplete histories do not match last-activity date filters.', '金额为未加权商机预计值；阶段停留时间不代表客户跟进间隔。最后活动采用当前可读记录中有依据的业务日期，日期不完整的历史不参与最后活动日期筛选。') }}</footer>
       </section>
     </template>
 
+    <dialog ref="shareDialog" class="board-dialog" :aria-label="copy('Share query', '分享查询')" @cancel="busy && $event.preventDefault()">
+      <form @submit.prevent="shareQuery"><header><h2>{{ copy('Share read-only query', '只读分享查询') }}</h2><button type="button" :disabled="busy" :aria-label="copy('Close', '关闭')" @click="shareDialog?.close()">×</button></header>
+      <p>{{ shareTarget?.name }}</p><p>{{ copy('Recipients use their own current record permissions for every query and export. Removing a recipient revokes this shared query; copies already saved stay independent.', '接收人每次查询和导出都使用自己的当前数据权限。移除接收人会撤销该共享查询；已经另存的副本保持独立。') }}</p>
+      <BoardMultiSelect v-model="recipients" :options="recipientOptions" :disabled="busy" :label="copy('Read-only recipients', '只读接收人')" :placeholder="copy('Private — no recipients', '私有，无接收人')" />
+      <p v-if="mutationError" class="board-error" role="alert">{{ mutationError }}</p><footer><button type="button" :disabled="busy" @click="shareDialog?.close()">{{ copy('Cancel', '取消') }}</button><button :disabled="busy" data-confirm-share>{{ copy('Save access', '保存访问范围') }}</button></footer></form>
+    </dialog>
     <dialog ref="saveDialog" class="board-dialog" :aria-label="copy('Save query', '保存查询')" @cancel="busy && $event.preventDefault()">
-      <form @submit.prevent="saveQuery"><header><h2>{{ editTarget ? copy('Update query', '更新查询') : copy('Save query', '保存查询') }}</h2><button type="button" :disabled="busy" :aria-label="copy('Close', '关闭')" @click="saveDialog?.close()"><X :size="18" /></button></header><p>{{ copy('Save your filters, columns and grouping. Only you can access this query.', '保存筛选条件、显示列和分组，仅自己可见。') }}</p><label>{{ copy('Query name', '查询名称') }}<input v-model="queryName" data-query-name required maxlength="80" :disabled="busy" autofocus /></label><p v-if="mutationError" role="alert" class="board-error">{{ mutationError }}</p><footer><button type="button" :disabled="busy" @click="saveDialog?.close()">{{ copy('Cancel', '取消') }}</button><button class="board-primary" data-confirm-save :disabled="busy || !queryName.trim()">{{ busy ? copy('Saving…', '保存中…') : copy('Save', '保存') }}</button></footer></form>
+      <form @submit.prevent="saveQuery"><header><h2>{{ editTarget ? copy('Update query', '更新查询') : copy('Save query', '保存查询') }}</h2><button type="button" :disabled="busy" :aria-label="copy('Close', '关闭')" @click="saveDialog?.close()"><X :size="18" /></button></header><p>{{ copy('Save filters, columns and grouping. A new copy starts private; only its author can edit or share it.', '保存筛选条件、显示列和分组。新副本默认私有，仅作者可修改和分享。') }}</p><label>{{ copy('Query name', '查询名称') }}<input v-model="queryName" data-query-name required maxlength="80" :disabled="busy" autofocus /></label><p v-if="mutationError" role="alert" class="board-error">{{ mutationError }}</p><footer><button type="button" :disabled="busy" @click="saveDialog?.close()">{{ copy('Cancel', '取消') }}</button><button class="board-primary" data-confirm-save :disabled="busy || !queryName.trim()">{{ busy ? copy('Saving…', '保存中…') : copy('Save', '保存') }}</button></footer></form>
     </dialog>
     <dialog ref="deleteDialog" class="board-dialog" :aria-label="copy('Delete query', '删除查询')" @cancel="busy && $event.preventDefault()">
       <form @submit.prevent="deleteQuery"><h2>{{ copy('Delete saved query?', '删除已保存查询？') }}</h2><p>{{ editTarget?.name }}</p><p>{{ copy('Opportunity records will remain available.', '删除查询不会删除商机记录。') }}</p><p v-if="mutationError" role="alert" class="board-error">{{ mutationError }}</p><footer><button type="button" :disabled="busy" @click="deleteDialog?.close()">{{ copy('Cancel', '取消') }}</button><button class="board-danger" data-confirm-delete :disabled="busy">{{ busy ? copy('Deleting…', '删除中…') : copy('Delete query', '删除查询') }}</button></footer></form>

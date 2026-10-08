@@ -1,12 +1,14 @@
 from __future__ import annotations
 
+from unittest.mock import patch
+
 import frappe
 from frappe.tests.utils import FrappeTestCase
 
 from rayher_crm.api.v1.errors import CrmApiException
 from rayher_crm.services.accounts import create_account
 from rayher_crm.services.contacts import create_contact
-from rayher_crm.services.dashboard import get_dashboard
+from rayher_crm.services.dashboard import _opportunities_and_actions, get_dashboard
 from rayher_crm.services.opportunities import create_opportunity_action, create_strategy_opportunity
 from rayher_crm.services.opportunity_stages import PO_RECEIVED, QUALIFIED_OPPORTUNITY
 from rayher_crm.tests._opportunity_fixtures import advance_opportunity_fixture
@@ -16,6 +18,32 @@ from rayher_crm.services.visits import create_visit
 
 
 class TestStage5GDashboardStakeholders(FrappeTestCase):
+    def test_dashboard_batches_scoped_actions_without_loading_full_deal_details(self):
+        self.sales = self._user("crm-dashboard-batch-sales@example.invalid", "CRM Sales")
+        self.other_sales = self._user("crm-dashboard-batch-foreign@example.invalid", "CRM Sales")
+        account, site, _ = self._base(self.sales, "Batched")
+        first = self._opportunity(account, site, self.sales, "Batch first", QUALIFIED_OPPORTUNITY, 100)
+        second = self._opportunity(account, site, self.sales, "Batch second", QUALIFIED_OPPORTUNITY, 200)
+        create_opportunity_action(first["id"], {"title": "Visible overdue", "owner": self.sales, "due": "2026-01-01", "status": "Open"})
+        archived = create_opportunity_action(second["id"], {"title": "Archived overdue", "owner": self.sales, "due": "2026-01-01", "status": "Open"})
+        frappe.db.set_value("CRM Opportunity Action", archived["id"], "archived", 1)
+        other, other_site, _ = self._base(self.other_sales, "BatchForeign")
+        hidden = self._opportunity(other, other_site, self.other_sales, "Hidden batch", QUALIFIED_OPPORTUNITY, 9000)
+        create_opportunity_action(hidden["id"], {"title": "Foreign overdue", "owner": self.other_sales, "due": "2026-01-01", "status": "Open"})
+        frappe.set_user(self.sales)
+        with patch("rayher_crm.services.dashboard.PAGE_SIZE", 1), \
+             patch("frappe.get_all", wraps=frappe.get_all) as reads:
+            _opportunities, actions = _opportunities_and_actions({account["id"], other["id"]})
+        self.assertEqual([row["title"] for row in actions], ["Visible overdue"])
+        batches = [call.kwargs["filters"]["opportunity"][1] for call in reads.call_args_list
+                   if call.args and call.args[0] == "CRM Opportunity Action"]
+        self.assertEqual(len(batches), 2)
+        self.assertEqual({id for batch in batches for id in batch}, {first["id"], second["id"]})
+        with patch("rayher_crm.services.opportunities.serialize_opportunity", side_effect=AssertionError("Dashboard loaded full deal details")):
+            result = get_dashboard({"range": "quarter", "segment": "Frontend"})
+        self.assertEqual(result["kpis"]["overdueActions"], 1)
+        self.assertEqual(result["kpis"]["moneyByCurrency"][0]["openPipeline"], "300.00")
+
     def setUp(self):
         super().setUp()
         self.original_user = frappe.session.user

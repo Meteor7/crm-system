@@ -3,6 +3,7 @@ import { flushPromises, mount } from '@vue/test-utils'
 import { createRouter, createMemoryHistory } from 'vue-router'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { setLocale } from '@/i18n'
+import { CrmApiError } from '@/api'
 import { createMockApi } from '@/api/mock-adapter'
 import { useAppStore } from '@/stores/app'
 import type { OpportunityDocuments } from '@/features/opportunities/document-types'
@@ -44,6 +45,23 @@ describe('Opportunity document library', () => {
     expect(save).toHaveBeenCalledWith('opp', { productScorecard: 'https://example.com/product', dealScorecard: 'https://example.com/deal' }, 'version1')
     expect(wrapper.get<HTMLInputElement>('[data-testid="productScorecard"]').element.value).toBe('https://example.com/product')
     expect(wrapper.text()).toContain('Changed by another request')
+    wrapper.unmount()
+  })
+  it('shows a refused scorecard link in the reader\'s language', async () => {
+    const { wrapper, save } = await setup()
+    await wrapper.findAll('button').find(button => button.text() === 'Edit links')!.trigger('click')
+    await wrapper.get('[data-testid="productScorecard"]').setValue('https://user:secret@example.com/product')
+    save.mockRejectedValueOnce(new CrmApiError('VALIDATION_ERROR', 'Enter an absolute HTTP or HTTPS URL without credentials.', 'req_link', false))
+    await wrapper.get('form').trigger('submit'); await flushPromises()
+    expect(wrapper.text()).toContain('without a user name or password')
+    expect(wrapper.text()).not.toContain('Enter an absolute HTTP or HTTPS URL without credentials.')
+    setLocale('zh-CN'); await flushPromises()
+    expect(wrapper.text()).toContain('链接里不能带用户名或密码')
+    // A message the client does not know is shown as the service wrote it.
+    setLocale('en-US'); await flushPromises()
+    save.mockRejectedValueOnce(new CrmApiError('VALIDATION_ERROR', 'Something else the service said.', 'req_other', false))
+    await wrapper.get('form').trigger('submit'); await flushPromises()
+    expect(wrapper.text()).toContain('Something else the service said.')
     wrapper.unmount()
   })
   it('uses the scoped download endpoint and surfaces deleted files without losing the library', async () => {

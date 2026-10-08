@@ -2,6 +2,7 @@ import { enableAutoUnmount, flushPromises, mount } from '@vue/test-utils'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createMockApi } from '@/api/mock-adapter'
 import type { CrmApi } from '@/api/contracts'
+import type { ControlledDocumentAccessRequestDto, DocumentUploadRequestDto } from '@/types/workspaces'
 import { setLocale } from '@/i18n'
 import DocumentCenterPage from './DocumentCenterPage.vue'
 
@@ -42,6 +43,86 @@ describe('Document Center live translation boundaries', () => {
     await flushPromises()
     expect(decide).toHaveBeenCalledWith(expect.any(String), 'more-info', 'Name the customer and the meeting')
     expect(wrapper.findAll('.request-card')).toHaveLength(0)
+  })
+
+  it('refuses an approval typed with a note, and sends the approval once the note is cleared', async () => {
+    const apiClient = createMockApi({ latency: 0, role: 'Manager' })
+    // One access request awaiting the Manager, on a document of the library, as the service lists it; the queue and
+    // the decision are stubbed, so nothing here depends on how the mock keeps requests.
+    const document = (await apiClient.listControlledDocuments({ page: 1, pageSize: 1 })).data.items[0]!
+    const pending: ControlledDocumentAccessRequestDto = {
+      id: 'DOCREQ-00077', requester: 'engineer@example.com', requesterName: 'Test Engineer', requesterRole: 'Engineer',
+      documentId: document.id, documentTitle: document.title, versionId: document.versionId, version: document.version, revision: document.revision,
+      documentConfidentiality: document.confidentiality, documentStatus: document.status, documentAudit: [],
+      reason: 'Customer technical review', status: 'Pending', deliveryMode: '', submittedAt: '2026-10-06T10:00:00', decidedBy: '', decidedAt: '', decisionNote: '',
+    }
+    vi.spyOn(apiClient, 'listControlledDocumentRequests').mockResolvedValue({ data: { items: [pending] }, meta: { requestId: 'req-queue' }, warnings: [] } as unknown as Awaited<ReturnType<CrmApi['listControlledDocumentRequests']>>)
+    vi.spyOn(apiClient, 'listControlledDocumentUploadRequests').mockResolvedValue({ data: { items: [] }, meta: { requestId: 'req-uploads' }, warnings: [] } as unknown as Awaited<ReturnType<CrmApi['listControlledDocumentUploadRequests']>>)
+    const decide = vi.spyOn(apiClient, 'decideControlledDocumentRequest').mockImplementation(async (id, decision) => ({
+      data: { ...pending, id, status: decision.startsWith('approve-') ? 'Approved' : decision === 'reject' ? 'Rejected' : 'More Info Required', deliveryMode: decision === 'approve-original' ? 'Original' : decision === 'approve-watermarked' ? 'Watermarked' : '' },
+      meta: { requestId: 'req-decide' }, warnings: [],
+    }) as unknown as Awaited<ReturnType<CrmApi['decideControlledDocumentRequest']>>)
+    const wrapper = mount(DocumentCenterPage, { props: { apiClient }, attachTo: window.document.body })
+    await flushPromises()
+    await wrapper.get('[data-workspace-tab="approvals"]').trigger('click')
+    await wrapper.get('[data-decision-note]').setValue('Only for the ACME call on 21 Oct')
+    for (const action of ['approve-watermarked', 'approve-original']) {
+      await wrapper.get(`[data-approval-action="${action}"]`).trigger('click')
+      await flushPromises()
+    }
+    // Nothing was sent: the request is still in the queue, with the note where the Manager left it.
+    expect(decide).not.toHaveBeenCalled()
+    expect(wrapper.text()).toContain('批准时不会把说明发给申请人')
+    expect(wrapper.get('.document-notice').attributes('role')).toBe('alert')
+    expect(wrapper.get('.document-notice').classes()).toContain('notice-error')
+    expect(window.document.activeElement).toBe(wrapper.get('.document-notice').element)
+    expect(wrapper.findAll('.request-card')).toHaveLength(1)
+    expect((wrapper.get('[data-decision-note]').element as HTMLTextAreaElement).value).toBe('Only for the ACME call on 21 Oct')
+    expect(wrapper.get('[data-approval-action="approve-watermarked"]').attributes('disabled')).toBeUndefined()
+
+    await wrapper.get('[data-decision-note]').setValue('   ')
+    await wrapper.get('[data-approval-action="approve-watermarked"]').trigger('click')
+    await flushPromises()
+    expect(decide).toHaveBeenCalledWith(expect.any(String), 'approve-watermarked', undefined)
+    expect(wrapper.get('.document-notice').attributes('role')).toBe('status')
+    expect(wrapper.get('.document-notice').classes()).not.toContain('notice-error')
+    expect(wrapper.findAll('.request-card')).toHaveLength(0)
+  })
+
+  it('starts the upload rejection reason afresh for the next request, so one applicant never gets another one\'s reason', async () => {
+    // Two uploads awaiting the Manager, as the service lists them; the queue and the decision are stubbed.
+    const upload = (id: string, title: string, submittedAt: string): DocumentUploadRequestDto => ({
+      id, title, category: 'Technical', documentType: 'Specification', accessMode: 'Direct', confidentiality: 'Internal',
+      product: 'General', version: '1.0', revision: 'R1', reviewDate: '2027-10-06', fileName: 'spec.pdf', mimeType: 'application/pdf', size: 8,
+      status: 'Pending', submittedBy: 'engineer@example.com', submittedByName: 'Test Engineer', submittedByRole: 'Engineer', submittedAt,
+      decidedBy: '', decidedAt: '', decisionReason: '', publishedDocumentId: '',
+    })
+    const pending = [upload('DOCUP-00002', 'Second upload', '2026-10-06T11:00:00'), upload('DOCUP-00001', 'First upload', '2026-10-06T10:00:00')]
+    const apiClient = createMockApi({ latency: 0, role: 'Manager' })
+    vi.spyOn(apiClient, 'listControlledDocumentUploadRequests').mockResolvedValue({ data: { items: pending }, meta: { requestId: 'req-uploads' }, warnings: [] } as unknown as Awaited<ReturnType<CrmApi['listControlledDocumentUploadRequests']>>)
+    vi.spyOn(apiClient, 'listControlledDocumentRequests').mockResolvedValue({ data: { items: [] }, meta: { requestId: 'req-queue' }, warnings: [] } as unknown as Awaited<ReturnType<CrmApi['listControlledDocumentRequests']>>)
+    const decide = vi.spyOn(apiClient, 'decideControlledDocumentUploadRequest').mockImplementation(async (id, input) => ({
+      data: { ...pending.find((item) => item.id === id)!, status: input.decision === 'reject' ? 'Rejected' : 'Published' }, meta: { requestId: 'req-decide' }, warnings: [],
+    }) as unknown as Awaited<ReturnType<CrmApi['decideControlledDocumentUploadRequest']>>)
+    const wrapper = mount(DocumentCenterPage, { props: { apiClient } })
+    await flushPromises()
+    await wrapper.get('[data-workspace-tab="approvals"]').trigger('click')
+    expect(wrapper.findAll('.request-card')).toHaveLength(2)
+
+    await wrapper.get('[data-upload-decision-reason]').setValue('Wrong revision of the first')
+    await wrapper.get('[data-approval-action="reject-upload"]').trigger('click')
+    await flushPromises()
+    expect(decide).toHaveBeenCalledTimes(1)
+    expect(decide.mock.calls[0]![1]).toEqual({ decision: 'reject', reason: 'Wrong revision of the first' })
+    expect(wrapper.findAll('.request-card')).toHaveLength(1)
+
+    // The next request is selected with an empty reason: rejecting it asks for one instead of sending the old text.
+    expect((wrapper.get('[data-upload-decision-reason]').element as HTMLTextAreaElement).value).toBe('')
+    await wrapper.get('[data-approval-action="reject-upload"]').trigger('click')
+    await flushPromises()
+    expect(decide).toHaveBeenCalledTimes(1)
+    expect(wrapper.text()).toContain('拒绝上传时必须填写原因')
+    expect(wrapper.findAll('.request-card')).toHaveLength(1)
   })
 
   it('reads the library again after a download, so that the audit shows it', async () => {

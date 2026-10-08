@@ -39,7 +39,8 @@
 {
   scope?: { sales?: string[]; regions?: string[]; markets?: string[]; equipment?: string[] }  // 空数组或省略 = 不限
   match?: "all" | "any"                      // 默认 all
-  conditions?: Array<{ field; operator; value }>   // 最多 20 条，单层
+  conditions?: Array<{ field; operator; value } | { match; conditions }> // 根算一级，最多三级、30 条叶子条件
+  periodFilter?: { field: "createdAt" | "stageChangedAt" | "poDate"; kind: "week" | "month" | "quarter" | "year"; anchor: string }
   sort?: { field; direction?: "asc" | "desc" }     // 默认 { field: "stageChangedAt", direction: "asc" }
   groupBy?: "region" | "sales" | "stage" | "probabilityLevel" | "equipment" | "market" | null
   page?: number                               // 默认 1
@@ -65,7 +66,7 @@
 - 未知字段、运算符不匹配、值的类型或格式不对、`in` 数组为空、`between` 前大后小。
 - 枚举值不在选项里：`stage`、`probabilityLevel`、`region`、`market` 对照固定选项；`sales` 对照 `get_opportunity_filters` 返回的销售选项。`equipment` 对照设备类型目录（预设 + 自定义），按存储值精确匹配。
 - `fieldErrors` 的键是出错位置，例如 `conditions[1].value`、`scope.sales`、`sort.field`。保存查询时加上 `definition.` 前缀。
-- 限制：条件最多 20 条；每个数组最多 100 个值；文本不超过 140 字。
+- 限制：条件最多 30 条，根计入最多三级，子组不能为空；每个数组最多 100 个值；文本不超过 140 字。
 
 ## 返回的口径
 
@@ -146,11 +147,9 @@ SavedQuery = {
 
 ## 导出
 
-后端没有单独的导出接口。前端用同一个 `input` 逐页调用 `query_opportunities`（pageSize 200，直到读满 `meta.total`），按当前列生成 Excel；分组时按 `groups` 切分工作表。
+POST `export_opportunities` 接收同一规范化查询，一次返回全部匹配行、汇总、分组和 asOf。前端不再逐页拼接，数据来自同一请求事务。共享查询额外传 `savedQuery: {id, modified}`，列表和导出均重新校验当前访问与版本。
 
-- `asOf` 是每次调用的计算时间，每一页都不同，不能用它判断数据是否变化。
-- 判断中途是否有变化，请比较各页的 `meta.total`、`summary` 和 `groups`：三者都应完全一致，不一致就提示用户重新导出。
-- 跨过上海零点时，停留天数会加一天。导出文件可以取第一页的 `asOf` 作为导出时间。
+Excel 保留所选列和分组，并增加 Summary 元数据页。人民币以百万元输出，15 位有效数字以内为数值，超出 Excel 精度时使用精确文本，汇总遵守相同规则。日期使用上海业务日历的 Excel 日期，未知值留空；文本不执行公式。完整合同见 [PR10](../superpowers/plans/2026-10-05-philippe-pr10-sharing.md)。
 
 ## 联调重点
 
@@ -158,7 +157,7 @@ SavedQuery = {
 2. 21 天边界：变更满 21 天的不标红，22 天的标红；变更时间为空的显示为未知，计入 `unknownStageAgeCount`。
 3. 缺失金额：`amountCny: null` 的行不参与金额条件，汇总单列 `missingAmountCount`。
 4. 分页分组：翻到最后一页再往后，返回空 `items`，但 summary 和 groups 不变。
-5. 保存查询的用户隔离：换一个账号，`list_opportunity_queries` 看不到别人的查询，用别人的 ID 更新或删除返回 `NOT_FOUND`。
+5. 保存查询的用户隔离：列表仅包含自己的查询和明确共享给自己的只读定义；非所有者更新、删除或再次共享返回 `NOT_FOUND`。
 6. Sales 账号即使用 `match: "any"`，也只能查到自己的商机；在 `scope.sales` 里填别人的 ID 会返回 `VALIDATION_ERROR`。
 
 ## 测试
@@ -181,4 +180,16 @@ SavedQuery = {
 - **比对规范化（审查后补充）**：比对和保存前先做 NFKC（全角字母、数字转半角），并去掉零宽空格、BOM 等不可见字符；只由标点组成的输入（如 `...`、`/`）直接拒绝。
 - **并发（审查后补充）**：凡是用到自定义类型的保存，都会先锁住一个固定行（`tabDocType` 里 `CRM Equipment Type` 这一行），再用当前读读取目录；两个请求同时新增同一类型时不会重复登记，新增不同类型时也不会死锁。migrate 时的 `sync_after_migrate` 先提交一次事务，再在同一把锁下读取，不会误删刚被使用的类型。
 - **测试**：`tests/test_equipment_types.py`（6 项），并更新了看板规则和接口测试。
-- **导出（审查后补充）**：Excel 里的人民币金额写成数值（¥ 格式），可以直接求和；XML 不允许的控制字符在写入前去掉，避免整个文件打不开。
+- **导出（审查后补充）**：Excel 里的人民币金额在 15 位有效数字内写成数值（PR10 起以人民币百万元输出），可以直接求和；超出精度的金额保留精确文本。XML 不允许的控制字符在写入前去掉，避免整个文件打不开。PR10 全量导出等待响应的默认超时为 120 秒，普通接口保持 30 秒。
+
+
+## PR09 扩展（2026-10-05）
+
+新增 createdAt、lastActivityAt、poDate 日期条件（before／after／between）和 status 条件（in／not_in；open／won／lost），也可显示及排序这些列。lastActivityIncomplete 表示关联完成活动中存在未知业务日期，该行最后活动日期不参与筛选／排序；已有证据日期仍可显示。业务事实和实质历史沿用 Review 公共读模型，范围先受商机权限约束。
+
+periodFilter 可省略，省略表示没有期间限制。选定字段后，期间与全局范围、根条件组取交集；规范化 anchor 为期间首日，采用上海日期的半开期间。页面显示业务字段与实际日期范围，不把跨页携带的 Review 期间隐含应用到查询。完整合同见 [PR09](../superpowers/plans/2026-10-05-philippe-pr09-queries.md)。
+
+
+## PR10 共享接口（2026-10-05）
+
+`SavedQuery` 新增 owner、readOnly、recipients，旧查询默认只有所有者可读；recipients 仅向所有者返回。GET get_query_recipients 返回可选人员，POST share_opportunity_query 接收 id、recipients、expectedModified，空名单撤销共享。授权的是定义，查询结果始终使用当前用户自己的商机及来源权限。另存生成不共享的独立副本。

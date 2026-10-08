@@ -15,6 +15,7 @@ import StatusBadge from '@/design-system/StatusBadge.vue'
 import ModalShell from '@/design-system/ModalShell.vue'
 import QuotationEditor from '@/features/quotations/QuotationEditor.vue'
 import QuotationPreview from '@/features/quotations/QuotationPreview.vue'
+import QuotationPlanningPanel from '@/features/quotations/QuotationPlanningPanel.vue'
 import QuotationHistory from '@/features/quotations/QuotationHistory.vue'
 import { formatDisplayDate } from '@/domain/time'
 import { downloadBlob } from '@/features/shared/download-blob'
@@ -243,6 +244,7 @@ onBeforeUnmount(()=>{ready=false;previewSequence+=1;window.removeEventListener('
     <DataState v-else-if="denied" type="denied" :message="error" :request-id="requestId" />
     <DataState v-else-if="error||!detail||!draft" type="error" :message="error||(locale === 'en-US' ? 'Quotation failed to load' : '报价单加载失败')" :request-id="requestId" @retry="loadHeld(linkedVersion)" />
     <template v-else>
+      <QuotationPlanningPanel :quotation-id="quotationId" :quotation-modified="detail.quotation.modified" :api-client="props.apiClient" :can-write="app.can('quotation:write')" />
       <section class="summary-strip">
         <div><small>{{ ui('Name', '名称') }}</small><strong>{{ detail.quotation.refNo }}</strong><span>{{ detail.quotation.accountName }}</span></div>
         <div><small>{{ ui('Type', '类型') }}</small><strong>{{ quotationTypeLabel(detail.version.quotationType) }}</strong><span>{{ detail.version.quotationType === 'Service' ? (locale === 'en-US' ? 'After-sales / repair / accessories' : '售后 / 维修 / 配件') : (locale === 'en-US' ? 'Equipment quotation' : '设备报价') }}</span></div>

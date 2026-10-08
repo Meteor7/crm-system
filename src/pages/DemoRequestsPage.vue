@@ -30,6 +30,9 @@ const actionError = useLocaleMessage(), actionRequestId = ref('')
 const modalError = useLocaleMessage(), modalRequestId = ref(''), modalFieldErrors = ref<Record<string, string>>({})
 let modalSession = 0
 const processing = ref(''), modalMode = ref<'create'|'edit'|'engineer'|'manager'|''>(''), selected = ref<DemoRequestDto | null>(null)
+// A save refused for the record's version: the dialog keeps its draft and offers the latest version (`reloadLatest`);
+// while that version is being read, the dialog is held (nothing typed meanwhile could survive the form starting over).
+const modalConflict = ref(false), modalReloading = ref(false)
 // The dialog's own save, out or not: the page's other actions (`processing`) do not stand for it.
 const modalSaving = ref(false)
 const activeView = ref<DemoRequestView>('overview')
@@ -57,8 +60,11 @@ const currentViewCopy = computed(() => {
   return copy[activeView.value]
 })
 
-async function load() {
-  const current = ++sequence; loading.value = true; error.value = ''; denied.value = false; meta.value = null
+// Resolves true when this read's rows are the ones shown (false when it failed or a later read took over).
+// The last read's refusal, as a message in both languages, for a dialog that asked for the read (`reloadLatest`).
+let lastLoadError: LocaleMessage = ''
+async function load(): Promise<boolean> {
+  const current = ++sequence; loading.value = true; error.value = ''; denied.value = false; meta.value = null; lastLoadError = ''
   try {
     const contactId = typeof route.query.contactId === 'string' ? route.query.contactId : ''
     // Everything still in progress, in one read: the workspace sorts it into its views and pages each of them.
@@ -67,14 +73,49 @@ async function load() {
       readAllPages((referencePage, referencePageSize) => props.apiClient.listAccounts({ page: referencePage, pageSize: referencePageSize })),
       app.can('contact:view') ? readAllPages((referencePage, referencePageSize) => props.apiClient.listContacts({ page: referencePage, pageSize: referencePageSize })) : Promise.resolve(null),
     ])
-    if (current !== sequence) return
+    if (current !== sequence) return false
     rows.value = requests.items; accounts.value = accountRows; contacts.value = contactRows ?? []; meta.value = readRequestMeta(requests.first)
-  } catch (reason) { if (current !== sequence) return; const mapped = mapRequestError(reason); error.value = mapped.localizedMessage ?? mapped.message; requestId.value = mapped.requestId; denied.value = mapped.denied; if (mapped.denied) rows.value = [] }
+    return true
+  } catch (reason) { if (current !== sequence) return false; const mapped = mapRequestError(reason); lastLoadError = mapped.localizedMessage ?? mapped.message; error.value = lastLoadError; requestId.value = mapped.requestId; denied.value = mapped.denied; if (mapped.denied) rows.value = []; return false }
   finally { if (current === sequence) loading.value = false }
 }
-function open(mode: 'create'|'edit'|'engineer'|'manager', request: DemoRequestDto | null = null) { modalSession += 1; clearModalError(); modalSaving.value = false; modalMode.value = mode; selected.value = request }
-function closeModal() { modalSession += 1; clearModalError(); modalSaving.value = false; modalMode.value = '' }
-function clearModalError() { modalError.value = ''; modalRequestId.value = ''; modalFieldErrors.value = {} }
+// A dialog opened or closed starts its own state: a read or a save still out for the one before ends with that session.
+function open(mode: 'create'|'edit'|'engineer'|'manager', request: DemoRequestDto | null = null) { modalSession += 1; clearModalError(); modalSaving.value = false; modalReloading.value = false; modalMode.value = mode; selected.value = request }
+function closeModal() { modalSession += 1; clearModalError(); modalSaving.value = false; modalReloading.value = false; modalMode.value = '' }
+function clearModalError() { modalError.value = ''; modalRequestId.value = ''; modalFieldErrors.value = {}; modalConflict.value = false }
+// The states a dialog acts on (as `DemoRequestCard` offers them): a record read anew in another state has moved on.
+const DIALOG_STATES: Record<'edit' | 'engineer' | 'manager', Array<DemoRequestDto['status']>> = {
+  edit: ['Draft', 'Engineer Returned', 'Manager Rejected'], engineer: ['Engineer Review'], manager: ['Manager Approval'],
+}
+// Discards the draft on purpose, at the user's request: it is the way out of a version the server refused.
+async function reloadLatest() {
+  const session = modalSession
+  const id = selected.value?.id
+  const mode = modalMode.value
+  if (!id || mode === '' || mode === 'create' || modalSaving.value) return
+  // The dialog waits for the read: a save sent meanwhile would name the version being replaced, and anything typed
+  // meanwhile would be lost when the form starts over.
+  modalSaving.value = true
+  modalReloading.value = true
+  let loaded = false
+  try { loaded = await load() } finally { if (session === modalSession) { modalSaving.value = false; modalReloading.value = false } }
+  if (session !== modalSession) return
+  if (!loaded) {
+    // Refused for who asks: the page says so, the dialog has nothing to show. Failed: the dialog says so and keeps its
+    // draft and the button. Overtaken by a later read: that read's outcome stands and the dialog is left as it is.
+    if (denied.value) { modalMode.value = ''; selected.value = null; clearModalError() }
+    else if (lastLoadError) { modalError.value = lastLoadError; modalRequestId.value = requestId.value }
+    return
+  }
+  const refreshed = rows.value.find((item) => item.id === id)
+  if (refreshed && DIALOG_STATES[mode].includes(refreshed.status)) { selected.value = refreshed; clearModalError(); return }
+  // Read anew, the request is not one this dialog can act on any more: it left the in-progress ones, this page's
+  // contact or the user's reach, or moved on to another step. The list shows it as it is now.
+  closeModal()
+  selected.value = null
+  actionError.value = localeMessage('This Demo Request has moved on since the dialog opened: it is no longer in progress, no longer in this list, or no longer at the step this dialog handles. The list shows the latest records.', '该 Demo 申请在对话框打开后已有变化：已不在进行中、不在这个列表里，或已不在这一步；列表已显示最新记录。')
+  actionRequestId.value = ''
+}
 function openDetail(request: DemoRequestDto) {
   router.push({ name: 'demo-detail', params: { demoId: request.id }, query: { from: 'demo-requests' } })
 }
@@ -107,6 +148,8 @@ async function submitModal(payload: CreateDemoRequestInput | DemoRequestCommand)
   processing.value = selected.value?.id || 'create'
   const session = modalSession
   modalSaving.value = true
+  // A known conflict outlives a save refused for another reason: the version is still the one refused.
+  const wasConflict = modalConflict.value
   clearModalError()
   let handoff: { requestId: string; evaluationId: string } | null = null
   try {
@@ -130,10 +173,19 @@ async function submitModal(payload: CreateDemoRequestInput | DemoRequestCommand)
     const mapped = mapRequestError(reason)
     // Denied for who asks, or answered to a dialog since closed: the page's business. Otherwise the dialog's.
     if (mapped.denied || !(reason instanceof CrmApiError) || session !== modalSession) { await handleWriteError(reason); return }
-    modalError.value = reason.code === 'VERSION_CONFLICT' ? message('demoRequests.versionConflict') : mapped.localizedMessage ?? mapped.message
+    // A version conflict of a record (a new request has no version): the dialog keeps its draft and still names the
+    // version it opened with, so a save without the latest version is refused again; the way on is `reloadLatest`,
+    // asked for by the user. The list is read again so that the page behind the dialog is current.
+    const conflict = reason.code === 'VERSION_CONFLICT' && selected.value !== null
+    modalError.value = conflict ? message('demoRequests.dialogVersionConflict') : mapped.localizedMessage ?? mapped.message
     modalRequestId.value = mapped.requestId
     modalFieldErrors.value = reason.fieldErrors
-    if (reason.code === 'VERSION_CONFLICT') await load()
+    modalConflict.value = conflict || (wasConflict && selected.value !== null)
+    if (reason.code === 'VERSION_CONFLICT') {
+      await load()
+      // Refused for who asks meanwhile: the page says so, the dialog has nothing to show (as `reloadLatest`).
+      if (denied.value && session === modalSession) { modalMode.value = ''; selected.value = null; clearModalError() }
+    }
   }
   finally { processing.value = ''; if (session === modalSession) modalSaving.value = false }
 }
@@ -222,7 +274,7 @@ onBeforeUnmount(clearPreparedDownload)
       @manager="open('manager', $event)"
       @download="downloadRequest"
     />
-    <DemoRequestModal v-if="modalMode" :mode="modalMode" :request="selected" :accounts="accounts" :contacts="contacts" :selected-contact-id="modalContactId" :current-sales-contact="app.bootstrap?.user.id || ''" :busy="modalSaving" :api-client="props.apiClient" :error="modalError" :request-id="modalRequestId" :field-errors="modalFieldErrors" @close="closeModal" @create-contact="openContact" @submit="submitModal" />
+    <DemoRequestModal v-if="modalMode" :mode="modalMode" :request="selected" :accounts="accounts" :contacts="contacts" :selected-contact-id="modalContactId" :current-sales-contact="app.bootstrap?.user.id || ''" :busy="modalSaving" :api-client="props.apiClient" :error="modalError" :request-id="modalRequestId" :field-errors="modalFieldErrors" :conflict="modalConflict" :reloading="modalReloading" @close="closeModal" @create-contact="openContact" @submit="submitModal" @reload="reloadLatest" />
     <ContactModal v-if="contactModal" :accounts="accounts" :sites="[]" :contacts="contacts" :fixed-account-id="contactAccountId" @close="contactModal = false" @submit="saveContact" />
   </div>
 </template>

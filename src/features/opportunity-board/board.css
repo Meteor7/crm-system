@@ -136,3 +136,5 @@
    second row on Review, Plan, Warnings and Opportunities, and the filters share the first row instead of
    wrapping, so the four top cards stay the same height. */
 @container(max-width:1860px){.board-controls .board-navigation{flex-basis:100%}}
+
+.board-condition-group{grid-column:1/-1;border:1px solid var(--color-border,#d6dee8);border-radius:10px;padding:12px;display:grid;gap:12px;min-width:0}.board-condition-group header,.board-period-filter{display:flex;align-items:center;gap:10px;flex-wrap:wrap}.board-condition-group .board-condition-group{margin-left:16px}.board-period-filter{padding:12px 22px}.board-period-filter label{display:flex;gap:8px;align-items:center}.board-period-filter span{font-size:12px;color:#526176}

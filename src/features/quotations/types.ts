@@ -147,3 +147,7 @@ export interface QuotationDecisionInput {
   feedbackNote: string
   expectedModified?: string
 }
+
+export interface QuotationFollowUpInput { title: string; due: string; status: 'Open' | 'Done' | 'Cancelled'; note: string }
+export interface QuotationFollowUp extends QuotationFollowUpInput { id: string; completedAt: string | null; completedVersion: string | null }
+export interface QuotationPlanning { quotationId: string; modified: string; plannedSendDate: string | null; followUps: QuotationFollowUp[] }

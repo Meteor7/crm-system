@@ -9,7 +9,7 @@ import frappe
 from rayher_crm.api.v1.errors import api_endpoint
 from rayher_crm.api.v1.responses import success_response
 from rayher_crm.services import equipment, opportunities
-from rayher_crm.services import loss_review, probability_recovery
+from rayher_crm.services import loss_review, probability_recovery, blue_sheet
 from rayher_crm.services.common import as_payload
 
 
@@ -46,6 +46,24 @@ def create_strategy_opportunity(input: Any) -> dict:
 @api_endpoint
 def update_strategy_opportunity(id: str, input: Any, expectedModified: str | None = None) -> dict:
     return success_response(opportunities.update_strategy_opportunity(id, as_payload(input), expectedModified))
+
+
+@frappe.whitelist(methods=["POST"])
+@api_endpoint
+def save_blue_sheet_flags(id: str, input: Any, expectedModified: str | None = None) -> dict:
+    return success_response(blue_sheet.save_flags(id, as_payload(input), expectedModified))
+
+
+@frappe.whitelist(methods=["GET"])
+@api_endpoint
+def get_blue_sheet_assessment(id: str) -> dict:
+    return success_response(blue_sheet.get_assessment(id))
+
+
+@frappe.whitelist(methods=["POST"])
+@api_endpoint
+def apply_blue_sheet_suggestion(id: str, input: Any, expectedModified: str | None = None) -> dict:
+    return success_response(blue_sheet.apply_suggestion(id, as_payload(input), expectedModified))
 
 
 @frappe.whitelist(methods=["POST"])

@@ -86,6 +86,7 @@ export interface OpportunityProbabilityHistoryDto {
 }
 
 export interface LossReviewInput {
+  reviewCategory?: string
   status: 'Reviewed' | 'Pending'
   /** The conclusion; required to mark the loss reviewed, kept unchanged by a revert. */
   reviewNote: string
@@ -95,6 +96,7 @@ export interface LossReviewInput {
 
 /** One post-mortem per marked_lost event; it survives reopening the Opportunity. */
 export interface LossReviewDto {
+  reviewCategory?: string
   id: string
   opportunityId: string
   stageEventId: string
@@ -108,7 +110,7 @@ export interface LossReviewDto {
   reviewedAt: string | null
   reopenedAt: string | null
   modified: string
-  history: { id: string; kind: string; status: 'pending' | 'reviewed'; note: string; reason: string; actor: string; at: string }[]
+  history: { id: string; kind: string; category?: string; status: 'pending' | 'reviewed'; note: string; reason: string; actor: string; at: string }[]
 }
 
 export interface ProbabilityRecoveryDto {
@@ -313,6 +315,16 @@ export interface OpportunityLiveBookingDto {
   actualPoDate?: string
 }
 
+export interface BlueSheetRedFlagInput { id?: string; text: string; severity: '' | 'Low' | 'Medium' | 'High'; status: 'Open' | 'Resolved' }
+export interface BlueSheetRedFlag extends BlueSheetRedFlagInput { id: string; updatedAt: string | null; updatedBy: string | null }
+export interface BlueSheetAssessment {
+  state: 'unconfigured' | 'no_match' | 'suggested' | 'closed'
+  ruleVersion: string | null; ruleId: string | null; suggestedLevel: OpportunityProbabilityLevel | null; reason: string | null
+  currentLevel: OpportunityProbabilityLevelValue; opportunityModified: string; fingerprint: string; canApply: boolean
+  facts: { openRedFlags: number; highRedFlags: number; unclassifiedRedFlags: number; opposedStakeholders: number; coveredRoles: string[]; supportingRoles: string[] }
+}
+export interface BlueSheetConfirmation { fingerprint: string; probabilityReason?: string; probabilityActionPlan?: string }
+
 export interface StrategyOpportunityDto {
   id: string
   sourceLeadId?: string
@@ -373,6 +385,7 @@ export interface StrategyOpportunityDto {
   history: Array<{ at: string; actor: string; field: string; from: string; to: string }>
   strengths: string[]
   redFlags: string[]
+  redFlagRecords?: BlueSheetRedFlag[]
   informationNeeded: string[]
   stakeholders: OpportunityStakeholderDto[]
   actions: OpportunityActionDto[]

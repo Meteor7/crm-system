@@ -105,6 +105,56 @@ class TestOpportunityBoardApi(FrappeTestCase):
         data, total, _page, _size = self._query(self.engineer)
         self.assertEqual((data["items"], total), ([], 0))
 
+    def test_nested_period_query_saved_roundtrip_and_authorized_activity_projection(self):
+        query = {"match": "all", "conditions": [{"match": "any", "conditions": [
+            {"field": "status", "operator": "in", "value": ["open"]},
+            {"field": "customerName", "operator": "contains", "value": "Theirs"}]}],
+            "periodFilter": {"field": "poDate", "kind": "quarter", "anchor": "2031-11-12"}}
+        data, total, _, _ = self._query(self.sales, **query)
+        self.assertEqual(([row["id"] for row in data["items"]], total), ([self.mine], 1))
+        self.assertIsNotNone(data["items"][0]["createdAt"])
+        self.assertIsNotNone(data["items"][0]["lastActivityAt"])
+        saved = self._as(self.sales, lambda: opportunity_board.save_opportunity_query(None,
+            {"name": "Nested period", "definition": {**query, "columns": COLUMNS}}))
+        self.assertEqual(saved["definition"]["periodFilter"]["anchor"], "2031-10-01")
+        restored = {key: value for key, value in saved["definition"].items() if key != "columns"}
+        self.assertEqual(self._query(self.sales, **restored)[1], 1)
+        restored["periodFilter"]["anchor"] = "2032-01-01"
+        self.assertEqual(self._query(self.sales, **restored)[1], 0)
+
+    def test_unknown_completion_cannot_match_last_activity_date_filter(self):
+        completed = frappe.db.get_value("CRM Opportunity Action", {"opportunity": self.mine, "status": "Done"}, "name")
+        frappe.db.set_value("CRM Opportunity Action", completed, "completed_at", None)
+        data, _, _, _ = self._query(self.sales)
+        self.assertTrue(data["items"][0]["lastActivityIncomplete"])
+        self.assertIsNotNone(data["items"][0]["lastActivityAt"])
+        data, total, _, _ = self._query(self.sales, conditions=[{"field": "lastActivityAt", "operator": "before", "value": "2099-01-01"}])
+        self.assertEqual((data["items"], total), ([], 0))
+
+    def test_last_activity_respects_independent_event_user_permissions(self):
+        from datetime import datetime
+        from frappe.permissions import add_user_permission, remove_user_permission
+        from rayher_crm.services import events
+        allowed = frappe.db.get_value("CRM Opportunity", self.mine, "account")
+        excluded = frappe.db.get_value("CRM Opportunity", self.theirs, "account")
+        with patch("frappe.utils.now_datetime", return_value=datetime(2030, 9, 30, 16)):
+            event = self._as(self.manager, lambda: events.save_event({"title": "Restricted event", "owner": self.other_sales,
+                "startDate": "2030-09-30", "endDate": "2030-09-30", "status": "Done", "accountId": excluded,
+                "opportunityId": self.theirs, "region": "", "market": "", "equipment": "", "note": ""}))
+        add_user_permission("Customer", allowed, self.manager, ignore_permissions=True, applicable_for="CRM Event")
+        frappe.clear_cache(user=self.manager)
+        try:
+            frappe.set_user(self.manager)
+            self.assertTrue(frappe.has_permission("CRM Opportunity", "read", doc=frappe.get_doc("CRM Opportunity", self.theirs)))
+            self.assertFalse(frappe.has_permission("CRM Event", "read", doc=frappe.get_doc("CRM Event", event["id"])))
+            with patch("frappe.utils.now_datetime", return_value=datetime(2031, 1, 1)):
+                data, _, _, _ = self._query(self.manager, conditions=[{"field": "lastActivityAt", "operator": "between", "value": ["2030-09-30", "2030-09-30"]}])
+            self.assertNotIn(self.theirs, {row["id"] for row in data["items"]})
+        finally:
+            frappe.set_user("Administrator")
+            remove_user_permission("Customer", allowed, self.manager, ignore_permissions=True)
+            frappe.clear_cache(user=self.manager)
+
     def test_totals_cover_every_match_on_every_page(self):
         scope = {"sales": [self.sales, self.other_sales]}
         first, total, page, size = self._query(self.manager, scope=scope, pageSize=1,

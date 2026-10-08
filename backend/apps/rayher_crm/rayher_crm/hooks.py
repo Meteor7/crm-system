@@ -76,14 +76,25 @@ permission_query_conditions = {
     "CRM Notification Event": "rayher_crm.permissions.scope.notification_query",
     "CRM Document Access Request": "rayher_crm.permissions.scope.document_access_request_query",
     "CRM Visit": "rayher_crm.permissions.scope.visit_query",
+    "CRM Event": "rayher_crm.permissions.scope.event_query",
     "CRM Visit Meeting Record": "rayher_crm.permissions.scope.visit_meeting_record_query",
     "CRM Quotation": "rayher_crm.permissions.scope.quotation_query",
     "CRM Quotation Version": "rayher_crm.permissions.scope.quotation_version_query",
     "CRM Quotation Item": "rayher_crm.permissions.scope.scoped_child_query",
+    "CRM Quotation Follow Up": "rayher_crm.permissions.scope.scoped_child_query",
+    "CRM Query Recipient": "rayher_crm.permissions.scope.scoped_child_query",
     "CRM Quotation Payment Term": "rayher_crm.permissions.scope.scoped_child_query",
     "CRM Quotation Approval": "rayher_crm.permissions.scope.quotation_approval_query",
     "CRM RFQ": "rayher_crm.permissions.scope.rfq_query",
     "CRM RFQ Version": "rayher_crm.permissions.scope.rfq_version_query",
+    # Restrict CRM User list rows while preserving valid Manager lookups.
+    "User": "rayher_crm.permissions.native_lists.user_query",
+    # User's child tables are listed on User's DocType-level read alone (#219).
+    "Has Role": "rayher_crm.permissions.scope.scoped_child_query",
+    "DefaultValue": "rayher_crm.permissions.scope.scoped_child_query",
+    "User Email": "rayher_crm.permissions.scope.scoped_child_query",
+    "User Social Login": "rayher_crm.permissions.scope.scoped_child_query",
+    "Block Module": "rayher_crm.permissions.scope.scoped_child_query",
 }
 
 has_permission = {
@@ -122,6 +133,7 @@ has_permission = {
     "CRM Notification Event": "rayher_crm.permissions.scope.has_crm_permission",
     "CRM Document Access Request": "rayher_crm.permissions.scope.has_crm_permission",
     "CRM Visit": "rayher_crm.permissions.scope.has_crm_permission",
+    "CRM Event": "rayher_crm.permissions.scope.has_crm_permission",
     "CRM Visit Meeting Record": "rayher_crm.permissions.scope.has_crm_permission",
     "CRM Quotation": "rayher_crm.permissions.scope.has_crm_permission",
     "CRM Quotation Version": "rayher_crm.permissions.scope.has_quotation_version_permission",
@@ -163,6 +175,7 @@ doc_events = {
     },
     "User": {
         "before_save": "rayher_crm.permissions.scope.revoke_shares_when_user_enters_crm",
+        "before_rename": "rayher_crm.services.cockpit_identity.lock_users_before_rename",
         "after_rename": "rayher_crm.permissions.scope.reconcile_shares_after_user_rename",
     },
     "File": {

@@ -116,6 +116,20 @@ class TestStage5FSchema(FrappeTestCase):
                 self.assertEqual(f"{table.columns['content_hash'].fieldname}_index",
                     add_file_content_hash_index.INDEX_NAME)
 
+    def test_commitment_period_and_business_key_indexes_survive_reinstallation(self):
+        from rayher_crm.setup.indexes import install_stage5f_indexes
+
+        for _ in range(2):
+            install_stage5f_indexes()
+            rows = frappe.db.sql("""SELECT INDEX_NAME AS index_name,
+                GROUP_CONCAT(COLUMN_NAME ORDER BY SEQ_IN_INDEX) AS columns
+                FROM information_schema.STATISTICS
+                WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='tabCRM Plan Commitment'
+                GROUP BY INDEX_NAME""", as_dict=True)
+            indexes = {row.index_name: row.columns for row in rows}
+            self.assertEqual(indexes.get("idx_crm_commitment_period"), "period,anchor")
+            self.assertEqual(indexes.get("idx_crm_commitment_owner"), "sales_owner,metric,period,anchor")
+
     def test_stage5f_scope_is_fail_closed_and_recipient_specific(self):
         sales = "stage5f-schema-sales@example.invalid"
         manager = "stage5f-schema-manager@example.invalid"

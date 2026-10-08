@@ -29,6 +29,7 @@ function retiredLeadsOpportunitiesRedirect(to: RouteLocationGeneric): RouteLocat
 export const routes: RouteRecordRaw[] = [
   { path: '/', redirect: '/dashboard' },
   { path: '/dashboard', name: 'dashboard', component: () => import('@/pages/DashboardHomePage.vue') },
+  { path: '/territories', name: 'territories', component: () => import('@/pages/TerritoriesPage.vue') },
   { path: '/plan', name: 'plan', component: () => import('@/pages/PlanPage.vue'), meta: { navigationPath: '/dashboard' } },
   { path: '/warnings', name: 'warnings', component: () => import('@/pages/WarningsPage.vue'), meta: { navigationPath: '/dashboard' } },
   { path: '/opportunity-board', name: 'opportunity-board', component: () => import('@/pages/OpportunityBoardPage.vue'), meta: { navigationPath: '/dashboard' } },
@@ -45,6 +46,7 @@ export const routes: RouteRecordRaw[] = [
   { path: '/booking', name: 'booking', component: () => import('@/pages/BookingPage.vue') },
   { path: '/booking/:bookingId', name: 'booking-detail', component: () => import('@/pages/BookingDetailPage.vue'), meta: { navigationPath: '/booking' } },
   { path: '/visits', name: 'visits', component: () => import('@/pages/VisitsPage.vue') },
+  { path: '/events', name: 'events', component: () => import('@/pages/EventsPage.vue') },
   { path: '/visits/:visitId', name: 'visit-detail', component: () => import('@/pages/VisitDetailPage.vue'), meta: { navigationPath: '/visits' } },
   { path: '/stakeholders', redirect: '/contacts' },
   { path: '/requirements', name: 'requirements', component: () => import('@/pages/RequirementsPage.vue') },

@@ -8,20 +8,31 @@ import { SESSION_EXPIRED_EVENT, loginUrl } from './session'
 
 const API_PREFIX = '/api/method/rayher_crm.api.v1.'
 const DEFAULT_TIMEOUT_MS = 30_000
+// Full-set exports share one server snapshot and may take longer than page reads.
+// Match the 120-second Gunicorn/proxy budget in backend/compose.yaml.
+const EXPORT_TIMEOUT_MS = 120_000
 let redirectingToLogin = false
 
 export const FRAPPE_METHODS = {
   queryOpportunities: 'cockpit.query_opportunities',
+      exportOpportunities: 'cockpit.export_opportunities',
+      getQueryRecipients: 'cockpit.get_query_recipients',
+      shareOpportunityQuery: 'cockpit.share_opportunity_query',
   getOpportunityFilters: 'cockpit.get_opportunity_filters',
   listOpportunityQueries: 'cockpit.list_opportunity_queries',
   saveOpportunityQuery: 'cockpit.save_opportunity_query',
   deleteOpportunityQuery: 'cockpit.delete_opportunity_query',
   getPlan: 'cockpit.get_plan',
+  savePlanCommitment: 'cockpit.save_plan_commitment',
   getPlanDetails: 'cockpit.get_plan_details',
   getReview: 'cockpit.get_review',
   getReviewDetails: 'cockpit.get_details',
   getWarnings: 'cockpit.get_warnings',
   saveReviewTarget: 'cockpit.save_target',
+  getReviewTarget: 'cockpit.get_target',
+  getTerritoryCatalogue: 'territories.get_catalogue',
+  saveTerritory: 'territories.save_territory',
+  saveTerritoryAssignment: 'territories.save_assignment',
   getCockpitSettings: 'cockpit.get_cockpit_settings',
   saveCockpitSettings: 'cockpit.save_cockpit_settings',
   saveWarningPlan: 'cockpit.save_warning_plan',
@@ -47,6 +58,9 @@ export const FRAPPE_METHODS = {
   updateAccountSite: 'accounts.update_account_site',
   deleteAccountSite: 'accounts.delete_account_site',
   listVisits: 'visits.list_visits',
+  listEvents: 'events.list_events',
+  getEvent: 'events.get_event',
+  saveEvent: 'events.save_event',
   getVisit: 'visits.get_visit',
   getVisitDetail: 'visits.get_visit_detail',
   createVisit: 'visits.create_visit',
@@ -101,6 +115,9 @@ export const FRAPPE_METHODS = {
   listContracts: 'read_only_views.list_contracts',
   listQuotationCatalog: 'quotations.list_catalog',
   listQuotations: 'quotations.list_quotations',
+  getQuotationPlanning: 'quotation_planning.get_planning',
+  saveQuotationSchedule: 'quotation_planning.save_schedule',
+  saveQuotationFollowUp: 'quotation_planning.save_follow_up',
   getQuotation: 'quotations.get_quotation',
   createQuotation: 'quotations.create_quotation',
   linkQuotationOpportunity: 'quotations.link_opportunity',
@@ -116,6 +133,9 @@ export const FRAPPE_METHODS = {
   listStrategyOpportunities: 'opportunities.list_strategy_opportunities',
   listEquipmentTypes: 'opportunities.list_equipment_types',
   getStrategyOpportunity: 'opportunities.get_strategy_opportunity',
+  saveBlueSheetFlags: 'opportunities.save_blue_sheet_flags',
+  getBlueSheetAssessment: 'opportunities.get_blue_sheet_assessment',
+  applyBlueSheetSuggestion: 'opportunities.apply_blue_sheet_suggestion',
   createStrategyOpportunity: 'opportunities.create_strategy_opportunity',
   updateStrategyOpportunity: 'opportunities.update_strategy_opportunity',
   saveProbabilityRecovery: 'opportunities.save_probability_recovery',
@@ -184,6 +204,8 @@ type JsonRecord = Record<string, unknown>
 export interface FrappeApiOptions {
   fetchImpl?: typeof fetch
   timeoutMs?: number
+  /** Export response wait; defaults to timeoutMs when supplied, otherwise 120s. */
+  exportTimeoutMs?: number
   csrfToken?: () => string | undefined
 }
 function isRecord(value: unknown): value is JsonRecord {
@@ -343,18 +365,24 @@ export function createFrappeApi(options: FrappeApiOptions = {}): CrmApi {
 
   // The requests out at the moment, so that the sign-out can wait for them: Frappe writes a session back to its
   // cache at the end of a request it authenticated, so one answered after the session was ended would revive it.
-  const inFlight = new Set<Promise<Response>>()
+  const inFlight = new Set<Promise<unknown>>()
   // Once the sign-out is under way nothing else leaves this client (a request answered after the session was ended
   // would write it back), until the sign-out fails and the session is there to use.
   let signingOut = false
 
-  async function send(method: string, init: RequestInit, fallbackRequestId: string, forSignOut = false) {
+  async function send<T>(method: string, init: RequestInit, fallbackRequestId: string, consume: (response: Response, refreshDeadline: () => void) => Promise<T>, requestTimeoutMs = timeoutMs, forSignOut = false) {
     if (signingOut && !forSignOut) {
       throw new ClientRequestError('INTERNAL_ERROR', localeMessage('Signing out; the request was not sent.', '正在退出登录，请求未发送。'), fallbackRequestId)
     }
     const controller = new AbortController()
-    const timer = setTimeout(() => controller.abort(), timeoutMs)
-    const request = fetchImpl(method, { ...init, signal: controller.signal })
+    let timer = setTimeout(() => controller.abort(), requestTimeoutMs)
+    const refreshDeadline = () => {
+      if (controller.signal.aborted) return
+      clearTimeout(timer)
+      timer = setTimeout(() => controller.abort(), requestTimeoutMs)
+    }
+    // Both the deadline and sign-out tracking include body consumption.
+    const request = (async () => consume(await fetchImpl(method, { ...init, signal: controller.signal }), refreshDeadline))()
     inFlight.add(request)
     try {
       return await request
@@ -366,7 +394,7 @@ export function createFrappeApi(options: FrappeApiOptions = {}): CrmApi {
     }
   }
 
-  async function requestJson<T>(method: string, verb: 'GET' | 'POST', values?: RequestValues, multipart?: FormData): Promise<ApiResponse<T>> {
+  async function requestJson<T>(method: string, verb: 'GET' | 'POST', values?: RequestValues, multipart?: FormData, requestTimeoutMs?: number): Promise<ApiResponse<T>> {
     const fallbackRequestId = requestId()
     const headers = new Headers({ Accept: 'application/json' })
     let url = methodUrl(method)
@@ -385,41 +413,54 @@ export function createFrappeApi(options: FrappeApiOptions = {}): CrmApi {
       const token = csrfToken()
       if (token) headers.set('X-Frappe-CSRF-Token', token)
     }
-    const response = await send(url, { method: verb, credentials: 'same-origin', headers, body }, fallbackRequestId)
-    const payload = await parseJson(response)
-    const envelope = unwrapFrappeMessage(payload)
-    if (isRecord(envelope) && isRecord(envelope.error)) throwRequestError(payload, response, fallbackRequestId, method)
-    if (!response.ok) throwRequestError(payload, response, fallbackRequestId, method)
-    if (!isRecord(envelope) || !('data' in envelope)) {
-      throw new ClientRequestError('INTERNAL_ERROR', localeMessage('The backend returned an unrecognized data format.', '后端返回了无法识别的数据格式。'), fallbackRequestId, true)
-    }
-    return {
-      data: envelope.data as T,
-      meta: isRecord(envelope.meta) && typeof envelope.meta.requestId === 'string'
-        ? envelope.meta as unknown as ApiResponse<T>['meta']
-        : undefined,
-      warnings: Array.isArray(envelope.warnings) ? envelope.warnings.filter((item): item is string => typeof item === 'string') : [],
-    }
+    return send(url, { method: verb, credentials: 'same-origin', headers, body }, fallbackRequestId, async response => {
+      const payload = await parseJson(response)
+      const envelope = unwrapFrappeMessage(payload)
+      if (isRecord(envelope) && isRecord(envelope.error)) throwRequestError(payload, response, fallbackRequestId, method)
+      if (!response.ok) throwRequestError(payload, response, fallbackRequestId, method)
+      if (!isRecord(envelope) || !('data' in envelope)) {
+        throw new ClientRequestError('INTERNAL_ERROR', localeMessage('The backend returned an unrecognized data format.', '后端返回了无法识别的数据格式。'), fallbackRequestId, true)
+      }
+      return {
+        data: envelope.data as T,
+        meta: isRecord(envelope.meta) && typeof envelope.meta.requestId === 'string'
+          ? envelope.meta as unknown as ApiResponse<T>['meta']
+          : undefined,
+        warnings: Array.isArray(envelope.warnings) ? envelope.warnings.filter((item): item is string => typeof item === 'string') : [],
+      }
+    }, requestTimeoutMs)
   }
 
   async function requestBinary(method: string, values: RequestValues, fallbackName: string): Promise<BinaryDownload> {
     const fallbackRequestId = requestId()
-    const response = await send(methodUrl(method, values), {
+    return send(methodUrl(method, values), {
       method: 'GET', credentials: 'same-origin', headers: { Accept: 'application/octet-stream' },
-    }, fallbackRequestId)
-    if (!response.ok) {
-      const payload = await parseJson(response)
-      throwRequestError(payload, response, fallbackRequestId, method)
-    }
-    return {
-      blob: await response.blob(),
-      fileName: parseFileName(response.headers.get('Content-Disposition'), fallbackName),
-      mimeType: response.headers.get('Content-Type')?.split(';')[0]?.trim() || 'application/octet-stream',
-    }
+    }, fallbackRequestId, async (response, refreshDeadline) => {
+      if (!response.ok) {
+        const payload = await parseJson(response)
+        throwRequestError(payload, response, fallbackRequestId, method)
+      }
+      // Downloads can be large. Bound header wait and body inactivity, while allowing
+      // an actively transferring file to take longer than the ordinary JSON deadline.
+      refreshDeadline()
+      const blob = response.body
+        ? await new Response(response.body.pipeThrough(new TransformStream<Uint8Array, Uint8Array>({
+          transform(chunk, stream) {
+            if (chunk.byteLength) refreshDeadline()
+            stream.enqueue(chunk)
+          },
+        })), { headers: response.headers }).blob()
+        : await response.blob()
+      return {
+        blob,
+        fileName: parseFileName(response.headers.get('Content-Disposition'), fallbackName),
+        mimeType: response.headers.get('Content-Type')?.split(';')[0]?.trim() || 'application/octet-stream',
+      }
+    })
   }
 
   const get = <T>(key: keyof CrmApi, values?: RequestValues) => requestJson<T>(FRAPPE_METHODS[key], 'GET', values)
-  const post = <T>(key: keyof CrmApi, values?: RequestValues) => requestJson<T>(FRAPPE_METHODS[key], 'POST', values)
+  const post = <T>(key: keyof CrmApi, values?: RequestValues, requestTimeoutMs?: number) => requestJson<T>(FRAPPE_METHODS[key], 'POST', values, undefined, requestTimeoutMs)
 
   const api: CrmApi = {
     getBootstrap: () => get('getBootstrap'),
@@ -433,8 +474,10 @@ export function createFrappeApi(options: FrappeApiOptions = {}): CrmApi {
         // Frappe's own `logout`, as a GET: Frappe asks no CSRF token of a GET, and the CRM's token comes with its
         // bootstrap, which may have failed (no CRM role, a server fault) while the session is there to end.
         const fallbackRequestId = requestId()
-        const response = await send('/api/method/logout', { method: 'GET', credentials: 'same-origin', headers: { Accept: 'application/json' } }, fallbackRequestId, true)
-        if (!response.ok) throwRequestError(await parseJson(response), response, fallbackRequestId, FRAPPE_METHODS.signOut)
+        await send('/api/method/logout', { method: 'GET', credentials: 'same-origin', headers: { Accept: 'application/json' } }, fallbackRequestId, async response => {
+          const payload = await parseJson(response)
+          if (!response.ok) throwRequestError(payload, response, fallbackRequestId, FRAPPE_METHODS.signOut)
+        }, timeoutMs, true)
       } catch (error) {
         // Still signed in: the page goes on using the session.
         signingOut = false
@@ -448,16 +491,24 @@ export function createFrappeApi(options: FrappeApiOptions = {}): CrmApi {
     markNotificationRead: (id) => post('markNotificationRead', { id }),
     markAllNotificationsRead: () => post('markAllNotificationsRead'),
     queryOpportunities: (input) => post('queryOpportunities', { input }),
+    exportOpportunities: (input) => post('exportOpportunities', { input }, options.exportTimeoutMs ?? options.timeoutMs ?? EXPORT_TIMEOUT_MS),
+    getQueryRecipients: () => get('getQueryRecipients'),
+    shareOpportunityQuery: (id, recipients, expectedModified) => post('shareOpportunityQuery', { id, recipients, expectedModified }),
     getOpportunityFilters: () => get('getOpportunityFilters'),
     listOpportunityQueries: () => get('listOpportunityQueries'),
     saveOpportunityQuery: (input, id, expectedModified) => post('saveOpportunityQuery', { input, id, expectedModified }),
     deleteOpportunityQuery: (id, expectedModified) => post('deleteOpportunityQuery', { id, expectedModified }),
     getPlan: (query) => get('getPlan', { ...query }),
+    savePlanCommitment: (input, expectedModified) => post('savePlanCommitment', { input, expectedModified }),
     getPlanDetails: (query) => get('getPlanDetails', { ...query }),
     getReview: (query) => get('getReview', { ...query }),
     getReviewDetails: (query) => get('getReviewDetails', { ...query }),
     getWarnings: (query) => get('getWarnings', { ...query }),
     saveReviewTarget: (input, expectedModified) => post('saveReviewTarget', { input, expectedModified }),
+    getReviewTarget: (query) => get('getReviewTarget', { ...query }),
+    getTerritoryCatalogue: () => get('getTerritoryCatalogue'),
+    saveTerritory: (input, name, expectedModified) => post('saveTerritory', { input, name, expectedModified }),
+    saveTerritoryAssignment: (input, name, expectedModified) => post('saveTerritoryAssignment', { input, name, expectedModified }),
     getCockpitSettings: () => get('getCockpitSettings'),
     saveCockpitSettings: (input, expectedModified) => post('saveCockpitSettings', { input, expectedModified }),
     saveWarningPlan: (input, expectedModified) => post('saveWarningPlan', { input, expectedModified }),
@@ -476,6 +527,9 @@ export function createFrappeApi(options: FrappeApiOptions = {}): CrmApi {
     updateAccountSite: (accountId, siteId, input) => post('updateAccountSite', { accountId, siteId, input }),
     deleteAccountSite: (accountId, siteId) => post('deleteAccountSite', { accountId, siteId }),
     listVisits: (query) => get('listVisits', query as RequestValues),
+    listEvents: query => get('listEvents', query as RequestValues),
+    getEvent: id => get('getEvent', { id }),
+    saveEvent: (input, id, expectedModified) => post('saveEvent', { input, id, expectedModified }),
     getVisit: (id) => get('getVisit', { id }),
     getVisitDetail: (id) => get('getVisitDetail', { id }),
     createVisit: (input) => post('createVisit', { input }),
@@ -575,6 +629,9 @@ export function createFrappeApi(options: FrappeApiOptions = {}): CrmApi {
     listContracts: (query) => get('listContracts', query as RequestValues),
     listQuotationCatalog: () => get('listQuotationCatalog'),
     listQuotations: (query) => get('listQuotations', query as RequestValues),
+    getQuotationPlanning: quotationId => get('getQuotationPlanning', { quotationId }),
+    saveQuotationSchedule: (quotationId, input, expectedModified) => post('saveQuotationSchedule', { quotationId, input, expectedModified }),
+    saveQuotationFollowUp: (quotationId, input, id, expectedModified) => post('saveQuotationFollowUp', { quotationId, input, id, expectedModified }),
     getQuotation: (id, versionId) => get('getQuotation', { id, versionId }),
     createQuotation: (input) => post('createQuotation', { input }),
     linkQuotationOpportunity: (id, opportunityId, expectedModified) => post('linkQuotationOpportunity', { id, opportunityId, expectedModified }),
@@ -590,6 +647,9 @@ export function createFrappeApi(options: FrappeApiOptions = {}): CrmApi {
     listStrategyOpportunities: (query) => get('listStrategyOpportunities', query as RequestValues),
     listEquipmentTypes: () => get('listEquipmentTypes'),
     getStrategyOpportunity: (id) => get('getStrategyOpportunity', { id }),
+    saveBlueSheetFlags: (id, input, expectedModified) => post('saveBlueSheetFlags', { id, input, expectedModified }),
+    getBlueSheetAssessment: (id) => get('getBlueSheetAssessment', { id }),
+    applyBlueSheetSuggestion: (id, input, expectedModified) => post('applyBlueSheetSuggestion', { id, input, expectedModified }),
     createStrategyOpportunity: (input) => post('createStrategyOpportunity', { input }),
     updateStrategyOpportunity: (id, input, expectedModified) => post('updateStrategyOpportunity', { id, input, expectedModified }),
     saveProbabilityRecovery: (id, eventId, input, expectedModified) => post('saveProbabilityRecovery', { id, eventId, input, expectedModified }),

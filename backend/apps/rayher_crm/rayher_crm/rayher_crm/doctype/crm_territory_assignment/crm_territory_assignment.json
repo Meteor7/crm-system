@@ -1,0 +1,65 @@
+{
+  "doctype": "DocType",
+  "name": "CRM Territory Assignment",
+  "module": "Rayher CRM",
+  "engine": "InnoDB",
+  "creation": "2026-10-05 12:00:00.000000",
+  "modified": "2026-10-05 12:00:00.000000",
+  "owner": "Administrator",
+  "modified_by": "Administrator",
+  "autoname": "hash",
+  "allow_rename": 0,
+  "track_changes": 1,
+  "sort_field": "valid_from",
+  "sort_order": "DESC",
+  "field_order": [
+    "territory",
+    "sales_owner",
+    "valid_from",
+    "valid_until",
+    "cancelled",
+    "note"
+  ],
+  "fields": [
+    {
+      "fieldname": "territory",
+      "fieldtype": "Link",
+      "label": "Region",
+      "options": "CRM Sales Territory",
+      "reqd": 1
+    },
+    {
+      "fieldname": "sales_owner",
+      "fieldtype": "Link",
+      "label": "Sales Owner",
+      "options": "User",
+      "reqd": 1
+    },
+    {
+      "fieldname": "valid_from",
+      "fieldtype": "Date",
+      "label": "Effective From",
+      "reqd": 1
+    },
+    {
+      "fieldname": "valid_until",
+      "fieldtype": "Date",
+      "label": "Effective Through"
+    },
+    {
+      "fieldname": "cancelled",
+      "fieldtype": "Check",
+      "label": "Cancelled",
+      "default": "0"
+    },
+    {
+      "fieldname": "note",
+      "fieldtype": "Small Text",
+      "label": "Change Note"
+    }
+  ],
+  "permissions": [],
+  "actions": [],
+  "links": [],
+  "states": []
+}

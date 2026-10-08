@@ -28,6 +28,7 @@ export const navigation: NavigationGroup[] = [
       // Manager reviews the sales cockpit at /dashboard; Sales and Engineer keep the information centre there.
       { key: 'review', label: '销售经营看板', i18nKey: 'nav.review', path: '/dashboard', icon: BarChart3, capabilities: ['cockpit:view'] },
       { key: 'dashboard', label: '信息中心', i18nKey: 'nav.dashboard', path: '/dashboard', icon: BarChart3, hiddenRoles: ['Manager'], capabilities: ['dashboard:view'] },
+      { key: 'territories', label: '地域与归属', i18nKey: 'nav.territories', path: '/territories', icon: Building2, capabilities: ['cockpit:view'] },
       { key: 'calendar', label: 'Calendar', i18nKey: 'nav.calendar', path: '/calendar', icon: CalendarDays, capabilities: ['service:view'] },
     ],
   },
@@ -43,6 +44,7 @@ export const navigation: NavigationGroup[] = [
       { key: 'quotations', label: 'Quotations', i18nKey: 'nav.quotations', path: '/quotations', icon: FileText, capabilities: ['quotation:view'] },
       { key: 'booking', label: 'Booking', i18nKey: 'nav.booking', path: '/booking', icon: PackageCheck, capabilities: ['deal:view'] },
       { key: 'visits', label: '拜访管理', i18nKey: 'nav.visits', path: '/visits', icon: CalendarDays, capabilities: ['visit:view'] },
+      { key: 'events', label: '活动管理', i18nKey: 'nav.events', path: '/events', icon: CalendarDays, capabilities: ['event:view'] },
     ],
   },
   {

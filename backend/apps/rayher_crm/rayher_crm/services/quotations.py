@@ -636,6 +636,7 @@ def create_version(name: str) -> dict[str, Any]:
     number = int(master.latest_version_no or 0) + 1
     values = _validated_values(master, _version_payload(source), False)
     version = frappe.get_doc({"doctype": "CRM Quotation Version", "quotation": master.name, "version_no": number, "quotation_type": master.quotation_type or "Device", "status": "Draft", "approval_status": "Not Submitted", "ref_no": master.ref_no, "opportunity": master.opportunity, "account": master.account, "quotation_owner": master.quotation_owner, **values}).insert(ignore_permissions=True)
+    master.planned_send_date = None  # Each revision needs its own send plan.
     master.latest_version_no = number; master.current_version = version.name; master.status = "Draft"; master.save(ignore_permissions=True)
     return get_quotation(master.name)
 
@@ -663,6 +664,7 @@ def discard_draft(name: str, expected_modified: str | None = None) -> dict[str, 
             master.current_version = published.name; master.latest_version_no = published.version_no; master.status = published.status
         else:
             master.current_version = None
+        master.planned_send_date = None
         master.save(ignore_permissions=True)
         version.delete(ignore_permissions=True)
         if published:
@@ -824,6 +826,7 @@ def _publish_locked(master, version, approval_status: str) -> None:
         if previous and previous != version.name:
             prior = frappe.get_doc("CRM Quotation Version", previous)
             if prior.status in {"Published", "Expired", "Accepted", "Rejected"}: prior.status = "Superseded"; prior.save(ignore_permissions=True)
+        master.planned_send_date = None
         master.current_published_version = version.name; master.current_version = version.name; master.status = "Published"; master.save(ignore_permissions=True)
         if master.opportunity:
             from rayher_crm.services.opportunities import advance_opportunity_for_event

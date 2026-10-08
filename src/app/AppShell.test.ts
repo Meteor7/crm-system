@@ -1,7 +1,7 @@
 import { setLocale } from '@/i18n'
 import { createPinia } from 'pinia'
 import { enableAutoUnmount, flushPromises, mount } from '@vue/test-utils'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import AppShell from './AppShell.vue'
 import { createAppRouter } from './router'
 import { createMockApi } from '@/api/mock-adapter'
@@ -9,6 +9,11 @@ import { useAppStore } from '@/stores/app'
 import { useNotificationStore } from '@/stores/notifications'
 
 enableAutoUnmount(afterEach)
+
+beforeEach(() => {
+  // JSDOM lacks the native dialog method used when Review leaves the route.
+  HTMLDialogElement.prototype.close = function () { this.removeAttribute('open') }
+})
 
 describe('AppShell', () => {
   it('uses the approved PLANCK CRM brand without the retired RAYHER label', async () => {

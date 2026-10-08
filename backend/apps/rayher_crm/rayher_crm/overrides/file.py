@@ -126,6 +126,7 @@ class ManagedFile(File):
         while moving only this File's bytes.
         """
         from rayher_crm.services.managed_file_access import (
+            _ordinary_private_crm_attachment,
             _protected_blob,
             canonical_local_reference,
             lock_canonical_file_siblings,
@@ -167,6 +168,16 @@ class ManagedFile(File):
         updated_file_url = new_prefix + relative_path
         if _protected_blob(url=reference, content_hash=stored.content_hash) or _protected_blob(url=updated_file_url):
             frappe.throw("A managed attachment cannot be moved through a native privacy change.", frappe.PermissionError)
+        if new_private:
+            # The bulk sibling UPDATE below bypasses each sibling's save hooks.
+            # Revoke its formerly-public CRM grants under the same File locks,
+            # and serialize Address/Customer promotions before moving any bytes.
+            restricted = [
+                row.name for row in siblings
+                if _ordinary_private_crm_attachment(frappe._dict(row, is_private=1))
+            ]
+            if restricted:
+                frappe.db.delete("DocShare", {"share_doctype": "File", "share_name": ("in", restricted)})
         old_file_url = stored.file_url
         source = Path(frappe.get_site_path(
             "private" if old_private else "public", "files", *relative_path.split("/"),

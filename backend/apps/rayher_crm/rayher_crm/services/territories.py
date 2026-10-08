@@ -25,6 +25,7 @@ def ensure_default_territories() -> None:
     for position, (name, parent) in enumerate(DEFAULT_TERRITORIES):
         frappe.get_doc({
             "doctype": DOCTYPE, "territory_name": name, "parent_territory": parent, "sort_order": position,
+            "is_group": int(name not in REGION_PRESETS), "enabled": 1,
         }).insert(ignore_permissions=True)
 
 

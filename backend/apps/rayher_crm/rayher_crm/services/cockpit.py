@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 from datetime import datetime
-from hashlib import sha256
 
 import frappe
 from rayher_crm.services.action_statuses import OPEN_ACTION_STATUSES
@@ -20,6 +19,7 @@ from rayher_crm.services.cockpit_conversion import build_conversions, pipeline_c
 from rayher_crm.services.equipment import equipment_key, list_equipment_types
 from rayher_crm.services.cockpit_settings import thresholds
 from rayher_crm.services import territory_tree
+from rayher_crm.services import cockpit_target_rules as target_rules, territory_admin
 from rayher_crm.services.territories import region_tree
 from rayher_crm.services.warning_handling import FIELDS as HANDLING_FIELDS, HANDLING, REVISION, REVISION_FIELDS, handling_records
 
@@ -108,15 +108,15 @@ def load_data(customers, people):
     handlings = list({r["name"]: r for r in (*linked(HANDLING, handling_fields, "opportunity", opp_ids),
                                              *linked(HANDLING, handling_fields, "source_id", {r["name"] for r in quotes}))}.values())
     return {
-        "customers": customers, "people": people, "opportunities": opps,
+        "customers": customers, "people": people, "opportunities": opps, "events": event_rows(ids),
         "bookings": bookings, "booking_dates_ready": booking_dates_ready,
         "cny_amount_ready": cny_amount_ready,
-        "history": linked("CRM Opportunity History", "name creation opportunity at field from_value to_value", "opportunity", opp_ids),
+        "history": linked("CRM Opportunity History", "name creation opportunity at field from_value to_value from_owner to_owner", "opportunity", opp_ids),
         "stages": stages,
         "actions": linked("CRM Opportunity Action", "name creation opportunity title action_owner due status archived completed_at", "opportunity", opp_ids),
         "probabilities": linked("CRM Opportunity Probability History", probability_fields, "opportunity", opp_ids),
         "recoveries": linked("CRM Probability Recovery", "name opportunity probability_change plan action_taken acted_by acted_at", "opportunity", opp_ids),
-        "loss_reviews": linked("CRM Opportunity Loss Review", "name opportunity stage_event review_status review_note reviewed_by reviewed_at reopened_at modified", "opportunity", opp_ids),
+        "loss_reviews": linked("CRM Opportunity Loss Review", "name opportunity stage_event review_status review_category review_note reviewed_by reviewed_at reopened_at modified", "opportunity", opp_ids),
         "visits": visits,
         "leads": leads,
         "requests": requests,
@@ -124,6 +124,7 @@ def load_data(customers, people):
         "evaluations": evaluations,
         "tests": linked("CRM Test Run", "name creation evaluation run_date test_round status", "evaluation", {r["name"] for r in evaluations}),
         "quotes": quotes, "quotation_opportunities": quotation_opportunities,
+        "followups": linked("CRM Quotation Follow Up", "name parent creation title due status completed_at completed_owner completed_version", "parent", {r["name"] for r in quotes}),
         "versions": linked("CRM Quotation Version", "name quotation version_no published_at account quotation_owner status valid_until currency total", "quotation", {r["name"] for r in quotes}),
         # Next steps and S6 actions Managers recorded on Warnings rows (overdue, quotation expiry, S6).
         "warning_handlings": handling_records(handlings, linked(REVISION, " ".join(REVISION_FIELDS), "handling", {r["name"] for r in handlings})),
@@ -168,9 +169,9 @@ def calculate(query):
     # before Warnings flags them: the Manager's settings page, else site config, else 14 and 30.
     limits = thresholds()
     data = load_data(customers, people)
-    result = build_review(data, query, now, coverage, limits["quote_expiry_days"][0], limits["stage6_no_po_days"][0])
+    result = build_review(data, query, now, coverage, limits["quote_expiry_days"][0], limits["stage6_no_po_days"][0], limits["stalled_days"][0], limits["stall_escalation_days"][0])
     result["filters"] = filters
-    attach_targets(result, query)
+    attach_targets(result, query, customers=customers)
     result["conversions"], conversion_details = build_conversions(
         data, query, now, coverage, frappe.conf.get("crm_cockpit_conversion_threshold", 45))
     result["_details"].update(conversion_details)
@@ -180,6 +181,9 @@ def calculate(query):
     resource_risks = result["demoResources"]
     result["warnings"].append({"key": "demo_resources", "count": metric(resource_risks["count"],
         "insufficient" if resource_risks["unknown"] else "ready", "missing_resource_schedule" if resource_risks["unknown"] else None)})
+    from rayher_crm.services.blue_sheet import warning_rows
+    result["_details"]["red_flags"] = warning_rows(data["opportunities"], customers, query)
+    result["warnings"].append({"key": "red_flags", "count": metric(len(result["_details"]["red_flags"]))})
     return result
 
 
@@ -236,6 +240,7 @@ def get_warnings(query):
               "stage6NoPo": result["stage6NoPo"],
               "stage6NoPoItems": details["stage6_no_po"],
               "closeDateSlipItems": details["close_date_slip"],
+              "redFlagItems": details["red_flags"],
               "closeDateSlipHandledItems": details["close_date_slip_handled"],
               "demoResources": result["demoResources"],
               # S6 deals with a recorded action whose follow-up day is still ahead: listed, never counted.
@@ -254,6 +259,7 @@ def _names(result):
     users |= {r.get("actionOwner") for r in result["overdue"]} | {r.get("currentOwner") for r in result["downgrade"]}
     users |= {(r.get("review") or {}).get("reviewedBy") for r in result["lost"] + result["lostBacklog"]}
     users |= {(r.get("recovery") or {}).get("editedBy") for r in result["downgrade"]}
+    users |= {row.get("owner") for row in result.get("redFlagItems", [])}
     users = sorted(u for u in users if u)
     if not users:
         return {}
@@ -267,6 +273,17 @@ def get_details(query):
         raise CrmApiException("VALIDATION_ERROR", "Unknown Review metric.")
     items, total, page, size = paginate_items(result["_details"][key], query)
     return {"items": items, "total": total, "page": page, "pageSize": size, "asOf": result["period"]["asOf"]}
+
+
+def event_rows(account_ids):
+    # Keep native row permissions while limiting the database result to this
+    # customer scope plus standalone events. Notes are not cockpit facts.
+    scope = [["account", "is", "not set"]]
+    if account_ids:
+        scope.append(["account", "in", sorted(account_ids)])
+    fields = "name title event_owner start_date end_date status account opportunity region market equipment completed_at completed_owner creation"
+    return [dict(row) for row in frappe.get_list("CRM Event", or_filters=scope,
+                                                fields=fields.split(), limit_page_length=0)]
 
 
 def load_plan_data(customers, people, equipment=False):
@@ -292,9 +309,16 @@ def load_plan_data(customers, people, equipment=False):
     visits = read("CRM Visit", "name account opportunity visit_owner subject visit_date status",
                   {"account": ["in", list(ids)], "status": "Planned"}) if ids else []
     requests = linked("CRM Demo Request", "name account sales_owner opportunity status", "account", ids)
-    unlisted_ids = {r["opportunity"] for r in (*visits, *requests) if r.get("opportunity")} - {r["name"] for r in opps} if equipment else set()
+    quotes = linked("CRM Quotation", "name ref_no account opportunity quotation_owner status current_version current_published_version planned_send_date", "account", ids)
+    quote_ids = {r["name"] for r in quotes}
+    quotation_opportunities = linked("CRM Opportunity", "name stage tool_type", "name", {r["opportunity"] for r in quotes if r.get("opportunity")})
+    versions = linked("CRM Quotation Version", "name quotation status currency total", "quotation", quote_ids)
+    followups = linked("CRM Quotation Follow Up", "name parent creation title due status completed_at completed_owner completed_version", "parent", quote_ids)
+    events = event_rows(ids)
+    unlisted_ids = {r["opportunity"] for r in (*visits, *requests, *events) if r.get("opportunity")} - {r["name"] for r in opps}
     return {
-        "customers": customers, "people": people, "opportunities": opps, "cny_amount_ready": cny_amount_ready,
+        "customers": customers, "people": people, "opportunities": opps, "cny_amount_ready": cny_amount_ready, "events": events,
+        "quotes": quotes, "versions": versions, "followups": followups, "quotation_opportunities": quotation_opportunities,
         "visits": visits,
         "requests": requests,
         "evaluations": evaluations,
@@ -315,6 +339,7 @@ def calculate_plan(query):
         raise CrmApiException("VALIDATION_ERROR", "Invalid Plan period or anchor.") from exc
     customers, people, filters = scoped(query)
     data = load_plan_data(customers, people, equipment=bool(query["equipment"]))
+    data["equipment_labels"] = filters["equipment"]
     result = build_plan(data, {**query, "includeOverdue": include_overdue}, frappe.utils.now_datetime())
     result["filters"] = filters
     return result
@@ -322,6 +347,8 @@ def calculate_plan(query):
 
 def get_plan(query):
     result = calculate_plan(query)
+    from rayher_crm.services.plan_commitments import attach
+    attach(result, query)
     result.pop("_details")
     return result
 
@@ -331,36 +358,124 @@ def get_plan_details(query):
     if key not in PLAN_METRICS:
         raise CrmApiException("VALIDATION_ERROR", "Unknown Plan metric.")
     result = calculate_plan(query)
-    items, total, page, size = paginate_items(result["_details"][key], {"page": query.get("page"), "pageSize": query.get("pageSize") or 50})
+    rows = result["_details"][key]
+    group = query.get("equipmentGroup")
+    if group is not None:
+        if group not in {row["id"] for row in result["equipmentGroups"]}:
+            raise CrmApiException("VALIDATION_ERROR", "Unknown equipment summary group.")
+        rows = [row for row in rows if row["equipmentGroup"] == group]
+    items, total, page, size = paginate_items(rows, {"page": query.get("page"), "pageSize": query.get("pageSize") or 50})
     return {"items": items, "total": total, "page": page, "pageSize": size, "asOf": result["asOf"]}
 
 
 def target_dto(row):
-    return {"id": row["name"], "sales": row["sales_owner"], "metric": row["metric"], "period": row["period"],
+    return {"id": row["name"], "sales": row.get("sales_owner") or "", "scope": "territory" if row.get("target_scope") == "Territory" else "sales",
+            "territory": row.get("territory") or "", "metric": row["metric"], "period": row["period"],
             "anchor": str(row["anchor"]), "value": str(row["target_value"]), "modified": to_iso_timestamp(row["modified"])}
 
 
-def attach_targets(result, query):
-    # Individual targets are per person only: never split by market, region or equipment.
-    applicable = bool(query["sales"] and not query["market"] and not query["region"] and not query.get("equipment"))
-    rows = read(TARGET, "name sales_owner metric period anchor target_value modified", {"sales_owner": query["sales"]}) if query["sales"] else []
+def targetable_sales():
+    from rayher_crm.permissions.roles import CRM_ROLE_TO_PROFILE
+    roles = {}
+    for row in read("Has Role", "parent role", {"parenttype": "User", "role": ["in", list(CRM_ROLE_TO_PROFILE)]}):
+        roles.setdefault(row["parent"], set()).add(row["role"])
+    candidates = {owner for owner, assigned in roles.items() if assigned == {"CRM Sales"}}
+    return {row["name"] for row in linked("User", "name enabled", "name", candidates) if row["enabled"]}
+
+
+def target_rows(where="", values=(), *, limit=None):
+    # MariaDB's User identity comparison also accepts legacy casing. Expose the
+    # canonical Link without rewriting a target or its audit history on a GET.
+    return [target_dto(r) for r in frappe.db.sql("""SELECT t.name, t.target_scope,
+        COALESCE(u.name, t.sales_owner) AS sales_owner, t.territory, t.metric,
+        t.period, t.anchor, t.target_value, t.modified
+        FROM `tabCRM Cockpit Target` t LEFT JOIN `tabUser` u ON u.name=t.sales_owner"""
+        + (" WHERE " + where if where else "") + (" LIMIT 2" if limit == 2 else ""), values, as_dict=True)]
+
+
+def period_target_rows(kind, anchor, *, orders_year=None):
+    """Materialize only this period and the latest applicable weekly defaults.
+
+    Keep all ties: duplicate business keys must remain visibly insufficient.
+    User Link comparisons/grouping use the database's native identity collation.
+    """
+    rows = target_rows("t.period=%s AND t.anchor=%s AND t.metric IN %s "
+                       "AND COALESCE(NULLIF(t.target_scope, ''), 'Sales')='Sales'",
+                       (kind, anchor, tuple(ACTIVITIES)))
+    if kind == "week":
+        rows += target_rows("""t.period='weekly_default' AND t.metric IN %s
+            AND COALESCE(NULLIF(t.target_scope, ''), 'Sales')='Sales'
+            AND (t.sales_owner, t.metric, t.anchor) IN (
+                SELECT sales_owner, metric, MAX(anchor) FROM `tabCRM Cockpit Target`
+                WHERE period='weekly_default' AND anchor<=%s
+                  AND COALESCE(NULLIF(target_scope, ''), 'Sales')='Sales'
+                GROUP BY sales_owner, metric)""", (tuple(ACTIVITIES), anchor))
+    if orders_year is not None:
+        rows += target_rows("t.metric='orders' AND t.period='year' AND t.anchor=%s", (f"{orders_year}-01-01",))
+    return rows
+
+
+def get_target(query):
+    """An exact editor key, independent of the period currently being reviewed."""
+    require_manager()
+    scope = query.get("scope") or "sales"
+    owner, territory = query.get("sales") or "", query.get("territory") or ""
+    key, kind = query.get("metric"), query.get("period")
+    if (scope not in ("sales", "territory") or not isinstance(owner, str) or not isinstance(territory, str)
+            or not isinstance(key, str) or key not in (*ACTIVITIES, "orders")
+            or not isinstance(kind, str) or kind not in ("week", "month", "quarter", "year", "weekly_default")
+            or (key == "orders" and kind != "year")
+            or (scope == "sales" and (not owner or territory))
+            or (scope == "territory" and (not territory or owner or key != "orders"))):
+        raise CrmApiException("VALIDATION_ERROR", "Choose a valid target owner, metric and period.")
+    try:
+        anchor = datetime.strptime(query.get("anchor", ""), "%Y-%m-%d").date()
+        start, _ = bounds("week" if kind == "weekly_default" else kind, anchor)
+        if anchor != start:
+            raise ValueError()
+    except (ValueError, TypeError) as exc:
+        raise CrmApiException("VALIDATION_ERROR", "Target anchor must be the first day of its period.") from exc
+    rows = target_rows("""COALESCE(NULLIF(t.target_scope, ''), 'Sales')=%s
+        AND COALESCE(t.sales_owner, '')=%s AND COALESCE(t.territory, '')=%s
+        AND t.metric=%s AND t.period=%s AND t.anchor=%s""",
+        ("Sales" if scope == "sales" else "Territory", owner, territory, key, kind, anchor), limit=2)
+    if len(rows) > 1:
+        raise CrmApiException("CONFLICT", "Duplicate targets exist for this period; reconcile them before saving.")
+    return rows[0] if rows else None
+
+
+def attach_targets(result, query, *, customers=None):
     start = result["period"]["start"]
     kind = result["period"]["kind"]
-
-    def find(key, kind, anchor):
-        matches = [r for r in rows if r["metric"] == key and r["period"] == kind and str(r["anchor"]) == anchor]
-        if not matches and kind == "week":
-            matches = sorted([r for r in rows if r["metric"] == key and r["period"] == "weekly_default" and str(r["anchor"]) <= anchor], key=lambda r: str(r["anchor"]), reverse=True)
-        if not applicable:
-            return {**metric(None, "not_applicable"), "record": None}
-        return {**metric(str(matches[0]["target_value"]) if matches else None, "ready" if matches else "not_set"),
-                "record": target_dto(matches[0]) if matches else None}
+    year = stamp(result["period"]["asOf"]).year
+    rows = period_target_rows(kind, start, orders_year=year)
+    tree = territory_admin.tree_rows()
+    leaves = sorted(r["name"] for r in tree if not r.get("is_group"))
+    # Match the target editor/save eligibility, keeping historical filter choices
+    # independent. Only an activity's own outside contributors affect its target.
+    members = targetable_sales()
+    result["targetOptions"] = {"territories": leaves, "teamMembers": sorted(members)}
+    not_allocated = {**metric(None, "not_applicable", "targets_not_allocated_to_scope"), "record": None}
+    personal = [r for r in rows if r["scope"] == "sales" and r["sales"] == query.get("sales")]
+    unallocated = bool(query.get("market") or query.get("equipment"))
 
     for item in result["activities"]:
-        item["target"] = find(item["key"], kind, start)
-    year = stamp(result["period"]["asOf"]).year
-    result["orders"]["target"] = find("orders", "year", f"{year}-01-01")
-    result["targets"] = [target_dto(r) for r in rows]
+        owners = {r.get("owner") or "__unknown_sales_owner__" for r in result.get("_details", {}).get(item["key"], [])}
+        item["target"] = (dict(not_allocated) if unallocated or query.get("region") else
+                          target_rules.target(personal, item["key"], kind, start) if query.get("sales") else
+                          target_rules.aggregate(rows, members | owners, item["key"], kind, start, "sales", non_targetable=owners - members))
+    anchor = f"{year}-01-01"
+    if unallocated or (query.get("sales") and query.get("region")):
+        result["orders"]["target"] = dict(not_allocated)
+    elif query.get("sales"):
+        result["orders"]["target"] = {**target_rules.target(personal, "orders", "year", anchor), "scope": "sales"}
+    else:
+        regions, unmapped = target_rules.territory_members(tree, query.get("region"), [r.get("custom_crm_region") for r in customers or []])
+        # Legacy parent targets cannot turn a Customer stored on a group into a valid leaf allocation.
+        region_targets = [r for r in rows if r["scope"] == "territory" and r["territory"] in leaves]
+        result["orders"]["target"] = target_rules.aggregate(region_targets, regions, "orders", "year", anchor, "territory")
+        result["targetOptions"]["unmappedRegions"] = unmapped
+    result["targets"] = rows
     annual = result["orders"]["target"]["value"]
     day = stamp(result["period"]["asOf"]).date()
     elapsed = (day - datetime(year, 1, 1).date()).days + 1
@@ -373,12 +488,38 @@ def save_target(payload, expected_modified=None):
     require_manager()
     payload = as_payload(payload)
     owner, key, kind = payload.get("sales"), payload.get("metric"), payload.get("period")
-    if key not in {*ACTIVITIES, "orders"} or kind not in {"week", "month", "quarter", "year", "weekly_default"} or (key == "orders" and kind != "year"):
+    scope = payload.get("scope") or "sales"
+    if not isinstance(scope, str) or scope not in {"sales", "territory"}:
+        raise CrmApiException("VALIDATION_ERROR", "Choose a sales or territory target.")
+    if not isinstance(key, str) or not isinstance(kind, str) or key not in {*ACTIVITIES, "orders"} or kind not in {"week", "month", "quarter", "year", "weekly_default"} or (key == "orders" and kind != "year"):
         raise CrmApiException("VALIDATION_ERROR", "Invalid target metric or period.")
-    if not isinstance(owner, str) or not frappe.db.exists("Has Role", {"parent": owner, "parenttype": "User", "role": "CRM Sales"}):
-        raise CrmApiException("VALIDATION_ERROR", "A sales owner is required.")
-    if not frappe.db.get_value("User", owner, "enabled"):
-        raise CrmApiException("VALIDATION_ERROR", "The sales owner is disabled.")
+    territory = payload.get("territory") or ""
+    if scope == "territory":
+        if not isinstance(territory, str) or owner or key != "orders" or kind != "year":
+            raise CrmApiException("VALIDATION_ERROR", "Territory targets are annual orders on a leaf region, without a sales owner.")
+    elif not isinstance(owner, str) or not owner or territory:
+        raise CrmApiException("VALIDATION_ERROR", "A sales owner is required, without a territory allocation.")
+    # An atomic upsert serializes first inserts and updates for this transaction.
+    # Take it before either scope's locks: assignments take User then catalogue,
+    # so catalogue -> Series -> User would create a three-transaction cycle.
+    # Series has no owner/modified_by fields scanned by User.after_rename;
+    # locking a DocType row here before User would invert native rename locks.
+    frappe.db.sql("""INSERT INTO `tabSeries` (`name`, `current`) VALUES (%s, 0)
+        ON DUPLICATE KEY UPDATE `current`=`current`""", ("rayher_crm.cockpit_target_write_lock",))
+    if scope == "territory":
+        territory_admin.lock_catalogue()
+        nodes = territory_admin.tree_rows(for_update=True)
+        if not any(r["name"] == territory and not r.get("is_group") for r in nodes):
+            raise CrmApiException("VALIDATION_ERROR", "Choose a leaf territory; parent totals are calculated.")
+    else:
+        from rayher_crm.permissions.roles import CRM_ROLE_TO_PROFILE
+        user = frappe.db.get_value("User", owner, ["name", "enabled"], as_dict=True, for_update=True)
+        if not user or not user.enabled:
+            raise CrmApiException("VALIDATION_ERROR", "Choose an enabled user with exactly the CRM Sales role.")
+        owner = user.name
+        roles = frappe.db.sql("SELECT role FROM `tabHas Role` WHERE parent=%s AND parenttype='User' FOR UPDATE", (owner,), pluck=True)
+        if {r for r in roles if r in CRM_ROLE_TO_PROFILE} != {"CRM Sales"}:
+            raise CrmApiException("VALIDATION_ERROR", "Choose an enabled user with exactly the CRM Sales role.")
     value = number(payload.get("value"))
     if value is None or value > number("999999999999.99") or (key != "orders" and value != value.to_integral_value()) or value.as_tuple().exponent < -2:
         raise CrmApiException("VALIDATION_ERROR", "Target must be a non-negative count or a CNY amount with at most two decimals.")
@@ -391,22 +532,38 @@ def save_target(payload, expected_modified=None):
         raise CrmApiException("VALIDATION_ERROR", "Target anchor must be the first day of its period.") from exc
     if kind == "weekly_default" and anchor <= frappe.utils.now_datetime().date():
         raise CrmApiException("VALIDATION_ERROR", "Default weekly targets take effect from a future Monday.")
-    name = sha256(f"{owner}|{key}|{kind}|{anchor}".encode()).hexdigest()[:32]
-    # Serialize creates as well as updates. The stable unique key prevents duplicate goals.
-    frappe.db.get_value("User", owner, "name", for_update=True)
-    exists = frappe.db.exists(TARGET, name)
+    # Links change during User/Territory rename; target IDs and Version records
+    # must survive. Include legacy empty Sales scope in the current business key.
+    matches = frappe.db.sql("""SELECT name FROM `tabCRM Cockpit Target`
+        WHERE COALESCE(NULLIF(target_scope, ''), 'Sales')=%s
+          AND COALESCE(sales_owner, '')=%s AND COALESCE(territory, '')=%s
+          AND metric=%s AND period=%s AND anchor=%s FOR UPDATE""",
+        ("Sales" if scope == "sales" else "Territory", owner if scope == "sales" else "", territory, key, kind, anchor), pluck=True)
+    if len(matches) > 1:
+        raise CrmApiException("CONFLICT", "Duplicate targets exist for this period; reconcile them before saving.")
+    exists = bool(matches)
+    # A reused old email must not collide with a renamed user's retained ID.
+    name = matches[0] if exists else frappe.generate_hash(length=32)
     if exists:
         if not expected_modified:
             raise CrmApiException("CONFLICT", "This target already exists. Reload before editing.")
         doc = lock_document(TARGET, name, expected_modified, "NOT_FOUND")
+        doc = frappe.get_doc(TARGET, name, for_update=True)
+        if scope == "sales":
+            doc.target_scope = "Sales"
+            doc.sales_owner = owner
     else:
         if expected_modified:
             raise CrmApiException("CONFLICT", "This target no longer exists. Reload before saving.")
-        doc = frappe.get_doc({"doctype": TARGET, "name": name, "sales_owner": owner, "metric": key, "period": kind, "anchor": anchor})
+        doc = frappe.get_doc({"doctype": TARGET, "name": name, "sales_owner": owner if scope == "sales" else None,
+                              "target_scope": "Sales" if scope == "sales" else "Territory", "territory": territory or None,
+                              "metric": key, "period": kind, "anchor": anchor})
     doc.target_value = format(value, ".2f")
     doc.changed_by = frappe.session.user
     if exists:
-        doc.save(ignore_permissions=True)
+        # Target edits always retain the native audit diff, including in the
+        # Frappe test runner which otherwise disables Version creation.
+        doc.save(ignore_permissions=True, ignore_version=False)
     else:
         doc.insert(ignore_permissions=True)
     return target_dto(doc.as_dict())

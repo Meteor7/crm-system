@@ -8,8 +8,8 @@ contains a preset name, like ``Kibo 4895C``)::
 
     bench --site <site> execute rayher_crm.setup.equipment_types.report
 
-``sync`` runs on every migrate (``sync_after_migrate``) and drops custom types no Opportunity uses
-any more, the same way unused custom regions are dropped.
+``sync`` runs on every migrate (``sync_after_migrate``) and drops custom types no Opportunity
+or Event uses any more. The diagnostic report keeps its Opportunity-only counts.
 """
 
 from __future__ import annotations
@@ -22,9 +22,11 @@ import frappe
 from rayher_crm.services.equipment import EQUIPMENT_PRESETS, EQUIPMENT_TYPE, equipment_key, lock_catalog
 
 
-def stored_values() -> Counter[str]:
+def stored_values(*, include_events=False) -> Counter[str]:
     # Counted in Python: the column's collation would fold "Nansi" and "nansi" into one group.
     rows = frappe.db.sql("SELECT `tool_type` FROM `tabCRM Opportunity`")
+    if include_events and frappe.db.table_exists("CRM Event"):
+        rows = [*rows, *frappe.db.sql("SELECT `equipment` FROM `tabCRM Event`")]
     return Counter(text for text in (str(row[0] or "").strip() for row in rows) if text)
 
 
@@ -45,7 +47,7 @@ def sync() -> dict[str, list[str]]:
     # starts using a type between the reads below. Opportunity rows are not locked: a save holds
     # its row while it waits for this lock, and locking rows here too could deadlock.
     lock_catalog()
-    counts = stored_values()
+    counts = stored_values(include_events=True)
     # One entry per type, holding its most common stored spelling; most common type first.
     stored: dict[str, str] = {}
     for value in sorted(counts, key=lambda value: (-counts[value], value)):

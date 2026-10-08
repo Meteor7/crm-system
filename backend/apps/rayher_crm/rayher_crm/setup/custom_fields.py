@@ -72,11 +72,17 @@ def _merged_options(defaults: str, existing: str) -> list[str]:
     return options
 
 
+def _maintained_regions() -> list[str]:
+    if frappe.db.table_exists("CRM Sales Territory") and frappe.db.has_column("CRM Sales Territory", "is_group"):
+        return frappe.get_all("CRM Sales Territory", filters={"is_group": 0}, pluck="name", order_by="name", limit_page_length=0)
+    return []
+
+
 def _regions_in_use() -> set[str]:
-    """Regions stored on any Customer or Opportunity."""
+    """Regions stored on Customers, Opportunities or standalone activities."""
 
     used: set[str] = set()
-    for table, column in (("Customer", "custom_crm_region"), ("CRM Opportunity", "sub_region")):
+    for table, column in (("Customer", "custom_crm_region"), ("CRM Opportunity", "sub_region"), ("CRM Event", "region")):
         if frappe.db.table_exists(table) and frappe.db.has_column(table, column):
             used.update(row[0] for row in frappe.db.sql(f"SELECT DISTINCT `{column}` FROM `tab{table}`") if row[0])
     return used
@@ -95,14 +101,15 @@ def _custom_fields_for_install() -> dict:
         segment_field = customer_fields["custom_crm_segment"]
         segment_field["options"] = "\n".join(_merged_options(segment_field["options"], segment_options))
     region_options = frappe.db.get_value("Custom Field", ACCOUNT_REGION_FIELD, "options")
-    if region_options:
-        region_field = customer_fields["custom_crm_region"]
-        in_use = _regions_in_use()
-        kept = [
-            option for option in _merged_options(region_field["options"], region_options)
-            if option in REGION_PRESETS or option in in_use
-        ]
-        region_field["options"] = options_text(kept)
+    region_field = customer_fields["custom_crm_region"]
+    maintained = _maintained_regions()
+    in_use = _regions_in_use() | set(maintained)
+    # Native legacy leaves may never have been registered as Select options.
+    # Add them to the candidates as well as the retention set, even on an
+    # installation whose existing Custom Field options are empty.
+    candidates = _merged_options(region_field["options"], "\n".join([region_options or "", *maintained]))
+    kept = [option for option in candidates if option in REGION_PRESETS or option in in_use]
+    region_field["options"] = options_text(kept)
     return fields
 
 

@@ -119,7 +119,8 @@ class TestSalesTerritories(FrappeTestCase):
             self.assertEqual(selected("East China")[0], {east["account"]})
             self.assertEqual(selected("Overseas")[0], {overseas["account"]})
             with self.assertRaises(CrmApiException) as unknown:
-                selected("Europe")
+                # Another test creates Europe natively, which now registers it.
+                selected("Unregistered " + frappe.generate_hash(length=10))
             self.assertEqual(unknown.exception.code, "VALIDATION_ERROR")
 
             # Review counts the same customers: stage-1 deals of both regions under China.

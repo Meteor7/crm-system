@@ -39,6 +39,73 @@ async function setup(role: UserRole = 'Manager', configure?: (api: ReturnType<ty
 }
 async function settle() { await new Promise(resolve => setTimeout(resolve, 340)); await flushPromises() }
 describe('Opportunities board', () => {
+  it('runs a shared query with its version and permits only saving an independent copy', async () => {
+    const item = { ...savedQueryFixture(), owner: 'author@example.invalid', readOnly: true, recipients: [] }
+    item.definition.scope.sales = ['alice@example.invalid', 'bob@example.invalid']
+    const { wrapper, api } = await setup('Sales', api => { api.listOpportunityQueries = vi.fn(async () => response({ items: [item] })) })
+    await wrapper.get('[data-saved-select]').setValue(item.id); await settle()
+    expect(wrapper.get('[data-shared-readonly]').text()).toContain(item.owner)
+    expect(wrapper.find('[data-update-query]').exists()).toBe(false)
+    expect(wrapper.find('[data-delete-query]').exists()).toBe(false)
+    expect(wrapper.find('[data-share-query]').exists()).toBe(false)
+    expect(api.queryOpportunities).toHaveBeenLastCalledWith(expect.objectContaining({ savedQuery: { id: item.id, modified: item.modified } }))
+    await wrapper.get('[data-save-new]').trigger('click'); await wrapper.get('[data-query-name]').setValue('Independent')
+    await wrapper.get('dialog[open] form').trigger('submit'); await flushPromises()
+    expect(api.saveOpportunityQuery).toHaveBeenCalledWith(expect.objectContaining({ name: 'Independent',
+      savedQuery: { id: item.id, modified: item.modified }, definition: expect.objectContaining({ scope: item.definition.scope }),
+    }), undefined, undefined)
+  })
+  it('revokes recipients with the current version and reloads an updated saved query', async () => {
+    const item = { ...savedQueryFixture(), readOnly: false, recipients: ['recipient@example.invalid'] }
+    const { wrapper, api } = await setup('Manager', api => {
+      api.listOpportunityQueries = vi.fn(async () => response({ items: [item] }))
+      api.getQueryRecipients = vi.fn(async () => response({ items: [{ value: item.recipients[0], label: 'Recipient' }] }))
+      api.shareOpportunityQuery = vi.fn(async (_id, recipients) => response({ ...item, recipients, modified: '2026-10-05T00:00:00Z' }))
+    })
+    await wrapper.get('[data-saved-select]').setValue(item.id)
+    await wrapper.get('[data-share-query]').trigger('click'); await flushPromises()
+    await wrapper.get('dialog[open] input[type="checkbox"]').setValue(false)
+    await wrapper.get('dialog[open] form').trigger('submit'); await flushPromises()
+    expect(api.shareOpportunityQuery).toHaveBeenCalledWith(item.id, [], item.modified)
+    expect(wrapper.find('dialog[open]').exists()).toBe(false)
+    await wrapper.get('[aria-label="刷新个人查询"]').trigger('click'); await flushPromises(); await settle()
+    expect(api.queryOpportunities).toHaveBeenLastCalledWith(expect.objectContaining({ savedQuery: { id: item.id, modified: item.modified } }))
+  })
+  it('edits nested groups and preserves their logic when saving a legacy query', async () => {
+    const { wrapper, api } = await setup('Manager', api => { api.listOpportunityQueries = vi.fn(async () => response({ items: [savedQueryFixture()] })) })
+    await wrapper.get('[data-saved-select]').setValue(savedQueryFixture().id)
+    await wrapper.get('[data-add-group]').trigger('click')
+    const group = wrapper.get('[data-group-depth="2"]')
+    await group.get('[aria-label="条件字段"]').setValue('customerName')
+    await group.get('[aria-label="条件值"]').setValue('Acme')
+    await group.get('[data-add-nested-group]').trigger('click')
+    const inner = group.get('[data-group-depth="3"]')
+    expect(inner.find('[data-add-nested-group]').exists()).toBe(false)
+    await inner.get('[aria-label="条件字段"]').setValue('createdAt')
+    await inner.get('[aria-label="条件值"]').setValue('2026-01-01')
+    await settle()
+    const sent = vi.mocked(api.queryOpportunities).mock.lastCall![0]
+    expect(sent.conditions.at(-1)).toEqual({ match: 'any', conditions: [
+      { field: 'customerName', operator: 'contains', value: 'Acme' },
+      { match: 'any', conditions: [{ field: 'createdAt', operator: 'after', value: '2026-01-01' }] },
+    ] })
+    await wrapper.get('[data-save-new]').trigger('click'); await flushPromises()
+    await wrapper.get('[data-query-name]').setValue('Nested copy')
+    await wrapper.get('dialog[open] form').trigger('submit'); await flushPromises()
+    expect(vi.mocked(api.saveOpportunityQuery).mock.lastCall![0].definition.conditions).toEqual(sent.conditions)
+  })
+  it('only applies a carried period after selecting its business date and preserves return navigation', async () => {
+    const { wrapper, api } = await setup('Manager', undefined, '/opportunity-board?period=quarter&reviewAnchor=2026-04-10')
+    expect(vi.mocked(api.queryOpportunities).mock.lastCall![0]).not.toHaveProperty('periodFilter')
+    expect(wrapper.text()).toContain('当前未限制日期')
+    await wrapper.get('[data-period-field]').setValue('poDate'); await settle()
+    expect(api.queryOpportunities).toHaveBeenLastCalledWith(expect.objectContaining({ periodFilter: { field: 'poDate', kind: 'quarter', anchor: '2026-04-10' } }))
+    expect(wrapper.get('[data-period-range]').text()).toContain('2026-04-01 – 2026-06-30')
+    await wrapper.get('[data-query-anchor]').setValue('2031-12-31'); await settle()
+    expect(wrapper.get('a[href^="/dashboard"]').attributes('href')).toContain('anchor=2026-04-10')
+    await wrapper.get('[data-period-field]').setValue(''); await settle()
+    expect(vi.mocked(api.queryOpportunities).mock.lastCall![0]).not.toHaveProperty('periodFilter')
+  })
   it.each<UserRole>(['Manager', 'Sales', 'Engineer'])('renders real HTTP rows and full-result summary for %s', async role => {
     const { wrapper, api } = await setup(role)
     const result = boardResultFixture()
@@ -115,16 +182,16 @@ describe('Opportunities board', () => {
     const { wrapper, api } = await setup()
     await wrapper.get('[data-save-new]').trigger('click')
     await wrapper.get('[data-query-name]').setValue('<x> Demo')
-    await wrapper.get('.board-dialog form').trigger('submit'); await flushPromises()
+    await wrapper.get('.board-dialog[open] form').trigger('submit'); await flushPromises()
     expect(api.saveOpportunityQuery).toHaveBeenCalledWith(expect.objectContaining({ name: '<x> Demo', definition: expect.not.objectContaining({ page: expect.anything() }) }), undefined, undefined)
     expect(wrapper.find('x').exists()).toBe(false)
     expect(wrapper.get('[data-saved-select]').text()).toContain('<x> Demo')
     await wrapper.get('[data-update-query]').trigger('click')
     await wrapper.get('[data-query-name]').setValue('Renamed')
-    await wrapper.get('.board-dialog form').trigger('submit'); await flushPromises()
+    await wrapper.get('.board-dialog[open] form').trigger('submit'); await flushPromises()
     expect(api.saveOpportunityQuery).toHaveBeenLastCalledWith(expect.objectContaining({ name: 'Renamed' }), 'saved-1', '2026-09-22T00:00:00Z')
     await wrapper.get('[data-delete-query]').trigger('click')
-    await wrapper.findAll('.board-dialog form')[1].trigger('submit'); await flushPromises()
+    await wrapper.get('.board-dialog[open] form').trigger('submit'); await flushPromises()
     expect(api.deleteOpportunityQuery).toHaveBeenCalledWith('saved-1', '2026-09-22T00:00:00Z')
     expect(wrapper.get('[data-saved-select]').text()).not.toContain('Renamed')
   })
@@ -133,7 +200,7 @@ describe('Opportunities board', () => {
       api.saveOpportunityQuery = vi.fn(async () => { throw new CrmApiError('VERSION_CONFLICT', 'Changed', 'test') })
     })
     await wrapper.get('[data-save-new]').trigger('click'); await wrapper.get('[data-query-name]').setValue('Demo')
-    await wrapper.get('.board-dialog form').trigger('submit'); await flushPromises()
+    await wrapper.get('.board-dialog[open] form').trigger('submit'); await flushPromises()
     expect(wrapper.get('dialog[open]').text()).toContain('其他位置更新')
   })
   it('uses server field errors and never leaves stale totals after query failure', async () => {

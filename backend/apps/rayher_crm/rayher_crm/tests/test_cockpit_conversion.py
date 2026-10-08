@@ -89,7 +89,7 @@ class TestConversions(unittest.TestCase):
     def test_filters_replay_owner_at_cutoff_and_keep_customer_master_scope(self):
         data = fixture()
         data["opportunities"][0]["opportunity_owner"] = "bob"
-        data["history"] = [{"name": "owner-change", "opportunity": "opp", "at": "2026-09-15", "field": "opportunity_owner", "from_value": "alice", "to_value": "bob"}]
+        data["history"] = [{"name": "owner-change", "opportunity": "opp", "at": "2026-09-15", "field": "opportunity_owner", "from_owner": "alice", "from_value": "old-alice", "to_value": "bob"}]
         data["stages"] = [event("qualified_opportunity")]
         historical = {"period": "week", "anchor": "2026-09-07", "sales": "alice", "region": "East China", "market": "Frontend"}
         result, details = build_conversions(data, historical, NOW, COVERAGE)
@@ -155,8 +155,10 @@ class TestPipelineCoverage(unittest.TestCase):
 
     def test_missing_amounts_targets_and_unsupported_scope_propagate_unknown(self):
         for state in ("not_set", "not_applicable", "insufficient"):
-            data = review(); data["orders"]["target"] = metric(None, state)
-            self.assertEqual(pipeline_coverage(data)["ratio"]["state"], state)
+            data = review(); data["orders"]["target"] = {**metric(None, state), "scope": "territory"}
+            result = pipeline_coverage(data)
+            self.assertEqual(result["ratio"]["state"], state)
+            self.assertEqual((result["targetState"], result["targetScope"]), (state, "territory"))
         for section in ("actual", "target"):
             data = review(); data["orders"][section] = metric(None, "insufficient")
             self.assertEqual(pipeline_coverage(data)["ratio"]["state"], "insufficient")

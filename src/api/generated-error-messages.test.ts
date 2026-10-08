@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 import { afterEach, expect, it } from 'vitest'
 import { CrmApiError } from './contracts'
 import { mapRequestError, requestErrorMessage } from './request-state'
@@ -52,6 +54,7 @@ it.each([
   ['VALIDATION_ERROR', 'approvedOn cannot be in the future.', 'cannot be in the future', '不能晚于今天'],
   ['VALIDATION_ERROR', 'expectedPoDate is required.', 'expected PO date', '预计 PO 日期'],
   ['VALIDATION_ERROR', 'A comment is required to reject an internal validation.', 'comment is required', '必须填写审批意见'],
+  ['VALIDATION_ERROR', 'An approval carries no note: clear it, or reject the request or ask for more information.', 'Clear the note', '请清空说明'],
   ['VALIDATION_ERROR', 'booking is required.', 'Booking details', 'Booking 信息'],
   ['VALIDATION_ERROR', 'The amount and the amount in CNY are required from Demo done.', 'required from Demo done on', '从 Demo 完成阶段起必须有金额'],
   ['VALIDATION_ERROR', 'singleSalesObjective is too long.', 'single sales objective is too long', '本单目标过长'],
@@ -85,6 +88,43 @@ it.each([
   ['ACCOUNT_NOT_FOUND', 'Account was not found, or you have no access to it.', 'account was not found, or you have no access', '找不到这个客户，或者你没有查看权限'],
   ['CONTACT_NOT_FOUND', 'Contact was not found, or you have no access to it.', 'contact was not found, or you have no access', '找不到这个联系人，或者你没有查看权限'],
   ['SITE_NOT_FOUND', 'Site was not found, or you have no access to it.', 'site was not found, or you have no access', '找不到这个厂区，或者你没有查看权限'],
+  // Demo resources (services/demo_resources.py): the catalogue, the intervals, a Demo's schedule, and the field pattern.
+  ['VALIDATION_ERROR', 'End must be later than start.', 'The end must be later than the start.', '结束时间必须晚于开始时间。'],
+  ['VALIDATION_ERROR', 'Status must be Active or Resolved.', 'Unavailable or Resolved', '状态只能是“不可用”或“已恢复”。'],
+  ['VALIDATION_ERROR', 'Equipment ID already exists.', 'exists already', '这个设备编号已存在。'],
+  ['VALIDATION_ERROR', 'code must be at most 140 characters.', 'The equipment ID may hold at most 140 characters.', '设备编号最多 140 个字符。'],
+  ['VALIDATION_ERROR', 'reason must be at most 1000 characters.', 'The reason may hold at most 1000 characters.', '原因最多 1000 个字符。'],
+  ['VALIDATION_ERROR', 'code is required.', 'The equipment ID is required.', '设备编号不能为空。'],
+  ['VALIDATION_ERROR', 'reason is required.', 'The reason is required.', '原因不能为空。'],
+  ['VALIDATION_ERROR', 'Provide start and end with an explicit time zone.', 'valid start and end time', '有效的开始和结束时间'],
+  ['PERMISSION_DENIED', 'Only Managers maintain the resource catalogue.', 'Only a Manager maintains the resource catalogue.', '只有经理可以维护设备目录。'],
+  ['SCOPE_DENIED', 'Only the current Demo Engineer or a Manager may arrange resources.', 'current Demo Engineer or a Manager', '只有当前负责的 Demo 工程师或经理可以安排设备资源。'],
+  ['INVALID_TRANSITION', 'This Demo is no longer awaiting testing.', 'no longer being prepared or tested', '已不在测试准备或测试阶段'],
+  ['VERSION_CONFLICT', 'Record changed; reload before saving.', 'Reload it before saving.', '记录已被修改，请刷新后再保存。'],
+  ['NOT_FOUND', 'Resource was not found.', 'The resource was not found.', '找不到这个设备资源。'],
+  // The Manager's decision note and the scorecard links (services/document_access.py, document_links.py).
+  ['VALIDATION_ERROR', 'The note may hold at most 1000 characters.', 'at most 1000 characters', '给申请人的说明最多 1000 个字符。'],
+  ['VALIDATION_ERROR', 'Enter an absolute HTTP or HTTPS URL without credentials.', 'without a user name or password', '链接里不能带用户名或密码'],
+  // The Warnings page's handling records (services/warning_handling.py).
+  ['VALIDATION_ERROR', 'Pick a follow-up day after today, at most a year ahead.', 'at most a year ahead', '复核日期请选今天之后、一年以内'],
+  ['VERSION_CONFLICT', "This warning's handling is no longer there. Reload before editing.", 'no longer there', '处理记录已不存在'],
+  // A Lead at its arrangement cap (services/leads.py): the whole list sent, and one more arrangement.
+  ['VALIDATION_ERROR', 'activities may hold at most 200 entries.', 'at most 200 activities', '最多 200 条安排'],
+  ['VALIDATION_ERROR', 'The Lead holds 200 arrangements, the most it can; remove one before adding another.', 'the most it can', '达到上限'],
+  ['VALIDATION_ERROR', 'activities[2].action is required.', 'Activity 3 needs its text.', '第 3 条安排未填写内容。'],
+  ['VALIDATION_ERROR', 'activities[0].action may hold at most 140 characters.', 'Activity 1 may hold at most 140 characters.', '第 1 条安排的内容最多 140 个字符。'],
+  // Files uploaded several at a time, and the Account's and its Contacts' scope (services/contact_files.py, accounts.py, contacts.py).
+  ['VALIDATION_ERROR', 'Upload must contain between 1 and 10 files.', '1 to 10 files', '一次上传 1 到 10 个文件。'],
+  ['VALIDATION_ERROR', 'Upload exceeds the 100 MiB request limit.', 'may not exceed 100 MiB together', '总大小不能超过 100 MiB'],
+  ['SCOPE_DENIED', 'The file is outside the current user scope.', 'This file is outside your scope.', '这个文件不在你的权限范围内。'],
+  ['SCOPE_DENIED', 'Only the Account owner or a Manager may upload files.', 'Only the account owner or a Manager may upload files.', '只有客户负责人或经理可以上传文件。'],
+  ['SCOPE_DENIED', 'Only the Account owner or a Manager may edit this Account.', 'may edit this account', '只有客户负责人或经理可以编辑这个客户。'],
+  ['SCOPE_DENIED', 'Only the Account owner or a Manager may edit contacts.', 'may edit its contacts', '只有客户负责人或经理可以编辑这个客户的联系人。'],
+  ['VERSION_CONFLICT', 'The record was changed by another request.', 'This record was changed by another user. Refresh and try again.', '记录已被其他用户修改，请刷新后重试。'],
+  // Service codes the client folds into CONFLICT and NOT_FOUND (contracts.ts).
+  ['QUOTATION_VERSION_LOCKED', 'Only the current draft can be discarded.', 'Only the current draft can be discarded.', '只能放弃当前的草稿版本。'],
+  ['CONTACT_MERGE_CONFLICT', 'Contacts from different accounts cannot be merged.', 'Contacts of different accounts cannot be merged.', '不同客户的联系人不能合并。'],
+  ['CONTACT_FILE_NOT_FOUND', 'Contact file was not found.', 'The file was not found.', '找不到这个文件。'],
 ])('localizes known %s feedback "%s" while retaining raw diagnostic metadata', (code, message, english, chinese) => {
   const error = new CrmApiError(code, message, 'req_original', false, { field: '原始字段错误' })
   const mapped = mapRequestError(error)
@@ -125,10 +165,51 @@ it('preserves arbitrary server errors, unrecognized stages and retired stage mes
     ['INVALID_TRANSITION', 'Unknown action is not available at demo_done.'],
     ['INVALID_TRANSITION', 'Opportunity cannot move from 需求发现 to 采购流程.'],
     ['CONFLICT', 'Opportunity must be at 客户备注 before workflow completion can move it to demo_done.'],
+    // A field the resource forms do not have, and a known message under another code.
+    ['VALIDATION_ERROR', 'somethingElse must be at most 140 characters.'],
+    ['NOT_FOUND', 'End must be later than start.'],
+    // "title" is a job title on a Contact or a Lead: the resource form's name must not be read into it.
+    ['VALIDATION_ERROR', 'title is required.'],
   ] as const) {
     const error = new CrmApiError(code, message, 'req_server', false)
     setLocale('en-US')
     expect(mapRequestError(error).localizedMessage).toBeUndefined()
     expect(requestErrorMessage(error)).toBe(message)
   }
+})
+
+// Every fixed message these services raise has a translation; a new one must be added to generated-error-messages.ts,
+// or it reads in English on a zh-CN screen. The pattern sees a plain double-quoted message only: one built from values
+// (an f-string) is read by pattern in generated-error-messages.ts, written out with its constant and checked below, or
+// answered by the page from the field errors it comes with (the Warnings page's text limits).
+const FIXED_MESSAGE = /CrmApiException\(\s*"([A-Z_]+)",\s*"((?:[^"\\]|\\.)*)"/g
+it.each([
+  ['backend/apps/rayher_crm/rayher_crm/services/demo_resources.py', FIXED_MESSAGE],
+  ['backend/apps/rayher_crm/rayher_crm/services/document_access.py', FIXED_MESSAGE],
+  ['backend/apps/rayher_crm/rayher_crm/services/warning_handling.py', FIXED_MESSAGE],
+  ['backend/apps/rayher_crm/rayher_crm/services/opportunity_documents.py', FIXED_MESSAGE],
+  // Its ValueError texts are answered as VALIDATION_ERROR by opportunity_documents.py.
+  ['backend/apps/rayher_crm/rayher_crm/services/document_links.py', /raise (ValueError)\("([^"]+)"\)/g],
+])('has a translation for every fixed message of %s', (file, pattern) => {
+  const source = readFileSync(resolve(file), 'utf8')
+  const found = [...source.matchAll(pattern)].map(([, code, message]) => [code === 'ValueError' ? 'VALIDATION_ERROR' : code!, message!] as const)
+  expect(found.length).toBeGreaterThan(0)
+  for (const [code, message] of found) {
+    const mapped = mapRequestError(new CrmApiError(code, message, 'req_coverage', false))
+    expect(mapped.localizedMessage, `${code}: ${message}`).toBeDefined()
+  }
+})
+
+it('keeps the limits written into the fixed messages in step with the services\' constants', () => {
+  const constant = (file: string, name: string) => {
+    const source = readFileSync(resolve(`backend/apps/rayher_crm/rayher_crm/services/${file}`), 'utf8')
+    return new RegExp(`^${name} = (\\d+)$`, 'm').exec(source)![1]
+  }
+  const note = constant('document_access.py', 'MAX_DECISION_NOTE')
+  const cap = constant('leads.py', 'MAX_ACTIVITIES')
+  for (const message of [
+    `The note may hold at most ${note} characters.`,
+    `activities may hold at most ${cap} entries.`,
+    `The Lead holds ${cap} arrangements, the most it can; remove one before adding another.`,
+  ]) expect(mapRequestError(new CrmApiError('VALIDATION_ERROR', message, 'req_constant', false)).localizedMessage, message).toBeDefined()
 })

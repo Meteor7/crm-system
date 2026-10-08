@@ -46,6 +46,7 @@ REQUIRED_DOC_EVENTS = {
     ("Address", "before_save"): "rayher_crm.permissions.scope.revoke_address_shares_entering_crm",
     ("Address", "before_rename"): "rayher_crm.permissions.scope.protect_standard_crm_merge",
     ("User", "before_save"): "rayher_crm.permissions.scope.revoke_shares_when_user_enters_crm",
+    ("User", "before_rename"): "rayher_crm.services.cockpit_identity.lock_users_before_rename",
     ("User", "after_rename"): "rayher_crm.permissions.scope.reconcile_shares_after_user_rename",
     ("File", "before_insert"): "rayher_crm.services.private_file_lifecycle.protect_private_upload",
     ("File", "before_validate"): "rayher_crm.services.managed_file_access.protect_file_write",
@@ -58,6 +59,12 @@ CORE_QUERY_HOOKS = {
     "Contact": ("frappe.contacts.address_and_contact.get_permission_query_conditions_for_contact",),
     "Address": ("frappe.contacts.address_and_contact.get_permission_query_conditions_for_address",),
     "File": ("frappe.core.doctype.file.file.get_permission_query_conditions",),
+    "User": ("frappe.core.doctype.user.user.get_permission_query_conditions",),
+}
+# Shared core objects whose list boundaries live outside business row scopes.
+CORE_BOUNDARY_MODULES = {
+    "File": "services.managed_file_access",
+    "User": "permissions.native_lists",
 }
 
 
@@ -105,7 +112,7 @@ POLICIES = (
     _scope("CRM Opportunity Stage History", "opportunity_stage_history_query", "Current Opportunity scope", "opportunity_stages", "CRM Opportunity"),
     _scope("CRM Opportunity Internal Validation", "opportunity_internal_validation_query", "Current Opportunity scope", "opportunities", "CRM Opportunity"),
     _scope("CRM Opportunity Action", "opportunity_action_query", "Current Opportunity scope", "opportunities", "CRM Opportunity"),
-    _scope("CRM Opportunity History", "opportunity_history_query", "Current Opportunity scope", "opportunities leads", "CRM Opportunity"),
+    _scope("CRM Opportunity History", "opportunity_history_query", "Current Opportunity scope", "opportunities leads cockpit_identity", "CRM Opportunity"),
     _scope("CRM Opportunity Stakeholder", "opportunity_stakeholder_query", "Current Opportunity; Engineer native reads denied", "stakeholders", "CRM Opportunity"),
     _scope("CRM Booking", "booking_query", "Current Account, Opportunity and Booking ownership", "bookings opportunities", "CRM Opportunity"),
     _scope("CRM Installed Tool", "installed_tool_query", "Current Account plus Sales owner or assigned Engineer", "installed_tools bookings", "Customer", "has_site_bearing_permission"),
@@ -125,14 +132,16 @@ POLICIES = (
     _scope("CRM Notification Event", "notification_query", "Recipient and current supported source scope", "notifications", "source_doctype/source_name"),
     _scope("CRM Document Access Request", "document_access_request_query", "Manager all; requester own", "controlled_documents", "CRM Controlled Document"),
     _scope("CRM Visit", "visit_query", "Manager / Sales owner or action owner; Engineer denied", "visits", "Customer"),
+    _scope("CRM Event", "event_query", "Manager / Sales owner and optional current Customer/Opportunity; Engineer denied", "events", "Customer"),
     _scope("CRM Visit Meeting Record", "visit_meeting_record_query", "Current Visit scope", "visit_meetings", "CRM Visit"),
-    _scope("CRM Quotation", "quotation_query", "Manager / Sales Account and Quotation scope", "quotations", "Customer"),
+    _scope("CRM Quotation", "quotation_query", "Manager / Sales Account and Quotation scope", "quotations quotation_planning", "Customer"),
     _scope("CRM Quotation Version", "quotation_version_query", "Current Quotation; service projection for draft-sensitive fields", "quotations", "CRM Quotation", "has_quotation_version_permission"),
     _scope("CRM Quotation Approval", "quotation_approval_query", "Manager and scoped Sales read; Engineer denied", "quotations", "CRM Quotation"),
     _scope("CRM RFQ", "rfq_query", "Current Account, Sales owner or assigned Engineer", "rfqs", "Customer"),
     _scope("CRM RFQ Version", "rfq_version_query", "Current RFQ scope", "rfqs", "CRM RFQ"),
     Policy("CRM Account Engineer Assignment", "desk_exception", "Manager all; Engineer own enabled; Sales denied", ("accounts",), "Customer", "account_engineer_assignment_query"),
-    Policy("File", "file_boundary", "Managed Contact/Visit native bytes use current scope and upload provenance; other files retain Frappe policy", ("private_file_lifecycle",), "attached_to_doctype/attached_to_name", "file_query", "file_permission"),
+    Policy("File", "file_boundary", "Managed Contact/Visit use current scope and provenance; private ordinary CRM parent attachments are hidden from native lists; ordinary ERP files retain Frappe policy", ("private_file_lifecycle",), "attached_to_doctype/attached_to_name", "file_query", "file_permission"),
+    Policy("User", "user_directory", "Sales/Engineer own row; Administrator, System Manager, CRM Manager and non-CRM ERP users keep core policy", (), query="user_query", detail=""),
     _child("Allowed To Transact With", "Native parent row scope", "Customer.companies / Supplier.companies", standard=True),
     _child("Customer Credit Limit", "Native parent row scope", "Customer.credit_limits / Customer Group.credit_limits", standard=True),
     _child("Party Account", "Native parent row scope", "Customer / Customer Group / Supplier / Supplier Group accounts", standard=True),
@@ -145,13 +154,21 @@ POLICIES = (
     _child("Communication Link", "Native Communication row scope", "Communication.timeline_links", standard=True),
     _child("Dynamic Link", "Native Address, Contact, Event, Call Log or Common Code row scope", "links / applies_to", standard=True),
     _child("CRM Note", "Native Lead, Opportunity or Prospect row scope", "notes", standard=True),
-    Policy("CRM Opportunity Saved Query", "service_only", "Private owner-scoped saved definitions", ("opportunity_board",)),
+    _child("Has Role", "Native User, Role Profile, Report, Page, Workspace, Dashboard Chart, Custom Role or Custom HTML Block row scope; a Single parent lists nothing", "roles", standard=True),
+    _child("DefaultValue", "Native User row scope; system defaults belong to no user and are not listed", "User.defaults", standard=True),
+    _child("User Email", "Native User row scope", "User.user_emails", standard=True),
+    _child("User Social Login", "Native User row scope", "User.social_logins", standard=True),
+    _child("Block Module", "Native User or Module Profile row scope", "block_modules", standard=True),
+    Policy("CRM Opportunity Saved Query", "service_only", "Author writes; explicit recipients read definitions through the service", ("opportunity_board",)),
+    _child("CRM Query Recipient", "Service-only Saved Query parent", "CRM Opportunity Saved Query.recipients"),
     Policy("CRM Opportunity Status", "service_only", "Current Opportunity; service projection", ("opportunity_status",), "CRM Opportunity"),
     Policy("CRM Equipment Type", "service_only", "Authenticated CRM equipment catalogue via bootstrap", ("equipment",)),
+    Policy("CRM Sales Territory", "service_only", "Territory classification and totals through CRM services; not an access scope", ("territories", "territory_admin")),
+    Policy("CRM Territory Assignment", "service_only", "Manager effective sales assignments; no access-scope effect", ("territory_admin",)),
+    _child("CRM Quotation Follow Up", "Native Quotation row scope", "CRM Quotation.follow_ups"),
     Policy("CRM Demo Resource", "service_only", "Shared technical catalogue; Manager maintains concrete resource identities", ("demo_resources",)),
     Policy("CRM Demo Unavailability", "service_only", "Shared resource availability; Manager or named maintainer writes", ("demo_resources",), "CRM Demo Resource"),
     Policy("CRM Demo Resource Impact", "service_only", "Immutable observed impact; current Evaluation scope for service reads", ("demo_resources",), "CRM Evaluation"),
-    Policy("CRM Sales Territory", "service_only", "Territory classification and totals through CRM services; not an access scope", ("territories",)),
     _child("CRM Quotation Item", "Native Quotation Version row scope", "CRM Quotation Version.items"),
     _child("CRM Quotation Payment Term", "Native Quotation Version row scope", "CRM Quotation Version.payment_terms"),
     Policy("CRM Quotation Catalog Item", "catalogue", "Native catalogue for Manager and Sales", ("quotations",), native_roles=("CRM Manager", "CRM Sales")),
@@ -160,6 +177,7 @@ POLICIES = (
     Policy("CRM File Access Audit", "manager_read", "Manager audit history", ("controlled_documents", "document_uploads", "opportunity_status"), native_roles=("CRM Manager",)),
     Policy("CRM Cockpit Settings", "manager_read", "Manager settings; service validates writes", ("cockpit_settings",), native_roles=("CRM Manager",)),
     Policy("CRM Cockpit Target", "manager_read", "Manager target rows; service validates writes", ("cockpit_settings",), native_roles=("CRM Manager",)),
+    Policy("CRM Plan Commitment", "manager_read", "Manager period promises; current schedules remain independent", ("plan_commitments",), native_roles=("CRM Manager",)),
     Policy("CRM Warning Handling", "manager_read", "Manager handling state; service validates writes", ("warning_handling",), native_roles=("CRM Manager",)),
     Policy("CRM Warning Handling Revision", "manager_read", "Manager handling history", ("warning_handling",), native_roles=("CRM Manager",)),
 )
@@ -223,7 +241,7 @@ def validate_source_registry(*, documents=None, query_hooks=None, detail_hooks=N
     expected = {
         name
         for name, policy in registered.items()
-        if name not in {*SHARED_ERP_DOCTYPES, "File"} and policy.category != "standard_child_table"
+        if name not in {*SHARED_ERP_DOCTYPES, *CORE_BOUNDARY_MODULES} and policy.category != "standard_child_table"
     }
     if set(documents) != expected:
         raise ValueError(f"CRM DocType policy inventory differs: missing={set(documents) - expected}, stale={expected - set(documents)}")
@@ -231,7 +249,7 @@ def validate_source_registry(*, documents=None, query_hooks=None, detail_hooks=N
         for writer in policy.writers:
             if not (APP_ROOT / "services" / f"{writer}.py").is_file():
                 raise ValueError(f"Unknown registered business service: {name}/{writer}")
-        module = "services.managed_file_access" if name == "File" else "permissions.scope"
+        module = CORE_BOUNDARY_MODULES.get(name, "permissions.scope")
         if policy.query and query_hooks.get(name) != f"rayher_crm.{module}.{policy.query}":
             raise ValueError(f"Missing or changed native scope hook for {name}: {policy.query}")
         if (
@@ -402,6 +420,14 @@ def installed_child_relationships(name):
     }
 
 
+def installed_table_fields(parent):
+    from frappe.model.meta import Meta
+
+    # The effective table fields as stored (DocField, Custom Field and Property Setter rows),
+    # read outside the Meta cache like installed_child_relationships.
+    return [field for field in Meta(parent).get_table_fields() if field.options]
+
+
 def validate_permission_registry(*, installed=True):
     import frappe
     from rayher_crm.permissions.scope import (
@@ -425,7 +451,7 @@ def validate_permission_registry(*, installed=True):
     registered_query_scopes = {
         policy.doctype
         for policy in POLICIES
-        if policy.query and policy.doctype != "File"
+        if policy.query and policy.doctype not in CORE_BOUNDARY_MODULES
     }
     registered_docperm_scopes = {
         policy.doctype for policy in POLICIES if policy.category == "scoped"
@@ -466,9 +492,24 @@ def validate_permission_registry(*, installed=True):
                     "ERP-owned child relationships of %s differ from the CRM registry: unregistered=%s missing=%s",
                     child_doctype, sorted(unregistered), sorted(missing),
                 )
+        # A list hook on a parent is only as tight as the hooks on its child tables: Frappe lists a
+        # child table on the parent's DocType-level read alone (#219). Every table field of a parent
+        # the CRM hooks must therefore be registered, whoever owns the parent; an unregistered one
+        # lists every row. A Frappe or ERPNext upgrade that adds one fails here, not silently.
+        from rayher_crm import hooks
+
+        for parent in hooks.permission_query_conditions:
+            if parent in SCOPED_CHILD_RELATIONSHIPS or not frappe.db.exists("DocType", parent):
+                continue
+            for field in installed_table_fields(parent):
+                if (parent, field.fieldname) not in SCOPED_CHILD_RELATIONSHIPS.get(field.options, ()):
+                    raise ValueError(
+                        f"Child table {field.options} of {parent}.{field.fieldname} is listed without "
+                        "the parent's scope: register it in SCOPED_CHILD_RELATIONSHIPS, hooks and the policies",
+                    )
     for name, policy in policies.items():
-        if name == "File":
-            continue  # Shared Frappe DocPerms; explicit managed lifecycle hooks above.
+        if name in CORE_BOUNDARY_MODULES:
+            continue  # Shared core DocPerms; explicit list/lifecycle hooks above.
         if name in registered_docperm_scopes:
             allowed = DOCPERMS_BY_DOCTYPE.get(name, ROLE_DOCPERMS)
             for role, bits in allowed.items():

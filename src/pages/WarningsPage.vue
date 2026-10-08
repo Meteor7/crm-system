@@ -9,8 +9,10 @@ import { localeMessage, useI18n, useLocaleMessage } from '@/i18n'
 import { opportunityActionLabel } from '@/features/shared/sales-i18n'
 import { detailRoute, labels, metricText } from '@/features/cockpit/presentation'
 import { cockpitRoute, dateWithin, EARLIEST_COCKPIT_DATE, endsBeforeEarliest, pickScope, shanghaiDate, showableAnchor, type CockpitContext } from '@/features/cockpit/scope'
+import { lossCategories, lossCategoryLabel } from '@/features/cockpit/review-labels'
 import WarningNextStep from '@/features/cockpit/WarningNextStep.vue'
 import RegionSelect from '@/features/cockpit/RegionSelect.vue'
+import BlueSheetCompetitionEvidence from '@/features/opportunities/BlueSheetCompetitionEvidence.vue'
 import type { CockpitSettings, CockpitSettingsInput, Metric, PeriodKind, ReviewQuery, ReviewRow, WarningHandling, WarningsDto } from '@/features/cockpit/types'
 
 const props = withDefaults(defineProps<{ apiClient?: CrmApi }>(), { apiClient: () => defaultApi })
@@ -113,6 +115,14 @@ const overdueHandling = computed(() => (data.value?.overdue ?? []).some(row => r
 // Older backends send no stage 6 count; an unknown count means an empty list proves nothing.
 const stage6Known = computed(() => !!data.value?.warnings.some(w => w.key === 'stage6_no_po'))
 const otherUnknown = computed(() => (data.value?.warnings ?? []).some(w => ['quotation_expiry', 'stage6_no_po', 'close_date_slip'].includes(w.key) && (w.count.state !== 'ready' || w.count.value == null)))
+const overdueUnknown = computed(() => {
+  const metric = data.value?.warnings.find(w => w.key === 'overdue')?.count
+  return !metric || metric.state !== 'ready' || metric.value == null
+})
+const downgradeUnknown = computed(() => {
+  const metric = data.value?.warnings.find(w => w.key === 'downgrade')?.count
+  return !metric || metric.state !== 'ready' || metric.value == null
+})
 const warningCount = (key: string) => { const metric = data.value?.warnings.find(w => w.key === key)?.count; return metric ? fmt(metric) : '—' }
 // One line each on the card (the masthead keeps one height); the full text is the tooltip.
 const summaryCards = computed(() => {
@@ -120,9 +130,13 @@ const summaryCards = computed(() => {
   const lostNote = !d ? '—' : [`${copy('pending post-mortem', '待复盘')} · ${lostSummary.value.text}`,
     lostSummary.value.missing ? `${lostSummary.value.missing} ${copy('without CNY estimate', '条缺人民币金额')}` : '',
     d.lostBacklog.length ? `${copy('older pending', '更早待复盘')} ${d.lostBacklog.length}` : ''].filter(Boolean).join(' · ')
-  const overdueNote = !d ? '—' : !d.overdue.length ? copy('Nothing overdue', '没有逾期行动')
-    : `${copy('Oldest', '最久')} ${oldestOverdue.value} ${copy('days late', '天')} · ${stalledOverdue.value === null ? copy('stall status unverified', '停滞状态待核验') : `${stalledOverdue.value} ${copy('on stalled deals', '条在停滞商机上')}`}`
-  const downgradeNote = !d ? '—' : `${copy('awaiting action', '待负责人行动')} · ${downgradeSummary.value.text}`
+  // Both notes describe the rows listed, whatever the count says: an unknown count shows as the card's value
+  // and withholds nothing listed. Only an empty list tells unknown from verified.
+  const overdueNote = !d ? '—' : d.overdue.length
+    ? `${copy('Oldest', '最久')} ${oldestOverdue.value} ${copy('days late', '天')} · ${stalledOverdue.value === null ? copy('stall status unverified', '停滞状态待核验') : `${stalledOverdue.value} ${copy('on stalled deals', '条在停滞商机上')}`}`
+    : overdueUnknown.value ? copy('Action history is incomplete; the overdue total is unknown', '行动历史不完整，逾期总数待核验') : copy('Nothing overdue', '没有逾期行动')
+  const downgradeNote = !d ? '—' : d.downgrade.length ? `${copy('awaiting action', '待负责人行动')} · ${downgradeSummary.value.text}`
+    : downgradeUnknown.value ? copy('Downgrade history is incomplete; the total awaiting action is unknown', '降档历史不完整，待处理总数待核验') : copy('No downgrades awaiting action', '没有待处理的降档')
   const otherNote = !d ? '—' : [`${label('quotation_expiry')} ${warningCount('quotation_expiry')}`,
     stage6Known.value ? `${label('stage6_no_po')} ${warningCount('stage6_no_po')}` : '',
     d.closeDateSlipItems ? `${label('close_date_slip')} ${warningCount('close_date_slip')}` : ''].filter(Boolean).join(' · ')
@@ -280,6 +294,8 @@ const fieldMessages = new Map<string, [string, string]>([
   ['followUpOn', ['Pick a follow-up date from tomorrow to one year ahead.', '请选择明天至一年内的复核日期']],
   ['quoteExpiryDays', ['Quote expiry reminder: a whole number from 0 to 365.', '报价到期提醒天数须为 0–365 的整数']],
   ['stage6NoPoDays', ['Stage 6 without PO: a whole number from 1 to 365.', '第 6 阶段无 PO 天数须为 1–365 的整数']],
+  ['stalledDays', ['Activity warning: a whole number from 1 to 365.', '无实质活动提醒天数须为 1–365 的整数']],
+  ['stallEscalationDays', ['Escalation: a whole number from 1 to 365, no earlier than the warning.', '升级天数须为 1–365 的整数，且不得小于提醒天数']],
 ])
 function failureMessage(reason: unknown) {
   const fields = reason instanceof CrmApiError ? Object.keys(reason.fieldErrors).map(key => fieldMessages.get(key)).filter((message): message is [string, string] => !!message) : []
@@ -376,15 +392,24 @@ function stepBind(handling: WarningHandling) {
 const reviewDialog = ref<HTMLDialogElement | null>(null)
 const reviewRow = ref<ReviewRow | null>(null)
 const reviewNote = ref('')
+const reviewCategory = ref('')
+const reviewCategoryRequired = computed(() => reviewRow.value?.review?.status !== 'reviewed')
 const reviewError = useLocaleMessage()
 const reviewSaving = ref(false)
 const reviewConflict = ref(false)
+function citeCompetition(text: string) {
+  if (reviewSaving.value || revertMode.value) return
+  const combined = [reviewNote.value.trim(), text].filter(Boolean).join('\n\n')
+  if (combined.length > 4000) { reviewError.value = copy('The citation would exceed 4,000 characters. Shorten the draft first.', '引用后超过 4,000 字，请先精简草稿。'); return }
+  reviewNote.value = combined
+}
 // Reverting asks for its own reason and never touches the conclusion.
 const revertMode = ref(false)
 const revertReason = ref('')
 function openReview(row: ReviewRow) {
   reviewRow.value = row
   reviewNote.value = row.review?.note ?? ''
+  reviewCategory.value = row.review?.category ?? ''
   revertMode.value = false; revertReason.value = ''
   reviewError.value = ''
   reviewConflict.value = false
@@ -394,12 +419,16 @@ async function submitReview(status: 'Reviewed' | 'Pending') {
   const row = reviewRow.value
   // A review row without a version cannot be saved against; the table shows such a row as pending backfill.
   if (!row?.review?.modified || reviewSaving.value) return
+  if (status === 'Reviewed' && reviewCategoryRequired.value && !reviewCategory.value) {
+    reviewError.value = copy('Choose a confirmed loss category.', '请选择复盘确认分类。')
+    return
+  }
   const requestRevision = revision
   reviewSaving.value = true; reviewError.value = ''; reviewConflict.value = false
   try {
     const input = status === 'Pending'
       ? { status, reviewNote: row.review.note, revertReason: revertReason.value.trim() }
-      : { status, reviewNote: reviewNote.value.trim() }
+      : { status, reviewNote: reviewNote.value.trim(), ...(reviewCategory.value || row.review.category ? { reviewCategory: reviewCategory.value } : {}) }
     await props.apiClient.reviewOpportunityLoss(row.id, row.review.id, input, row.review.modified)
     if (requestRevision !== revision) return
     reviewDialog.value?.close()
@@ -415,25 +444,28 @@ async function submitReview(status: 'Reviewed' | 'Pending') {
 const settingsDialog = ref<HTMLDialogElement | null>(null)
 const settingsOpener = ref<HTMLButtonElement | null>(null)
 const settings = ref<CockpitSettings | null>(null)
-const settingsDraft = reactive<Record<keyof CockpitSettingsInput, number | string>>({ quoteExpiryDays: '', stage6NoPoDays: '' })
+const settingsDraft = reactive<Record<keyof CockpitSettingsInput, number | string>>({ quoteExpiryDays: '', stage6NoPoDays: '', stalledDays: '', stallEscalationDays: '' })
 const settingsLoading = ref(false)
 const settingsSaving = ref(false)
 const settingsError = useLocaleMessage()
 const settingsConflict = ref(false)
 let settingsRequest = 0
 // 0 quote days means only quotes expiring on the reference date; a stage 6 wait is at least one day.
-const minDays: Record<keyof CockpitSettingsInput, number> = { quoteExpiryDays: 0, stage6NoPoDays: 1 }
+const minDays: Record<keyof CockpitSettingsInput, number> = { quoteExpiryDays: 0, stage6NoPoDays: 1, stalledDays: 1, stallEscalationDays: 1 }
 const settingFields = computed(() => [
+  { key: 'stalledDays' as const, label: copy('Stalled activity warning (days)', '无实质活动提醒天数') },
+  { key: 'stallEscalationDays' as const, label: copy('Stalled activity escalation (days)', '无实质活动升级天数') },
   { key: 'quoteExpiryDays' as const, label: copy('Quote expiry reminder (days)', '报价到期提醒天数') },
   { key: 'stage6NoPoDays' as const, label: copy('Stage 6 without PO (days)', '第 6 阶段无 PO 天数') },
 ])
 const sourceText = (source: string) => source === 'settings' ? copy('Saved setting', '已保存设置') : source === 'site_config' ? copy('Site config', '站点配置') : copy('Default', '默认值')
 // Whole days from the field's minimum to 365 (a number input gives a number, or '' when cleared).
 const validDays = (key: keyof CockpitSettingsInput) => {
-  const value = settingsDraft[key], days = typeof value === 'number' ? value : value.trim() ? Number(value) : NaN
+  const value = settingsDraft[key], days = typeof value === 'number' ? value : value?.trim() ? Number(value) : NaN
   return Number.isInteger(days) && days >= minDays[key] && days <= 365 ? days : null
 }
-const settingsValid = computed(() => validDays('quoteExpiryDays') !== null && validDays('stage6NoPoDays') !== null)
+const invalidStallPair = computed(() => validDays('stallEscalationDays') !== null && validDays('stalledDays') !== null && Number(validDays('stallEscalationDays')) < Number(validDays('stalledDays')))
+const settingsValid = computed(() => settingFields.value.every(field => validDays(field.key) !== null) && !invalidStallPair.value)
 // Back to the thresholds button once it is enabled again (it stays disabled while a save reloads the page).
 function focusSettingsOpener() { if (!settingsSaving.value) void nextTick(() => settingsOpener.value?.focus()) }
 function closeSettings() { settingsDialog.value?.close(); focusSettingsOpener() }
@@ -447,6 +479,7 @@ async function openSettings() {
     if (id !== settingsRequest) return
     settings.value = result.data
     settingsDraft.quoteExpiryDays = result.data.quoteExpiryDays; settingsDraft.stage6NoPoDays = result.data.stage6NoPoDays
+    settingsDraft.stalledDays = result.data.stalledDays ?? 21; settingsDraft.stallEscalationDays = result.data.stallEscalationDays ?? 35
   } catch (reason) {
     if (id === settingsRequest) settingsError.value = requestErrorMessage(reason)
   } finally { if (id === settingsRequest) settingsLoading.value = false }
@@ -454,12 +487,12 @@ async function openSettings() {
 async function saveSettings() {
   const current = settings.value
   const quoteExpiryDays = validDays('quoteExpiryDays'), stage6NoPoDays = validDays('stage6NoPoDays')
-  if (!current || busy.value || quoteExpiryDays === null || stage6NoPoDays === null) return
+  if (!current || busy.value || !settingsValid.value || quoteExpiryDays === null || stage6NoPoDays === null) return
   const requestRevision = revision
   let saved = false
   settingsSaving.value = true; settingsError.value = ''; settingsConflict.value = false
   try {
-    await props.apiClient.saveCockpitSettings({ quoteExpiryDays, stage6NoPoDays }, current.modified)
+    await props.apiClient.saveCockpitSettings({ quoteExpiryDays, stage6NoPoDays, stalledDays: validDays('stalledDays')!, stallEscalationDays: validDays('stallEscalationDays')! }, current.modified)
     if (requestRevision !== revision) return
     settingsDialog.value?.close()
     saved = true
@@ -517,8 +550,8 @@ onBeforeUnmount(() => { revision++ })
       </section>
       <div class="warnings-grid">
         <section class="panel lost-panel" data-zone="lost"><div class="panel-heading"><div><h2>{{ copy('Opportunities lost', '丢单') }}</h2><p>{{ copy('Closed-lost in the last 4 weeks; older unreviewed losses are listed below the table', '近 4 周丢单；更早未复盘的丢单可在表格下方展开') }}</p></div><span class="zone-count">{{ warningCount('lost') }} {{ copy('pending', '待复盘') }}</span></div>
-          <div class="table-scroll"><table><thead><tr><th>{{ copy('Customer', '客户') }}</th><th>{{ copy('Lost at stage', '丢失阶段') }}</th><th>{{ copy('Value', '金额') }}</th><th>{{ copy('Owner', '销售') }}</th><th>{{ copy('Loss reason', '丢单原因') }}</th><th>{{ copy('Date', '日期') }}</th><th>{{ copy('Post-mortem', '复盘') }}</th></tr></thead>
-            <tbody><tr v-for="row in lostRows" :key="row.eventId ?? row.id" :data-lost-row="row.id" :class="{ backlog: row.reviewOverdue }"><td><RouterLink :to="detailRoute(row)"><strong>{{ row.customer }}</strong><small>{{ row.title }}</small></RouterLink></td><td>{{ label(row.stage ?? '') || '—' }}</td><td class="numeric">{{ rowAmount(row) }}</td><td>{{ ownerName(row.owner) }}</td><td class="reason-cell"><p>{{ row.reason || copy('Reason not recorded', '未记录原因') }}</p><small v-if="row.review?.status === 'reviewed' && row.review.note">{{ row.review.note }}</small></td><td>{{ dateText(row.at) }}</td>
+          <div class="table-scroll"><table><thead><tr><th>{{ copy('Customer', '客户') }}</th><th>{{ copy('Lost at stage', '丢失阶段') }}</th><th>{{ copy('Value', '金额') }}</th><th>{{ copy('Owner', '销售') }}</th><th>{{ copy('Sales note / post-mortem category', '销售备注／复盘分类') }}</th><th>{{ copy('Date', '日期') }}</th><th>{{ copy('Post-mortem', '复盘') }}</th></tr></thead>
+            <tbody><tr v-for="row in lostRows" :key="row.eventId ?? row.id" :data-lost-row="row.id" :class="{ backlog: row.reviewOverdue }"><td><RouterLink :to="detailRoute(row)"><strong>{{ row.customer }}</strong><small>{{ row.title }}</small></RouterLink></td><td>{{ label(row.stage ?? '') || '—' }}</td><td class="numeric">{{ rowAmount(row) }}</td><td>{{ ownerName(row.owner) }}</td><td class="reason-cell"><strong v-if="row.review?.status === 'reviewed'">{{ lossCategoryLabel(row.review.category || 'unclassified', locale) }}</strong><p>{{ row.reason || copy('Reason not recorded', '未记录原因') }}</p><small v-if="row.review?.status === 'reviewed' && row.review.note">{{ row.review.note }}</small></td><td>{{ dateText(row.at) }}</td>
               <td class="review-cell"><template v-if="row.reopenedAt"><span class="badge muted">{{ copy('Reopened', '已重开') }} {{ dateText(row.reopenedAt) }}</span></template><template v-else-if="!row.review || !row.review.modified"><span class="badge muted">{{ copy('Review record pending backfill', '复盘记录待回填') }}</span></template><template v-else-if="row.review.status === 'reviewed'"><span class="badge done"><CircleCheck :size="13" />{{ copy('Done', '已复盘') }} {{ dateText(row.review.reviewedAt) }} · {{ ownerName(row.review.reviewedBy) }}</span><button class="text-link" data-review-edit :disabled="busy" @click="openReview(row)">{{ copy('Edit', '修改') }}</button></template><template v-else><span v-if="row.reviewOverdue" class="badge danger">{{ copy('Post-mortem overdue', '复盘逾期') }}</span><span v-else class="badge warn">{{ copy('To do', '待分析') }}</span><button class="review-button" data-review-open :disabled="busy" @click="openReview(row)">{{ copy('Record post-mortem', '记录复盘') }}</button></template></td></tr></tbody></table></div>
           <button v-if="data.lostBacklog.length" type="button" class="backlog-toggle" data-lost-backlog :aria-expanded="showBacklog" @click="showBacklog = !showBacklog">{{ showBacklog ? copy('Hide older losses', '收起更早的丢单') : `${copy('Older losses awaiting a post-mortem', '更早未复盘的丢单')} · ${data.lostBacklog.length} ${copy('(not counted)', '条（不计入预警数）')}` }}</button>
           <p v-if="!data.lost.length && data.lostBacklog.length" class="backlog-only">{{ copy('No losses in the last 4 weeks', '近 4 周无丢单') }}</p>
@@ -528,14 +561,14 @@ onBeforeUnmount(() => { revision++ })
         <section class="panel overdue-panel" data-zone="overdue"><div class="panel-heading"><div><h2>{{ copy('Planned actions not executed', '未执行计划') }}</h2><p>{{ copy('Open actions past their due date with no completion logged', '已过截止日期且没有记录完成的行动计划') }}</p></div><span class="zone-count">{{ warningCount('overdue') }} {{ copy('overdue', '条逾期') }}</span></div>
           <div class="table-scroll"><table><thead><tr><th>{{ copy('Action', '行动') }}</th><th>{{ copy('Opportunity', '商机') }}</th><th>{{ copy('Owner', '负责人') }}</th><th>{{ copy('Due', '到期') }}</th><th>{{ copy('Overdue', '逾期') }}</th><th>{{ copy('Status', '状态') }}</th><th v-if="overdueHandling">{{ copy('Next step', '下一步') }}</th></tr></thead>
             <tbody><tr v-for="row in data.overdue" :key="`${row.actionId}:${row.id}`" :data-overdue-row="row.actionId"><td><strong>{{ row.actionTitle }}</strong><small v-if="row.actionStatus">{{ opportunityActionLabel(row.actionStatus, locale) }}</small></td><td><RouterLink :to="detailRoute(row)"><strong>{{ row.customer }}</strong><small>{{ row.title }} · {{ rowAmount(row) }}</small></RouterLink></td><td>{{ ownerName(row.actionOwner ?? row.owner) }}</td><td>{{ dayText(row.due) }}</td><td class="negative idle">{{ daysLate(row.due) ?? '—' }} {{ copy('d', '天') }}</td><td><span v-if="row.stalled" class="badge danger">{{ copy('Stalled deal', '商机停滞') }}</span><span v-else class="badge warn">{{ copy('Open', '未完成') }}</span></td><td v-if="overdueHandling" class="step-cell"><WarningNextStep v-if="row.handling" v-bind="stepBind(row.handling)" /><span v-else class="muted">—</span></td></tr></tbody></table></div>
-          <p v-if="!data.overdue.length" class="empty-list">{{ copy('No overdue actions', '没有逾期的行动计划') }}</p>
+          <p v-if="!data.overdue.length" class="empty-list">{{ overdueUnknown ? copy('Action data is insufficient; an empty list does not mean no actions are overdue', '行动数据不足，列表为空不代表没有逾期行动') : copy('No overdue actions', '没有逾期的行动计划') }}</p>
           <footer v-if="busiestOwner" class="zone-note">{{ ownerName(busiestOwner.owner) }} {{ copy('owns', '名下有') }} {{ busiestOwner.count }} / {{ data.overdue.length }} {{ copy('overdue actions — check workload before adding new commitments', '条逾期行动，安排新任务前先看负荷') }}</footer>
           <footer v-else class="zone-note">{{ copy('Completing the action on the opportunity page clears the row', '在商机页把行动标记完成后，该行自动清除') }}</footer>
         </section>
         <section class="panel downgrade-panel" data-zone="downgrade"><div class="panel-heading"><div><h2>{{ copy('Probability level reduced', '概率降档') }}</h2><p>{{ copy('Downgrades in the period still awaiting the owner action; edit the plan here in the meeting', '本期降档且负责人尚未记录行动；行动计划可在例会中直接修改') }}</p></div><span class="zone-count">{{ warningCount('downgrade') }} {{ copy('deals', '个商机') }}</span></div>
           <div class="table-scroll"><table><thead><tr><th>{{ copy('Customer', '客户') }}</th><th>{{ copy('Value', '金额') }}</th><th>{{ copy('Level', '档位') }}</th><th>{{ copy('Reason', '原因') }}</th><th>{{ copy('Action plan', '行动计划') }}</th><th>{{ copy('Owner', '负责人') }}</th></tr></thead>
             <tbody><tr v-for="row in data.downgrade" :key="row.eventId ?? row.id" :data-downgrade-row="row.eventId"><td><RouterLink :to="detailRoute(row)"><strong>{{ row.customer }}</strong><small>{{ row.title }}<template v-if="row.stage"> · {{ label(row.stage) }}</template></small></RouterLink></td><td class="numeric">{{ rowAmount(row) }}</td><td class="level-cell"><span class="badge muted">{{ label(row.fromLevel ?? '') }}</span><span class="arrow">→</span><span class="badge warn">{{ label(row.toLevel ?? '') }}</span></td><td class="reason-cell"><p>{{ row.reason || copy('Reason not recorded', '未记录原因') }}</p></td><td class="plan-cell"><div v-if="planEdit?.eventId === row.eventId" class="plan-editor" data-plan-editor><textarea v-model="planDraft" rows="3" maxlength="4000" :disabled="planSaving" :aria-label="copy('Action plan', '行动计划')" data-plan-draft></textarea><div class="plan-editor-foot"><small>{{ copy('Editing in the meeting · the warning stays until the owner records the action', '例会中编辑 · 负责人记录行动后预警才清除') }}</small><button type="button" :disabled="planSaving" @click="cancelPlanEdit()">{{ copy('Cancel', '取消') }}</button><button type="button" class="save-plan" :disabled="busy || !planDraft.trim()" data-plan-save @click="savePlan()">{{ copy('Save', '保存') }}</button></div><p v-if="planError" class="dialog-error" role="alert">{{ planError }}<button v-if="planConflict" type="button" data-plan-reload @click="load()">{{ copy('Reload', '重新加载') }}</button></p></div><template v-else><button type="button" class="plan-box" :disabled="!row.opportunityModified || busy || !!planEdit || !!handlingEdit" data-plan-edit :title="row.opportunityModified ? copy('Edit the plan in the meeting', '在例会中编辑计划') : copy('Reload the page to edit this plan', '请重新加载后再编辑')" @click="startPlanEdit(row)"><span v-if="row.recovery?.plan" class="recovery-text">{{ row.recovery.plan }}</span><span v-else class="muted">{{ copy('No plan recorded yet — add one', '尚未记录行动计划，点击补录') }}</span><small v-if="row.recovery?.editedAt">{{ copy('edited', '编辑于') }} {{ dateText(row.recovery.editedAt) }} · {{ ownerName(row.recovery.editedBy) }}</small></button><RouterLink class="text-link" :to="detailRoute(row)">{{ copy('Open the deal · the owner records the action', '打开商机 · 由负责人记录行动') }} →</RouterLink></template></td><td>{{ ownerName(row.currentOwner ?? row.owner) }}</td></tr></tbody></table></div>
-          <p v-if="!data.downgrade.length" class="empty-list">{{ copy('No downgrades awaiting action', '没有待处理的降档') }}</p>
+          <p v-if="!data.downgrade.length" class="empty-list">{{ downgradeUnknown ? copy('Downgrade history is incomplete; an empty list does not mean none await action', '降档历史不完整，列表为空不代表没有待处理的降档') : copy('No downgrades awaiting action', '没有待处理的降档') }}</p>
           <footer class="zone-note"><template v-if="data.downgrade.length">{{ copy('Estimated value awaiting action', '待处理商机金额') }} {{ downgradeSummary.text }}<template v-if="largestDowngrade"> · {{ largestDowngrade.customer }} {{ copy('is the largest exposure', '是最大的一笔') }}</template></template><template v-else>{{ copy('Recording the action taken on the opportunity page clears the warning; editing the plan alone does not', '负责人在商机页记录已采取的行动后预警清除，只修改计划不清除') }}</template></footer>
         </section>
         <section class="panel other-panel" data-zone="other"><div class="panel-heading"><div><h2>{{ label('other_alerts') }}</h2><p>{{ copy('Deadlines, resources and commitments at risk', '到期、资源与承诺风险') }}</p></div><div class="zone-tools"><button v-if="handlingReady" ref="settingsOpener" type="button" class="settings-button" data-settings-open :disabled="busy" @click="openSettings()"><SlidersHorizontal :size="12" />{{ copy('Thresholds', '阈值设置') }}</button><span class="zone-count">{{ otherCount }}</span></div></div>
@@ -552,19 +585,27 @@ onBeforeUnmount(() => { revision++ })
           <footer class="zone-note">{{ copy('Reference date', '参考日') }} {{ data.quotationExpiry.referenceDate }} · {{ copy('quotes', '报价') }} {{ data.quotationExpiry.thresholdDays }} {{ copy('days', '天') }}<template v-if="data.stage6NoPo"> · {{ copy('stage 6', '第 6 阶段') }} {{ data.stage6NoPo.thresholdDays }} {{ copy('days', '天') }}</template> · {{ copy('Alerts clear on their own: a quote once accepted, rejected, replaced or its deal closes', '提醒自动清除：报价在接受、拒绝、换版或商机结束后') }}<template v-if="stage6Known">{{ copy('; a stage 6 deal once it has its PO or leaves stage 6', '；第 6 阶段商机在收到 PO 或离开第 6 阶段（推进、退回或关闭）后') }}<template v-if="handlingReady">{{ copy(', or once the action taken is recorded, until its follow-up date', '，或记录已采取行动后至复核日期') }}</template></template><template v-if="handlingReady">{{ copy('. Saving a next step never clears an alert', '。保存下一步不清除提醒') }}</template></footer>
         </section>
       </div>
-      <footer class="review-footer"><strong>QIHENG DEMO CONFIDENTIAL</strong><span>{{ copy('Shanghai timezone · Missing data is not zero · Same scope and period as Review', '上海时区 · 数据不足不计为零 · 与 Review 同一筛选与周期') }}</span></footer>
+      <section v-if="data.redFlagItems" class="warning-zone" data-blue-flag-warnings>
+        <header><h2>{{ copy('Current open red flags', '当前未解决红旗') }} · {{ data.redFlagItems.length }}</h2></header>
+        <p class="zone-note">{{ copy('Current active deals in the selected scope, independent of the historical period. Resolving or deleting a flag clears its alert.', '采用当前筛选范围内的进行中商机，不受历史周期限制。解决或删除红旗后清除对应提醒。') }}</p>
+        <ul class="alert-list"><li v-for="row in data.redFlagItems" :key="`${row.id}:${row.eventId}`" class="alert-item" data-blue-flag-warning><div><RouterLink :to="detailRoute(row)">{{ row.customer }} · {{ row.title }}</RouterLink><p>{{ row.redFlagText }}</p><small>{{ ownerName(row.owner) }} · {{ row.redFlagSeverity === 'High' ? copy('High', '高') : row.redFlagSeverity === 'Medium' ? copy('Medium', '中') : row.redFlagSeverity === 'Low' ? copy('Low', '低') : copy('Unclassified severity', '严重程度未分类') }}</small></div></li></ul>
+        <p v-if="!data.redFlagItems.length" class="zone-note">{{ copy('No open red flags on active deals in this scope.', '当前范围的进行中商机没有未解决红旗。') }}</p>
+      </section>
+      <footer class="review-footer"><strong>QIHENG DEMO CONFIDENTIAL</strong><span>{{ copy('Shanghai timezone · Missing data is not zero · Current red flags are shown separately', '上海时区 · 数据不足不计为零 · 当前红旗单独展示') }}</span></footer>
     </template>
     <dialog ref="reviewDialog" class="review-dialog loss-review-dialog" :aria-label="copy('Lost-deal post-mortem', '丢单复盘')" @cancel="reviewSaving && $event.preventDefault()">
       <header><div><p class="eyebrow">{{ copy('POST-MORTEM', '丢单复盘') }}</p><h2>{{ reviewRow?.customer }}</h2></div><button :disabled="reviewSaving" :aria-label="copy('Close', '关闭')" @click="reviewDialog?.close()"><X :size="20" /></button></header>
       <template v-if="reviewRow">
         <dl class="review-facts"><div><dt>{{ copy('Opportunity', '商机') }}</dt><dd>{{ reviewRow.title }} · {{ rowAmount(reviewRow) }}</dd></div><div><dt>{{ copy('Lost', '丢单') }}</dt><dd>{{ dateText(reviewRow.at) }} · {{ label(reviewRow.stage ?? '') }} · {{ ownerName(reviewRow.owner) }}</dd></div><div><dt>{{ copy('Reason entered by Sales', '销售填写的原因') }}</dt><dd>{{ reviewRow.reason || copy('Reason not recorded', '未记录原因') }}</dd></div></dl>
         <form @submit.prevent="submitReview('Reviewed')">
+          <BlueSheetCompetitionEvidence :key="reviewRow.review?.id" :opportunity-id="reviewRow.id" :api-client="apiClient" :disabled="reviewSaving || revertMode" @cite="citeCompetition" />
+          <label>{{ copy('Confirmed loss category', '复盘确认分类') }}<select v-model="reviewCategory" :required="reviewCategoryRequired" :disabled="reviewSaving || revertMode" data-review-category><option value="">{{ reviewCategoryRequired ? copy('Choose a category', '请选择分类') : copy('Unclassified · preserved for older records', '未分类 · 旧记录可保留') }}</option><option v-for="category in lossCategories" :key="category" :value="category">{{ lossCategoryLabel(category, locale) }}</option></select></label>
           <label>{{ copy('Post-mortem conclusion', '复盘结论') }}<textarea v-model="reviewNote" rows="4" maxlength="4000" :disabled="reviewSaving || revertMode" data-review-note :placeholder="copy('What was confirmed in the post-mortem, and what changes next time', '复盘确认了什么，下次怎么改')"></textarea></label>
           <p class="dialog-note">{{ copy('The Sales reason stays as entered. Marking the loss reviewed counts it in the Review loss statistics; every change is kept in the audit trail.', '销售原因原样保留。标记已复盘后计入 Review 的丢单统计；每次修改都有留痕。') }}</p>
           <label v-if="revertMode">{{ copy('Reason for reverting to pending', '撤回复盘的原因') }}<textarea v-model="revertReason" rows="3" maxlength="4000" :disabled="reviewSaving" data-revert-reason :placeholder="copy('Why the post-mortem needs another look', '为什么需要重新复盘')"></textarea></label>
           <p v-if="reviewError" class="dialog-error" role="alert">{{ reviewError }}<button v-if="reviewConflict" type="button" data-review-reload @click="load()">{{ copy('Reload', '重新加载') }}</button></p>
           <footer v-if="revertMode"><button type="button" :disabled="reviewSaving" @click="revertMode = false">{{ copy('Keep reviewed', '不撤回') }}</button><button type="button" class="save-review" :disabled="busy || !revertReason.trim()" data-review-revert-confirm @click="submitReview('Pending')">{{ copy('Revert to pending', '确认改回待分析') }}</button></footer>
-          <footer v-else><button v-if="reviewRow.review?.status === 'reviewed'" type="button" :disabled="reviewSaving" data-review-revert @click="revertMode = true">{{ copy('Revert to pending…', '改回待分析…') }}</button><button type="button" :disabled="reviewSaving" @click="reviewDialog?.close()">{{ copy('Cancel', '取消') }}</button><button type="submit" class="save-review" :disabled="busy || !reviewNote.trim()" data-review-submit>{{ reviewRow.review?.status === 'reviewed' ? copy('Save changes', '保存修改') : copy('Mark post-mortem done', '标记已复盘') }}</button></footer>
+          <footer v-else><button v-if="reviewRow.review?.status === 'reviewed'" type="button" :disabled="reviewSaving" data-review-revert @click="revertMode = true">{{ copy('Revert to pending…', '改回待分析…') }}</button><button type="button" :disabled="reviewSaving" @click="reviewDialog?.close()">{{ copy('Cancel', '取消') }}</button><button type="submit" class="save-review" :disabled="busy || !reviewNote.trim() || (reviewCategoryRequired && !reviewCategory)" data-review-submit>{{ reviewRow.review?.status === 'reviewed' ? copy('Save changes', '保存修改') : copy('Mark post-mortem done', '标记已复盘') }}</button></footer>
         </form>
       </template>
     </dialog>
@@ -572,7 +613,8 @@ onBeforeUnmount(() => { revision++ })
       <header><div><p class="eyebrow">{{ label('other_alerts') }}</p><h2>{{ copy('Alert thresholds', '阈值设置') }}</h2></div><button :disabled="settingsSaving" :aria-label="copy('Close', '关闭')" @click="closeSettings()"><X :size="20" /></button></header>
       <p v-if="settingsLoading" class="dialog-note" role="status">{{ copy('Loading…', '加载中…') }}</p>
       <form v-else-if="settings" @submit.prevent="saveSettings()">
-        <label v-for="field in settingFields" :key="field.key">{{ field.label }}<input v-model="settingsDraft[field.key]" type="number" :min="minDays[field.key]" max="365" step="1" required :disabled="settingsSaving" :data-setting="field.key" /><small :data-setting-source="field.key">{{ sourceText(settings.sources[field.key]) }}<span v-if="validDays(field.key) === null" class="field-error" data-setting-invalid> · {{ copy(`Enter a whole number from ${minDays[field.key]} to 365`, `请输入 ${minDays[field.key]}–365 的整数`) }}</span></small></label>
+        <label v-for="field in settingFields" :key="field.key">{{ field.label }}<input v-model="settingsDraft[field.key]" type="number" :min="minDays[field.key]" max="365" step="1" required :disabled="settingsSaving" :data-setting="field.key" /><small :data-setting-source="field.key">{{ sourceText(settings.sources[field.key] ?? 'default') }}<span v-if="validDays(field.key) === null" class="field-error" data-setting-invalid> · {{ copy(`Enter a whole number from ${minDays[field.key]} to 365`, `请输入 ${minDays[field.key]}–365 的整数`) }}</span></small></label>
+        <p v-if="invalidStallPair" class="dialog-error" data-stall-pair-invalid>{{ copy('Escalation days must be at least the warning days.', '升级天数不能小于提醒天数。') }}</p>
         <p class="dialog-note" data-settings-modified>{{ copy('Last modified: ', '最后修改：') }}{{ settings.modified ? `${settings.modifiedByName || ownerName(settings.modifiedBy)} · ${dateText(settings.modified)}` : copy('not saved yet', '尚未保存') }}{{ copy('. The counts use the new values as soon as they are saved.', '。保存后预警数立即按新阈值计算。') }}</p>
         <p v-if="settingsError" class="dialog-error" role="alert">{{ settingsError }}<button v-if="settingsConflict" type="button" data-settings-reload @click="openSettings()">{{ copy('Reload', '重新加载') }}</button></p>
         <footer><button type="button" :disabled="settingsSaving" @click="closeSettings()">{{ copy('Cancel', '取消') }}</button><button type="submit" class="save-review" :disabled="busy || !settingsValid" data-settings-save>{{ copy('Save', '保存') }}</button></footer>

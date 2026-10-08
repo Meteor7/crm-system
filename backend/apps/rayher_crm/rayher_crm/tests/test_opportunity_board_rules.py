@@ -52,6 +52,19 @@ def invalid(query, options=OPTIONS):
 
 
 class TestValidation(unittest.TestCase):
+    def test_region_migration_expansion_has_a_separate_bounded_value_limit(self):
+        regions = [f"Region {index}" for index in range(200)]
+        options = {**OPTIONS, "regions": regions, "sales": set(regions)}
+        definition = {"scope": {"regions": regions}, "conditions": [
+            {"field": "region", "operator": operator, "value": regions} for operator in ("in", "not_in")
+        ], "columns": ["title"]}
+        self.assertEqual(len(validate_definition(definition, options)["scope"]["regions"]), 200)
+        for query in ({"scope": {"regions": [*regions, "overflow"]}},
+                      {"conditions": [{"field": "region", "operator": "in", "value": [*regions, "overflow"]}]},
+                      {"scope": {"sales": regions[:101]}}):
+            with self.subTest(query=query), self.assertRaises(BoardQueryError):
+                validate_query(query, options)
+
     def test_defaults_mean_no_restriction(self):
         self.assertEqual(validate_query({}, OPTIONS), {
             "scope": {"sales": [], "regions": [], "markets": [], "equipment": []},
@@ -80,7 +93,7 @@ class TestValidation(unittest.TestCase):
             # Equipment comes from the catalog now; a spelling outside it is not silently matched to nothing.
             ({"scope": {"equipment": ["nansi"]}}, "scope.equipment"),
             ({"conditions": [{"field": "equipment", "operator": "in", "value": ["Kibo 4895C"]}]}, "conditions[0].value"),
-            ({"conditions": [{"field": "stage", "operator": "in", "value": ["lost"]}] * 21}, "conditions"),
+            ({"conditions": [{"field": "stage", "operator": "in", "value": ["lost"]}] * 31}, "conditions"),
         ]
         for query, field in cases:
             with self.subTest(query=query):
@@ -154,6 +167,7 @@ class TestRows(unittest.TestCase):
         self.assertEqual(row.dto, {
             "id": "o1", "title": "Title o1", "accountId": "acc-o1", "customerName": "Customer o1", "region": None,
             "salesId": "alice", "salesName": "Alice", "stage": "demo_done",
+            "status": "open", "createdAt": None, "lastActivityAt": None, "lastActivityIncomplete": False, "poDate": None,
             "stageChangedAt": "2026-06-30T16:30:00Z", "stageAgeDays": 83, "stageUnchangedOver21Days": True,
             "probabilityLevel": None, "equipment": None, "market": "Frontend", "amount": "125000.25", "currency": "USD",
             "amountCny": None, "nextAction": {"id": "a1", "title": "Call", "due": "2026-09-30"},
@@ -374,3 +388,55 @@ class TestTerritories(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestNestedAndPeriodQueries(unittest.TestCase):
+    def test_nested_or_stays_inside_root_and_and_scope(self):
+        board = rows(opportunity("a"), opportunity("b", amount_cny="500.00"),
+                     opportunity("c", opportunity_owner="bob", amount_cny="500.00"),
+                     opportunity("d", stage="lost", amount_cny="500.00"))
+        query = {"scope": {"sales": ["alice"]}, "conditions": [
+            {"field": "status", "operator": "in", "value": ["open"]},
+            {"match": "any", "conditions": [
+                {"field": "customerName", "operator": "contains", "value": "a"},
+                {"match": "all", "conditions": [{"field": "amountCny", "operator": "gte", "value": "500"}]}]}]}
+        ids, summary, _ = run(board, **query)
+        self.assertEqual(ids, ["a", "b"])
+        self.assertEqual((summary["count"], summary["knownAmountCny"]), (2, "600.00"))
+        saved = validate_definition({**query, "columns": ["createdAt", "lastActivityAt", "status"]}, OPTIONS)
+        self.assertEqual(saved["conditions"][1]["match"], "any")
+
+    def test_depth_empty_group_and_total_leaf_limits(self):
+        leaf = {"field": "status", "operator": "in", "value": ["open"]}
+        group = lambda children: {"match": "all", "conditions": children}
+        validate_query({"conditions": [group([group([leaf] * 30)])]}, OPTIONS)
+        for conditions in ([group([])], [group([group([group([leaf])])])], [group([leaf] * 16), group([leaf] * 15)]):
+            with self.subTest(conditions=conditions), self.assertRaises(BoardQueryError):
+                validate_query({"conditions": conditions}, OPTIONS)
+        with self.assertRaises(BoardQueryError) as caught:
+            validate_query({"conditions": [group([{"field": "bad", "operator": "in", "value": ["open"]}])]}, OPTIONS)
+        self.assertEqual(caught.exception.field, "conditions[0].conditions[0].field")
+
+    def test_period_intersects_or_and_uses_shanghai_days_including_leap_day(self):
+        board = rows(opportunity("inside", creation="2024-02-29T15:59:59Z"),
+                     opportunity("outside", creation="2024-02-29T16:00:00Z"), opportunity("missing"))
+        ids, summary, _ = run(board, match="any", conditions=[{"field": "status", "operator": "in", "value": ["open"]}],
+                              periodFilter={"field": "createdAt", "kind": "month", "anchor": "2024-02-17"})
+        self.assertEqual((ids, summary["count"]), (["inside"], 1))
+        for period in ({"field": "lastActivityAt", "kind": "month", "anchor": "2024-02-01"},
+                       {"field": "createdAt", "kind": "month", "anchor": "0001-01-01"},
+                       {"field": "createdAt", "kind": "year", "anchor": "9999-12-31"}):
+            with self.subTest(period=period), self.assertRaises(BoardQueryError):
+                validate_query({"periodFilter": period}, OPTIONS)
+
+    def test_po_quarter_crosses_year_and_dates_remain_unknown(self):
+        board = rows(opportunity("a", po_date="2031-01-01"), opportunity("b", po_date="2030-12-31"), opportunity("c"))
+        self.assertEqual(run(board, periodFilter={"field": "poDate", "kind": "quarter", "anchor": "2031-03-31"})[0], ["a"])
+        self.assertEqual(run(board, conditions=[{"field": "createdAt", "operator": "before", "value": "2099-01-01"}])[0], [])
+
+    def test_undated_completion_keeps_evidence_but_cannot_assert_last_activity_date(self):
+        board = rows(opportunity("a", last_activity_at="2026-09-01"),
+                     opportunity("b", last_activity_at="2026-09-01", last_activity_incomplete=True))
+        self.assertEqual(board[1].dto["lastActivityAt"], "2026-08-31T16:00:00Z")
+        ids, _, _ = run(board, conditions=[{"field": "lastActivityAt", "operator": "before", "value": "2026-09-02"}])
+        self.assertEqual(ids, ["a"])

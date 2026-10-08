@@ -1,0 +1,16 @@
+{
+  "doctype": "DocType", "name": "CRM Plan Commitment", "module": "Rayher CRM", "engine": "InnoDB",
+  "creation": "2026-10-05 00:00:00.000000", "modified": "2026-10-05 00:00:00.000000",
+  "owner": "Administrator", "modified_by": "Administrator", "naming_rule": "Set by user", "autoname": "prompt",
+  "track_changes": 1, "sort_field": "modified", "sort_order": "DESC",
+  "field_order": ["sales_owner", "metric", "period", "anchor", "commitment_value", "note"],
+  "fields": [
+    {"fieldname": "sales_owner", "fieldtype": "Link", "options": "User", "label": "Sales Owner", "reqd": 1},
+    {"fieldname": "metric", "fieldtype": "Select", "options": "visits\nleads\ntests\nquotes\nfollowups\nactions\nevents", "label": "Activity", "reqd": 1},
+    {"fieldname": "period", "fieldtype": "Select", "options": "week\nmonth\nquarter\nyear", "label": "Period", "reqd": 1},
+    {"fieldname": "anchor", "fieldtype": "Date", "label": "Period Start", "reqd": 1},
+    {"fieldname": "commitment_value", "fieldtype": "Data", "label": "Committed Count", "reqd": 1},
+    {"fieldname": "note", "fieldtype": "Small Text", "label": "Meeting Note"}
+  ],
+  "permissions": [{"role": "CRM Manager", "read": 1}], "actions": [], "links": [], "states": []
+}

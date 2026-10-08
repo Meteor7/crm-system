@@ -42,6 +42,19 @@ def save_target(input, expectedModified=None):
     return success_response(cockpit.save_target(input, expectedModified))
 
 
+@frappe.whitelist(methods=["POST"])
+@api_endpoint
+def save_plan_commitment(input=None, expectedModified=None):
+    from rayher_crm.services.plan_commitments import save
+    return success_response(save(input, expectedModified))
+
+
+@frappe.whitelist(methods=["GET"])
+@api_endpoint
+def get_target(**query):
+    return success_response(cockpit.get_target(query))
+
+
 # Warnings handling: a next step on any overdue / quotation / S6 row; a recorded action on S6 rows only.
 @frappe.whitelist(methods=["POST"])
 @api_endpoint
@@ -73,6 +86,24 @@ def save_cockpit_settings(input=None, expectedModified=None):
 def query_opportunities(input=None):
     data, total, page, page_size = opportunity_board.query_opportunities(input)
     return success_response(data, page=page, pageSize=page_size, total=total)
+
+
+@frappe.whitelist(methods=["POST"])
+@api_endpoint
+def export_opportunities(input=None):
+    return success_response(opportunity_board.export_opportunities(input))
+
+
+@frappe.whitelist(methods=["GET"])
+@api_endpoint
+def get_query_recipients(**query):
+    return success_response(opportunity_board.query_recipient_options())
+
+
+@frappe.whitelist(methods=["POST"])
+@api_endpoint
+def share_opportunity_query(id=None, recipients=None, expectedModified=None):
+    return success_response(opportunity_board.share_opportunity_query(id, recipients, expectedModified))
 
 
 @frappe.whitelist(methods=["GET"])

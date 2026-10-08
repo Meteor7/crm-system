@@ -466,8 +466,14 @@ class TestEvaluationApi(FrappeTestCase):
         try:
             query = {"period": "week", "anchor": anchor, "sales": self.sales}
             details = cockpit.get_plan_details({**query, "metric": "tests"})
-            self.assertEqual(cockpit.get_plan(query)["summary"]["tests"], {"value": details["total"], "state": "ready", "reason": None})
-            return [row["id"] for row in details["items"]]
+            other = cockpit.get_plan_details({**query, "metric": "tests_other"})
+            plan = cockpit.get_plan(query)
+            self.assertEqual(plan["summary"]["tests"], {"value": details["total"], "state": "ready", "reason": None})
+            self.assertEqual(plan["otherDemos"], {"value": other["total"], "state": "ready", "reason": None})
+            # The workflow keeps every ready Demo visible. Only explicit deadlines
+            # inside the period belong to the scheduled count.
+            self.assertFalse({row["id"] for row in details["items"]} & {row["id"] for row in other["items"]})
+            return [row["id"] for row in details["items"] + other["items"]]
         finally:
             frappe.set_user(user)
 
@@ -557,6 +563,8 @@ class TestEvaluationApi(FrappeTestCase):
         opportunity_id = self.request["opportunityId"]
         frappe.set_user(self.engineer)
         run_id = self._planned_run(evaluation_id)["runs"][0]["id"]
+        frappe.set_user(self.manager)
+        set_evaluation_test_run_deadline(evaluation_id, {"testRunDeadline": "2026-12-10", "expectedModified": get_evaluation(evaluation_id)["modified"]})
         frappe.set_user(self.sales)
         visit = create_visit({"accountId": self.account, "opportunityId": opportunity_id, "subject": "Plan visit",
                               "date": "2026-12-13", "type": "On-site", "owner": self.sales, "objective": "Agree the test scope"})
@@ -595,7 +603,7 @@ class TestEvaluationApi(FrappeTestCase):
         self.assertTrue(plan["poAmountIncomplete"])
 
         everything = listed("all")
-        self.assertEqual(everything["total"], sum(listed(metric)["total"] for metric in own))
+        self.assertEqual(everything["total"], sum(listed(metric)["total"] for metric in (*plan["summary"], "overdue", "tests_other")))
         self.assertTrue(everything["items"][0]["carryover"])
         paged = [row for page in range(1, everything["total"] // 2 + 2)
                  for row in cockpit.get_plan_details({**query, "metric": "all", "page": page, "pageSize": 2})["items"]]

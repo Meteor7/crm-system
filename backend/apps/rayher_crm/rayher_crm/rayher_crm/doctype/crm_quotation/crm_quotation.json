@@ -1,6 +1,6 @@
 {
   "actions": [], "autoname": "format:CRM-QTN-{#####}", "creation": "2026-08-10 00:00:00.000000", "doctype": "DocType", "engine": "InnoDB",
-  "field_order": ["ref_no", "quotation_type", "opportunity", "account", "quotation_owner", "status", "latest_version_no", "current_version", "current_published_version"],
+  "field_order": ["ref_no", "quotation_type", "opportunity", "account", "quotation_owner", "status", "latest_version_no", "current_version", "current_published_version", "planned_send_date", "follow_ups"],
   "fields": [
     {"fieldname": "ref_no", "fieldtype": "Data", "label": "Ref No.", "reqd": 1, "unique": 1, "in_list_view": 1},
     {"default": "Device", "fieldname": "quotation_type", "fieldtype": "Select", "label": "Quotation Type", "options": "Device\nService", "reqd": 1, "in_list_view": 1},
@@ -10,9 +10,11 @@
     {"default": "Draft", "fieldname": "status", "fieldtype": "Select", "label": "Status", "options": "Draft\nPublished\nAccepted\nRejected\nExpired", "reqd": 1, "in_list_view": 1},
     {"default": "1", "fieldname": "latest_version_no", "fieldtype": "Int", "label": "Latest Version", "read_only": 1},
     {"fieldname": "current_version", "fieldtype": "Link", "label": "Current Version", "options": "CRM Quotation Version", "read_only": 1},
-    {"fieldname": "current_published_version", "fieldtype": "Link", "label": "Current Published Version", "options": "CRM Quotation Version", "read_only": 1}
+    {"fieldname": "current_published_version", "fieldtype": "Link", "label": "Current Published Version", "options": "CRM Quotation Version", "read_only": 1},
+    {"fieldname": "planned_send_date", "fieldtype": "Date", "label": "Planned Send Date", "read_only": 1},
+    {"fieldname": "follow_ups", "fieldtype": "Table", "options": "CRM Quotation Follow Up", "label": "Follow Ups", "read_only": 1}
   ],
-  "index_web_pages_for_search": 0, "modified": "2026-08-10 00:00:00.000000", "modified_by": "Administrator", "module": "Rayher CRM", "name": "CRM Quotation", "naming_rule": "Expression", "owner": "Administrator",
+  "track_changes": 1, "index_web_pages_for_search": 0, "modified": "2026-10-05 12:00:00.000000", "modified_by": "Administrator", "module": "Rayher CRM", "name": "CRM Quotation", "naming_rule": "Expression", "owner": "Administrator",
   "permissions": [
     {"read": 1, "role": "CRM Manager"},
     {"read": 1, "role": "CRM Sales"}

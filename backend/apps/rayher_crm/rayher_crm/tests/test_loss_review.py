@@ -47,9 +47,70 @@ class TestLossReview(FrappeTestCase):
 
     def _review(self, review, status="Reviewed", note="Price gap confirmed; report shared", modified=None, reason=None):
         payload = {"status": status, "reviewNote": note}
+        if status == "Reviewed":
+            payload["reviewCategory"] = "Price"
         if reason is not None:
             payload["revertReason"] = reason
         return review_loss(self.opportunity["id"], review["id"], payload, modified or review["modified"])
+
+    def test_new_confirmation_requires_category_without_mutating_review_or_audit(self):
+        review = self._lose()["lossReviews"][0]
+        frappe.set_user(self.manager)
+        payload = {"status": "Reviewed", "reviewNote": "Buyer confirmed the outcome"}
+        for category in (None, "", " ", "Guessed"):
+            with self.subTest(category=category):
+                candidate = payload if category is None else {**payload, "reviewCategory": category}
+                with self.assertRaises(CrmApiException) as invalid:
+                    review_loss(self.opportunity["id"], review["id"], candidate, review["modified"])
+                self.assertEqual(invalid.exception.code, "VALIDATION_ERROR")
+                self.assertIn("reviewCategory", invalid.exception.field_errors)
+                unchanged = get_strategy_opportunity(self.opportunity["id"])["lossReviews"][0]
+                self.assertEqual((unchanged["status"], unchanged["modified"]), ("pending", review["modified"]))
+                self.assertEqual(len(unchanged["history"]), 1)
+        saved = review_loss(self.opportunity["id"], review["id"], {**payload, "reviewCategory": "Other"}, review["modified"])
+        reverted = self._review(saved, status="Pending", reason="Recheck evidence")
+        # A retained formal category is still valid when a reverted review is confirmed again.
+        confirmed = review_loss(self.opportunity["id"], review["id"], payload, reverted["modified"])
+        self.assertEqual((confirmed["status"], confirmed["reviewCategory"]), ("reviewed", "Other"))
+
+    def test_legacy_reviewed_blank_category_can_be_edited_but_new_confirmation_cannot_stay_blank(self):
+        initial = self._lose()["lossReviews"][0]
+        frappe.set_user(self.manager)
+        # Imported already-reviewed data is preserved without inventing its category.
+        frappe.db.set_value(LOSS_REVIEW, initial["id"], {"review_status": "Reviewed", "review_note": "Legacy conclusion",
+            "review_category": "", "reviewed_by": self.manager, "reviewed_at": frappe.utils.now_datetime()})
+        legacy = get_strategy_opportunity(self.opportunity["id"])["lossReviews"][0]
+        payload = {"status": "Reviewed", "reviewNote": "Clarified legacy conclusion"}
+        edited = review_loss(self.opportunity["id"], initial["id"], payload, legacy["modified"])
+        self.assertEqual((edited["status"], edited["reviewCategory"]), ("reviewed", ""))
+        reverted = self._review(edited, status="Pending", reason="Needs new confirmation")
+        with self.assertRaises(CrmApiException) as invalid:
+            review_loss(self.opportunity["id"], initial["id"], payload, reverted["modified"])
+        self.assertIn("reviewCategory", invalid.exception.field_errors)
+
+    def test_formal_category_is_manager_audited_and_revert_preserves_history(self):
+        lost = self._lose("Sales wrote price but the review found lead time")
+        initial = lost["lossReviews"][0]
+        frappe.set_user(self.manager)
+        payload = {"status": "Reviewed", "reviewNote": "Buyer confirmed delivery date", "reviewCategory": "Delivery lead time"}
+        saved = review_loss(self.opportunity["id"], initial["id"], payload, initial["modified"])
+        self.assertEqual(saved["reviewCategory"], "Delivery lead time")
+        self.assertEqual(saved["lostReason"], "Sales wrote price but the review found lead time")
+        self.assertEqual(saved["history"][0]["category"], "Delivery lead time")
+        changed = review_loss(self.opportunity["id"], saved["id"], {**payload, "reviewCategory": "Other"}, saved["modified"])
+        self.assertEqual(changed["reviewCategory"], "Other")
+        with self.assertRaises(CrmApiException) as stale:
+            review_loss(self.opportunity["id"], saved["id"], payload, saved["modified"])
+        self.assertEqual(stale.exception.code, "VERSION_CONFLICT")
+        with self.assertRaises(CrmApiException):
+            review_loss(self.opportunity["id"], saved["id"], {**payload, "reviewCategory": "Guessed"}, changed["modified"])
+        cleared = review_loss(self.opportunity["id"], saved["id"], {**payload, "reviewCategory": ""}, changed["modified"])
+        self.assertEqual(cleared["reviewCategory"], "")
+        self.assertEqual(cleared["history"][0]["category"], "")
+        changed = review_loss(self.opportunity["id"], saved["id"], {**payload, "reviewCategory": "Other"}, cleared["modified"])
+        reverted = self._review(changed, status="Pending", reason="Await buyer evidence")
+        self.assertEqual((reverted["status"], reverted["reviewCategory"]), ("pending", "Other"))
+        self.assertEqual(reverted["history"][0]["category"], "Other")
 
     def test_marking_lost_opens_a_pending_review_that_survives_reopening(self):
         lost = self._lose()

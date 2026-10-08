@@ -1,5 +1,11 @@
 # Plan 前后端对接清单（2026-09-18）
 
+## Philippe PR07 更新（2026-10-05，开发候选，未部署）
+
+本次完整非 AI 交付计划新增了下文 9 月范围中排除的报价计划、报价跟进与独立展会活动；当前合同见 `../superpowers/plans/2026-10-05-philippe-pr07-plans.md`。报价主档维护草稿发送日及跟进子记录；独立活动使用 CRM Event，提供销售/经理录入入口，不创建外部邀请。新增接口为 `quotation_planning.get_planning/save_schedule/save_follow_up` 和 `events.list_events/get_event/save_event`，写入带原来源的并发版本。
+
+Plan 增加 quotes、followups、events，金额仅人民币，原计划测试分为本期有日期的安排与其他进行中 Demo（`tests_other`）。往期未完成报价和跟进自动进入 `quotation_carryover`，页面提供数量及明细入口，保留原到期日，不加到本期数量；原行动逾期仍在 Warnings。多日活动按日期范围与周期相交计一次，保留起止日期。以下章节为历史合同及部署记录，不代表本候选已部署。
+
 ## Planned Test Run 操作与执行人姓名（2026-09-22，开发分支，未部署）
 
 本节更新下文历史记录中的两个剩余缺口，不改变已部署的 Demo 阶段计数规则。

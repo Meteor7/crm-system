@@ -35,7 +35,9 @@ def field_at(opp, field, at, histories, coverage, now):
     result = opp.get(field)
     for row in sorted(histories, key=lambda r: (stamp(r["at"]), str(r.get("creation", "")), r.get("name", "")), reverse=True):
         if row["field"] == field and stamp(row["at"]) > at:
-            result = row.get("from_value")
+            # User Links follow native rename/merge; the original audit text does
+            # not. An unresolved legacy identity must remain unknown.
+            result = row.get("from_owner") if field == "opportunity_owner" else row.get("from_value")
     return result
 
 

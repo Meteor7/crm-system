@@ -21,6 +21,50 @@ afterEach(() => {
 })
 
 describe('Frappe method contract', () => {
+  it('posts a period commitment and the previously saved version', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(success({ id: 'promise' }))
+    const api = createFrappeApi({ fetchImpl: fetchMock })
+    const input = { sales: 'sales', period: 'week' as const, anchor: '2030-09-02', metric: 'visits' as const, value: '0', note: 'Updated promise' }
+    await api.savePlanCommitment(input, 'previous')
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit]
+    expect(url).toBe('/api/method/rayher_crm.api.v1.cockpit.save_plan_commitment')
+    expect(Object.fromEntries(new URLSearchParams(init.body as string))).toEqual({ input: JSON.stringify(input), expectedModified: 'previous' })
+  })
+
+  it('carries the Blue Sheet version, stable flags and suggestion fingerprint to the backend', async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => success({ id: 'OPP-1' }))
+    const api = createFrappeApi({ fetchImpl: fetchMock })
+    const input = { items: [{ id: 'flag-1', text: 'Risk', severity: 'High' as const, status: 'Resolved' as const }] }
+    await api.saveBlueSheetFlags('OPP-1', input, 'version-1')
+    expect(fetchMock.mock.calls[0][0]).toBe('/api/method/rayher_crm.api.v1.opportunities.save_blue_sheet_flags')
+    expect(Object.fromEntries(new URLSearchParams(fetchMock.mock.calls[0][1]!.body as string))).toEqual({ id: 'OPP-1', input: JSON.stringify(input), expectedModified: 'version-1' })
+    const confirmation = { fingerprint: 'facts-v1', probabilityReason: 'Budget', probabilityActionPlan: 'Meet buyer' }
+    await api.applyBlueSheetSuggestion('OPP-1', confirmation, 'version-2')
+    expect(Object.fromEntries(new URLSearchParams(fetchMock.mock.calls[1][1]!.body as string))).toEqual({ id: 'OPP-1', input: JSON.stringify(confirmation), expectedModified: 'version-2' })
+  })
+
+  it('reads an exact target key without writing or sending a target value', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(success(null))
+    const api = createFrappeApi({ fetchImpl: fetchMock })
+    const key = { scope: 'sales' as const, sales: 'rep@example.invalid', territory: '', metric: 'visits' as const,
+      period: 'weekly_default' as const, anchor: '2030-09-02' }
+    expect((await api.getReviewTarget(key)).data).toBeNull()
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit]
+    const parsed = new URL(url, 'http://localhost')
+    expect(parsed.pathname).toBe('/api/method/rayher_crm.api.v1.cockpit.get_target')
+    expect(Object.fromEntries(parsed.searchParams)).toEqual(key)
+    expect(init.method).toBe('GET')
+  })
+  it('keeps effective dates and the saved version on territory assignment edits', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(success({ id: 'A-1' }))
+    const api = createFrappeApi({ fetchImpl: fetchMock })
+    const input = { territory: 'East China', salesOwner: 'sales@example.invalid', validFrom: '2026-10-01', validUntil: null, cancelled: false, note: 'New responsibility' }
+    await api.saveTerritoryAssignment(input, 'A-1', '2026-09-30T00:00:00Z')
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit]
+    expect(url).toBe('/api/method/rayher_crm.api.v1.territories.save_assignment')
+    expect(Object.fromEntries(new URLSearchParams(init.body as string))).toEqual({ name: 'A-1', input: JSON.stringify(input), expectedModified: '2026-09-30T00:00:00Z' })
+  })
+
   it('reads the opportunity library and saves links with the exact parent version', async () => {
     const fetchMock = vi.fn().mockImplementation(async () => success({}))
     const api = createFrappeApi({ fetchImpl: fetchMock })
@@ -51,16 +95,30 @@ describe('Frappe method contract', () => {
   it('freezes every CrmApi method to a rayher_crm v1 whitelist endpoint', () => {
     expect(FRAPPE_METHODS).toEqual({
       queryOpportunities: 'cockpit.query_opportunities',
+      exportOpportunities: 'cockpit.export_opportunities',
+      getQueryRecipients: 'cockpit.get_query_recipients',
+      shareOpportunityQuery: 'cockpit.share_opportunity_query',
       getOpportunityFilters: 'cockpit.get_opportunity_filters',
       listOpportunityQueries: 'cockpit.list_opportunity_queries',
       saveOpportunityQuery: 'cockpit.save_opportunity_query',
       deleteOpportunityQuery: 'cockpit.delete_opportunity_query',
+      getQuotationPlanning: 'quotation_planning.get_planning',
+      saveQuotationSchedule: 'quotation_planning.save_schedule',
+      saveQuotationFollowUp: 'quotation_planning.save_follow_up',
+      listEvents: 'events.list_events',
+      getEvent: 'events.get_event',
+      saveEvent: 'events.save_event',
       getPlan: 'cockpit.get_plan',
+      savePlanCommitment: 'cockpit.save_plan_commitment',
       getPlanDetails: 'cockpit.get_plan_details',
       getReview: 'cockpit.get_review',
       getReviewDetails: 'cockpit.get_details',
       getWarnings: 'cockpit.get_warnings',
       saveReviewTarget: 'cockpit.save_target',
+      getReviewTarget: 'cockpit.get_target',
+      getTerritoryCatalogue: 'territories.get_catalogue',
+      saveTerritory: 'territories.save_territory',
+      saveTerritoryAssignment: 'territories.save_assignment',
       getCockpitSettings: 'cockpit.get_cockpit_settings',
       saveCockpitSettings: 'cockpit.save_cockpit_settings',
       saveWarningPlan: 'cockpit.save_warning_plan',
@@ -165,6 +223,9 @@ describe('Frappe method contract', () => {
       listStrategyOpportunities: 'opportunities.list_strategy_opportunities',
       listEquipmentTypes: 'opportunities.list_equipment_types',
       getStrategyOpportunity: 'opportunities.get_strategy_opportunity',
+      saveBlueSheetFlags: 'opportunities.save_blue_sheet_flags',
+      getBlueSheetAssessment: 'opportunities.get_blue_sheet_assessment',
+      applyBlueSheetSuggestion: 'opportunities.apply_blue_sheet_suggestion',
       createStrategyOpportunity: 'opportunities.create_strategy_opportunity',
       updateStrategyOpportunity: 'opportunities.update_strategy_opportunity',
       reviewOpportunityLoss: 'opportunities.review_opportunity_loss',
@@ -376,6 +437,31 @@ describe('Frappe JSON transport', () => {
     await expect(signingOut).rejects.toBeInstanceOf(CrmApiError)
     await api.listNotifications({ page: 1, pageSize: 1 }).catch(() => undefined)
     expect(fetchMock).toHaveBeenCalledTimes(3)
+  })
+
+  it('waits for an in-flight body deadline before sending logout', async () => {
+    vi.useFakeTimers()
+    try {
+      const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+        if (url.endsWith('/logout')) return jsonResponse({ message: 'Logged Out' })
+        return new Response(new ReadableStream({ start(controller) {
+          init?.signal?.addEventListener('abort', () => controller.error(new DOMException('Aborted', 'AbortError')))
+        } }))
+      })
+      const api = createFrappeApi({ fetchImpl: fetchMock as typeof fetch, timeoutMs: 100 })
+      const reading = api.getBootstrap().then(() => null, error => error as CrmApiError)
+      await vi.advanceTimersByTimeAsync(1)
+      const signingOut = api.signOut()
+      await vi.advanceTimersByTimeAsync(98)
+      expect(fetchMock).toHaveBeenCalledTimes(1)
+      await vi.advanceTimersByTimeAsync(1)
+      await expect(reading).resolves.toMatchObject({ code: 'NETWORK_ERROR', retryable: true })
+      await signingOut
+      expect(fetchMock.mock.calls.map(call => call[0])).toEqual([
+        '/api/method/rayher_crm.api.v1.bootstrap.get_bootstrap', '/api/method/logout',
+      ])
+      expect(vi.getTimerCount()).toBe(0)
+    } finally { vi.useRealTimers() }
   })
 
   it('JSON-serializes complex POST fields and sends the Frappe CSRF token', async () => {
@@ -778,6 +864,146 @@ describe('Warnings business reads and loss reviews', () => {
 })
 
 describe('Plan business reads', () => {
+  const exportQuery = { scope: { sales: [], regions: [], markets: [], equipment: [] }, match: 'all' as const, conditions: [], sort: { field: 'stageChangedAt' as const, direction: 'asc' as const }, groupBy: null, page: 1, pageSize: 200 }
+  it.each(['complete', 'stall'] as const)('times binary download inactivity instead of total transfer time: %s', async (ending) => {
+    vi.useFakeTimers()
+    try {
+      let signal: AbortSignal | undefined
+      let stream!: ReadableStreamDefaultController<Uint8Array>
+      const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => {
+        signal = init?.signal ?? undefined
+        return new Response(new ReadableStream<Uint8Array>({ start(controller) {
+          stream = controller
+          signal?.addEventListener('abort', () => controller.error(new DOMException('Aborted', 'AbortError')))
+        } }), { headers: { 'Content-Type': 'application/pdf', 'Content-Disposition': 'attachment; filename="large.pdf"' } })
+      })
+      const outcome = createFrappeApi({ fetchImpl: fetchMock as typeof fetch }).getContactFile('large-file')
+        .then(value => ({ value }), error => ({ error: error as CrmApiError }))
+      await vi.advanceTimersByTimeAsync(20_000)
+      stream.enqueue(new TextEncoder().encode('first'))
+      await vi.advanceTimersByTimeAsync(20_000)
+      expect(signal?.aborted).toBe(false)
+      if (ending === 'complete') {
+        stream.enqueue(new TextEncoder().encode('second'))
+        await vi.advanceTimersByTimeAsync(20_000)
+        expect(signal?.aborted).toBe(false)
+        stream.close()
+        const result = await outcome
+        expect(result).toMatchObject({ value: { fileName: 'large.pdf', mimeType: 'application/pdf' } })
+        if ('value' in result) {
+          expect(await result.value.blob.text()).toBe('firstsecond')
+          expect(result.value.blob.type).toBe('application/pdf')
+        }
+      } else {
+        // An empty chunk does not count as progress or extend a stalled download.
+        stream.enqueue(new Uint8Array())
+        await vi.advanceTimersByTimeAsync(9_999)
+        expect(signal?.aborted).toBe(false)
+        await vi.advanceTimersByTimeAsync(1)
+        expect(signal?.aborted).toBe(true)
+        await expect(outcome).resolves.toMatchObject({ error: { code: 'NETWORK_ERROR', retryable: true } })
+      }
+      expect(vi.getTimerCount()).toBe(0)
+    } finally { vi.useRealTimers() }
+  })
+  it.each(['export', 'binary'] as const)('keeps the deadline active through a stalled %s response body', async (kind) => {
+    vi.useFakeTimers()
+    try {
+      let signal: AbortSignal | undefined
+      const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => {
+        signal = init?.signal ?? undefined
+        return new Response(new ReadableStream({ start(controller) {
+          signal?.addEventListener('abort', () => controller.error(new DOMException('Aborted', 'AbortError')))
+        } }))
+      })
+      const api = createFrappeApi({ fetchImpl: fetchMock as typeof fetch, timeoutMs: 100, exportTimeoutMs: 200 })
+      const outcome = (kind === 'export' ? api.exportOpportunities(exportQuery) : api.getContactFile('file-1'))
+        .then(() => null, error => error as CrmApiError)
+      const deadline = kind === 'export' ? 200 : 100
+      await vi.advanceTimersByTimeAsync(deadline - 1)
+      expect(signal?.aborted).toBe(false)
+      await vi.advanceTimersByTimeAsync(1)
+      expect(signal?.aborted).toBe(true)
+      await expect(outcome).resolves.toMatchObject({ code: 'NETWORK_ERROR', retryable: true })
+      expect(vi.getTimerCount()).toBe(0)
+    } finally { vi.useRealTimers() }
+  })
+  it('clears the deadline only after a delayed export body completes', async () => {
+    vi.useFakeTimers()
+    try {
+      let signal: AbortSignal | undefined
+      let stream!: ReadableStreamDefaultController<Uint8Array>
+      const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => {
+        signal = init?.signal ?? undefined
+        return new Response(new ReadableStream<Uint8Array>({ start(controller) { stream = controller } }))
+      })
+      const exported = createFrappeApi({ fetchImpl: fetchMock as typeof fetch, exportTimeoutMs: 200 }).exportOpportunities(exportQuery)
+      await vi.advanceTimersByTimeAsync(100)
+      expect(vi.getTimerCount()).toBe(1)
+      stream.enqueue(new TextEncoder().encode(JSON.stringify({ message: { data: { items: [] } } })))
+      stream.close()
+      await expect(exported).resolves.toMatchObject({ data: { items: [] } })
+      expect(vi.getTimerCount()).toBe(0)
+      await vi.advanceTimersByTimeAsync(200)
+      expect(signal?.aborted).toBe(false)
+    } finally { vi.useRealTimers() }
+  })
+  it('allows a full export past 30 seconds while ordinary reads still time out', async () => {
+    vi.useFakeTimers()
+    try {
+      let finishExport!: (value: Response) => void
+      let exportSignal: AbortSignal | undefined
+      const fetchMock = vi.fn((url: string, init?: RequestInit) => new Promise<Response>((resolve, reject) => {
+        init?.signal?.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')))
+        if (url.endsWith('export_opportunities')) { finishExport = resolve; exportSignal = init?.signal ?? undefined }
+      }))
+      const api = createFrappeApi({ fetchImpl: fetchMock as typeof fetch })
+      const ordinary = expect(api.getBootstrap()).rejects.toMatchObject({ code: 'NETWORK_ERROR', retryable: true })
+      const exported = api.exportOpportunities(exportQuery)
+      await vi.advanceTimersByTimeAsync(45_000)
+      await ordinary
+      expect(exportSignal?.aborted).toBe(false)
+      finishExport(success({ items: ['complete export'] }))
+      await expect(exported).resolves.toMatchObject({ data: { items: ['complete export'] } })
+      expect(vi.getTimerCount()).toBe(0)
+    } finally { vi.useRealTimers() }
+  })
+  it.each([
+    [{}, 120_000],
+    [{ timeoutMs: 500 }, 500],
+    [{ timeoutMs: 500, exportTimeoutMs: 2_000 }, 2_000],
+  ])('keeps export timeout bounded and respects explicit overrides %j', async (options, timeout) => {
+    vi.useFakeTimers()
+    try {
+      let signal: AbortSignal | undefined
+      const fetchMock = vi.fn((_url: string, init?: RequestInit) => new Promise<Response>((_resolve, reject) => {
+        signal = init?.signal ?? undefined
+        signal?.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')))
+      }))
+      const api = createFrappeApi({ ...options, fetchImpl: fetchMock as typeof fetch })
+      const rejected = expect(api.exportOpportunities(exportQuery)).rejects.toMatchObject({ code: 'NETWORK_ERROR', retryable: true })
+      await vi.advanceTimersByTimeAsync(timeout - 1)
+      expect(signal?.aborted).toBe(false)
+      await vi.advanceTimersByTimeAsync(1)
+      await rejected
+      expect(signal?.aborted).toBe(true)
+      expect(vi.getTimerCount()).toBe(0)
+    } finally { vi.useRealTimers() }
+  })
+  it('serializes query export, recipient lookup and sharing with the expected version', async () => {
+    const fetchMock = vi.fn().mockImplementation(() => Promise.resolve(success({})))
+    const api = createFrappeApi({ fetchImpl: fetchMock })
+    const input = { scope: { sales: [], regions: [], markets: [], equipment: [] }, match: 'all' as const, conditions: [], sort: { field: 'stageChangedAt' as const, direction: 'asc' as const }, groupBy: null, page: 2, pageSize: 1, savedQuery: { id: 'shared', modified: 'v1' } }
+    await api.exportOpportunities(input)
+    await api.getQueryRecipients()
+    await api.shareOpportunityQuery('shared', ['reader@example.invalid'], 'v2')
+    expect(fetchMock.mock.calls.map(([url]) => new URL(url, 'http://localhost').pathname)).toEqual(['export_opportunities', 'get_query_recipients', 'share_opportunity_query'].map(method => '/api/method/rayher_crm.api.v1.cockpit.' + method))
+    expect(fetchMock.mock.calls.map(([, init]) => init.method)).toEqual(['POST', 'GET', 'POST'])
+    expect(JSON.parse(new URLSearchParams(fetchMock.mock.calls[0][1].body).get('input')!)).toEqual(input)
+    const shared = new URLSearchParams(fetchMock.mock.calls[2][1].body)
+    expect(shared.get('expectedModified')).toBe('v2')
+    expect(JSON.parse(shared.get('recipients')!)).toEqual(['reader@example.invalid'])
+  })
   it('sends future periods and identical filters to the dedicated summary and detail endpoints', async () => {
     const fetchMock = vi.fn().mockImplementation(() => Promise.resolve(success({})))
     const api = createFrappeApi({ fetchImpl: fetchMock })

@@ -4,7 +4,7 @@ import { RouterLink, useRoute } from 'vue-router'
 import { api as defaultApi, type CrmApi } from '@/api'
 import { mapRequestError } from '@/api/request-state'
 import { useAppStore } from '@/stores/app'
-import { useI18n } from '@/i18n'
+import { useI18n, useLocaleMessage } from '@/i18n'
 import { downloadBlob } from '@/features/shared/download-blob'
 import { formatDisplayDate } from '@/domain/time'
 import type { OpportunityDocuments, OpportunityDocumentKind, OpportunityDocumentItem, ScorecardKey } from '@/features/opportunities/document-types'
@@ -14,7 +14,10 @@ const route = useRoute(), app = useAppStore(), { locale } = useI18n()
 const copy = (english: string, chinese: string) => locale.value === 'en-US' ? english : chinese
 const id = computed(() => String(route.params.opportunityId || ''))
 const data = ref<OpportunityDocuments | null>(null)
-const loading = ref(false), busy = ref(false), editing = ref(false), error = ref(''), formError = ref(''), downloading = ref('')
+const loading = ref(false), busy = ref(false), editing = ref(false), downloading = ref('')
+// Read in the reader's language where the service's message is a known one; as written otherwise.
+const error = useLocaleMessage(), formError = useLocaleMessage()
+const refusal = (reason: unknown) => { const mapped = mapRequestError(reason); return mapped.localizedMessage ?? mapped.message }
 const draft = ref({ productScorecard: '', dealScorecard: '' })
 const keys: ScorecardKey[] = ['productScorecard', 'dealScorecard']
 let revision = 0
@@ -24,7 +27,7 @@ async function load() {
   const current = ++revision
   loading.value = true; error.value = ''; editing.value = false; data.value = null
   try { const result = await props.apiClient.getOpportunityDocuments(id.value); if (current === revision) data.value = result.data }
-  catch (reason) { if (current === revision) error.value = mapRequestError(reason).message }
+  catch (reason) { if (current === revision) error.value = refusal(reason) }
   finally { if (current === revision) loading.value = false }
 }
 watch(id, load, { immediate: true })
@@ -40,7 +43,7 @@ async function save() {
   try {
     const result = await props.apiClient.saveOpportunityDocumentLinks(opportunityId, { ...draft.value }, data.value.modified)
     if (current === revision && data.value) { Object.assign(data.value, result.data); editing.value = false }
-  } catch (reason) { if (current === revision) formError.value = mapRequestError(reason).message }
+  } catch (reason) { if (current === revision) formError.value = refusal(reason) }
   finally { busy.value = false }
 }
 function destination(kind: OpportunityDocumentKind, item: OpportunityDocumentItem) {
@@ -58,7 +61,7 @@ async function download(kind: OpportunityDocumentKind, item: OpportunityDocument
     const result = kind === 'demo' ? await props.apiClient.getDemoArtifact(item.fileId)
       : await props.apiClient.getOpportunityStatusFile(opportunityId, item.recordId!, item.fileId)
     if (current === revision) downloadBlob(result.blob, result.fileName)
-  } catch (reason) { if (current === revision) error.value = mapRequestError(reason).message }
+  } catch (reason) { if (current === revision) error.value = refusal(reason) }
   finally { downloading.value = '' }
 }
 </script>

@@ -12,7 +12,9 @@
   "field_order": [
     "quote_expiry_days",
     "stage6_no_po_days",
-    "configured"
+    "configured",
+    "stalled_days",
+    "stall_escalation_days"
   ],
   "fields": [
     {
@@ -35,6 +37,18 @@
       "hidden": 1,
       "read_only": 1,
       "description": "Set by the Warnings settings save. A row that install or migrate may leave has every Int at 0; without this flag it would read as saved."
+    },
+    {
+      "fieldname": "stalled_days",
+      "fieldtype": "Int",
+      "label": "Stalled Warning Days",
+      "description": "Empty or invalid: default 21. Applied to evidenced substantive activity."
+    },
+    {
+      "fieldname": "stall_escalation_days",
+      "fieldtype": "Int",
+      "label": "Stalled Escalation Days",
+      "description": "Empty or invalid: default 35. Applied to evidenced substantive activity."
     }
   ],
   "permissions": [

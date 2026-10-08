@@ -11,6 +11,8 @@ from rayher_crm.services.cockpit_metrics import number
 SETTINGS = "CRM Cockpit Settings"
 # field: (API key, site config key, default, lowest value). A quotation threshold of 0 flags only quotes expiring today.
 THRESHOLDS = {
+    "stalled_days": ("stalledDays", "crm_cockpit_stalled_days", 21, 1),
+    "stall_escalation_days": ("stallEscalationDays", "crm_cockpit_stall_escalation_days", 35, 1),
     "quote_expiry_days": ("quoteExpiryDays", "crm_cockpit_quote_expiry_days", 14, 0),
     "stage6_no_po_days": ("stage6NoPoDays", "crm_cockpit_stage6_no_po_days", 56, 1),
 }
@@ -49,6 +51,8 @@ def thresholds(*, for_update=False) -> dict[str, tuple[int, str]]:
             result[field] = (_conf(key, default, lowest), "site_config")
         else:
             result[field] = (default, "default")
+    if result["stall_escalation_days"][0] < result["stalled_days"][0]:
+        result["stalled_days"], result["stall_escalation_days"] = (21, "default"), (35, "default")
     return result
 
 
@@ -67,9 +71,9 @@ def _modified():
     return meta.get("modified") if meta.get("configured") == "1" else None
 
 
-def _dto():
-    values = thresholds()
-    modified = frappe.db.sql("SELECT `field`, `value` FROM `tabSingles` WHERE `doctype` = %s AND `field` IN ('modified', 'modified_by', 'configured')", (SETTINGS,))
+def _dto(*, for_update=False):
+    values = thresholds(for_update=for_update)
+    modified = frappe.db.sql("SELECT `field`, `value` FROM `tabSingles` WHERE `doctype` = %s AND `field` IN ('modified', 'modified_by', 'configured')" + (" FOR UPDATE" if for_update else ""), (SETTINGS,))
     meta = dict(modified) if dict(modified).get("configured") == "1" else {}
     return {**{api: values[field][0] for field, (api, *_rest) in THRESHOLDS.items()},
             "sources": {api: values[field][1] for field, (api, *_rest) in THRESHOLDS.items()},
@@ -88,6 +92,8 @@ def save_settings(payload, expected_modified=None) -> dict:
     payload = as_payload(payload)
     values, errors = {}, {}
     for field, (api, _key, _default, lowest) in THRESHOLDS.items():
+        if field in {"stalled_days", "stall_escalation_days"} and api not in payload:
+            continue  # Old clients preserve these new settings.
         value = payload.get(api)
         text = str(value).strip() if isinstance(value, (int, str)) and not isinstance(value, bool) else ""
         # ASCII digits only: str.isdigit() also accepts superscripts that int() rejects.
@@ -96,18 +102,25 @@ def save_settings(payload, expected_modified=None) -> dict:
         else:
             values[field] = int(text)
     if errors:
-        raise CrmApiException("VALIDATION_ERROR", "Thresholds must be whole days (quotation 0–365, stage 6 1–365).", field_errors=errors)
+        raise CrmApiException("VALIDATION_ERROR", "Thresholds must be whole days (quotation 0–365, all others 1–365).", field_errors=errors)
     # The settings row is the lock: a stale page must reload rather than overwrite a newer save.
     current = _modified()
     doc = frappe.get_single(SETTINGS)
-    saved = thresholds()
+    saved = thresholds(for_update=True)
+    effective = {field: values.get(field, saved[field][0]) for field in THRESHOLDS}
+    if effective["stall_escalation_days"] < effective["stalled_days"]:
+        raise CrmApiException("VALIDATION_ERROR", "Escalation days must be at least the stalled warning days.", field_errors={"stallEscalationDays": "Must be at least stalledDays"})
     if all(saved[field] == (value, "settings") for field, value in values.items()):
         # A retried save that already landed returns the saved values instead of a conflict.
-        return _dto()
+        return _dto(for_update=True)
     expected = normalize_expected_modified(expected_modified) if expected_modified else None
     if (to_iso_timestamp(current) if current else None) != expected:
         raise CrmApiException("VERSION_CONFLICT", "The thresholds were changed by someone else. Reload before saving.")
+    # A legacy client omits the new pair. Preserve currently saved values after
+    # waiting for the lock, including when get_single used an older RR view.
+    for field in {"stalled_days", "stall_escalation_days"} - values.keys():
+        doc.set(field, saved[field][0] if saved[field][1] == "settings" else 0)
     doc.update({**values, "configured": 1})
     # Track changes keeps a Version row per save: who changed which threshold, and when.
     doc.save(ignore_permissions=True)
-    return _dto()
+    return _dto(for_update=True)

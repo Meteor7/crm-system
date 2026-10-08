@@ -30,7 +30,7 @@ class TestCockpitApi(FrappeTestCase):
                 return [{"name": "test", "evaluation": "evaluation"}]
             return []
         meta = SimpleNamespace(has_field=lambda name: True)
-        with patch.object(cockpit.frappe, "get_meta", return_value=meta), patch.object(cockpit, "linked", side_effect=records):
+        with patch.object(cockpit.frappe, "get_meta", return_value=meta), patch.object(cockpit, "linked", side_effect=records), patch.object(cockpit, "event_rows", return_value=[]):
             data = cockpit.load_data([{"name": "new"}], [])
         for key, name in (("visits", "visit"), ("requests", "request"), ("quotes", "quote"), ("evaluations", "evaluation"), ("tests", "test")):
             self.assertEqual([row["name"] for row in data[key]], [name])
@@ -65,7 +65,7 @@ class TestCockpitApi(FrappeTestCase):
                     if doctype == "CRM Booking":
                         return [{"name": "booking", "source_opportunity": "opp"}]
                     return []
-                with patch.object(cockpit.frappe, "get_meta", return_value=meta), patch.object(cockpit, "linked", side_effect=records) as linked:
+                with patch.object(cockpit.frappe, "get_meta", return_value=meta), patch.object(cockpit, "linked", side_effect=records) as linked, patch.object(cockpit, "event_rows", return_value=[]):
                     data = cockpit.load_data([{"name": "customer"}], [])
                 calls = [call for call in linked.call_args_list if call.args[0] == "CRM Booking"]
                 self.assertEqual(data["booking_dates_ready"], has_date)
@@ -129,7 +129,7 @@ class TestCockpitApi(FrappeTestCase):
             with self.subTest(has_cny=has_cny):
                 def meta(doctype):
                     return SimpleNamespace(has_field=lambda field: doctype == "CRM Opportunity" and field == "amount_cny" and has_cny)
-                with patch.object(cockpit.frappe, "get_meta", side_effect=meta), patch.object(cockpit, "linked", return_value=[]) as linked:
+                with patch.object(cockpit.frappe, "get_meta", side_effect=meta), patch.object(cockpit, "linked", return_value=[]) as linked, patch.object(cockpit, "event_rows", return_value=[]):
                     data = cockpit.load_data([{"name": "customer"}], [])
                 call = next(call for call in linked.call_args_list if call.args[0] == "CRM Opportunity")
                 self.assertEqual("amount_cny" in call.args[1].split(), has_cny)
@@ -141,7 +141,7 @@ class TestCockpitApi(FrappeTestCase):
             with self.subTest(has_cny=has_cny):
                 def meta(doctype):
                     return SimpleNamespace(has_field=lambda field: doctype == "CRM Booking" and (field == "actual_po_date" or (field == "amount_cny" and has_cny)))
-                with patch.object(cockpit.frappe, "get_meta", side_effect=meta), patch.object(cockpit, "linked", return_value=[]) as linked:
+                with patch.object(cockpit.frappe, "get_meta", side_effect=meta), patch.object(cockpit, "linked", return_value=[]) as linked, patch.object(cockpit, "event_rows", return_value=[]):
                     cockpit.load_data([{"name": "customer"}], [])
                 fields = next(call for call in linked.call_args_list if call.args[0] == "CRM Booking").args[1].split()
                 self.assertLessEqual({"amount", "currency", "actual_po_date"}, set(fields))
@@ -154,7 +154,7 @@ class TestCockpitApi(FrappeTestCase):
                                lambda: cockpit.get_warnings({}),
                                lambda: cockpit.get_plan({"period": "week", "anchor": "2026-09-21"}),
                                lambda: cockpit.get_plan_details({"period": "week", "anchor": "2026-09-21", "metric": "all"}),
-                               lambda: cockpit.save_target({})):
+                               lambda: cockpit.get_target({}), lambda: cockpit.save_target({})):
                     with self.assertRaises(CrmApiException) as error:
                         action()
                     self.assertEqual(error.exception.code, "PERMISSION_DENIED")
@@ -165,7 +165,7 @@ class TestCockpitApi(FrappeTestCase):
             plan = cockpit.get_plan({"period": "year", "anchor": "2031-05-05"})
             self.assertEqual(plan["period"], {"kind": "year", "start": "2031-01-01", "end": "2031-12-31",
                                               "previousAnchor": "2030-01-01", "nextAnchor": "2032-01-01"})
-            self.assertEqual(set(plan["summary"]), {"visits", "tests", "actions", "po"})
+            self.assertEqual(set(plan["summary"]), {"visits", "tests", "actions", "po", "quotes", "followups", "events"})
             self.assertEqual(set(plan["filters"]), {"sales", "markets", "regions", "regionParents", "regionReady", "equipment"})
             # The equipment catalog of the Opportunities board; presets are always offered.
             self.assertIn("Kibo", plan["filters"]["equipment"])
@@ -264,7 +264,7 @@ class TestCockpitApi(FrappeTestCase):
 
     def test_empty_plan_does_not_query_user_names(self):
         meta = SimpleNamespace(has_field=lambda name: True)
-        with patch.object(cockpit.frappe, "get_meta", return_value=meta), patch.object(cockpit, "read") as read:
+        with patch.object(cockpit.frappe, "get_meta", return_value=meta), patch.object(cockpit, "read") as read, patch.object(cockpit, "event_rows", return_value=[]):
             data = cockpit.load_plan_data([], [])
         self.assertEqual(data["actions"], [])
         self.assertEqual(data["action_people"], [])
@@ -292,7 +292,7 @@ class TestCockpitApi(FrappeTestCase):
 
     def test_series_fraction_matches_the_elapsed_fraction_on_the_as_of_day(self):
         result = {"period": {"start": "2026-09-07", "kind": "week", "asOf": "2026-09-13T15:59:59Z"}, "activities": [], "orders": {}}
-        with patch.object(cockpit, "read", return_value=[]):
+        with patch.object(cockpit, "target_rows", return_value=[]):
             cockpit.attach_targets(result, {"sales": "", "market": "", "region": ""})
         data = {key: [] for key in ("people", "history", "stages", "actions", "probabilities", "visits", "leads", "requests", "evaluations", "tests", "quotes", "versions")}
         data["customers"] = [{"name": "c", "customer_name": "Customer", "custom_crm_region": "", "custom_crm_segment": ""}]
@@ -302,14 +302,15 @@ class TestCockpitApi(FrappeTestCase):
         review = build_review(data, {"period": "week", "anchor": "2026-09-07"}, datetime(2026, 9, 16, 12), {})
         self.assertEqual(review["orders"]["series"][-1]["fraction"], result["orders"]["elapsedFraction"])
 
-    def test_targets_are_not_summed_or_allocated_to_regions(self):
-        row = {"name": "target", "sales_owner": self.sales, "metric": "visits", "period": "week", "anchor": "2026-09-07", "target_value": "0", "modified": "2026-09-01 12:00:00"}
+    def test_team_targets_sum_but_activity_targets_are_not_allocated_to_regions(self):
+        cockpit.save_target({"sales": self.sales, "metric": "visits", "period": "week", "anchor": "2026-09-07", "value": "0"})
         def result():
-            return {"period": {"start": "2026-09-07", "kind": "week", "asOf": "2026-09-13T15:59:59Z"}, "activities": [{"key": "visits"}], "orders": {}}
-        with patch.object(cockpit, "read", return_value=[row]):
+            return {"period": {"start": "2026-09-07", "kind": "week", "asOf": "2026-09-13T15:59:59Z"}, "activities": [{"key": "visits"}], "orders": {}, "filters": {"sales": [{"id": self.sales}]}}
+        with patch.object(cockpit, "targetable_sales", return_value={self.sales}):
             own = result(); cockpit.attach_targets(own, {"sales": self.sales, "market": "", "region": ""})
-            self.assertEqual(own["activities"][0]["target"]["value"], "0")
+            self.assertEqual(own["activities"][0]["target"]["value"], "0.00")
             team = result(); cockpit.attach_targets(team, {"sales": "", "market": "", "region": ""})
-            self.assertEqual(team["activities"][0]["target"]["state"], "not_applicable")
+            self.assertEqual(team["activities"][0]["target"]["state"], "ready")
+            self.assertEqual(team["activities"][0]["target"]["value"], "0.00")
             regional = result(); cockpit.attach_targets(regional, {"sales": self.sales, "market": "", "region": "East China"})
             self.assertEqual(regional["activities"][0]["target"]["state"], "not_applicable")

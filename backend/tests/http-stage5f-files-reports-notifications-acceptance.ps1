@@ -280,6 +280,56 @@ try {
     $managerNotifications = (Invoke-RestMethod -Uri "$BaseUrl/api/method/rayher_crm.api.v1.notifications.list_notifications?page=1&pageSize=200" -WebSession $sessions.Manager).message
     if (@($managerNotifications.data | Where-Object {$_.id -eq $salesRelease.id}).Count -ne 0) { throw 'Manager wildcarded into a recipient notification.' }
 
+    # List only this run's fixtures. Service-backed Contact files keep scope-based
+    # access; ordinary private CRM parent attachments and Demo artifacts stay hidden.
+    foreach ($parent in @(@{Type='Customer';Name=$created.Account}, @{Type='Contact';Name=$created.Contact}, @{Type='Address';Name=$created.Site})) {
+        $body = @{file_name="native-$($parent.Type)-$stamp.txt";content="private $($parent.Type) $stamp";is_private=1;attached_to_doctype=$parent.Type;attached_to_name=$parent.Name} | ConvertTo-Json -Compress
+        $file = (Invoke-RestMethod -Uri "$BaseUrl/api/resource/File" -Method Post -ContentType 'application/json' -Body $body -WebSession $adminSession).data
+        $created.Files += $file.name
+    }
+    $nativeFileFields = [Uri]::EscapeDataString((ConvertTo-Json -Compress -InputObject @('name','file_name','file_url','attached_to_doctype','attached_to_name')))
+    $nativeFileFilters = [Uri]::EscapeDataString((ConvertTo-Json -Compress -Depth 5 -InputObject @{name=@('in',@($created.Files))}))
+    $nativeFileUri = "$BaseUrl/api/resource/File?fields=$nativeFileFields&filters=$nativeFileFilters&limit_page_length=1000"
+    $nativeUserFields = [Uri]::EscapeDataString((ConvertTo-Json -Compress -InputObject @('name','last_ip','last_login')))
+    $adminFiles = @((Invoke-RestMethod -Uri $nativeFileUri -WebSession $adminSession).data)
+    if ($adminFiles.Count -ne $created.Files.Count) { throw 'Administrator no longer lists all fixture files.' }
+    $contactNative = @($adminFiles | Where-Object { $_.attached_to_doctype -eq 'CRM Contact File' -and $_.attached_to_name -eq $created.ContactFile })
+    if ($contactNative.Count -ne 1) { throw 'Expected one service-backed Contact file.' }
+    $nativeDownloadPath = [IO.Path]::GetTempFileName(); $temporaryFiles += $nativeDownloadPath
+    Invoke-WebRequest -Uri ($BaseUrl + $contactNative[0].file_url) -WebSession $sessions.Sales -OutFile $nativeDownloadPath | Out-Null
+    if ((Get-FileHash $nativeDownloadPath).Hash -ne (Get-FileHash $contactDownload).Hash) { throw 'Authorized native Contact download differs from CRM delivery.' }
+    foreach ($key in @('OtherSales','Engineer','Sales','Manager')) {
+        $nativeFiles = @((Invoke-RestMethod -Uri $nativeFileUri -WebSession $sessions[$key]).data)
+        $expectedNames = if ($key -in @('Sales','Manager')) { @($contactNative[0].name) } else { @() }
+        if (@(Compare-Object (@('sentinel') + @($nativeFiles | ForEach-Object { $_.name })) (@('sentinel') + $expectedNames)).Count -ne 0) { throw "Unexpected native File visibility for $key." }
+        $nativeUsers = @((Invoke-RestMethod -Uri "$BaseUrl/api/resource/User?fields=$nativeUserFields&limit_page_length=1000" -WebSession $sessions[$key]).data)
+        if ($key -eq 'Manager') {
+            if (@($nativeUsers | Where-Object { $_.name -eq $created.Engineer }).Count -ne 1) { throw 'The native User list no longer shows a Manager the Engineer to assign.' }
+        } else {
+            if ($nativeUsers.Count -ne 1 -or $nativeUsers[0].name -ne $created[$key]) { throw "The native User list showed $key more than their own row." }
+            $nativeCount = (Invoke-RestMethod -Uri "$BaseUrl/api/method/frappe.client.get_count?doctype=User" -WebSession $sessions[$key]).message
+            if ($nativeCount -ne 1) { throw "Native User count leaks other rows to $key." }
+            $otherUserFilter = [Uri]::EscapeDataString((ConvertTo-Json -Compress -InputObject @{name=$created.Manager}))
+            $otherUserValue = (Invoke-RestMethod -Uri "$BaseUrl/api/method/frappe.client.get_value?doctype=User&fieldname=last_ip&filters=$otherUserFilter" -WebSession $sessions[$key]).message
+            if ($otherUserValue -and $otherUserValue.PSObject.Properties.Count -gt 0) { throw "Native User get_value leaks the Manager row to $key." }
+        }
+    }
+
+    # Transfer through the actual business API: the former uploader must lose
+    # both the native metadata row and native bytes, then recover after transfer back.
+    $accountInput = @{name=$account.data.name;shortName=$account.data.shortName;segment=$account.data.segment;tier=$account.data.tier;city=$account.data.city;region=$account.data.region;owner=$created.OtherSales;visibility='Private'}
+    $transferred = Invoke-CrmPost $sessions.Manager 'rayher_crm.api.v1.accounts.update_account' @{id=$created.Account;input=$accountInput;expectedModified=$account.data.modified}
+    $revokedFiles = @((Invoke-RestMethod -Uri $nativeFileUri -WebSession $sessions.Sales).data)
+    if ($revokedFiles.Count -ne 0) { throw 'The former uploader still lists Contact metadata after transfer.' }
+    $revokedPath = [IO.Path]::GetTempFileName(); $temporaryFiles += $revokedPath
+    $revokedStatus = 0
+    try { Invoke-WebRequest -Uri ($BaseUrl + $contactNative[0].file_url) -WebSession $sessions.Sales -OutFile $revokedPath | Out-Null } catch { $revokedStatus = [int]$_.Exception.Response.StatusCode }
+    if ($revokedStatus -ne 403) { throw "Expected revoked native Contact download HTTP 403, got $revokedStatus." }
+    $accountInput.owner = $created.Sales
+    Invoke-CrmPost $sessions.Manager 'rayher_crm.api.v1.accounts.update_account' @{id=$created.Account;input=$accountInput;expectedModified=$transferred.data.modified} | Out-Null
+    $restoredFiles = @((Invoke-RestMethod -Uri $nativeFileUri -WebSession $sessions.Sales).data)
+    if ($restoredFiles.Count -ne 1 -or $restoredFiles[0].name -ne $contactNative[0].name) { throw 'Authorized Contact visibility did not recover after transfer back.' }
+
     & docker compose @composeArgs restart backend | Out-Null
     if ($LASTEXITCODE -ne 0) { throw 'Backend restart failed.' }
     $persisted = $null; $deadline = [DateTime]::UtcNow.AddSeconds(90)
@@ -297,7 +347,7 @@ try {
     $deletedStatus = 0
     try { Save-Download $sessions.Sales 'rayher_crm.api.v1.contact_files.download_file' 'fileId' $created.ContactFile | Out-Null } catch { $deletedStatus = [int]$_.Exception.Response.StatusCode }
     if ($deletedStatus -ne 404) { throw "Expected deleted Contact File HTTP 404, got $deletedStatus." }
-    Write-Output 'Stage 5F authenticated HTTP acceptance passed: multipart/private raw download/IDOR/arbitrary Test Report/Article projection/recipient notifications/read state/restart persistence.'
+    Write-Output 'Stage 5F authenticated HTTP acceptance passed: multipart/private raw download/IDOR/arbitrary Test Report/Article projection/recipient notifications/read state/native File and User lists/restart persistence.'
 } finally {
     $adminPassword=$null; $passwords=$null
     foreach ($path in @($temporaryFiles)) {

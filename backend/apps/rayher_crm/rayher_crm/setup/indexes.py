@@ -17,6 +17,7 @@ LOSS_REVIEW_INDEX = "idx_crm_opportunity_loss_review"
 LOSS_REVIEW_REVISION_INDEX = "idx_crm_opportunity_loss_review_revision"
 WARNING_HANDLING_REVISION_INDEX = "idx_crm_warning_handling_revision"
 OPPORTUNITY_FIELD_HISTORY_INDEX = "idx_crm_opportunity_field_history"
+OPPORTUNITY_STAKEHOLDER_INDEX = "idx_crm_opportunity_stakeholder_active"
 LEAD_CONVERTED_ACCOUNT_INDEX = "custom_crm_converted_account_index"
 NOTIFICATION_RECIPIENT_CREATED_INDEX = "idx_crm_notification_recipient_created"
 NOTIFICATION_RECIPIENT_UNREAD_CREATED_INDEX = "idx_crm_notification_recipient_unread_created"
@@ -47,6 +48,13 @@ DEMO_REQUEST_SUBMISSION_INDEX = "idx_crm_demo_request_history_submission"
 
 def install_stage5f_indexes() -> None:
     install_notification_indexes()
+    if frappe.db.table_exists("CRM Cockpit Target"):
+        frappe.db.add_index("CRM Cockpit Target", ["period", "anchor"], "idx_crm_target_period")
+        frappe.db.add_index("CRM Cockpit Target", ["period", "sales_owner", "metric", "anchor"], "idx_crm_target_defaults")
+    if frappe.db.table_exists("CRM Plan Commitment"):
+        frappe.db.add_index("CRM Plan Commitment", ["period", "anchor"], "idx_crm_commitment_period")
+        # Non-unique: historical duplicates remain visible for reconciliation.
+        frappe.db.add_index("CRM Plan Commitment", ["sales_owner", "metric", "period", "anchor"], "idx_crm_commitment_owner")
     if frappe.db.table_exists("File") and frappe.db.has_column("File", "content_hash"):
         ensure_file_content_hash_index()
     if frappe.db.table_exists("Lead") and frappe.db.has_column(
@@ -89,6 +97,8 @@ def install_stage5f_indexes() -> None:
     if frappe.db.table_exists("CRM Opportunity History"):
         # Slip handling locks this opportunity's PO-date history, not other deals.
         frappe.db.add_index("CRM Opportunity History", ["opportunity", "field"], OPPORTUNITY_FIELD_HISTORY_INDEX)
+    if frappe.db.table_exists("CRM Opportunity Stakeholder"):
+        frappe.db.add_index("CRM Opportunity Stakeholder", ["opportunity", "archived", "name"], OPPORTUNITY_STAKEHOLDER_INDEX)
     if frappe.db.table_exists("CRM Opportunity Stage History"):
         frappe.db.add_index(
             "CRM Opportunity Stage History", ["opportunity", "recorded_at"], STAGE_HISTORY_INDEX,

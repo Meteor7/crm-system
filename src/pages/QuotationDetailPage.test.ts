@@ -551,7 +551,9 @@ describe('QuotationDetailPage optimistic save recovery', () => {
     await flushPromises()
 
     expect(wrapper.attributes('data-editable')).toBe('false')
+    // Neither as the service wrote it nor as the client reads it (zh-CN): the late refusal is not shown at all.
     expect(wrapper.text()).not.toContain('Quotation version was not found.')
+    expect(wrapper.text()).not.toContain('找不到这个报价版本')
     wrapper.unmount()
   })
 

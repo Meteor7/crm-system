@@ -17,6 +17,17 @@ function legacyOpportunity(saleType: string) {
 }
 
 describe('OpportunityEditorModal sale type', () => {
+  it('leaves structured multiline and resolved red flags to the Blue Sheet editor', async () => {
+    const text = '  Budget pending\nBuyer follow-up  '
+    const opportunity = { ...legacyOpportunity('Service'), redFlags: [text], redFlagRecords: [
+      { id: 'risk-one', text, severity: 'High', status: 'Resolved', updatedAt: null, updatedBy: null },
+    ] } as StrategyOpportunityDto
+    const wrapper = mount(OpportunityEditorModal, { props: { ...props, opportunity } })
+    expect(wrapper.find('[data-testid="structured-red-flags-note"]').exists()).toBe(true)
+    await wrapper.get('form').trigger('submit')
+    expect(wrapper.emitted('submit')?.[0]?.[0]).not.toHaveProperty('redFlags')
+    wrapper.unmount()
+  })
   it('never exposes Opportunity stage as an editable field', () => {
     const create = mount(OpportunityEditorModal, { props })
     const edit = mount(OpportunityEditorModal, {

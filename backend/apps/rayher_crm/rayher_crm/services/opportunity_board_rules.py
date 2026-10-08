@@ -29,6 +29,7 @@ from decimal import Decimal
 from rayher_crm.services.equipment_names import canonical_equipment, equipment_spellings
 from rayher_crm.services.opportunity_stages import OPEN_STAGES, OPPORTUNITY_STAGES, PROBABILITY_LEVELS
 from rayher_crm.services.territory_tree import ancestors
+from rayher_crm.services.cockpit_metrics import supported_bounds
 
 # China has kept UTC+8 without daylight saving since 1991; a fixed offset needs no tz database.
 SHANGHAI = timezone(timedelta(hours=8), "Asia/Shanghai")
@@ -58,9 +59,12 @@ NOT_SET_LABEL = "Not set"
 
 MATCH_MODES = ("all", "any")
 LIST_OPERATORS = ("in", "not_in")
+DATE_FIELDS = ("stageChangedAt", "createdAt", "lastActivityAt", "poDate")
+STATUS_LABELS = {"open": "Open", "won": "Won", "lost": "Lost"}
 COMPARISONS = {"gt": operator.gt, "gte": operator.ge, "lt": operator.lt, "lte": operator.le}
 OPERATORS = {
     "stage": LIST_OPERATORS,
+    "status": LIST_OPERATORS,
     "probabilityLevel": LIST_OPERATORS,
     "sales": LIST_OPERATORS,
     "region": LIST_OPERATORS,
@@ -68,6 +72,9 @@ OPERATORS = {
     "equipment": LIST_OPERATORS,
     "customerName": ("contains",),
     "stageChangedAt": ("before", "after", "between"),
+    "createdAt": ("before", "after", "between"),
+    "lastActivityAt": ("before", "after", "between"),
+    "poDate": ("before", "after", "between"),
     "stageAgeDays": ("gt", "gte", "lt", "lte"),
     "amountCny": ("gt", "gte", "lt", "lte", "between"),
 }
@@ -76,18 +83,22 @@ SCOPE_FIELDS = {"sales": "sales", "regions": "region", "markets": "market", "equ
 GROUP_FIELDS = ("region", "sales", "stage", "probabilityLevel", "equipment", "market")
 SORT_FIELDS = (
     "customerName", "title", "region", "sales", "stage", "stageChangedAt", "stageAgeDays",
-    "probabilityLevel", "equipment", "market", "amountCny", "nextAction",
+    "probabilityLevel", "equipment", "market", "amountCny", "nextAction", "status", "createdAt", "lastActivityAt", "poDate",
 )
 COLUMNS = (
     "customerName", "title", "region", "sales", "stage", "stageChangedAt", "probabilityLevel",
-    "equipment", "market", "amount", "amountCny", "nextAction",
+    "equipment", "market", "amount", "amountCny", "nextAction", "status", "createdAt", "lastActivityAt", "poDate",
 )
 DEFAULT_SORT = {"field": "stageChangedAt", "direction": "asc"}
-QUERY_KEYS = ("scope", "match", "conditions", "sort", "groupBy", "page", "pageSize")
-DEFINITION_KEYS = ("scope", "match", "conditions", "sort", "groupBy", "columns")
+QUERY_KEYS = ("scope", "match", "conditions", "sort", "groupBy", "page", "pageSize", "periodFilter")
+DEFINITION_KEYS = ("scope", "match", "conditions", "sort", "groupBy", "columns", "periodFilter")
 
-MAX_CONDITIONS = 20
+MAX_CONDITIONS = 30
+MAX_GROUP_DEPTH = 3  # root AND/OR is level 1
 MAX_VALUES = 100
+# Legacy region/group identities can split one old value into two without
+# changing its covered set. Other fields retain their original bound.
+MAX_REGION_VALUES = 200
 MAX_TEXT = 140
 MAX_STAGE_AGE_DAYS = 36500
 AMOUNT_PATTERN = re.compile(r"[0-9]{1,18}(\.[0-9]{1,2})?")
@@ -120,13 +131,30 @@ def validate_definition(raw, options):
 
 
 def _definition(raw, options):
-    return {
+    result = {
         "scope": _scope(raw.get("scope"), options),
         "match": _choice(_or_default(raw.get("match"), "all"), MATCH_MODES, "match"),
         "conditions": _conditions(raw.get("conditions"), options),
         "sort": _sort(raw.get("sort")),
         "groupBy": _group_by(raw.get("groupBy"), options),
     }
+    if raw.get("periodFilter") is not None:
+        result["periodFilter"] = _period_filter(raw["periodFilter"])
+    return result
+
+
+def _period_filter(raw):
+    _object(raw, ("field", "kind", "anchor"), "periodFilter")
+    field = _choice(raw.get("field"), ("stageChangedAt", "createdAt", "poDate"), "periodFilter.field")
+    kind = _choice(raw.get("kind"), ("week", "month", "quarter", "year"), "periodFilter.kind")
+    anchor = _day(raw.get("anchor"), "periodFilter.anchor")
+    try:
+        start, _ = supported_bounds(kind, date.fromisoformat(anchor))
+        if anchor > "2099-12-31":
+            raise ValueError()
+    except (ValueError, OverflowError) as exc:
+        raise BoardQueryError("periodFilter.anchor", "Choose a business period from 2000 through 2099.") from exc
+    return {"field": field, "kind": kind, "anchor": start.isoformat()}
 
 
 def _or_default(value, default):
@@ -174,8 +202,9 @@ def _values(field, value, options, path, *, allow_empty):
         raise BoardQueryError(path, f"{path} must be an array.")
     if not value and not allow_empty:
         raise BoardQueryError(path, f"{path} must list at least one value.")
-    if len(value) > MAX_VALUES:
-        raise BoardQueryError(path, f"{path} may list at most {MAX_VALUES} values.")
+    maximum = MAX_REGION_VALUES if field == "region" else MAX_VALUES
+    if len(value) > maximum:
+        raise BoardQueryError(path, f"{path} may list at most {maximum} values.")
     result = []
     for item in value:
         text = item.strip() if isinstance(item, str) else ""
@@ -192,6 +221,8 @@ def _values(field, value, options, path, *, allow_empty):
 
 
 def _allowed_values(field, options, path):
+    if field == "status":
+        return set(STATUS_LABELS)
     if field == "stage":
         return set(OPPORTUNITY_STAGES)
     if field == "probabilityLevel":
@@ -215,11 +246,29 @@ def _require_regions(options, path):
 def _conditions(value, options):
     if value is None:
         return []
-    if not isinstance(value, list):
-        raise BoardQueryError("conditions", "conditions must be an array.")
-    if len(value) > MAX_CONDITIONS:
-        raise BoardQueryError("conditions", f"conditions may hold at most {MAX_CONDITIONS} entries.")
-    return [_condition(item, options, f"conditions[{index}]") for index, item in enumerate(value)]
+    count = [0]
+
+    def children(items, depth, path):
+        if not isinstance(items, list) or (depth > 1 and not items):
+            raise BoardQueryError(path, "Condition groups must be non-empty arrays.")
+        if len(items) > MAX_CONDITIONS:
+            raise BoardQueryError(path, f"A query may hold at most {MAX_CONDITIONS} conditions.")
+        result = []
+        for index, item in enumerate(items):
+            here = f"{path}[{index}]"
+            if isinstance(item, dict) and ("conditions" in item or "match" in item):
+                _object(item, ("match", "conditions"), here)
+                if depth >= MAX_GROUP_DEPTH:
+                    raise BoardQueryError(here, f"A query supports at most {MAX_GROUP_DEPTH} group levels, including the root.")
+                result.append({"match": _choice(item.get("match"), MATCH_MODES, f"{here}.match"),
+                               "conditions": children(item.get("conditions"), depth + 1, f"{here}.conditions")})
+            else:
+                count[0] += 1
+                if count[0] > MAX_CONDITIONS:
+                    raise BoardQueryError("conditions", f"A query may hold at most {MAX_CONDITIONS} conditions in total.")
+                result.append(_condition(item, options, here))
+        return result
+    return children(value, 1, "conditions")
 
 
 def _condition(raw, options, path):
@@ -236,7 +285,7 @@ def _condition(raw, options, path):
         parsed = _values(field, value, options, value_path, allow_empty=False)
     elif field == "customerName":
         parsed = _text(value, value_path)
-    elif field == "stageChangedAt":
+    elif field in DATE_FIELDS:
         parsed = _range(value, _day, date.fromisoformat, value_path) if op == "between" else _day(value, value_path)
     elif field == "stageAgeDays":
         parsed = _age(value, value_path)
@@ -391,6 +440,9 @@ def board_rows(opportunities, owner_names, actions, now, equipment=(), region_pa
 
 def _row(opp, owner_names, next_action, today, spellings, region_parents):
     changed = stamp(opp.get("stage_changed_at"))
+    created = stamp(opp.get("creation"))
+    activity = stamp(opp.get("last_activity_at"))
+    po_day = _calendar_day(opp.get("po_date"))
     changed_day = changed.astimezone(SHANGHAI).date() if changed else None
     # A change recorded later today (or a declared day ahead of the clock) is day 0, not negative.
     age = max((today - changed_day).days, 0) if changed_day else None
@@ -415,6 +467,11 @@ def _row(opp, owner_names, next_action, today, spellings, region_parents):
         "salesId": owner,
         "salesName": owner_names.get(owner) or owner,
         "stage": opp["stage"],
+        "status": "open" if opp["stage"] in OPEN_STAGES else "won" if opp["stage"] == "po_received" else "lost",
+        "createdAt": utc_iso(created) if created else None,
+        "lastActivityAt": utc_iso(activity) if activity else None,
+        "lastActivityIncomplete": bool(opp.get("last_activity_incomplete")),
+        "poDate": po_day.isoformat() if po_day else None,
         "stageChangedAt": utc_iso(changed) if changed else None,
         "stageAgeDays": age,
         "stageUnchangedOver21Days": stale,
@@ -438,6 +495,10 @@ def _row(opp, owner_names, next_action, today, spellings, region_parents):
         "sales": owner or None,
         "salesName": dto["salesName"],
         "stage": dto["stage"],
+        "status": dto["status"],
+        "createdAt": created,
+        "lastActivityAt": activity if not dto["lastActivityIncomplete"] else None,
+        "poDate": po_day,
         "probabilityLevel": level or PENDING,
         "stageChangedAt": changed,
         "stageDay": changed_day,
@@ -453,6 +514,10 @@ def _row(opp, owner_names, next_action, today, spellings, region_parents):
 # ---------------------------------------------------------------- evaluation
 
 def _predicate(condition):
+    if "conditions" in condition:
+        children = [_predicate(child) for child in condition["conditions"]]
+        combine = all if condition["match"] == "all" else any
+        return lambda facts: combine(child(facts) for child in children)
     field, op, value = condition["field"], condition["operator"], condition["value"]
     if op in LIST_OPERATORS:
         listed = set(value)
@@ -466,13 +531,16 @@ def _predicate(condition):
     if op == "contains":
         needle = value.casefold()
         return lambda facts: needle in facts["customerName"].casefold()
-    if field == "stageChangedAt":
+    if field in DATE_FIELDS:
+        def day_of(facts):
+            value = facts[field]
+            return value.astimezone(SHANGHAI).date() if isinstance(value, datetime) else value
         if op == "between":
             low, high = (date.fromisoformat(day) for day in value)
-            return lambda facts: facts["stageDay"] is not None and low <= facts["stageDay"] <= high
+            return lambda facts: day_of(facts) is not None and low <= day_of(facts) <= high
         day = date.fromisoformat(value)
         compare = operator.lt if op == "before" else operator.gt
-        return lambda facts: facts["stageDay"] is not None and compare(facts["stageDay"], day)
+        return lambda facts: day_of(facts) is not None and compare(day_of(facts), day)
     if field == "amountCny" and op == "between":
         low, high = (Decimal(amount) for amount in value)
         return lambda facts: facts["amountCny"] is not None and low <= facts["amountCny"] <= high
@@ -486,6 +554,10 @@ def _matcher(query):
         _predicate({"field": SCOPE_FIELDS[key], "operator": "in", "value": values})
         for key, values in query["scope"].items() if values
     ]
+    period = query.get("periodFilter")
+    if period:
+        start, end = supported_bounds(period["kind"], date.fromisoformat(period["anchor"]))
+        scope.append(_predicate({"field": period["field"], "operator": "between", "value": [start.isoformat(), (end - timedelta(days=1)).isoformat()]}))
     predicates = [_predicate(condition) for condition in query["conditions"]]
     combine = all if query["match"] == "all" else any
 
@@ -510,6 +582,10 @@ def _stage_rank(stage):
 
 
 SORT_KEYS = {
+    "status": lambda facts: facts["status"],
+    "createdAt": lambda facts: facts["createdAt"],
+    "lastActivityAt": lambda facts: facts["lastActivityAt"],
+    "poDate": lambda facts: facts["poDate"],
     "customerName": lambda facts: facts["customerName"].casefold(),
     "title": lambda facts: facts["title"].casefold(),
     "region": lambda facts: _fold(facts["region"]),

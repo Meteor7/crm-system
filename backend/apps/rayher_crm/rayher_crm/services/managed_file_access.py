@@ -811,7 +811,14 @@ def protect_file_write(doc, method=None) -> None:
     trusted = doc.flags.get("crm_upload_token") is _UPLOAD_TOKEN
     old = None
     if not doc.is_new() and doc.name:
-        old = frappe.db.get_value("File", doc.name, list(_PROTECTED_FIELDS), as_dict=True)
+        # Document.save already locks this row in check_if_latest. Keep the
+        # File -> boundary -> DocShare order explicit for direct guard callers too.
+        old = frappe.db.get_value("File", doc.name, list(_PROTECTED_FIELDS), as_dict=True, for_update=True)
+    # A File can move from an ordinary ERP attachment to a private CRM parent.
+    # Lock Address/Customer boundaries even for a new File so a concurrent CRM
+    # promotion cannot miss the new attachment while revoking its shares.
+    if _ordinary_private_crm_attachment(doc) and old:
+        frappe.db.delete("DocShare", {"share_doctype": "File", "share_name": doc.name})
     if old and not doc.is_folder and frappe.utils.cint(old.is_private) != frappe.utils.cint(doc.is_private):
         # File.validate returns early for folders. Converting an old folder or
         # unresolved row into a file cannot make its display name a disk source.
@@ -930,10 +937,68 @@ def _visit_read_condition(user, *, for_bound_query: bool = False) -> str:
     )
 
 
+def _ordinary_crm_parent_condition(alias="`tabFile`") -> str:
+    from rayher_crm.permissions.scope import _protected_address_exists_condition
+
+    crm_site = _protected_address_exists_condition(f"{alias}.`attached_to_name`")
+    return (
+        f"COALESCE({alias}.`attached_to_doctype`,'') IN ('Customer', 'Contact', 'Lead') "
+        f"OR (COALESCE({alias}.`attached_to_doctype`,'')='Address' AND {crm_site})"
+    )
+
+
+def _ordinary_private_crm_attachment(doc) -> bool:
+    if not frappe.utils.cint(doc.is_private):
+        return False
+    if doc.attached_to_doctype in {"Customer", "Contact", "Lead"}:
+        return True
+    if doc.attached_to_doctype != "Address" or not doc.attached_to_name:
+        return False
+    from rayher_crm.permissions.scope import (
+        _lock_address, _locked_linked_customer_names, _lock_customer_groups,
+    )
+
+    _lock_address(doc.attached_to_name)
+    customers = _locked_linked_customer_names("Address", doc.attached_to_name)
+    groups = _lock_customer_groups(customers)
+    return "CRM Customers" in groups.values() or len(groups) < len(customers)
+
+
+def reconcile_ordinary_file_shares() -> None:
+    """Migration cleanup: DocShare is ORed outside the File query hook."""
+    frappe.db.sql(
+        "DELETE s FROM `tabDocShare` s INNER JOIN `tabFile` f "
+        "ON s.share_doctype='File' AND s.share_name=f.name "
+        f"WHERE f.is_private=1 AND ({_ordinary_crm_parent_condition('f')})"
+    )
+
+
+def revoke_address_file_shares(address_names) -> None:
+    """Called with transitioning Addresses locked; abort a competing File write."""
+    from rayher_crm.permissions.scope import _lock_transition_targets
+
+    names = tuple(sorted(set(filter(None, address_names))))
+    if not names:
+        return
+    placeholders = ", ".join(["%s"] * len(names))
+    files = _lock_transition_targets(
+        "File",
+        "SELECT name FROM `tabFile` WHERE attached_to_doctype='Address' "
+        f"AND attached_to_name IN ({placeholders}) AND is_private=1 ORDER BY name FOR UPDATE NOWAIT",
+        names,
+    )
+    if files:
+        frappe.db.delete("DocShare", {"share_doctype": "File", "share_name": ("in", files)})
+
+
 def file_query(user=None) -> str:
     user = user or frappe.session.user
     if user == "Administrator":
         return ""
+    # Ordinary Desk attachments on shared CRM parents have no service metadata
+    # to authorize them. Hide their private native-list rows; keep the existing
+    # current-scope Contact/Visit branches below and ordinary ERP Addresses.
+    ordinary_crm_parent = _ordinary_crm_parent_condition()
     # Release migration inventory rejects canonical aliases before traffic
     # resumes, and File write hooks prevent creating new aliases afterwards.
     # Runtime list queries must stay bounded to indexed SQL guards instead of
@@ -960,7 +1025,8 @@ def file_query(user=None) -> str:
         "AND `crm_alias_doctype`.`module`='Rayher CRM')) "
         f"AND COALESCE(`crm_managed_alias`.`attached_to_doctype`,'') NOT IN ({native_scoped}))"
     )
-    return (f"NOT ({_controlled_file_query_condition('`tabFile`')}) AND "
+    return (f"NOT (`tabFile`.`is_private`=1 AND ({ordinary_crm_parent})) AND "
+        f"NOT ({_controlled_file_query_condition('`tabFile`')}) AND "
         f"NOT (({direct_restricted}) OR ({alias_restricted})) AND "
         f"(NOT ({target}) OR ({_contact_read_condition(user)})) AND "
         f"(COALESCE(`tabFile`.`attached_to_doctype`,'')!='CRM Visit' OR ({_visit_read_condition(user)}))")
@@ -995,6 +1061,18 @@ def protect_share(doc, method=None) -> None:
     protected = doc.share_doctype in {"CRM Contact File", "CRM Controlled Document"}
     if doc.share_doctype == "File":
         protected = bool(_managed_file_kinds(doc.share_name))
+        # Match the native-list policy for ordinary private CRM parent files,
+        # while preserving ordinary ERP and public-file sharing.
+        # A saved DocShare already holds its own row. A competing File save
+        # holds File and may delete that grant, so a waiting read can deadlock.
+        try:
+            rows = frappe.db.sql(
+                "SELECT name, is_private, attached_to_doctype, attached_to_name "
+                "FROM `tabFile` WHERE name=%s FOR UPDATE NOWAIT", (doc.share_name,), as_dict=True,
+            )
+        except (frappe.QueryTimeoutError, frappe.QueryDeadlockError):
+            frappe.throw("The file's sharing boundary is being changed. Please retry.", frappe.PermissionError)
+        protected = protected or bool(rows and _ordinary_private_crm_attachment(rows[0]))
     if protected:
         frappe.throw("Managed attachments follow current CRM access and cannot be shared separately.", frappe.PermissionError)
 

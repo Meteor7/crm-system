@@ -356,7 +356,18 @@ class TestControlledDocumentDelivery(FrappeTestCase):
         frappe.set_user(self.engineer)
         third = create_request(version_id(self.document), "Internal training only")
         frappe.set_user(self.manager)
-        approved = decide_request(third["id"], "approve-watermarked", "ignored")
+        # A note sent with an approval is refused, not dropped: the request stays pending until the note is gone.
+        for decision in ("approve-watermarked", "approve-original"):
+            with self.assertRaises(CrmApiException) as refused:
+                decide_request(third["id"], decision, "Only for the ACME call on 21 Oct")
+            self.assertEqual(refused.exception.code, "VALIDATION_ERROR")
+            self.assertEqual(refused.exception.field_errors, {"note": "Not with an approval"})
+            # The client reads this text (src/api/generated-error-messages.ts): a rewording changes both.
+            self.assertEqual(
+                str(refused.exception), "An approval carries no note: clear it, or reject the request or ask for more information.",
+            )
+        self.assertEqual(frappe.db.get_value("CRM Document Access Request", third["id"], "status"), "Pending")
+        approved = decide_request(third["id"], "approve-watermarked", "   ")
         self.assertEqual((approved["status"], approved["decisionNote"]), ("Approved", ""))
 
     def test_decision_skips_requester_after_crm_role_is_revoked(self):

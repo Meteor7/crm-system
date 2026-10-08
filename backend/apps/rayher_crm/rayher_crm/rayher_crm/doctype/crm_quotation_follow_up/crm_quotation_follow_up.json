@@ -1,0 +1,73 @@
+{
+  "doctype": "DocType",
+  "name": "CRM Quotation Follow Up",
+  "module": "Rayher CRM",
+  "engine": "InnoDB",
+  "istable": 1,
+  "autoname": "hash",
+  "naming_rule": "Random",
+  "creation": "2026-10-05 12:00:00.000000",
+  "modified": "2026-10-05 12:00:00.000000",
+  "owner": "Administrator",
+  "modified_by": "Administrator",
+  "field_order": [
+    "title",
+    "due",
+    "status",
+    "note",
+    "completed_at",
+    "completed_owner",
+    "completed_version"
+  ],
+  "fields": [
+    {
+      "fieldname": "title",
+      "fieldtype": "Data",
+      "label": "Title",
+      "reqd": 1
+    },
+    {
+      "fieldname": "due",
+      "fieldtype": "Date",
+      "label": "Due",
+      "reqd": 1
+    },
+    {
+      "fieldname": "status",
+      "fieldtype": "Select",
+      "label": "Status",
+      "reqd": 1,
+      "options": "Open\nDone\nCancelled",
+      "default": "Open"
+    },
+    {
+      "fieldname": "note",
+      "fieldtype": "Text",
+      "label": "Note"
+    },
+    {
+      "fieldname": "completed_at",
+      "fieldtype": "Datetime",
+      "label": "Completed At",
+      "read_only": 1
+    },
+    {
+      "fieldname": "completed_owner",
+      "fieldtype": "Link",
+      "label": "Completed Sales Owner",
+      "options": "User",
+      "read_only": 1
+    },
+    {
+      "fieldname": "completed_version",
+      "fieldtype": "Link",
+      "label": "Completed Quotation Version",
+      "options": "CRM Quotation Version",
+      "read_only": 1
+    }
+  ],
+  "permissions": [],
+  "actions": [],
+  "links": [],
+  "states": []
+}

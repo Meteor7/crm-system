@@ -19,10 +19,11 @@
 .period-controls{display:flex;gap:4px;align-items:center;margin-left:auto}.period-controls>button{display:inline-flex;align-items:center;justify-content:center;gap:5px;min-height:34px}.period-controls input{width:125px;min-width:0}
 .segmented{display:flex;flex-shrink:0;border:1px solid var(--crm-line);border-radius:var(--crm-radius-sm);overflow:hidden}.segmented button{border:0;border-radius:0;padding:6px 10px;font-weight:600}.segmented button[aria-pressed=true]{background:var(--crm-brand);color:var(--crm-brand-ink)}
 .error-banner{border:1px solid #e6b4ae;background:var(--crm-danger-soft);padding:15px;border-radius:8px;margin-bottom:16px}.error-banner p{margin:7px 0;font-size:12px}
-.plan-kpis{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin-bottom:14px}
+.plan-kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin-bottom:14px}
 .plan-page .kpi{text-align:left;padding:14px 18px;border-radius:var(--crm-radius-md);border-top:1px solid var(--crm-line);border-left:3px solid var(--kind-color);min-height:86px;display:grid;grid-template-columns:1fr auto;align-items:center;gap:5px 12px;opacity:1}
 .kpi:hover:enabled,.kpi.selected{background:var(--crm-surface-muted)}.kpi>span{color:var(--crm-text-muted);font-size:12px}.kpi>strong{grid-column:2;grid-row:1 / 3;font-size:32px;line-height:1.4;font-weight:750;letter-spacing:-.5px}.kpi small{grid-column:1}.kpi small{font-size:11px;line-height:1.4;overflow-wrap:anywhere}.kpi .unavailable{grid-column:1 / -1;grid-row:auto;font-size:13px;color:var(--crm-text-muted)}
 .visits{--kind-color:#2866a1}.tests{--kind-color:#2e8064}.actions{--kind-color:#8b9aa7}.po{--kind-color:#b8443c}
+.quotes{--kind-color:#876040}.followups{--kind-color:#6e69a5}.events{--kind-color:#287f89}
 .plan-grid{position:relative;isolation:isolate;display:grid;grid-template-columns:1.05fr 1.2fr .8fr;gap:14px}.agenda-panel{grid-column:1/-1;height:clamp(330px,calc(100dvh - 340px),460px)}
 .panel{min-width:0;min-height:0;display:flex;flex-direction:column;background:white;border:1px solid var(--crm-line);border-radius:var(--crm-radius-md);overflow:hidden}
 .panel-heading{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;padding:16px 18px 10px;flex-shrink:0}.panel-heading h2{margin:0;font-size:16px;line-height:1.25;letter-spacing:-.2px}.panel-heading p{font-size:12px;color:var(--crm-text-muted);margin:4px 0 0;line-height:1.4}.panel-heading label{font-size:11px;white-space:nowrap}.panel-heading select{font-size:13px}
@@ -56,3 +57,5 @@
 @container(max-width:1860px){.plan-controls .period-controls{flex-basis:100%;margin-left:0}.plan-controls label{flex:1 1 110px;max-width:max-content;min-width:0}.plan-controls select{min-width:0}}
 /* Below a 1200px page the filter names give way so the four first-row selects stay readable; each select keeps its aria-label. */
 @container(max-width:1200px){.plan-controls .filter-name{display:none}}
+
+.equipment-summary{margin-bottom:14px;padding-bottom:12px}

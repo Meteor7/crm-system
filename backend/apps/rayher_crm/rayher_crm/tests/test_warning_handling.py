@@ -92,6 +92,20 @@ class TestWarningHandling(FrappeTestCase):
             call()
         return raised.exception.code
 
+    def test_stall_settings_validate_pair_preserve_legacy_saves_and_feed_review(self):
+        payload = {"quoteExpiryDays": 14, "stage6NoPoDays": 56, "stalledDays": 12, "stallEscalationDays": 20}
+        saved = cockpit_settings.save_settings(payload)
+        result = self._warnings()
+        review = cockpit.get_review({"period": "week", "anchor": "2030-03-13"})
+        self.assertEqual((review["stalled"]["thresholdDays"], review["stalled"]["escalationDays"]), (12, 20))
+        old_client = cockpit_settings.save_settings({"quoteExpiryDays": 15, "stage6NoPoDays": 56}, saved["modified"])
+        self.assertEqual((old_client["stalledDays"], old_client["stallEscalationDays"]), (12, 20))
+        with self.assertRaises(CrmApiException):
+            cockpit_settings.save_settings({**payload, "stalledDays": 30}, old_client["modified"])
+        self.assertEqual(cockpit_settings.get_settings()["stalledDays"], 12)
+        with self.assertRaises(CrmApiException):
+            cockpit_settings.save_settings({**payload, "stalledDays": 0}, old_client["modified"])
+
     def test_next_step_is_audited_and_never_clears_an_overdue_action(self):
         action = self._action("2030-03-01")
         before = self._warnings()
@@ -162,7 +176,7 @@ class TestWarningHandling(FrappeTestCase):
         frappe.conf.crm_cockpit_stage6_no_po_days = None
         settings = cockpit_settings.get_settings()
         self.assertEqual((settings["quoteExpiryDays"], settings["stage6NoPoDays"], settings["modified"]), (14, 56, None))
-        self.assertEqual(settings["sources"], {"quoteExpiryDays": "default", "stage6NoPoDays": "default"})
+        self.assertEqual(settings["sources"], {"quoteExpiryDays": "default", "stage6NoPoDays": "default", "stalledDays": "default", "stallEscalationDays": "default"})
         with patch.dict(frappe.conf, {"crm_cockpit_stage6_no_po_days": 40, "crm_cockpit_quote_expiry_days": "bad"}):
             fallback = cockpit_settings.get_settings()
             self.assertEqual((fallback["stage6NoPoDays"], fallback["sources"]["stage6NoPoDays"]), (40, "site_config"))
@@ -173,7 +187,7 @@ class TestWarningHandling(FrappeTestCase):
                       " (%s, 'modified', '2026-09-24 17:07:24.983428'), (%s, 'modified_by', 'Administrator')", (cockpit_settings.SETTINGS,) * 4)
         installed = cockpit_settings.get_settings()
         self.assertEqual((installed["quoteExpiryDays"], installed["stage6NoPoDays"], installed["modified"], installed["modifiedBy"]), (14, 56, None, None))
-        self.assertEqual(installed["sources"], {"quoteExpiryDays": "default", "stage6NoPoDays": "default"})
+        self.assertEqual(installed["sources"], {"quoteExpiryDays": "default", "stage6NoPoDays": "default", "stalledDays": "default", "stallEscalationDays": "default"})
         self.assertEqual(self._warnings()["quotationExpiry"]["thresholdDays"], 14)
         for bad in (366, -1, "7.5", "x", None, True, 7.0, "²"):
             with self.subTest(bad=bad):
@@ -186,7 +200,7 @@ class TestWarningHandling(FrappeTestCase):
         with patch.dict(frappe.conf, {"crm_cockpit_stage6_no_po_days": 20}):
             saved = cockpit_settings.save_settings({"quoteExpiryDays": 10, "stage6NoPoDays": 50}, None)
             self.assertEqual((saved["quoteExpiryDays"], saved["stage6NoPoDays"], saved["modifiedBy"]), (10, 50, self.manager))
-            self.assertEqual(saved["sources"], {"quoteExpiryDays": "settings", "stage6NoPoDays": "settings"})
+            self.assertEqual(saved["sources"], {"quoteExpiryDays": "settings", "stage6NoPoDays": "settings", "stalledDays": "default", "stallEscalationDays": "default"})
             # Saved settings win over site config, at once.
             result = self._warnings()
             self.assertEqual((result["stage6NoPo"]["thresholdDays"], result["quotationExpiry"]["thresholdDays"]), (50, 10))

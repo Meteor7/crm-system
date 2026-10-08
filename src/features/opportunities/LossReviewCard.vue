@@ -2,6 +2,7 @@
 import { computed } from 'vue'
 import { personnelDisplayName } from '@/demo/personnel'
 import { formatDisplayDateTime } from '@/domain/time'
+import { lossCategoryLabel } from '@/features/cockpit/review-labels'
 import { labels } from '@/features/cockpit/presentation'
 import { useI18n } from '@/i18n'
 import { useAppStore } from '@/stores/app'
@@ -33,11 +34,12 @@ function status(review: LossReviewDto) {
       <div class="title"><strong>{{ copy('Lost at', '丢失于') }} {{ stage(review.lostAtStage) }}</strong><em :class="status(review).tone" data-loss-review-status>{{ status(review).text }}</em></div>
       <p class="meta">{{ personnelDisplayName(review.lostBy) }} · <time :datetime="review.lostAt">{{ formatDisplayDateTime(review.lostAt) }}</time><template v-if="review.reopenedAt"> · {{ copy('reopened', '重开于') }} <time :datetime="review.reopenedAt">{{ formatDisplayDateTime(review.reopenedAt) }}</time></template></p>
       <p><span class="label">{{ copy('Reason (Sales)', '丢单原因（销售）') }}</span>{{ review.lostReason || copy('Not recorded', '未记录') }}</p>
+      <p v-if="review.status === 'reviewed'" data-loss-category><span class="label">{{ copy('Confirmed loss category', '复盘确认分类') }}</span>{{ lossCategoryLabel(review.reviewCategory || 'unclassified', locale) }}</p>
       <p v-if="review.reviewNote"><span class="label">{{ copy('Post-mortem conclusion', '复盘结论') }}</span><span class="note">{{ review.reviewNote }}</span></p>
       <p v-if="review.status === 'reviewed' && review.reviewedBy" class="meta">{{ copy('Confirmed by', '确认人') }} {{ personnelDisplayName(review.reviewedBy) }} · <time :datetime="review.reviewedAt ?? ''">{{ formatDisplayDateTime(review.reviewedAt ?? '') }}</time></p>
       <RouterLink v-if="manager && review.status === 'pending' && !review.reopenedAt" class="to-warnings" to="/warnings" data-loss-review-link>{{ copy('Record the post-mortem on Warnings', '到 Warnings 页记录复盘') }} →</RouterLink>
       <details v-if="review.history.length" class="history"><summary>{{ copy('Audit trail', '修改留痕') }} · {{ review.history.length }}</summary>
-        <ol><li v-for="entry in review.history" :key="entry.id"><strong>{{ kind(entry.kind) }}</strong> · {{ personnelDisplayName(entry.actor) }} · <time :datetime="entry.at">{{ formatDisplayDateTime(entry.at) }}</time><p v-if="entry.reason">{{ copy('Reason', '原因') }}：{{ entry.reason }}</p><p v-else-if="entry.note && entry.kind !== 'Created' && entry.kind !== 'Reopened'">{{ entry.note }}</p></li></ol>
+        <ol><li v-for="entry in review.history" :key="entry.id"><strong>{{ kind(entry.kind) }}</strong> · {{ personnelDisplayName(entry.actor) }} · <time :datetime="entry.at">{{ formatDisplayDateTime(entry.at) }}</time><p v-if="entry.category">{{ lossCategoryLabel(entry.category, locale) }}</p><p v-if="entry.reason">{{ copy('Reason', '原因') }}：{{ entry.reason }}</p><p v-else-if="entry.note && entry.kind !== 'Created' && entry.kind !== 'Reopened'">{{ entry.note }}</p></li></ol>
       </details>
     </article>
   </section>

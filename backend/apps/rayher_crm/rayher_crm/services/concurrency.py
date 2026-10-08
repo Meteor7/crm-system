@@ -11,6 +11,7 @@ from rayher_crm.services.common import normalize_expected_modified, to_iso_times
 
 
 LOCKABLE_DOCTYPES = frozenset({
+    "CRM Sales Territory", "CRM Territory Assignment",
     "Customer", "Contact", "Lead", "CRM Opportunity", "CRM Booking", "CRM Installed Tool",
     "CRM Demo Request", "CRM Evaluation", "CRM Demo Artifact", "CRM Visit", "CRM Quotation Version",
     "CRM RFQ", "CRM Cockpit Target", "CRM Probability Recovery",
