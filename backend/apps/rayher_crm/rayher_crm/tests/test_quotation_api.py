@@ -106,6 +106,24 @@ class TestQuotationApi(FrappeTestCase):
         saved = save_draft(created["quotation"]["id"], payload, created["version"]["modified"])
         return saved, payload
 
+    def _request_rollbacks(self):
+        """A patch of the request's full rollbacks, and the list that counts them.
+
+        Under test the request's transaction is the test's own, fixtures included: a full rollback goes back to
+        where the request began instead (a savepoint taken here), which undoes what an attempt wrote and keeps
+        the fixtures. A rollback to a savepoint of the request's own is carried out as it is.
+        """
+        savepoint = f"crm_test_request_{frappe.generate_hash(length=8)}"
+        frappe.db.savepoint(savepoint)
+        rollback, rollbacks = frappe.db.rollback, []
+
+        def to_request_start(*, save_point=None):
+            if not save_point:
+                rollbacks.append(savepoint)
+            return rollback(save_point=save_point or savepoint)
+
+        return patch.object(frappe.db, "rollback", side_effect=to_request_start), rollbacks
+
     def test_account_360_includes_customer_quotations(self):
         opportunity = self._opportunity()
         created = create_quotation({"opportunityId": opportunity["id"]})
@@ -530,6 +548,121 @@ class TestQuotationApi(FrappeTestCase):
         self.assertEqual(reloaded["version"]["discountValue"], "11.10")
         self.assertEqual(reloaded["version"]["discountAmount"], "11.10")
         self.assertEqual(reloaded["version"]["total"], "112.35")
+
+    def test_a_creation_the_database_rolls_back_for_a_deadlock_is_made_again(self):
+        from rayher_crm.services.quotations import _next_ref_no
+
+        opportunity = self._opportunity()
+        allocations = []
+
+        def deadlocked_once(quote_date):
+            allocations.append(quote_date)
+            if len(allocations) == 1:
+                # As MariaDB answers the transaction it rolls back to break a deadlock (1213).
+                raise frappe.QueryDeadlockError("Deadlock found when trying to get lock; try restarting transaction")
+            return _next_ref_no(quote_date)
+
+        rolled_back, rollbacks = self._request_rollbacks()
+        with rolled_back, patch("rayher_crm.services.quotations._next_ref_no", side_effect=deadlocked_once):
+            created = create_quotation({"opportunityId": opportunity["id"]})
+
+        self.assertEqual((len(allocations), len(rollbacks)), (2, 1))
+        self.assertEqual(created["quotation"]["opportunityId"], opportunity["id"])
+        self.assertRegex(created["quotation"]["refNo"], r"^PK\d{8}-A\d+$")
+        self.assertEqual(created["version"]["refNo"], created["quotation"]["refNo"])
+        self.assertEqual(frappe.db.count("CRM Quotation", {"opportunity": opportunity["id"]}), 1)
+
+    def test_a_creation_whose_insert_the_database_rolls_back_for_a_deadlock_is_made_again(self):
+        from frappe.model.document import Document
+
+        opportunity = self._opportunity()
+        insert, refused = Document.db_insert, []
+
+        def deadlocked_once(document, *args, **kwargs):
+            if document.doctype == "CRM Quotation" and not refused:
+                refused.append(document.ref_no)
+                raise frappe.QueryDeadlockError("Deadlock found when trying to get lock; try restarting transaction")
+            return insert(document, *args, **kwargs)
+
+        rolled_back, rollbacks = self._request_rollbacks()
+        with rolled_back, patch("frappe.model.document.Document.db_insert", new=deadlocked_once):
+            created = create_quotation({"opportunityId": opportunity["id"]})
+
+        self.assertEqual(len(rollbacks), 1)
+        # The rolled back attempt took nothing with it: the next one is given the same reference.
+        self.assertEqual(created["quotation"]["refNo"], refused[0])
+        self.assertEqual(frappe.db.count("CRM Quotation", {"opportunity": opportunity["id"]}), 1)
+
+    def test_a_creation_deadlocked_on_every_attempt_answers_with_the_deadlock(self):
+        from rayher_crm.services.quotations import QUOTATION_CREATE_ATTEMPTS
+
+        opportunity = self._opportunity()
+        deadlock = frappe.QueryDeadlockError("Deadlock found when trying to get lock; try restarting transaction")
+        rolled_back, rollbacks = self._request_rollbacks()
+        with rolled_back, patch("rayher_crm.services.quotations._next_ref_no", side_effect=deadlock) as allocate:
+            with self.assertRaises(frappe.QueryDeadlockError):
+                create_quotation({"opportunityId": opportunity["id"]})
+
+        self.assertEqual((allocate.call_count, len(rollbacks)), (QUOTATION_CREATE_ATTEMPTS, QUOTATION_CREATE_ATTEMPTS))
+        self.assertFalse(frappe.db.exists("CRM Quotation", {"opportunity": opportunity["id"]}))
+
+    def test_a_creation_that_another_beats_to_the_opportunity_is_told_it_has_its_quotation(self):
+        opportunity = self._opportunity()
+        # The other request's Quotation was committed after this request's snapshot was taken: the check before
+        # the attempts does not see it. However an attempt then meets it (the insert tripping on the Opportunity's
+        # unique key, and the rollback that follows), the creation is told the Opportunity has its Quotation.
+        other = create_quotation({"opportunityId": opportunity["id"]})
+        exists, unseen = frappe.db.exists, []
+
+        def before_the_other(doctype, filters=None, *args, **kwargs):
+            if doctype == "CRM Quotation" and filters == {"opportunity": opportunity["id"]} and not unseen:
+                unseen.append(filters)
+                return None
+            return exists(doctype, filters, *args, **kwargs)
+
+        messages = len(frappe.local.message_log)
+        rolled_back, _ = self._request_rollbacks()
+        with rolled_back, patch.object(frappe.db, "exists", side_effect=before_the_other):
+            with self.assertRaises(CrmApiException) as refused:
+                create_quotation({"opportunityId": opportunity["id"]})
+
+        self.assertEqual(
+            (refused.exception.code, refused.exception.public_message),
+            ("CONFLICT", "This Opportunity already has a Quotation."),
+        )
+        # Frappe's "must be unique" for a refused insert is not left behind for the answer to carry.
+        self.assertEqual(len(frappe.local.message_log), messages)
+        self.assertEqual(
+            frappe.get_all("CRM Quotation", filters={"opportunity": opportunity["id"]}, pluck="name"),
+            [other["quotation"]["id"]],
+        )
+
+    def _quote_on(self, account_id: str, quote_date: str) -> tuple[dict, str, int]:
+        created = create_quotation({"accountId": account_id, "quotationType": "Service", "quoteDate": quote_date})
+        prefix, number = created["quotation"]["refNo"].rsplit("A", 1)
+        return created, f"{prefix}A", int(number)
+
+    def test_a_reference_is_counted_on_past_those_its_date_has_already(self):
+        account_id = self._opportunity()["accountId"]
+        first, prefix, number = self._quote_on(account_id, "2031-03-03")
+        self.assertEqual(prefix, "PK20310303-A")
+        self.assertEqual(self._quote_on(account_id, "2031-03-03")[2], number + 1)
+
+        # References issued before the date's count was kept: the count starts past the highest.
+        frappe.db.sql("DELETE FROM `tabSeries` WHERE `name` = %s", (prefix,))
+        self.assertEqual(self._quote_on(account_id, "2031-03-03")[2], number + 2)
+        # A reference written some other way, past the count: the count goes on past it.
+        frappe.db.set_value("CRM Quotation", first["quotation"]["id"], "ref_no", f"{prefix}{number + 7}", update_modified=False)
+        self.assertEqual(self._quote_on(account_id, "2031-03-03")[2], number + 8)
+        self.assertEqual(self._quote_on(account_id, "2031-03-03")[2], number + 9)
+
+    def test_a_reference_is_not_given_again_once_its_quotation_is_discarded(self):
+        account_id = self._opportunity()["accountId"]
+        discarded, prefix, number = self._quote_on(account_id, "2031-04-04")
+        discard_draft(discarded["quotation"]["id"], discarded["version"]["modified"])
+        self.assertFalse(frappe.db.exists("CRM Quotation", {"ref_no": f"{prefix}{number}"}))
+
+        self.assertEqual(self._quote_on(account_id, "2031-04-04")[1:], (prefix, number + 1))
 
     def test_others_service_quotation_and_payment_total_gate(self):
         opportunity = self._opportunity()

@@ -46,6 +46,9 @@ MAX_DATA_LENGTH = 140
 MAX_DESCRIPTION_LENGTH = 5000
 MAX_TERM_MONTHS = 120
 QUOTATION_TYPES = {"Device", "Service"}
+# The tries a creation makes at writing its Quotation: another follows a reference another request took meanwhile,
+# or the database rolling the request back to break a deadlock.
+QUOTATION_CREATE_ATTEMPTS = 5
 PAYMENT_TERM_DESCRIPTIONS = (
     "收到订单1周内，买方电汇方式支付订单总价{percentage}%作为预付款。",
     "发货前两周内，买方电汇方式支付订单总价{percentage}%作为发货款。",
@@ -154,19 +157,38 @@ def _db_decimal(value: Any) -> str:
 
 
 def _next_ref_no(quote_date: str) -> str:
+    """The next reference of a Quotation first quoted on `quote_date`: `PK<date>-A<n>`.
+
+    Counted on a row of the date's own in `tabSeries` (where Frappe's naming series count), keyed by the prefix,
+    not by locking the date's Quotations: their writers hold a Quotation's row while they wait for other rows (the
+    naming series' one, its Opportunity's), so a creation that waited for one of them could close a cycle with
+    them. The row is written by an upsert: the second of two first creations of a date waits for the row the first
+    inserted, where a locking read of a date with no Quotation would take a gap that both then insert into.
+
+    The references the date has already (issued before its row existed, or written some other way) are a floor,
+    read as this request sees them: the count goes on past the highest. One committed since and not seen trips the
+    unique `ref_no`, and create_quotation tries again in a new transaction, which sees it.
+
+    A number is given once: the next Quotation of a date does not take the number of one discarded since.
+    """
     date_key = getdate(quote_date).strftime("%Y%m%d")
     prefix = f"PK{date_key}-A"
-    rows = frappe.db.sql(
-        "SELECT ref_no FROM `tabCRM Quotation` WHERE ref_no LIKE %s FOR UPDATE",
-        (f"{prefix}%",),
-        as_dict=True,
-    )
-    sequences = [
-        int(row.ref_no[len(prefix):])
-        for row in rows
-        if row.ref_no.startswith(prefix) and row.ref_no[len(prefix):].isdigit()
+    issued = [
+        int(ref_no[len(prefix):])
+        for ref_no in frappe.db.sql(
+            "SELECT `ref_no` FROM `tabCRM Quotation` WHERE `ref_no` LIKE %s", (f"{prefix}%",), pluck=True,
+        )
+        if ref_no.startswith(prefix) and ref_no[len(prefix):].isdigit()
     ]
-    return f"{prefix}{max(sequences, default=0) + 1}"
+    floor = max(issued, default=0)
+    frappe.db.sql(
+        "INSERT INTO `tabSeries` (`name`, `current`) VALUES (%s, %s) "
+        "ON DUPLICATE KEY UPDATE `current` = GREATEST(`current`, %s) + 1",
+        (prefix, floor + 1, floor),
+    )
+    # This transaction's own write: a plain read sees it.
+    sequence = frappe.db.sql("SELECT `current` FROM `tabSeries` WHERE `name` = %s", (prefix,))[0][0]
+    return f"{prefix}{sequence}"
 
 def _require_quotation(name: str):
     if not frappe.db.exists("CRM Quotation", name):
@@ -524,18 +546,32 @@ def create_quotation(payload: dict[str, Any]) -> dict[str, Any]:
     owner = opportunity.opportunity_owner if opportunity else frappe.session.user
     if resolve_crm_role() == "Sales" and owner != frappe.session.user: raise CrmApiException("SCOPE_DENIED", "Sales can only create quotations for owned Opportunities.")
     master = None
-    for _ in range(5):
+    for attempt in range(1, QUOTATION_CREATE_ATTEMPTS + 1):
         try:
-            ref_no = _next_ref_no(initial_quote_date)
-        except (TypeError, ValueError) as exc:
-            raise CrmApiException("VALIDATION_ERROR", "Quotation date must be valid.") from exc
-        try:
+            # After a rollback below, a Quotation another request has given the Opportunity meanwhile is seen here,
+            # and this creation is told so instead of tripping on the unique key again.
+            if attempt > 1 and opportunity and frappe.db.exists("CRM Quotation", {"opportunity": opportunity.name}):
+                raise CrmApiException("QUOTATION_ALREADY_EXISTS", "This Opportunity already has a Quotation.")
+            try:
+                ref_no = _next_ref_no(initial_quote_date)
+            except (TypeError, ValueError) as exc:
+                raise CrmApiException("VALIDATION_ERROR", "Quotation date must be valid.") from exc
             master = frappe.get_doc({"doctype": "CRM Quotation", "ref_no": ref_no, "quotation_type": quotation_type, "opportunity": opportunity.name if opportunity else None, "account": account, "quotation_owner": owner, "status": "Draft", "latest_version_no": 1}).insert(ignore_permissions=True)
             break
         except (frappe.UniqueValidationError, frappe.DuplicateEntryError):
-            # Another transaction may have allocated the same sequence while
-            # the date had no existing row; recompute from the now-visible max.
+            # A reference committed since this request's snapshot, which the date's count did not give (one written
+            # some other way), or the Opportunity's Quotation created meanwhile: try again with what is committed.
             frappe.db.rollback()
+            frappe.clear_last_message()  # Frappe's "must be unique", which this answer replaces
+        except frappe.QueryDeadlockError:
+            # The database rolled this request's transaction back to break a deadlock: a cycle of transactions, each
+            # waiting for a row the next one holds (the naming series' row, which every `format:` name takes and this
+            # request holds from its insert on, is one). Nothing is written before this loop, so the attempt is made
+            # again in a new transaction. The last attempt's deadlock reaches the API edge, which logs it and answers
+            # it as a failure to retry.
+            frappe.db.rollback()
+            if attempt == QUOTATION_CREATE_ATTEMPTS:
+                raise
     if master is None:
         raise CrmApiException("CONFLICT", "Could not allocate a unique quotation reference.")
     if not initial.get("items"):
