@@ -7,6 +7,9 @@ import { useAppStore } from '@/stores/app'
 import type { Territory, TerritoryAssignment, TerritoryAssignmentInput, TerritoryCatalogue, TerritoryInput } from '@/features/territories/types'
 import PageHeader from '@/design-system/PageHeader.vue'
 import DataState from '@/design-system/DataState.vue'
+import { regionLabel } from '@/domain/regions'
+import StatusBadge from '@/design-system/StatusBadge.vue'
+import { Pencil, Plus, RotateCcw } from '@lucide/vue'
 
 const props = withDefaults(defineProps<{ apiClient?: CrmApi }>(), { apiClient: () => defaultApi })
 const app = useAppStore(), { locale } = useI18n()
@@ -110,52 +113,52 @@ onMounted(start)
 <template>
   <div class="territories-page">
     <PageHeader eyebrow="SALES TERRITORIES" :title="copy('Territories and sales responsibility', '地域与销售归属')" :description="copy('Maintain the territory tree and dated sales responsibility.', '维护地域层级和分时段的销售负责人。')">
-      <button v-if="manager" class="secondary-button" :disabled="busy" @click="reload">{{ copy('Reload and discard draft', '重新加载并放弃草稿') }}</button>
+      <button v-if="manager" class="secondary-button" type="button" :disabled="busy" @click="reload"><RotateCcw :size="14" />{{ copy('Reload and discard draft', '重新加载并放弃草稿') }}</button>
     </PageHeader>
-    <p v-if="!manager && !loading && !bootstrapFailed">{{ copy('Available to Managers only.', '仅经理可维护。') }}</p>
-    <p v-if="error && errorContext === 'page'" ref="errorFeedback" tabindex="-1" role="alert">{{ error }}</p>
-    <button v-if="bootstrapFailed && !loading" class="secondary-button" type="button" data-testid="territories-retry" @click="start">{{ copy('Try again', '重试') }}</button>
+    <DataState v-if="!manager && !loading && !bootstrapFailed" type="denied" :message="copy('Available to Managers only.', '仅经理可维护。')" />
+    <div v-if="error && errorContext === 'page'" ref="errorFeedback" tabindex="-1" class="form-error" role="alert"><span>{{ error }}</span><button v-if="bootstrapFailed && !loading" class="secondary-button" type="button" data-testid="territories-retry" @click="start">{{ copy('Try again', '重试') }}</button></div>
     <DataState v-if="loading" type="loading" />
     <template v-else-if="manager && data">
       <p class="note">{{ copy('A sales user can cover several regions. Each region has one responsible sales user for any date. Existing access permissions continue to apply.', '一名销售可负责多个区域，同一区域在同一天只有一名负责人。业务资料仍按现有权限访问。') }}</p>
       <section v-if="data.unmappedRegions.length" class="card">
         <h2>{{ copy('Regions awaiting placement', '待挂接区域') }}</h2>
-        <p>{{ copy('Existing region names are preserved. Choose a name, then its parent in the form below.', '保留现有区域名称；选中后在下方设置所属层级。') }}</p>
-        <button v-for="name in data.unmappedRegions" :key="name" class="secondary-button" :disabled="busy" @click="editTerritory(undefined, name)">{{ name }}</button>
+        <p class="note">{{ copy('Existing region names are preserved. Choose a name, then its parent in the form below.', '保留现有区域名称；选中后在下方设置所属层级。') }}</p>
+        <div class="chip-row"><button v-for="name in data.unmappedRegions" :key="name" class="secondary-button" type="button" :disabled="busy" @click="editTerritory(undefined, name)">{{ regionLabel(name, locale) }}</button></div>
       </section>
       <div class="columns">
-        <section class="card">
-          <h2>{{ copy('Territory tree', '地域树') }}</h2>
-          <table><thead><tr><th>{{ copy('Territory', '地域') }}</th><th>{{ copy('Current owner', '当前负责人') }}</th><th>{{ copy('Status', '状态') }}</th><th /></tr></thead>
-            <tbody><tr v-for="entry in tree" :key="entry.row.name"><td :style="{ paddingLeft: `${8 + entry.depth * 18}px` }">{{ entry.row.name }}</td><td>{{ entry.row.isGroup ? '—' : currentOwner(entry.row.name) }}</td><td>{{ entry.row.enabled ? copy('Active', '启用') : copy('Inactive', '停用') }}</td><td><button :disabled="busy" @click="editTerritory(entry.row)">{{ copy('Edit', '编辑') }}</button></td></tr></tbody>
-          </table>
+        <section class="card flush">
+          <h2 class="card-title">{{ copy('Territory tree', '地域树') }}</h2>
+          <div class="table-scroll"><table class="crm-table"><thead><tr><th>{{ copy('Territory', '地域') }}</th><th>{{ copy('Current owner', '当前负责人') }}</th><th>{{ copy('Status', '状态') }}</th><th /></tr></thead>
+            <tbody><tr v-for="entry in tree" :key="entry.row.name"><td :style="{ paddingLeft: `${15 + entry.depth * 18}px` }"><strong :class="{ group: entry.row.isGroup }">{{ regionLabel(entry.row.name, locale) }}</strong></td><td>{{ entry.row.isGroup ? '—' : currentOwner(entry.row.name) }}</td><td><StatusBadge :label="entry.row.enabled ? copy('Active', '启用') : copy('Inactive', '停用')" :tone="entry.row.enabled ? 'positive' : 'neutral'" /></td><td class="row-action"><button class="secondary-button compact" type="button" :disabled="busy" @click="editTerritory(entry.row)"><Pencil :size="13" />{{ copy('Edit', '编辑') }}</button></td></tr></tbody>
+          </table></div>
         </section>
         <form class="card editor" data-territory-form @submit.prevent="saveTerritory">
           <h2>{{ editedTerritory ? copy('Edit territory', '编辑地域') : copy('Add territory', '新增地域') }}</h2>
-          <label>{{ copy('English name', '英文名称') }}<input v-model="territory.name" aria-label="Territory name" required maxlength="100" :disabled="!!editedTerritory || busy" /></label>
-          <label>{{ copy('Parent', '上级地域') }}<select v-model="territory.parent" aria-label="Parent territory" :disabled="busy"><option :value="null">{{ copy('Top level', '顶层') }}</option><option v-for="row in parentOptions" :key="row.name" :value="row.name">{{ row.name }}</option></select></label>
-          <label>{{ copy('Node type', '节点类型') }}<select v-model="territory.isGroup" aria-label="Territory type" :disabled="!!editedTerritory || busy"><option :value="false">{{ copy('Region: assign sales here', '区域：在此分配销售') }}</option><option :value="true">{{ copy('Group: contains territories', '分组：下设地域') }}</option></select></label>
-          <label>{{ copy('Display order', '显示顺序') }}<input v-model.number="territory.sortOrder" type="number" min="-10000" max="10000" step="1" :disabled="busy" /></label>
+          <label><span>{{ copy('English name', '英文名称') }}</span><input v-model="territory.name" aria-label="Territory name" required maxlength="100" :disabled="!!editedTerritory || busy" /></label>
+          <label><span>{{ copy('Parent', '上级地域') }}</span><select v-model="territory.parent" aria-label="Parent territory" :disabled="busy"><option :value="null">{{ copy('Top level', '顶层') }}</option><option v-for="row in parentOptions" :key="row.name" :value="row.name">{{ regionLabel(row.name, locale) }}</option></select></label>
+          <label><span>{{ copy('Node type', '节点类型') }}</span><select v-model="territory.isGroup" aria-label="Territory type" :disabled="!!editedTerritory || busy"><option :value="false">{{ copy('Region: assign sales here', '区域：在此分配销售') }}</option><option :value="true">{{ copy('Group: contains territories', '分组：下设地域') }}</option></select></label>
+          <label><span>{{ copy('Display order', '显示顺序') }}</span><input v-model.number="territory.sortOrder" type="number" min="-10000" max="10000" step="1" :disabled="busy" /></label>
           <label class="check"><input v-model="territory.enabled" type="checkbox" :disabled="busy" />{{ copy('Active for new assignments', '启用新的销售归属') }}</label>
           <p class="note">{{ copy('Names and node types stay fixed. Inactive regions keep their records and remain available in historical filters.', '名称和节点类型保存后固定。停用区域保留业务记录，历史筛选仍可选择。') }}</p>
-          <p v-if="error && errorContext === 'territory'" ref="errorFeedback" tabindex="-1" role="alert">{{ error }}</p>
-          <div><button class="primary-button" :disabled="busy">{{ copy('Save territory', '保存地域') }}</button><button type="button" class="secondary-button" :disabled="busy" @click="editTerritory()">{{ copy('New', '新增') }}</button></div>
+          <p v-if="error && errorContext === 'territory'" ref="errorFeedback" tabindex="-1" class="form-error" role="alert">{{ error }}</p>
+          <div class="form-actions"><button class="primary-button" type="submit" :disabled="busy">{{ copy('Save territory', '保存地域') }}</button><button type="button" class="secondary-button" :disabled="busy" @click="editTerritory()"><Plus :size="14" />{{ copy('New', '新增') }}</button></div>
         </form>
       </div>
       <section class="card">
-        <h2>{{ copy('Sales assignment history', '销售归属记录') }}</h2>
-        <select v-model="selectedRegion" aria-label="Assignment region" :disabled="busy" @change="selectRegion"><option v-for="row in regions" :key="row.name" :value="row.name">{{ row.name }}{{ row.enabled ? '' : copy(' (inactive)', '（停用）') }}</option></select>
-        <table><thead><tr><th>{{ copy('Sales', '销售') }}</th><th>{{ copy('From', '生效日') }}</th><th>{{ copy('Through', '截止日') }}</th><th>{{ copy('Status / note', '状态／备注') }}</th><th /></tr></thead><tbody><tr v-for="row in assignments" :key="row.id"><td>{{ salesName(row.salesOwner) }}</td><td>{{ row.validFrom }}</td><td>{{ row.validUntil || copy('Ongoing', '持续有效') }}</td><td>{{ row.cancelled ? copy('Cancelled', '已撤销') : copy('Recorded', '已登记') }} · {{ row.note }}</td><td><button :disabled="busy" @click="editAssignment(row)">{{ copy('Edit', '编辑') }}</button></td></tr></tbody></table>
-        <p v-if="!assignments.length">{{ copy('No assignment recorded.', '尚无归属记录。') }}</p>
+        <div class="card-head"><h2>{{ copy('Sales assignment history', '销售归属记录') }}</h2><select v-model="selectedRegion" class="filter-control" aria-label="Assignment region" :disabled="busy" @change="selectRegion"><option v-for="row in regions" :key="row.name" :value="row.name">{{ regionLabel(row.name, locale) }}{{ row.enabled ? '' : copy(' (inactive)', '（停用）') }}</option></select></div>
+        <div class="table-scroll"><table class="crm-table"><thead><tr><th>{{ copy('Sales', '销售') }}</th><th>{{ copy('From', '生效日') }}</th><th>{{ copy('Through', '截止日') }}</th><th>{{ copy('Status / note', '状态／备注') }}</th><th /></tr></thead><tbody><tr v-for="row in assignments" :key="row.id"><td><strong>{{ salesName(row.salesOwner) }}</strong></td><td>{{ row.validFrom }}</td><td>{{ row.validUntil || copy('Ongoing', '持续有效') }}</td><td><div class="status-note"><StatusBadge :label="row.cancelled ? copy('Cancelled', '已撤销') : copy('Recorded', '已登记')" :tone="row.cancelled ? 'neutral' : 'info'" /><span class="note-text">{{ row.note }}</span></div></td><td class="row-action"><button class="secondary-button compact" type="button" :disabled="busy" @click="editAssignment(row)"><Pencil :size="13" />{{ copy('Edit', '编辑') }}</button></td></tr></tbody></table></div>
+        <p v-if="!assignments.length" class="empty">{{ copy('No assignment recorded.', '尚无归属记录。') }}</p>
         <form v-if="selectedRegion" class="assignment-editor editor" data-assignment-form @submit.prevent="saveAssignment">
-          <label>{{ copy('Sales owner', '销售负责人') }}<select v-model="assignment.salesOwner" aria-label="Sales owner" required :disabled="busy || !!editedAssignment"><option value="">{{ copy('Choose Sales', '选择销售') }}</option><option v-for="person in data.sales" :key="person.id" :value="person.id">{{ person.name }}</option><option v-if="assignment.salesOwner && !data.sales.some(row => row.id === assignment.salesOwner)" :value="assignment.salesOwner">{{ assignment.salesOwner }}</option></select></label>
-          <label>{{ copy('Effective from', '生效日期') }}<input v-model="assignment.validFrom" aria-label="Effective from" type="date" required :disabled="busy" /></label>
-          <label>{{ copy('Effective through (inclusive)', '截止日期（含当天）') }}<input v-model="assignment.validUntil" aria-label="Effective through" type="date" :min="assignment.validFrom" :disabled="busy" /></label>
-          <label>{{ copy('Change note', '变更说明') }}<input v-model="assignment.note" aria-label="Assignment note" maxlength="2000" :disabled="busy" /></label>
-          <label class="check"><input v-model="assignment.cancelled" type="checkbox" :disabled="busy" />{{ copy('Cancel this assignment', '撤销此归属记录') }}</label>
+          <div class="form-grid">
+            <label><span>{{ copy('Sales owner', '销售负责人') }}</span><select v-model="assignment.salesOwner" aria-label="Sales owner" required :disabled="busy || !!editedAssignment"><option value="">{{ copy('Choose Sales', '选择销售') }}</option><option v-for="person in data.sales" :key="person.id" :value="person.id">{{ person.name }}</option><option v-if="assignment.salesOwner && !data.sales.some(row => row.id === assignment.salesOwner)" :value="assignment.salesOwner">{{ assignment.salesOwner }}</option></select></label>
+            <label><span>{{ copy('Change note', '变更说明') }}</span><input v-model="assignment.note" aria-label="Assignment note" maxlength="2000" :disabled="busy" /></label>
+            <label><span>{{ copy('Effective from', '生效日期') }}</span><input v-model="assignment.validFrom" aria-label="Effective from" type="date" required :disabled="busy" /></label>
+            <label><span>{{ copy('Effective through (inclusive)', '截止日期（含当天）') }}</span><input v-model="assignment.validUntil" aria-label="Effective through" type="date" :min="assignment.validFrom" :disabled="busy" /></label>
+            <label class="check wide"><input v-model="assignment.cancelled" type="checkbox" :disabled="busy" />{{ copy('Cancel this assignment', '撤销此归属记录') }}</label>
+          </div>
           <p class="note">{{ copy('End the previous period before adding its successor. Dates include both endpoints; cancelled entries stay in history.', '先结束原归属期间，再增加下一任负责人；起止日期均含当天，撤销后保留记录。') }}</p>
-          <p v-if="error && errorContext === 'assignment'" ref="errorFeedback" tabindex="-1" role="alert">{{ error }}</p>
-          <div><button class="primary-button" :disabled="busy">{{ copy('Save assignment', '保存归属') }}</button><button type="button" class="secondary-button" :disabled="busy" @click="editAssignment()">{{ copy('New assignment', '新增归属') }}</button></div>
+          <p v-if="error && errorContext === 'assignment'" ref="errorFeedback" tabindex="-1" class="form-error" role="alert">{{ error }}</p>
+          <div class="form-actions"><button class="primary-button" type="submit" :disabled="busy">{{ copy('Save assignment', '保存归属') }}</button><button type="button" class="secondary-button" :disabled="busy" @click="editAssignment()"><Plus :size="14" />{{ copy('New assignment', '新增归属') }}</button></div>
         </form>
       </section>
     </template>
@@ -163,5 +166,36 @@ onMounted(start)
 </template>
 
 <style scoped>
-.territories-page{display:grid;gap:16px}.columns{display:grid;grid-template-columns:1.5fr 1fr;gap:16px}.card{padding:20px;background:white;border:1px solid var(--crm-line);border-radius:10px;overflow:auto}.card h2{margin-top:0;font-size:16px}.note,.card p{font-size:12px;color:var(--crm-text-muted);line-height:1.7}table{width:100%;border-collapse:collapse;font-size:12px}td,th{text-align:left;padding:10px 8px;border-bottom:1px solid var(--crm-line)}.editor{display:grid;gap:12px}.editor label{display:grid;gap:5px;font-size:12px}.editor input:not([type=checkbox]),select{padding:8px;border:1px solid var(--crm-line);border-radius:5px;max-width:100%;background:white}.editor .check{display:flex;align-items:center}.assignment-editor{margin-top:18px;max-width:640px}button{cursor:pointer}.editor button+button{margin-left:8px}.territories-page [role=alert]{padding:12px;background:var(--crm-danger-soft);color:var(--crm-danger)}@media(max-width:960px){.columns{grid-template-columns:1fr}}
+.territories-page{display:grid;gap:16px}
+.columns{display:grid;grid-template-columns:1.5fr 1fr;gap:16px;align-items:start}
+.card{padding:20px;background:var(--crm-surface-raised);border:1px solid var(--crm-line);border-radius:var(--crm-radius-md);min-width:0}
+.card.flush{padding:0;overflow:hidden}
+.card h2{margin:0 0 12px;color:var(--crm-navy);font-size:15px}
+.card-title{padding:19px 20px 0}
+.card-head{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:12px;margin-bottom:12px}
+.card-head h2{margin:0;flex-shrink:0}
+.card-head .filter-control{min-width:0;max-width:100%}
+.note{margin:0;color:var(--crm-text-muted);font-size:12px;line-height:1.7}
+.empty{margin:12px 0 0;color:var(--crm-text-muted);font-size:11px}
+.chip-row{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px}
+.table-scroll{overflow:auto}
+.crm-table td{height:52px}
+.crm-table strong.group{color:var(--crm-navy)}
+.row-action{text-align:right;white-space:nowrap}
+.status-note{display:flex;align-items:center;gap:8px}
+.status-note .note-text{color:var(--crm-text-muted)}
+.secondary-button.compact{min-height:30px;padding:0 10px}
+.form-error{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:0;padding:10px 12px;color:var(--crm-danger);background:var(--crm-danger-soft);border-radius:8px;font-size:11px}
+.editor{display:grid;gap:14px}
+.editor label{display:grid;gap:6px}
+.editor label>span{color:var(--crm-text-muted);font-size:9px;font-weight:700}
+.editor input:not([type=checkbox]),.editor select{min-height:38px;max-width:100%;padding:0 10px;color:var(--crm-text);background:#fff;border:1px solid var(--crm-line);border-radius:8px;font:inherit}
+.editor input:focus,.editor select:focus{border-color:var(--crm-teal);outline:0}
+.editor .check{display:flex;align-items:center;gap:8px;font-size:11px}
+.form-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+.form-grid .wide{grid-column:1/-1}
+.form-actions{display:flex;gap:8px}
+.assignment-editor{margin-top:18px;padding:16px;max-width:760px;background:var(--crm-surface);border-radius:10px}
+@media(max-width:960px){.columns,.form-grid{grid-template-columns:1fr}.form-grid .wide{grid-column:auto}}
+@media(max-width:700px){.card-head{align-items:flex-start;flex-direction:column}.card-head .filter-control{width:100%}}
 </style>

@@ -50,6 +50,21 @@ describe('Territory administration', () => {
     wrapper.unmount()
   })
 
+  it('names territories in the current language while saving their stored English names', async () => {
+    const { wrapper, save } = await setup()
+    const names = () => wrapper.findAll('tbody tr strong').map(cell => cell.text())
+    expect(names()).toEqual(expect.arrayContaining(['中国', '华东']))
+    expect(wrapper.get('[aria-label="Assignment region"]').get('option[value="East China"]').text()).toBe('华东')
+    expect(wrapper.get('[aria-label="Parent territory"]').get('option[value="China"]').text()).toBe('中国')
+    await wrapper.get('[aria-label="Sales owner"]').setValue('sales')
+    await wrapper.get('[data-assignment-form]').trigger('submit')
+    expect(save.mock.calls[0]?.[0]).toMatchObject({ territory: 'East China' })
+    setLocale('en-US')
+    await flushPromises()
+    expect(names()).toEqual(expect.arrayContaining(['China', 'East China']))
+    wrapper.unmount()
+  })
+
   it('retains an assignment draft when the server rejects overlapping dates', async () => {
     const { wrapper, save } = await setup()
     save.mockRejectedValueOnce(new Error('Overlapping dates'))

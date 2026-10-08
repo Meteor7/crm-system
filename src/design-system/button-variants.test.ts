@@ -17,3 +17,14 @@ describe('button variants', () => {
     expect(computed.color).not.toBe('buttontext')
   })
 })
+
+describe('link default', () => {
+  // jsdom does not evaluate :where(), so the rule is checked as written; a browser applies it to every link
+  // that no page rule or class colours (#222).
+  it('colours a link without a style of its own as a CRM link, below every page and class rule', () => {
+    expect(buttonStyles).toMatch(/:where\(\.semicrm-app\) a \{\s*color: var\(--crm-link\);\s*\}/)
+    expect(buttonStyles).toMatch(/:where\(\.semicrm-app\) a:where\(:hover, :focus-visible\) \{\s*color: var\(--crm-link-hover\);\s*\}/)
+    // No :visited rule of its own: the colour above is the author's, so the browser's purple never applies.
+    expect(buttonStyles).not.toMatch(/a:visited/)
+  })
+})

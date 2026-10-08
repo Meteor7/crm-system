@@ -127,6 +127,7 @@ describe('Manager Review', () => {
     await wrapper.get('.target-button').trigger('click'); await flushPromises()
     await wrapper.get('[data-testid="target-scope"]').setValue('territory')
     await wrapper.get('[data-testid="target-territory"]').setValue('East China'); await flushPromises()
+    expect(wrapper.get('[data-testid="target-territory"] option[value="East China"]').text()).toBe('华东')
     expect(wrapper.get('[data-testid="target-metric"]').attributes('disabled')).toBeDefined()
     expect(wrapper.get('[data-testid="target-period"]').attributes('disabled')).toBeDefined()
     expect((wrapper.get('.target-dialog input[type="number"]').element as HTMLInputElement).value).toBe('1500000')

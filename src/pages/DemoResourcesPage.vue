@@ -5,6 +5,10 @@ import { CrmApiError } from '@/api/contracts'
 import { requestErrorMessage } from '@/api/request-state'
 import { useAppStore } from '@/stores/app'
 import { useI18n, useLocaleMessage } from '@/i18n'
+import { Pencil, Plus } from '@lucide/vue'
+import PageHeader from '@/design-system/PageHeader.vue'
+import DataState from '@/design-system/DataState.vue'
+import StatusBadge from '@/design-system/StatusBadge.vue'
 import { resourceDateTime } from '@/features/demo-resources/types'
 import type { DemoResource, DemoResourceCatalogue, DemoUnavailability } from '@/features/demo-resources/types'
 import { shanghaiInput, shanghaiTimestamp } from '@/features/demo-resources/types'
@@ -89,42 +93,86 @@ onBeforeUnmount(() => { revision++; intervalRevision++ })
 
 <template>
   <div v-if="app.can('evaluation:view')" class="resources-page" data-demo-resources>
-    <header><div><h1>{{ copy('Demo resources', 'Demo 设备资源') }}</h1><p>{{ copy('Concrete internal equipment and its recorded unavailable intervals.', '内部具体设备及已记录的不可用时段。') }}</p></div><button v-if="manager" :disabled="busy || !!editing" data-new-resource @click="editResource()">{{ copy('Add equipment', '添加设备') }}</button></header>
-    <p class="help">{{ copy('Enter real equipment IDs and maintainers. This directory starts empty. Turning off new assignments does not mark equipment unavailable; record an interval below.', '请录入真实设备编号与维护负责人，目录初始为空。停止新安排不代表设备不可用；请在下方登记不可用时段。') }}</p>
-    <p v-if="loading" role="status">{{ copy('Loading…', '正在加载…') }}</p>
-    <p v-if="error" role="alert">{{ error }} <button :disabled="saving" @click="load">{{ copy('Discard edits and reload', '放弃修改并重新加载') }}</button></p>
-    <form v-if="editing === 'resource'" data-resource-form @submit.prevent="save">
+    <PageHeader eyebrow="DEMO RESOURCES" :title="copy('Demo resources', 'Demo 设备资源')" :description="copy('Concrete internal equipment and its recorded unavailable intervals.', '内部具体设备及已记录的不可用时段。')">
+      <button v-if="manager" class="primary-button" type="button" :disabled="busy || !!editing" data-new-resource @click="editResource()"><Plus :size="14" />{{ copy('Add equipment', '添加设备') }}</button>
+    </PageHeader>
+    <p class="note">{{ copy('Enter real equipment IDs and maintainers. This directory starts empty. Turning off new assignments does not mark equipment unavailable; record an interval below.', '请录入真实设备编号与维护负责人，目录初始为空。停止新安排不代表设备不可用；请在下方登记不可用时段。') }}</p>
+    <DataState v-if="loading && !catalogue.resources.length" type="loading" />
+    <div v-if="error" class="form-error" role="alert"><span>{{ error }}</span><button class="secondary-button" type="button" :disabled="saving" @click="load">{{ copy('Discard edits and reload', '放弃修改并重新加载') }}</button></div>
+    <form v-if="editing === 'resource'" class="card editor" data-resource-form @submit.prevent="save">
       <h2>{{ resourceVersion ? copy('Edit equipment', '修改设备') : copy('New equipment', '添加设备') }}</h2>
-      <label>{{ copy('Equipment ID', '设备编号') }}<input v-model="resourceDraft.code" maxlength="140" required :disabled="saving || !!resourceVersion" /></label>
-      <label>{{ copy('Name', '名称') }}<input v-model="resourceDraft.title" maxlength="140" required :disabled="saving" /></label>
-      <label>{{ copy('Platform / model', '平台／型号') }}<input v-model="resourceDraft.platform" maxlength="140" required :disabled="saving" /></label>
-      <label>{{ copy('Maintainer', '维护负责人') }}<select v-model="resourceDraft.maintainer" required :disabled="saving"><option value="">{{ copy('Choose', '请选择') }}</option><option v-if="resourceVersion && !catalogue.maintainers.some(row => row.id === resourceVersion?.maintainer)" :value="resourceVersion.maintainer">{{ resourceVersion.maintainer }} ({{ copy('inactive', '已停用') }})</option><option v-for="row in catalogue.maintainers" :key="row.id" :value="row.id">{{ row.name }}</option></select></label>
-      <label class="check"><input v-model="resourceDraft.enabled" type="checkbox" :disabled="saving" />{{ copy('Allow new assignments', '允许新安排') }}</label>
-      <div class="actions"><button type="submit" :disabled="busy || stale">{{ copy('Save', '保存') }}</button><button type="button" :disabled="saving" @click="editing = null">{{ copy('Cancel', '取消') }}</button></div>
+      <div class="form-grid">
+        <label><span>{{ copy('Equipment ID', '设备编号') }}</span><input v-model="resourceDraft.code" maxlength="140" required :disabled="saving || !!resourceVersion" /></label>
+        <label><span>{{ copy('Name', '名称') }}</span><input v-model="resourceDraft.title" maxlength="140" required :disabled="saving" /></label>
+        <label><span>{{ copy('Platform / model', '平台／型号') }}</span><input v-model="resourceDraft.platform" maxlength="140" required :disabled="saving" /></label>
+        <label><span>{{ copy('Maintainer', '维护负责人') }}</span><select v-model="resourceDraft.maintainer" required :disabled="saving"><option value="">{{ copy('Choose', '请选择') }}</option><option v-if="resourceVersion && !catalogue.maintainers.some(row => row.id === resourceVersion?.maintainer)" :value="resourceVersion.maintainer">{{ resourceVersion.maintainer }} ({{ copy('inactive', '已停用') }})</option><option v-for="row in catalogue.maintainers" :key="row.id" :value="row.id">{{ row.name }}</option></select></label>
+        <label class="check wide"><input v-model="resourceDraft.enabled" type="checkbox" :disabled="saving" />{{ copy('Allow new assignments', '允许新安排') }}</label>
+      </div>
+      <div class="form-actions"><button class="primary-button" type="submit" :disabled="busy || stale">{{ copy('Save', '保存') }}</button><button class="secondary-button" type="button" :disabled="saving" @click="editing = null">{{ copy('Cancel', '取消') }}</button></div>
     </form>
     <div class="resource-grid">
-      <aside><button v-for="row in catalogue.resources" :key="row.id" class="resource-row" :class="{ selected: row.id === selected }" :disabled="busy || !!editing" @click="select(row.id)"><strong>{{ row.code }} · {{ row.title }}</strong><span>{{ row.platform }} · {{ row.enabled ? copy('Accepting assignments', '允许新安排') : copy('No new assignments', '停止新安排') }}</span></button><p v-if="!loading && !catalogue.resources.length">{{ copy('No equipment registered.', '尚未登记设备。') }}</p></aside>
-      <section v-if="resource">
-        <header><div><h2>{{ resource.code }} · {{ resource.title }}</h2><p>{{ copy('Maintainer', '维护负责人') }}: {{ catalogue.maintainers.find(row => row.id === resource?.maintainer)?.name || resource.maintainer }}</p></div><button v-if="manager" :disabled="busy || !!editing" data-edit-resource @click="editResource(resource)">{{ copy('Edit equipment', '修改设备') }}</button></header>
-        <h3>{{ copy('Unavailable intervals', '不可用时段') }}</h3>
-        <p class="help">{{ copy('All input times use Shanghai time. Adjacent intervals do not conflict. Resolving an interval clears its current warning and keeps observed impact history.', '所有输入时间均为上海时间，首尾相接不算冲突。恢复可用会解除该时段的当前预警，已记录的影响历史保留。') }}</p>
-        <button v-if="resource.canMaintain" :disabled="busy || !!editing" data-new-interval @click="editInterval()">{{ copy('Record unavailable interval', '登记不可用时段') }}</button>
-        <p v-if="intervalError" role="alert">{{ intervalError }} <button @click="loadIntervals">{{ copy('Retry', '重试') }}</button></p>
-        <form v-if="editing === 'interval'" data-interval-form @submit.prevent="save">
-          <label>{{ copy('Start · Shanghai', '开始 · 上海时间') }}<input v-model="intervalDraft.start" type="datetime-local" required :disabled="saving" /></label>
-          <label>{{ copy('End · Shanghai', '结束 · 上海时间') }}<input v-model="intervalDraft.end" type="datetime-local" required :disabled="saving" /></label>
-          <label>{{ copy('Reason', '原因') }}<textarea v-model="intervalDraft.reason" maxlength="1000" required :disabled="saving" /></label>
-          <label>{{ copy('Status', '状态') }}<select v-model="intervalDraft.status" :disabled="saving"><option value="Active">{{ copy('Unavailable', '不可用') }}</option><option value="Resolved">{{ copy('Resolved', '已恢复') }}</option></select></label>
-          <div class="actions"><button type="submit" :disabled="busy || stale">{{ copy('Save', '保存') }}</button><button type="button" :disabled="saving" @click="editing = null">{{ copy('Cancel', '取消') }}</button></div>
+      <aside class="card resource-list">
+        <h2>{{ copy('Resource directory', '设备目录') }}</h2>
+        <button v-for="row in catalogue.resources" :key="row.id" type="button" class="resource-row" :class="{ selected: row.id === selected }" :disabled="busy || !!editing" @click="select(row.id)"><strong>{{ row.code }} · {{ row.title }}</strong><span class="resource-platform">{{ row.platform }}</span><StatusBadge :label="row.enabled ? copy('Accepting assignments', '允许新安排') : copy('No new assignments', '停止新安排')" :tone="row.enabled ? 'positive' : 'neutral'" /></button>
+        <p v-if="!loading && !catalogue.resources.length" class="empty">{{ copy('No equipment registered.', '尚未登记设备。') }}</p>
+      </aside>
+      <section v-if="resource" class="card resource-detail">
+        <header class="card-header"><div><h2>{{ resource.code }} · {{ resource.title }}</h2><p>{{ copy('Maintainer', '维护负责人') }}: {{ catalogue.maintainers.find(row => row.id === resource?.maintainer)?.name || resource.maintainer }}</p></div><button v-if="manager" class="secondary-button" type="button" :disabled="busy || !!editing" data-edit-resource @click="editResource(resource)"><Pencil :size="14" />{{ copy('Edit equipment', '修改设备') }}</button></header>
+        <div class="card-header interval-header"><h3>{{ copy('Unavailable intervals', '不可用时段') }}</h3><button v-if="resource.canMaintain" class="secondary-button" type="button" :disabled="busy || !!editing" data-new-interval @click="editInterval()"><Plus :size="14" />{{ copy('Record unavailable interval', '登记不可用时段') }}</button></div>
+        <p class="note">{{ copy('All input times use Shanghai time. Adjacent intervals do not conflict. Resolving an interval clears its current warning and keeps observed impact history.', '所有输入时间均为上海时间，首尾相接不算冲突。恢复可用会解除该时段的当前预警，已记录的影响历史保留。') }}</p>
+        <div v-if="intervalError" class="form-error" role="alert"><span>{{ intervalError }}</span><button class="secondary-button" type="button" @click="loadIntervals">{{ copy('Retry', '重试') }}</button></div>
+        <form v-if="editing === 'interval'" class="editor interval-editor" data-interval-form @submit.prevent="save">
+          <div class="form-grid">
+            <label><span>{{ copy('Start · Shanghai', '开始 · 上海时间') }}</span><input v-model="intervalDraft.start" type="datetime-local" required :disabled="saving" /></label>
+            <label><span>{{ copy('End · Shanghai', '结束 · 上海时间') }}</span><input v-model="intervalDraft.end" type="datetime-local" required :disabled="saving" /></label>
+            <label class="wide"><span>{{ copy('Reason', '原因') }}</span><textarea v-model="intervalDraft.reason" maxlength="1000" required :disabled="saving" /></label>
+            <label><span>{{ copy('Status', '状态') }}</span><select v-model="intervalDraft.status" :disabled="saving"><option value="Active">{{ copy('Unavailable', '不可用') }}</option><option value="Resolved">{{ copy('Resolved', '已恢复') }}</option></select></label>
+          </div>
+          <div class="form-actions"><button class="primary-button" type="submit" :disabled="busy || stale">{{ copy('Save', '保存') }}</button><button class="secondary-button" type="button" :disabled="saving" @click="editing = null">{{ copy('Cancel', '取消') }}</button></div>
         </form>
-        <ul><li v-for="row in intervals" :key="row.id" :data-unavailable="row.id"><strong>{{ row.status === 'Active' ? copy('Unavailable', '不可用') : copy('Resolved', '已恢复') }}</strong><p>{{ resourceDateTime(row.start) }} — {{ resourceDateTime(row.end) }}</p><p>{{ row.reason }}</p><button v-if="resource.canMaintain" :disabled="busy || !!editing" @click="editInterval(row)">{{ copy('Edit / resolve', '修改／恢复可用') }}</button></li></ul>
-        <p v-if="!intervalError && !intervals.length">{{ copy('No unavailable intervals recorded.', '未记录不可用时段。') }}</p>
+        <ul class="interval-list"><li v-for="row in intervals" :key="row.id" :data-unavailable="row.id"><div><StatusBadge :label="row.status === 'Active' ? copy('Unavailable', '不可用') : copy('Resolved', '已恢复')" :tone="row.status === 'Active' ? 'danger' : 'positive'" /><strong>{{ resourceDateTime(row.start) }} — {{ resourceDateTime(row.end) }}</strong><p>{{ row.reason }}</p></div><button v-if="resource.canMaintain" class="secondary-button" type="button" :disabled="busy || !!editing" @click="editInterval(row)">{{ copy('Edit / resolve', '修改／恢复可用') }}</button></li></ul>
+        <p v-if="!intervalError && !intervals.length" class="empty">{{ copy('No unavailable intervals recorded.', '未记录不可用时段。') }}</p>
       </section>
     </div>
   </div>
-  <p v-else>{{ copy('Demo access is required.', '需要 Demo 查看权限。') }}</p>
+  <DataState v-else type="denied" :message="copy('Demo access is required.', '需要 Demo 查看权限。')" />
 </template>
 
 <style scoped>
-.resources-page{max-width:1400px;margin:auto;color:var(--crm-text)}header{display:flex;gap:16px;justify-content:space-between;align-items:center}h1{font-size:26px}h2{font-size:18px}h3{font-size:16px}.help,header p{color:var(--crm-text-muted);line-height:1.6}.resource-grid{display:grid;grid-template-columns:320px 1fr;gap:20px;margin-top:20px}section,form,aside{background:white;border:1px solid var(--crm-line);border-radius:10px;padding:18px}form{display:flex;flex-wrap:wrap;gap:12px;margin:16px 0}form h2{width:100%;margin:0}label{display:grid;gap:6px;flex:1;min-width:180px}.check{display:flex;align-items:center}.actions{display:flex;gap:8px;align-items:end}input,select,textarea,button{font:inherit;padding:8px;border:1px solid var(--crm-line);border-radius:6px;background:white}button{cursor:pointer}button:disabled{opacity:.55;cursor:default}.resource-row{display:grid;gap:8px;width:100%;text-align:left;margin-bottom:10px}.selected{border-color:var(--crm-brand)}ul{padding:0;list-style:none}li{padding:14px 0;border-bottom:1px solid var(--crm-line)}[role=alert]{color:var(--crm-danger)}@media(max-width:850px){.resource-grid{grid-template-columns:1fr}header{align-items:start}}
+.resources-page{display:grid;gap:16px;max-width:1400px;margin:auto}
+.note{margin:0;color:var(--crm-text-muted);font-size:12px;line-height:1.7}
+.card{padding:20px;background:var(--crm-surface-raised);border:1px solid var(--crm-line);border-radius:var(--crm-radius-md)}
+.card h2{margin:0;color:var(--crm-navy);font-size:15px}
+.card h3{margin:0;color:var(--crm-navy);font-size:13px}
+.card-header{display:flex;align-items:center;justify-content:space-between;gap:12px}
+.card-header p{margin:4px 0 0;color:var(--crm-text-muted);font-size:11px}
+.form-error{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:0;padding:10px 12px;color:var(--crm-danger);background:var(--crm-danger-soft);border-radius:8px;font-size:11px}
+.editor{display:grid;gap:14px}
+.form-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+.form-grid label{display:grid;gap:6px}
+.form-grid label.wide{grid-column:1/-1}
+.form-grid span{color:var(--crm-text-muted);font-size:9px;font-weight:700}
+.form-grid input:not([type=checkbox]),.form-grid select,.form-grid textarea{min-height:38px;padding:0 10px;color:var(--crm-text);background:#fff;border:1px solid var(--crm-line);border-radius:8px;font:inherit}
+.form-grid textarea{min-height:76px;padding:8px 10px;resize:vertical}
+.form-grid input:focus,.form-grid select:focus,.form-grid textarea:focus{border-color:var(--crm-teal);outline:0}
+.form-grid .check{display:flex;align-items:center;gap:8px;font-size:11px}
+.form-actions{display:flex;gap:8px}
+.resource-grid{display:grid;grid-template-columns:320px 1fr;gap:16px;align-items:start}
+.resource-list{display:grid;gap:10px}
+.resource-row{display:grid;justify-items:start;gap:6px;width:100%;padding:12px;text-align:left;color:var(--crm-text);background:#fff;border:1px solid var(--crm-line);border-radius:10px;cursor:pointer;transition:border-color .18s ease,background-color .18s ease}
+.resource-row .resource-platform{color:var(--crm-text-muted);font-size:11px}
+.resource-row:not(:disabled):hover{background:#FFFBF5;border-color:#F3C173}
+.resource-row.selected{background:#FFFBF5;border-color:var(--crm-brand)}
+.resource-row:disabled{cursor:default;opacity:.7}
+.resource-detail{display:grid;gap:14px}
+.interval-header{padding-top:14px;border-top:1px solid var(--crm-line)}
+.interval-editor{padding:14px;background:var(--crm-surface);border-radius:10px}
+.interval-list{display:grid;margin:0;padding:0;list-style:none}
+.interval-list li{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;padding:14px 0;border-bottom:1px solid var(--crm-line)}
+.interval-list li:last-child{border-bottom:0}
+.interval-list li>div{display:grid;gap:6px}
+.interval-list strong{font-size:12px}
+.interval-list p{margin:0;color:var(--crm-text-muted);font-size:11px;line-height:1.6}
+.empty{margin:0;color:var(--crm-text-muted);font-size:11px}
+@media(max-width:850px){.resource-grid,.form-grid{grid-template-columns:1fr}.form-grid label.wide{grid-column:auto}}
 </style>

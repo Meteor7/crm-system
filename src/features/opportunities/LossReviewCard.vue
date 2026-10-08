@@ -56,6 +56,6 @@ article:last-child{border-bottom:0}p{margin:8px 0;line-height:1.5}
 .title em{padding:2px 8px;border-radius:999px;font-size:10px;font-style:normal;font-weight:700;white-space:nowrap}
 .title em.warn{background:var(--crm-warning-soft);color:#9a5b00}.title em.done{background:#e8f5ee;color:var(--crm-positive-ink)}.title em.muted{background:var(--crm-surface-muted);color:var(--crm-text-muted)}
 .label{display:block;margin-bottom:2px;font-size:10px;color:var(--crm-text-muted)}.note{white-space:pre-wrap}
-.to-warnings{font-size:11px;font-weight:700;color:var(--crm-teal);text-decoration:none}
+.to-warnings{font-size:11px;font-weight:700;color:var(--crm-link);text-decoration:none}
 .history{margin-top:10px}.history summary{cursor:pointer;color:var(--crm-teal)}.history ol{padding-left:18px}.history li{padding:4px 0;border-top:1px solid var(--crm-line)}
 </style>

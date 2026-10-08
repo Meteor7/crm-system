@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import { RouterLink, useRoute } from 'vue-router'
+import { ArrowLeft, Target } from '@lucide/vue'
 import { api as defaultApi, type CrmApi } from '@/api'
 import { mapRequestError } from '@/api/request-state'
 import { useAppStore } from '@/stores/app'
@@ -68,7 +69,8 @@ async function download(kind: OpportunityDocumentKind, item: OpportunityDocument
 
 <template>
   <main class="document-library" data-testid="opportunity-documents">
-    <nav><RouterLink :to="{ name: 'opportunity-detail', params: { opportunityId: id } }">← {{ copy('Opportunity', '商机') }}</RouterLink><RouterLink :to="{ name: 'opportunity-detail', params: { opportunityId: id }, hash: '#blue-sheet' }">Blue Sheet</RouterLink></nav>
+    <!-- The ways back are buttons, as on the other detail pages: the back button and the Blue Sheet button. -->
+    <nav><RouterLink class="detail-back-button" data-testid="documents-back-opportunity" :to="{ name: 'opportunity-detail', params: { opportunityId: id } }"><ArrowLeft :size="14" />{{ copy('Back to opportunity', '返回商机') }}</RouterLink><RouterLink class="secondary-button" data-testid="documents-blue-sheet" :to="{ name: 'opportunity-detail', params: { opportunityId: id }, hash: '#blue-sheet' }"><Target :size="14" />{{ copy('Blue Sheet', '战略分析') }}</RouterLink></nav>
     <header><div><h1>{{ copy('Documents', '商机资料') }}</h1><p v-if="data">{{ data.title }}</p></div><button :disabled="loading || busy || editing" @click="load">{{ copy('Refresh', '刷新') }}</button></header>
     <p v-if="error" role="alert">{{ error }} <button :disabled="editing" @click="load">{{ copy('Reload documents', '重新加载资料') }}</button></p>
     <p v-if="loading">{{ copy('Loading…', '正在加载…') }}</p>
@@ -93,5 +95,6 @@ async function download(kind: OpportunityDocumentKind, item: OpportunityDocument
 </template>
 
 <style scoped>
-.document-library{max-width:1100px;margin:auto;padding:24px;color:var(--crm-text)}nav,header{display:flex;align-items:center;justify-content:space-between;gap:16px}nav{justify-content:flex-start;margin-bottom:20px}h1{margin:0}h2{font-size:17px}section{background:white;border:1px solid var(--crm-line);border-radius:12px;padding:20px;margin:18px 0}ul{list-style:none;margin:0;padding:0}li{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:12px 0;border-top:1px solid var(--crm-line)}li>div{display:grid;gap:6px}a{color:var(--crm-teal);overflow-wrap:anywhere}small,section>p{color:var(--crm-text-muted)}button{padding:8px 12px;border:1px solid var(--crm-line);border-radius:6px;background:white;cursor:pointer}button:disabled{opacity:.5;cursor:default}label{display:grid;gap:6px;margin:14px 0}input{padding:10px;border:1px solid var(--crm-line);border-radius:6px}form>button{margin-right:8px}[role=alert]{color:var(--crm-danger)}@media(max-width:600px){.document-library{padding:12px}section{padding:14px}li{align-items:flex-start;flex-wrap:wrap}}
+.document-library{max-width:1100px;margin:auto;padding:24px;color:var(--crm-text)}nav,header{display:flex;align-items:center;justify-content:space-between;gap:16px}nav{justify-content:flex-start;gap:8px;margin-bottom:20px}
+nav a{text-decoration:none}nav .secondary-button{min-height:38px}h1{margin:0}h2{font-size:17px}section{background:white;border:1px solid var(--crm-line);border-radius:12px;padding:20px;margin:18px 0}ul{list-style:none;margin:0;padding:0}li{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:12px 0;border-top:1px solid var(--crm-line)}li>div{display:grid;gap:6px}a{color:var(--crm-link);overflow-wrap:anywhere}small,section>p{color:var(--crm-text-muted)}button{padding:8px 12px;border:1px solid var(--crm-line);border-radius:6px;background:white;cursor:pointer}button:disabled{opacity:.5;cursor:default}label{display:grid;gap:6px;margin:14px 0}input{padding:10px;border:1px solid var(--crm-line);border-radius:6px}form>button{margin-right:8px}[role=alert]{color:var(--crm-danger)}@media(max-width:600px){.document-library{padding:12px}section{padding:14px}li{align-items:flex-start;flex-wrap:wrap}}
 </style>

@@ -21,6 +21,17 @@
   -webkit-font-smoothing: antialiased;
 }
 
+/* Every link reads as a CRM link unless its page or class styles it (#222): the browser's blue, and its purple
+   once visited, never shows. :where() keeps the rule at the specificity of a bare element, so any page rule, table rule or
+   button class still decides; only the colour is set, so a link keeps the underline (or none) its page gives it. */
+:where(.semicrm-app) a {
+  color: var(--crm-link);
+}
+
+:where(.semicrm-app) a:where(:hover, :focus-visible) {
+  color: var(--crm-link-hover);
+}
+
 .semicrm-app :focus-visible {
   outline: 3px solid rgba(254, 153, 0, 0.32);
   outline-offset: 2px;

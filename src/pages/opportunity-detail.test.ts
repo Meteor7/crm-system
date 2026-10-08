@@ -138,6 +138,12 @@ describe('Opportunity detail', () => {
     expect(wrapper.get('[data-testid="opportunity-stage"]').text()).toBe('合格商机')
     expect(wrapper.get('[data-testid="back-opportunities"]').attributes('href')).toContain('/opportunities')
     expect(wrapper.get('[data-testid="blue-sheet-title"]').text()).toBe('战略分析')
+    // One way to the documents page: the record action beside quotation, RFQ and Booking, named as the page is.
+    const documentsButton = wrapper.get('[data-testid="opportunity-documents-link"]')
+    expect(documentsButton.classes()).toContain('secondary-button')
+    expect(documentsButton.text()).toBe('商机资料')
+    expect(documentsButton.attributes('href')).toContain('/opportunities/OPP-001/documents')
+    expect(wrapper.findAll('a[href$="/opportunities/OPP-001/documents"]')).toHaveLength(1)
     const detailGrid = wrapper.get('[data-testid="selected-opportunity"]')
     expect(Array.from(detailGrid.element.children).map((child) => child.className)).toEqual([
       'detail-column detail-left',

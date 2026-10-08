@@ -7,6 +7,7 @@ import { requestErrorMessage } from '@/api/request-state'
 import { useAppStore } from '@/stores/app'
 import { opportunityActionLabel } from '@/features/shared/sales-i18n'
 import { useI18n, useLocaleMessage } from '@/i18n'
+import { regionLabel } from '@/domain/regions'
 import { detailRoute, labels, metricText, monotoneCurvePath, nextMonday, targetStart } from '@/features/cockpit/presentation'
 import { cockpitRoute, dateWithin, defaultReviewAnchor, EARLIEST_COCKPIT_DATE, endsBeforeEarliest, pickScope, shanghaiDate, showableAnchor, type CockpitContext } from '@/features/cockpit/scope'
 import ReviewConversionPanel from '@/features/cockpit/ReviewConversionPanel.vue'
@@ -93,7 +94,7 @@ const maxPipeline = computed(() => Math.max(1, ...data.value?.pipeline.map(row =
 const periodTitle = computed(() => data.value ? `${data.value.period.start} — ${data.value.period.end}` : '')
 // The orders card shows the salesperson chosen in the filter bar; it has no selector of its own.
 const chartSales = computed(() => query.sales ?? '')
-const chartScopeName = computed(() => chartSales.value ? ownerName(chartSales.value) : query.region || copy('All territories', '全部地域'))
+const chartScopeName = computed(() => chartSales.value ? ownerName(chartSales.value) : query.region ? regionLabel(query.region, locale.value) : copy('All territories', '全部地域'))
 const chartSource = data
 const annualTarget = computed(() => chartSource.value?.orders.target.state === 'ready' ? Number(chartSource.value.orders.target.value) : null)
 const actualTotal = computed(() => chartSource.value?.orders.actual.state === 'ready' ? Number(chartSource.value.orders.actual.value) : null)
@@ -366,7 +367,7 @@ async function saveTarget() {
       <header><h2>{{ copy('Targets', '目标设置') }}</h2><button :disabled="saving" :aria-label="copy('Close', '关闭')" @click="closeTargets"><X :size="20" /></button></header>
       <form @submit.prevent="saveTarget">
         <label>{{ copy('Target scope', '目标归属') }}<select v-model="target.scope" data-testid="target-scope" :disabled="saving" @change="targetScopeChanged"><option value="sales">{{ copy('Individual', '个人') }}</option><option value="territory">{{ copy('Leaf territory', '末级地域') }}</option></select></label>
-        <label v-if="target.scope === 'territory'">{{ copy('Territory', '地域') }}<select v-model="target.territory" data-testid="target-territory" required :disabled="saving"><option value="" disabled>{{ copy('Choose a leaf territory', '选择末级地域') }}</option><option v-for="name in data?.targetOptions?.territories ?? []" :key="name" :value="name">{{ name }}</option></select></label>
+        <label v-if="target.scope === 'territory'">{{ copy('Territory', '地域') }}<select v-model="target.territory" data-testid="target-territory" required :disabled="saving"><option value="" disabled>{{ copy('Choose a leaf territory', '选择末级地域') }}</option><option v-for="name in data?.targetOptions?.territories ?? []" :key="name" :value="name">{{ regionLabel(name, locale) }}</option></select></label>
         <label v-else>{{ copy('Sales rep', '销售') }}<select v-model="target.sales" data-testid="target-sales" required :disabled="saving"><option value="" disabled>{{ copy('Choose a sales rep', '选择销售') }}</option><option v-for="rep in targetSalesOptions" :key="rep.id" :value="rep.id">{{ rep.name }}</option></select></label>
         <label>{{ copy('Metric', '指标') }}<select v-model="target.metric" data-testid="target-metric" :disabled="saving || target.scope === 'territory'" @change="targetPeriodChanged"><option v-for="key in [...activities, 'orders']" :key="key" :value="key">{{ label(key) }}</option></select></label>
         <label>{{ copy('Target period', '目标周期') }}<select v-model="target.period" data-testid="target-period" :disabled="saving || target.metric === 'orders'" @change="targetPeriodChanged"><option v-for="kind in [...periods, 'weekly_default']" :key="kind" :value="kind">{{ label(kind) }}</option></select></label>

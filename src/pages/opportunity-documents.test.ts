@@ -64,6 +64,18 @@ describe('Opportunity document library', () => {
     expect(wrapper.text()).toContain('Something else the service said.')
     wrapper.unmount()
   })
+  it('offers the ways back as buttons, not bare browser links', async () => {
+    const { wrapper } = await setup()
+    const back = wrapper.get('[data-testid="documents-back-opportunity"]')
+    expect(back.classes()).toContain('detail-back-button')
+    expect(back.text()).toBe('Back to opportunity')
+    expect(back.attributes('href')).toContain('/opportunities/opp')
+    const blueSheet = wrapper.get('[data-testid="documents-blue-sheet"]')
+    expect(blueSheet.classes()).toContain('secondary-button')
+    expect(blueSheet.text()).toBe('Blue Sheet')
+    expect(blueSheet.attributes('href')).toContain('#blue-sheet')
+    wrapper.unmount()
+  })
   it('uses the scoped download endpoint and surfaces deleted files without losing the library', async () => {
     const { wrapper, download } = await setup()
     await wrapper.findAll('button').find(button => button.text() === 'Download')!.trigger('click'); await flushPromises()
