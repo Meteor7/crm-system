@@ -91,6 +91,21 @@ class TestQuotationApi(FrappeTestCase):
         finally:
             frappe.set_user(self.sales)
 
+    def _refused_without_rollback(self, endpoint, *arguments) -> tuple[str, str]:
+        # The API edge answers a refusal without a rollback, and the request then commits. Under test the request's
+        # transaction is the test's own: a full rollback is counted here, not carried out, so what a refused request
+        # wrote would still be seen.
+        rollback, request_rollbacks = frappe.db.rollback, []
+
+        def counted(*, save_point=None):
+            return rollback(save_point=save_point) if save_point else request_rollbacks.append(True)
+
+        frappe.local.response.pop("http_status_code", None)
+        with patch.object(frappe.db, "rollback", side_effect=counted):
+            response = endpoint(*arguments)
+        self.assertEqual((request_rollbacks, response["data"], frappe.local.response.pop("http_status_code", None)), ([], None, 422))
+        return response["error"]["code"], response["error"]["message"]
+
     def _ready_quotation(self):
         opportunity = self._opportunity()
         created = create_quotation({"opportunityId": opportunity["id"]})
@@ -106,7 +121,7 @@ class TestQuotationApi(FrappeTestCase):
         saved = save_draft(created["quotation"]["id"], payload, created["version"]["modified"])
         return saved, payload
 
-    def _request_rollbacks(self):
+    def _request_rollbacks(self, after_rollback=None):
         """A patch of the request's full rollbacks, and the list that counts them.
 
         Under test the request's transaction is the test's own, fixtures included: a full rollback goes back to
@@ -120,7 +135,11 @@ class TestQuotationApi(FrappeTestCase):
         def to_request_start(*, save_point=None):
             if not save_point:
                 rollbacks.append(savepoint)
-            return rollback(save_point=save_point or savepoint)
+            result = rollback(save_point=save_point or savepoint)
+            if not save_point and after_rollback:
+                # Model a concurrent change that becomes visible to the request after its full rollback.
+                after_rollback()
+            return result
 
         return patch.object(frappe.db, "rollback", side_effect=to_request_start), rollbacks
 
@@ -279,6 +298,140 @@ class TestQuotationApi(FrappeTestCase):
                 create_quotation(payload)
             self.assertEqual(denied.exception.code, "SCOPE_DENIED")
         self.assertEqual(frappe.db.count("CRM Quotation", {"account": account_id}), before)
+
+    def test_a_refused_create_leaves_no_quotation_and_the_opportunity_free(self):
+        # The API edge answers a CrmApiException without a rollback and the request then commits. Under test the
+        # request's transaction is the test's own: what a refused create wrote would be visible here.
+        opportunity = self._opportunity()
+        account_id = opportunity["accountId"]
+        suffix = random_string(6)
+        other_account = create_account({
+            "name": f"Other Quotation Customer {suffix}", "shortName": suffix, "segment": "Frontend",
+            "tier": "A", "city": "Shanghai", "region": "East China", "owner": self.sales,
+        })
+        foreign_contact = create_contact({
+            "accountId": other_account["id"], "name": f"Other Quotation Contact {suffix}", "title": "Director",
+            "department": "Engineering", "phone": "13800000002", "email": f"other-quotation-{suffix.lower()}@example.invalid",
+            "relationship": "Developing", "owner": self.sales, "status": "Active",
+        })
+        quote_date = "2026-08-10"
+        prefix = "PK20260810-A"
+        counter_before = frappe.db.sql("SELECT `current` FROM `tabSeries` WHERE `name` = %s", (prefix,))
+        without_line_key = [{"lineType": "Device", "name": "x"}]
+        invalid_items = ("VALIDATION_ERROR", "Each quotation line needs a unique lineKey.")
+        invalid_date = ("VALIDATION_ERROR", "Quotation date must be valid.")
+        others = {"accountId": account_id, "quotationType": "Service", "quoteDate": quote_date}
+        cases = (
+            ({**others, "items": without_line_key}, invalid_items),
+            ({"opportunityId": opportunity["id"], "quoteDate": quote_date, "items": without_line_key}, invalid_items),
+            ({**others, "primaryContactId": foreign_contact["id"]}, ("CONFLICT", "ATTN must belong to the quotation customer.")),
+            ({**others, "quoteDate": "not-a-date"}, invalid_date),
+            ({**others, "quoteDate": "0000-00-00"}, invalid_date),
+            ({**others, "quoteDate": "9" * 20}, invalid_date),
+        )
+        for payload, refusal in cases:
+            with self.subTest(payload=payload):
+                with self.assertRaises(CrmApiException) as refused:
+                    create_quotation(payload)
+                self.assertEqual((refused.exception.code, refused.exception.public_message), refusal)
+                self.assertEqual(
+                    frappe.db.sql("SELECT `current` FROM `tabSeries` WHERE `name` = %s", (prefix,)),
+                    counter_before,
+                )
+        self.assertEqual(frappe.db.count("CRM Quotation", {"account": account_id}), 0)
+
+        # Refused creates consumed no reference, and the Opportunity still takes its Quotation.
+        created = create_quotation({"opportunityId": opportunity["id"], "quoteDate": quote_date})
+        self.assertEqual(created["quotation"]["opportunityId"], opportunity["id"])
+        self.assertTrue(created["quotation"]["refNo"].startswith(prefix))
+
+    def test_a_creation_retry_revalidates_contact_and_address_before_writing(self):
+        from frappe.model.document import Document
+
+        for failure in (frappe.QueryDeadlockError, frappe.UniqueValidationError):
+            for changed in ("inactive_contact", "moved_contact", "unlinked_address"):
+                with self.subTest(failure=failure.__name__, changed=changed):
+                    opportunity = self._opportunity()
+                    contact_id, address_id = self.quotation_contact["id"], self.quotation_site["id"]
+                    other = create_account({
+                        "name": f"Retry Customer {random_string(8)}", "shortName": random_string(6),
+                        "segment": "Frontend", "tier": "A", "city": "Shanghai",
+                        "region": "East China", "owner": self.sales,
+                    })
+                    version_count = frappe.db.count("CRM Quotation Version", {"account": opportunity["accountId"]})
+                    counter_before = frappe.db.sql(
+                        "SELECT `current` FROM `tabSeries` WHERE `name` = %s", ("PK20320303-A",),
+                    )
+                    insert, attempts = Document.db_insert, []
+
+                    def fail_first_insert(document, *args, **kwargs):
+                        if document.doctype == "CRM Quotation":
+                            attempts.append(document.ref_no)
+                            if len(attempts) == 1:
+                                raise failure("retry the creation")
+                        return insert(document, *args, **kwargs)
+
+                    def change_relation():
+                        if changed == "inactive_contact":
+                            frappe.db.set_value("Contact", contact_id, "custom_crm_status", "Left Company")
+                        elif changed == "moved_contact":
+                            frappe.db.set_value("Dynamic Link", {
+                                "parent": contact_id, "parenttype": "Contact", "link_doctype": "Customer",
+                            }, "link_name", other["id"])
+                        else:
+                            frappe.db.delete("Dynamic Link", {
+                                "parent": address_id, "parenttype": "Address", "link_doctype": "Customer",
+                            })
+
+                    rolled_back, rollbacks = self._request_rollbacks(after_rollback=change_relation)
+                    with rolled_back, patch("frappe.model.document.Document.db_insert", new=fail_first_insert):
+                        with self.assertRaises(CrmApiException) as refused:
+                            create_quotation({
+                                "opportunityId": opportunity["id"], "quoteDate": "2032-03-03",
+                                "primaryContactId": contact_id, "addressId": address_id,
+                            })
+                    expected_messages = {
+                        "inactive_contact": "ATTN must be an active contact.",
+                        "moved_contact": "ATTN must belong to the quotation customer.",
+                        "unlinked_address": "Quotation address was not found.",
+                    }
+                    self.assertEqual(refused.exception.public_message, expected_messages[changed])
+                    self.assertEqual((len(attempts), len(rollbacks)), (1, 1))
+                    self.assertFalse(frappe.db.exists("CRM Quotation", {"opportunity": opportunity["id"]}))
+                    self.assertEqual(frappe.db.count("CRM Quotation Version", {"account": opportunity["accountId"]}), version_count)
+                    self.assertEqual(frappe.db.sql(
+                        "SELECT `current` FROM `tabSeries` WHERE `name` = %s", ("PK20320303-A",),
+                    ), counter_before)
+
+    def test_a_creation_retry_refreshes_contact_and_address_snapshots(self):
+        from frappe.model.document import Document
+
+        for failure in (frappe.QueryDeadlockError, frappe.UniqueValidationError):
+            with self.subTest(failure=failure.__name__):
+                opportunity = self._opportunity()
+                contact_id, address_id = self.quotation_contact["id"], self.quotation_site["id"]
+                insert, attempts = Document.db_insert, []
+
+                def fail_first_insert(document, *args, **kwargs):
+                    if document.doctype == "CRM Quotation":
+                        attempts.append(document.ref_no)
+                        if len(attempts) == 1:
+                            raise failure("retry the creation")
+                    return insert(document, *args, **kwargs)
+
+                def change_snapshot():
+                    frappe.db.set_value("Contact", contact_id, "designation", "Updated Director")
+                    frappe.db.set_value("Address", address_id, "address_line1", "Updated Road")
+
+                rolled_back, rollbacks = self._request_rollbacks(after_rollback=change_snapshot)
+                with rolled_back, patch("frappe.model.document.Document.db_insert", new=fail_first_insert):
+                    created = create_quotation({
+                        "opportunityId": opportunity["id"], "primaryContactId": contact_id, "addressId": address_id,
+                    })
+                self.assertEqual((len(attempts), len(rollbacks)), (2, 1))
+                self.assertEqual(attempts[0], attempts[1])
+                self.assertEqual(created["version"]["attentionTitle"], "Updated Director")
+                self.assertIn("Updated Road", created["version"]["addressText"])
 
     def test_sales_submission_requires_manager_approval_and_preserves_retries(self):
         saved, payload = self._ready_quotation()
@@ -888,6 +1041,117 @@ class TestQuotationApi(FrappeTestCase):
         for candidate, message in cases:
             with self.subTest(message=message), self.assertRaisesRegex(CrmApiException, message):
                 _validated_values(master, candidate, False)
+
+    def test_a_validity_ending_after_9999_12_31_answers_422_and_writes_nothing(self):
+        from rayher_crm.api.v1 import quotations as quotation_api
+
+        refusal = ("VALIDATION_ERROR", "Quotation validity must end by 9999-12-31.")
+
+        saved, payload = self._ready_quotation()
+        quotation_id, modified = saved["quotation"]["id"], saved["version"]["modified"]
+        before = get_quotation(quotation_id)
+        # The date alone does not decide: the validity months move the end past 9999-12-31.
+        for quote_date, months in (("9999-12-31", 1), ("9999-12-01", 1), ("9999-11-30", 2), ("9990-01-01", 120)):
+            with self.subTest(quote_date=quote_date, months=months):
+                draft = {**payload, "quoteDate": quote_date, "validityMonths": months}
+                self.assertEqual(self._refused_without_rollback(quotation_api.save_draft, quotation_id, draft, modified), refusal)
+        self.assertEqual(get_quotation(quotation_id), before)
+
+        # A create is refused before its Quotation is written, so the Opportunity still takes one.
+        opportunity = self._opportunity()
+        for quotation_input in (
+            {"opportunityId": opportunity["id"], "quoteDate": "9999-12-31"},
+            {"accountId": opportunity["accountId"], "quotationType": "Service", "quoteDate": "9999-12-31"},
+        ):
+            with self.subTest(quotation_input=quotation_input):
+                self.assertEqual(self._refused_without_rollback(quotation_api.create_quotation, quotation_input), refusal)
+        self.assertEqual(frappe.db.count("CRM Quotation", {"account": opportunity["accountId"]}), 0)
+        self.assertEqual(create_quotation({"opportunityId": opportunity["id"]})["quotation"]["opportunityId"], opportunity["id"])
+
+        # A validity ending on 9999-12-31 itself is kept.
+        kept = save_draft(quotation_id, {**payload, "quoteDate": "9989-12-31", "validityMonths": 120}, modified)
+        self.assertEqual((kept["version"]["quoteDate"], kept["version"]["validUntil"]), ("9989-12-31", "9999-12-31"))
+
+    def test_a_stored_validity_ending_after_9999_12_31_is_refused_before_any_write(self):
+        # A version stored some other way (Desk, an import) can hold such a date. The commands that work its values out
+        # again refuse it and leave the Quotation as it was: before they write, or, for an approval, which has written
+        # its decision by then, by rolling back to its savepoint.
+        refusal = ("VALIDATION_ERROR", "Quotation validity must end by 9999-12-31.")
+
+        def store_the_last_day(version_id: str) -> None:
+            frappe.db.set_value("CRM Quotation Version", version_id, "quote_date", "9999-12-31", update_modified=False)
+            frappe.clear_document_cache("CRM Quotation Version", version_id)
+
+        def assert_refused(quotation_id: str, command) -> None:
+            notices = {"source_doctype": "CRM Quotation", "source_name": quotation_id}
+            before, notices_before = get_quotation(quotation_id), frappe.db.count("CRM Notification Event", notices)
+            with self.assertRaises(CrmApiException) as refused:
+                command()
+            self.assertEqual((refused.exception.code, refused.exception.public_message), refusal)
+            self.assertEqual(get_quotation(quotation_id), before)
+            self.assertEqual(frappe.db.count("CRM Notification Event", notices), notices_before)
+
+        draft, _ = self._ready_quotation()
+        quotation_id, modified = draft["quotation"]["id"], draft["version"]["modified"]
+        store_the_last_day(draft["version"]["id"])
+        assert_refused(quotation_id, lambda: submit_for_approval(quotation_id, modified))
+        assert_refused(quotation_id, lambda: self._publish(quotation_id, modified))
+
+        draft, _ = self._ready_quotation()
+        quotation_id = draft["quotation"]["id"]
+        pending = submit_for_approval(quotation_id, draft["version"]["modified"])
+        store_the_last_day(pending["version"]["id"])
+        frappe.set_user(self.manager)
+        assert_refused(quotation_id, lambda: review_approval(quotation_id, "Approved", "", pending["version"]["modified"]))
+        frappe.set_user(self.sales)
+
+        draft, _ = self._ready_quotation()
+        quotation_id = draft["quotation"]["id"]
+        published = self._publish(quotation_id, draft["version"]["modified"])
+        store_the_last_day(published["version"]["id"])
+        assert_refused(quotation_id, lambda: create_version(quotation_id))
+
+    def test_an_unreadable_quote_date_answers_422_and_leaves_the_draft_unchanged(self):
+        from rayher_crm.api.v1 import quotations as quotation_api
+
+        saved, payload = self._ready_quotation()
+        quotation_id, modified = saved["quotation"]["id"], saved["version"]["modified"]
+        before = get_quotation(quotation_id)
+        # `getdate` raises Frappe's ValidationError for text it cannot read and OverflowError for a number too large to
+        # read as a date. For a zero date, or one Frappe takes for none such as 0001-01-01, it answers None, which
+        # `add_months` took for today: the draft was saved with that date and a validity counted from today.
+        for quote_date in ("not-a-date", "9" * 20, "0000-00-00", "0001-01-01"):
+            with self.subTest(quote_date=quote_date):
+                draft = {**payload, "quoteDate": quote_date}
+                self.assertEqual(
+                    self._refused_without_rollback(quotation_api.save_draft, quotation_id, draft, modified),
+                    ("VALIDATION_ERROR", "Quotation date must be valid."),
+                )
+                self.assertEqual(get_quotation(quotation_id), before)
+        # A month value that is no number keeps its own message.
+        self.assertEqual(
+            self._refused_without_rollback(quotation_api.save_draft, quotation_id, {**payload, "validityMonths": "two"}, modified),
+            ("VALIDATION_ERROR", "Quotation date and month values must be valid."),
+        )
+        self.assertEqual(get_quotation(quotation_id), before)
+
+    def test_a_stored_zero_quote_date_is_refused_before_any_write(self):
+        from rayher_crm.api.v1 import quotations as quotation_api
+
+        # A draft saved before the date was checked can hold 0000-00-00, which MariaDB keeps and gives back as text.
+        # Submitting it works its values out again and is refused as the date would be in a request.
+        draft, _ = self._ready_quotation()
+        quotation_id, version_id = draft["quotation"]["id"], draft["version"]["id"]
+        frappe.db.set_value("CRM Quotation Version", version_id, "quote_date", "0000-00-00", update_modified=False)
+        frappe.clear_document_cache("CRM Quotation Version", version_id)
+        before = get_quotation(quotation_id)
+        self.assertEqual(before["version"]["quoteDate"], "0000-00-00")
+        self.assertEqual(
+            self._refused_without_rollback(quotation_api.submit_for_approval, quotation_id, draft["version"]["modified"]),
+            ("VALIDATION_ERROR", "Quotation date must be valid."),
+        )
+        self.assertEqual(get_quotation(quotation_id), before)
+
     def test_stale_destructive_lifecycle_commands_are_rejected(self):
         opportunity = self._opportunity()
         created = create_quotation({"opportunityId": opportunity["id"]})

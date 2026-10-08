@@ -156,6 +156,18 @@ def _db_decimal(value: Any) -> str:
     return decimal_string(str(value or 0))
 
 
+def _quote_day(quote_date: str):
+    # `getdate` answers None for a zero date such as 0000-00-00, raises Frappe's ValidationError for text it
+    # cannot read, and OverflowError for a number too large to read as a date.
+    try:
+        quote_day = getdate(quote_date)
+    except (frappe.ValidationError, TypeError, ValueError, OverflowError) as exc:
+        raise CrmApiException("VALIDATION_ERROR", "Quotation date must be valid.") from exc
+    if quote_day is None:
+        raise CrmApiException("VALIDATION_ERROR", "Quotation date must be valid.")
+    return quote_day
+
+
 def _next_ref_no(quote_date: str) -> str:
     """The next reference of a Quotation first quoted on `quote_date`: `PK<date>-A<n>`.
 
@@ -171,7 +183,7 @@ def _next_ref_no(quote_date: str) -> str:
 
     A number is given once: the next Quotation of a date does not take the number of one discarded since.
     """
-    date_key = getdate(quote_date).strftime("%Y%m%d")
+    date_key = _quote_day(quote_date).strftime("%Y%m%d")
     prefix = f"PK{date_key}-A"
     issued = [
         int(ref_no[len(prefix):])
@@ -357,8 +369,8 @@ def _validated_values(master, payload: dict[str, Any], publishing: bool) -> dict
     except (QuotationRuleError, KeyError) as exc:
         raise CrmApiException("VALIDATION_ERROR", str(exc)) from exc
     quote_date = _text(payload, "quoteDate", today())
+    quote_day = _quote_day(quote_date)
     try:
-        quote_day = getdate(quote_date)
         validity_months = int(payload.get("validityMonths") or 1)
         delivery_months = int(payload.get("deliveryMonths") or 4)
         warranty_months = int(payload.get("warrantyMonths") or 12)
@@ -366,7 +378,11 @@ def _validated_values(master, payload: dict[str, Any], publishing: bool) -> dict
         raise CrmApiException("VALIDATION_ERROR", "Quotation date and month values must be valid.") from exc
     if not all(1 <= value <= MAX_TERM_MONTHS for value in (validity_months, delivery_months, warranty_months)):
         raise CrmApiException("VALIDATION_ERROR", f"Validity, delivery and warranty months must be between 1 and {MAX_TERM_MONTHS}.")
-    valid_until = str(add_months(quote_day, validity_months))
+    try:
+        valid_until = str(add_months(quote_day, validity_months))
+    except ValueError as exc:
+        # The validity would end after 9999-12-31, the last day a date holds: "year 10000 is out of range".
+        raise CrmApiException("VALIDATION_ERROR", "Quotation validity must end by 9999-12-31.") from exc
     values = {
         "primary_contact": contact_id or None, "address": address_id or None, "quote_date": quote_date,
         "validity_months": validity_months, "valid_until": valid_until,
@@ -545,6 +561,9 @@ def create_quotation(payload: dict[str, Any]) -> dict[str, Any]:
     initial["quoteDate"] = initial_quote_date
     owner = opportunity.opportunity_owner if opportunity else frappe.session.user
     if resolve_crm_role() == "Sales" and owner != frappe.session.user: raise CrmApiException("SCOPE_DENIED", "Sales can only create quotations for owned Opportunities.")
+    if not initial.get("items"):
+        initial["items"] = [{"lineKey": "device-1", "lineType": "Device", "name": "New Device" if quotation_type == "Device" else "New Service Item", "quantity": 1, "unitPrice": "0"}]
+    _quote_day(initial_quote_date)
     master = None
     for attempt in range(1, QUOTATION_CREATE_ATTEMPTS + 1):
         try:
@@ -552,10 +571,12 @@ def create_quotation(payload: dict[str, Any]) -> dict[str, Any]:
             # and this creation is told so instead of tripping on the unique key again.
             if attempt > 1 and opportunity and frappe.db.exists("CRM Quotation", {"opportunity": opportunity.name}):
                 raise CrmApiException("QUOTATION_ALREADY_EXISTS", "This Opportunity already has a Quotation.")
-            try:
-                ref_no = _next_ref_no(initial_quote_date)
-            except (TypeError, ValueError) as exc:
-                raise CrmApiException("VALIDATION_ERROR", "Quotation date must be valid.") from exc
+            # Validate before the first write on every attempt: a rollback starts a new transaction, where
+            # Contact status, customer links and address snapshots may have changed. The API commits a handled
+            # CrmApiException, so neither an invalid request nor an invalid retry may allocate a reference or
+            # leave a Quotation without its version. Of the master, this validation reads only its Account.
+            values = _validated_values(frappe._dict(account=account), initial, False)
+            ref_no = _next_ref_no(initial_quote_date)
             master = frappe.get_doc({"doctype": "CRM Quotation", "ref_no": ref_no, "quotation_type": quotation_type, "opportunity": opportunity.name if opportunity else None, "account": account, "quotation_owner": owner, "status": "Draft", "latest_version_no": 1}).insert(ignore_permissions=True)
             break
         except (frappe.UniqueValidationError, frappe.DuplicateEntryError):
@@ -574,9 +595,6 @@ def create_quotation(payload: dict[str, Any]) -> dict[str, Any]:
                 raise
     if master is None:
         raise CrmApiException("CONFLICT", "Could not allocate a unique quotation reference.")
-    if not initial.get("items"):
-        initial["items"] = [{"lineKey": "device-1", "lineType": "Device", "name": "New Device" if quotation_type == "Device" else "New Service Item", "quantity": 1, "unitPrice": "0"}]
-    values = _validated_values(master, initial, False)
     version = frappe.get_doc({"doctype": "CRM Quotation Version", "quotation": master.name, "version_no": 1, "quotation_type": quotation_type, "status": "Draft", "approval_status": "Not Submitted", "ref_no": ref_no, "opportunity": opportunity.name if opportunity else None, "account": account, "quotation_owner": owner, **values}).insert(ignore_permissions=True)
     master.current_version = version.name; master.save(ignore_permissions=True)
     return get_quotation(master.name)
