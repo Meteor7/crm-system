@@ -14,6 +14,7 @@ from typing import Any
 
 import frappe
 from frappe.utils import now_datetime
+from frappe.utils.html_utils import sanitize_html
 from rayher_crm.services.private_file_lifecycle import discard_rolled_back_blob, lock_upload_contents
 from rayher_crm.services.private_file_lifecycle import save_private_file as save_file
 
@@ -86,9 +87,25 @@ def list_records(opportunity_id: str) -> list[dict]:
     return [_serialize(row, grouped[row.name]) for row in rows]
 
 
+def _stored_file_name(file_name: str) -> str:
+    # Frappe's XSS filter rewrites a Data value once it finds a tag in it, after
+    # its own length check: stray `<` and `&` become entities, attributes gain
+    # quotes, open tags gain closing ones. The stored name can so be longer than
+    # the one the user typed. Mirror that rewrite here.
+    if "<" not in file_name and ">" not in file_name:
+        return file_name
+    return sanitize_html(file_name)
+
+
 def _validate_upload(part: dict, scanner) -> str:
+    # The length as typed first: the filter parses the whole name, so it must never see an unbounded one.
     if len(part["file_name"]) > MAX_FILE_NAME_LENGTH:
         raise CrmApiException("VALIDATION_ERROR", "File name including extension must not exceed 140 characters.")
+    if len(_stored_file_name(part["file_name"])) > MAX_FILE_NAME_LENGTH:
+        raise CrmApiException(
+            "VALIDATION_ERROR",
+            "File name including extension must not exceed 140 characters once the HTML filter has rewritten it.",
+        )
     mime = part["mime_type"]
     if part["file_name"].lower().endswith(".csv") and mime == "application/vnd.ms-excel":
         mime = "text/csv"

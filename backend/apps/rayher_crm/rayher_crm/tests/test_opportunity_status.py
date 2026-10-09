@@ -651,6 +651,20 @@ class TestOpportunityStatus(FrappeTestCase):
         finally:
             connection.close()
 
+    def test_stored_name_boundary_follows_frappe_xss_filter(self):
+        from frappe.utils.html_utils import sanitize_html
+
+        # A void tag keeps the filter from adding a closing `</br>` (a `/` no File name may hold),
+        # while every stray `<` after it is stored as `&lt;`: four characters for one typed.
+        fitting = "<br>" + "<" * 33 + ".txt"
+        self.assertEqual(len(sanitize_html(fitting)), service.MAX_FILE_NAME_LENGTH)
+        saved = self.save(files=[self.upload(name=fitting)])
+        self.assertEqual(saved["files"][0]["fileName"], sanitize_html(fitting))
+        with self.assertRaises(CrmApiException) as refused:
+            self.save(files=[self.upload(name="<br>" + "<" * 34 + ".txt")])
+        self.assertEqual(refused.exception.code, "VALIDATION_ERROR")
+        self.assertIn("HTML filter", refused.exception.public_message)
+
 
 class TestOpportunityStatusConcurrency(FrappeTestCase):
     _user = TestOpportunityRelations._user
