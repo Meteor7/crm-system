@@ -208,6 +208,17 @@ def decide_request(request_id: Any, decision: Any, note: Any = None) -> dict[str
         document = frappe.get_doc("CRM Document Access Request", request_name)
         if document.status != "Pending":
             raise CrmApiException("CONFLICT", "This controlled-document request has already been decided.")
+        if decision_name == "approve-watermarked":
+            # The approval must still have a PDF source, even when the client loaded an older library.
+            # A locking read checks the current committed document and keeps its source stable until approval.
+            sources = frappe.db.sql(
+                "SELECT `preview_file` FROM `tabCRM Controlled Document` WHERE `name` = %s FOR UPDATE",
+                (document.controlled_document,), as_dict=True,
+            )
+            if not sources or not sources[0].preview_file:
+                raise CrmApiException(
+                    "VALIDATION_ERROR", "This document has no PDF preview. Approve the original file instead.",
+                )
         status, delivery_mode = APPROVAL_DECISIONS[decision_name]
         document.status = status
         document.delivery_mode = delivery_mode

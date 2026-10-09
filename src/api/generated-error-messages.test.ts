@@ -67,6 +67,7 @@ it.each([
   ['VALIDATION_ERROR', 'expectedPoDate is required.', 'expected PO date', '预计 PO 日期'],
   ['VALIDATION_ERROR', 'A comment is required to reject an internal validation.', 'comment is required', '必须填写审批意见'],
   ['VALIDATION_ERROR', 'An approval carries no note: clear it, or reject the request or ask for more information.', 'Clear the note', '请清空说明'],
+  ['VALIDATION_ERROR', 'This document has no PDF preview. Approve the original file instead.', 'Approve the original file instead.', '该文档没有 PDF 预览，请改为批准原件。'],
   ['VALIDATION_ERROR', 'booking is required.', 'Booking details', 'Booking 信息'],
   ['VALIDATION_ERROR', 'The amount and the amount in CNY are required from Demo done.', 'required from Demo done on', '从 Demo 完成阶段起必须有金额'],
   ['VALIDATION_ERROR', 'singleSalesObjective is too long.', 'single sales objective is too long', '本单目标过长'],

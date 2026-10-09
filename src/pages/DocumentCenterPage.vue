@@ -179,6 +179,16 @@ const approvalAudit = computed(() => approvalDocument.value?.audit ?? selectedRe
 const decisionNote = ref('')
 // The note and the upload's rejection reason are the selected request's: another request chosen starts them afresh.
 watch(selectedRequestId, () => { decisionNote.value = ''; uploadDecisionReason.value = '' })
+const needsOriginalApproval = computed(() =>
+  role.value !== 'Manager'
+  && selected.value?.canDownload
+  && selected.value.deliveryMode === 'Watermarked'
+  && selected.value.hasPreview !== true,
+)
+const canApproveWatermarked = computed(() =>
+  selectedRequest.value?.kind === 'access'
+  && controlledDocuments.value.find((document) => document.id === selectedRequest.value?.documentId)?.hasPreview === true,
+)
 const filteredDocuments = computed(() => {
   return controlledDocuments.value.filter((document) => libraryFilter.value === 'All' || document.category === libraryFilter.value)
 })
@@ -371,7 +381,7 @@ async function loadControlledPreview() {
 }
 
 async function downloadControlledDocument() {
-  if (!selected.value?.canDownload || downloading.value) return
+  if (!selected.value?.canDownload || needsOriginalApproval.value || downloading.value) return
   const document = selected.value
   downloading.value = true
   setNotice('')
@@ -395,6 +405,7 @@ async function downloadControlledDocument() {
 async function decideRequest(decision: ApprovalDecision) {
   if (isManagementReadonly.value || !selectedRequest.value || decidingRequestId.value) return
   const request = selectedRequest.value
+  if (request.kind === 'access' && decision === 'approve-watermarked' && !canApproveWatermarked.value) return
   decidingRequestId.value = request.id
   if (request.kind === 'upload' && request.upload) {
     try {
@@ -712,6 +723,7 @@ onBeforeUnmount(() => {
               <div>
                 <small>{{ locale === 'en-US' ? 'Authorization policy' : '授权策略' }}</small>
                 <strong>{{ locale === 'en-US' ? 'Choose watermarked PDF or original PPTX during approval' : '审批时明确选择水印 PDF 或原始 PPTX' }}</strong>
+                <p v-if="selectedRequest.kind === 'access' && !canApproveWatermarked" id="watermark-approval-help" class="action-help" data-watermark-approval-help>{{ locale === 'en-US' ? 'This document has no PDF preview, so watermarked PDF approval is unavailable. Choose original approval.' : '该文档没有 PDF 预览，无法批准水印 PDF，请选择批准原件。' }}</p>
               </div>
               <label v-if="selectedRequest.kind === 'access'" class="decision-note">
                 <span>{{ locale === 'en-US' ? 'Note to the applicant (required to request more information; cannot go with an approval)' : '给申请人的说明（补充信息时必填；批准时不能附带）' }}</span>
@@ -743,7 +755,8 @@ onBeforeUnmount(() => {
                   type="button"
                   class="primary-button"
                   data-approval-action="approve-watermarked"
-                  :disabled="isManagementReadonly || selectedRequest.status !== 'Manager Review' || decidingRequestId === selectedRequest.id"
+                  :aria-describedby="!canApproveWatermarked ? 'watermark-approval-help' : undefined"
+                  :disabled="!canApproveWatermarked || isManagementReadonly || selectedRequest.status !== 'Manager Review' || decidingRequestId === selectedRequest.id"
                   @click="decideRequest('approve-watermarked')"
                 >
                   <Check :size="15" />{{ locale === 'en-US' ? 'Approve watermarked PDF' : '批准水印 PDF' }}
@@ -945,7 +958,7 @@ onBeforeUnmount(() => {
               </section>
 
               <section
-                v-else-if="selected.canDownload"
+                v-else-if="selected.canDownload && !needsOriginalApproval"
                 class="document-preview original-only-preview"
                 data-document-preview="original-only"
               >
@@ -962,7 +975,7 @@ onBeforeUnmount(() => {
               </section>
 
               <aside class="document-action-card">
-                <template v-if="selected.canDownload">
+                <template v-if="selected.canDownload && !needsOriginalApproval">
                   <span class="workspace-badge positive"><ShieldCheck :size="13" />{{ locale === 'en-US' ? 'Approved access' : '已批准访问' }}</span>
                   <h3>{{ role === 'Manager' ? (locale === 'en-US' ? 'Download clean original' : '无水印原件下载') : selected.deliveryMode === 'Original' ? (locale === 'en-US' ? 'Download approved original' : '已批准原件下载') : (locale === 'en-US' ? 'Download approved watermarked PDF' : '已批准水印 PDF 下载') }}</h3>
                   <p>{{ role === 'Manager' ? (locale === 'en-US' ? 'Manager can view the clean preview and download the integrity-checked original.' : 'Manager 可直接查看无水印预览，并下载经过完整性校验的原始文件。') : (locale === 'en-US' ? 'Preview uses a personal watermarked PDF; the original is available only after explicit Manager approval.' : '预览使用当前账号的个人水印 PDF；原始文件仅在 Manager 明确批准后提供。') }}</p>
@@ -1010,6 +1023,7 @@ onBeforeUnmount(() => {
                 </template>
 
                 <form v-else data-access-request-form @submit.prevent="submitAccessRequest">
+                  <p v-if="needsOriginalApproval" class="inline-error" data-original-approval-required>{{ locale === 'en-US' ? 'The current approval permits a watermarked PDF, but this document has no PDF preview. Submit a new request so the Manager can approve the original file.' : '当前批准的是水印 PDF，但该文档没有 PDF 预览。请重新提交申请，由经理批准原件下载。' }}</p>
                   <div v-if="decidedRequest" class="request-decision" data-access-request-decision>
                     <span class="workspace-badge" :class="statusTone(decidedRequest.status)">{{ requestStatusLabel(decidedRequest.status) }}</span>
                     <p>{{ decidedRequest.decisionNote || (decidedRequest.status === 'Rejected' ? (locale === 'en-US' ? 'The Manager rejected the request.' : '经理已拒绝这次申请。') : (locale === 'en-US' ? 'The Manager asked for more information.' : '经理要求补充信息。')) }}</p>

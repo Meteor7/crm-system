@@ -56,6 +56,7 @@ const FIXED_MESSAGES: Partial<Record<string, Record<string, CopyPair>>> = {
     'A comment is required to reject an internal validation.': ['A comment is required to reject an internal validation.', '驳回内部生产审批时必须填写审批意见。'],
     // A controlled-document approval (services/document_access.py): the page refuses the same before sending.
     'An approval carries no note: clear it, or reject the request or ask for more information.': ['An approval carries no note to the applicant. Clear the note, or reject the request or ask for more information instead.', '批准时不会把说明发给申请人。请清空说明，或改为拒绝/要求补充信息。'],
+    'This document has no PDF preview. Approve the original file instead.': ['This document has no PDF preview. Approve the original file instead.', '该文档没有 PDF 预览，请改为批准原件。'],
     'booking is required.': ['Enter the Booking details.', '请填写 Booking 信息。'],
     'amountCny is required.': ['Enter the amount in CNY.', '请填写人民币金额。'],
     'The amount and the amount in CNY are required from Demo done.': ['Enter the amount and the amount in CNY on the Opportunity first: they are required from Demo done on.', '请先在商机上填写金额和人民币金额：从 Demo 完成阶段起必须有金额。'],

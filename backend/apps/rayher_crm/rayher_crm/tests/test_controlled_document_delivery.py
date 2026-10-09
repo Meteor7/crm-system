@@ -227,6 +227,47 @@ class TestControlledDocumentDelivery(FrappeTestCase):
         result = render_controlled_document(ACONCA_DOCUMENT_ID, "preview")
         self.assertEqual(result["mime_type"], "application/pdf")
 
+    def test_api_refuses_watermarked_approval_without_a_pdf_source_and_keeps_request_pending(self):
+        from rayher_crm.api.v1.read_only_views import decide_controlled_document_request
+
+        requested = create_request(version_id(self.document), "Customer acceptance review")
+        # A Manager may have loaded the library before the PDF source was removed.
+        self.assertTrue(self.document.preview_file)
+        frappe.set_user(self.manager)
+        before = frappe.get_doc("CRM Document Access Request", requested["id"])
+        decision_fields = ("status", "delivery_mode", "decided_by", "decided_at", "decision_note")
+        expected = {field: before.get(field) for field in decision_fields}
+        for absent_source in (None, ""):
+            with self.subTest(preview_file=absent_source):
+                frappe.db.set_value(
+                    "CRM Controlled Document", self.document.name, "preview_file", absent_source,
+                    update_modified=False,
+                )
+                response = decide_controlled_document_request(requested["id"], "approve-watermarked")
+                self.assertEqual(response["error"]["code"], "VALIDATION_ERROR")
+                self.assertIn("Approve the original file", response["error"]["message"])
+                self.assertEqual(frappe.local.response.pop("http_status_code", None), 422)
+                refused = frappe.get_doc("CRM Document Access Request", requested["id"])
+                self.assertEqual({field: refused.get(field) for field in decision_fields}, expected)
+                self.assertFalse(frappe.db.exists("CRM Notification Event", {
+                    "source_doctype": "CRM Document Access Request", "source_name": requested["id"],
+                    "recipient_user": self.sales,
+                }))
+
+    def test_original_approval_without_a_pdf_source_still_delivers_verified_original(self):
+        requested = create_request(version_id(self.document), "Customer needs the original presentation")
+        source = self._source_content(self.original_private_file)
+        frappe.set_user(self.manager)
+        frappe.db.set_value(
+            "CRM Controlled Document", self.document.name, "preview_file", None, update_modified=False,
+        )
+
+        approved = decide_request(requested["id"], "approve-original")
+        self.assertEqual((approved["status"], approved["deliveryMode"]), ("Approved", "Original"))
+        frappe.set_user(self.sales)
+        result = render_controlled_document(ACONCA_DOCUMENT_ID, "download")
+        self.assertEqual((result["mime_type"], result["content"]), (PPTX_MIME, source))
+
     def test_the_download_audit_names_who_downloaded_and_why(self):
         from rayher_crm.services.read_only_views import list_controlled_documents
 
