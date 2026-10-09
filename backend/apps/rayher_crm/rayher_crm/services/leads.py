@@ -13,7 +13,7 @@ from frappe.utils.html_utils import sanitize_html
 
 from rayher_crm.api.v1.errors import CrmApiException, _raising_frame_locals
 from rayher_crm.permissions.roles import assert_capability, resolve_crm_role
-from rayher_crm.permissions.scope import conditions_for_doctype
+from rayher_crm.permissions.scope import _lock_user_crm_roles, conditions_for_doctype
 from rayher_crm.services.common import (
     archive_state,
     ensure_server_generated_id,
@@ -549,10 +549,16 @@ def convert_lead(
         raise CrmApiException("INVALID_TRANSITION", ARCHIVED_LEAD_CONVERT)
 
     values = _validate_conversion(payload)
+    # The Lead owner's User and role rows next, before any Account's row (or the region catalogue a new Account may
+    # take): the Lead's save takes them in its hook (permissions.scope.revoke_lead_shares_entering_crm), and taken
+    # there, after the Account's row, they would come after it, where every writer that locks a User (an
+    # Opportunity's edit, an Event's save, a territory's assignment) takes it first. The Lead's row before them is the
+    # order of the Lead's own saves.
+    _lock_user_crm_roles((lead.lead_owner,))
     savepoint = f"crm_convert_{frappe.generate_hash(length=8)}"
     frappe.db.savepoint(savepoint)
     try:
-        from rayher_crm.services.accounts import _require_account, create_account
+        from rayher_crm.services.accounts import create_account, require_active_account
         from rayher_crm.services.contacts import _contact_account, _require_contact, create_contact
         from rayher_crm.services.opportunities import insert_qualified_opportunity
         from rayher_crm.services.sites import _require_site, create_site, sites_for_account
@@ -560,7 +566,11 @@ def convert_lead(
         account_id = str(payload.get("accountId") or "").strip()
         reused_account = bool(account_id)
         if account_id:
-            _require_account(account_id)
+            # A Lead is not converted into an archived Account. The Account's row is read under an exclusive lock:
+            # the Lead's and the Contact's saves take it so in their hooks (permissions.scope._lock_customer_groups),
+            # so it is never raised from shared; the Account's archive never locks a Lead, so the Lead's lock held
+            # already is no cycle.
+            require_active_account(account_id, for_update=True)
         else:
             new_account = payload.get("newAccount")
             if not isinstance(new_account, dict):

@@ -10,10 +10,9 @@ import frappe
 from rayher_crm.api.v1.errors import CrmApiException
 from rayher_crm.permissions.roles import assert_capability, resolve_crm_role
 from rayher_crm.permissions.scope import conditions_for_doctype
-from rayher_crm.services.accounts import _require_account
+from rayher_crm.services.accounts import require_active_account
 from rayher_crm.services.opportunity_archive import ARCHIVED_OPPORTUNITY_LINK, assert_opportunity_not_archived, opportunity_archived
 from rayher_crm.services.common import (
-    delete_manager_scoped_document,
     ensure_server_generated_id,
     normalize_pagination,
     optional_date,
@@ -29,10 +28,6 @@ from rayher_crm.services.notifications import notify_if_reachable
 
 VISIT_TYPES = {"On-site", "Video", "Phone"}
 VISIT_STATUS_ORDER = ["Planned", "Visited", "Minutes Submitted", "Manager Reviewed"]
-
-
-def delete_visit(name: str) -> dict[str, str]:
-    return delete_manager_scoped_document("CRM Visit", name, "visit:write", "VISIT_NOT_FOUND")
 
 
 def _reads_account(user: str, account: str) -> bool:
@@ -216,7 +211,9 @@ def create_visit(payload: dict[str, Any]) -> dict[str, Any]:
     assert_capability("visit:create")
     ensure_server_generated_id(payload)
     account_id = required_text(payload, "accountId")
-    _require_account(account_id)
+    # No Visit is planned under an archived Account (the flag read under a shared lock on the Account's row, the
+    # first lock of the request); the Visits it has keep their own workflow.
+    require_active_account(account_id)
     opportunity = _validate_opportunity(payload.get("opportunityId"), account_id)
     if opportunity:
         # Read again under the Opportunity's lock before the insert: an archive committed since the read above

@@ -136,7 +136,8 @@ describe('Frappe method contract', () => {
       listAccountCities: 'accounts.list_account_cities',
       createAccount: 'accounts.create_account',
       updateAccount: 'accounts.update_account',
-      deleteAccount: 'accounts.delete_account',
+      archiveAccount: 'accounts.archive_account',
+      unarchiveAccount: 'accounts.unarchive_account',
       getAccount360: 'accounts.get_account_360',
       listAccountSites: 'accounts.list_account_sites',
       createAccountSite: 'accounts.create_account_site',
@@ -284,14 +285,18 @@ describe('Frappe method contract', () => {
 })
 
 describe('Frappe JSON transport', () => {
-  it('posts stable ids to the Manager-only Account delete endpoint', async () => {
-    const fetchMock = vi.fn().mockImplementation(() => Promise.resolve(success({ id: 'deleted', status: 'Deleted' })))
+  it('posts the Account id to the archive and restore endpoints', async () => {
+    const fetchMock = vi.fn().mockImplementation(() => Promise.resolve(success({ id: 'ACC-ARC', archived: true })))
     const api = createFrappeApi({ fetchImpl: fetchMock })
 
-    await api.deleteAccount('ACC-DEL')
+    await api.archiveAccount('ACC-ARC')
+    await api.unarchiveAccount('ACC-ARC')
 
-    expect(fetchMock.mock.calls.map(([url]) => url)).toEqual(['/api/method/rayher_crm.api.v1.accounts.delete_account'])
-    expect(fetchMock.mock.calls.map(([, init]) => new URLSearchParams(String(init.body)).get('id'))).toEqual(['ACC-DEL'])
+    expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([
+      '/api/method/rayher_crm.api.v1.accounts.archive_account',
+      '/api/method/rayher_crm.api.v1.accounts.unarchive_account',
+    ])
+    expect(fetchMock.mock.calls.map(([, init]) => new URLSearchParams(String(init.body)).get('id'))).toEqual(['ACC-ARC', 'ACC-ARC'])
   })
 
   it('posts the Opportunity id to the archive and restore endpoints', async () => {

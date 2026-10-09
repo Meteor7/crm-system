@@ -153,6 +153,123 @@ class TestQuotationPlanning(FrappeTestCase):
         self.assertIn(quote_id, planned())
         self.assertIsNone(service.save_schedule(quote_id, {"plannedSendDate": None}, scheduled["modified"])["plannedSendDate"])
 
+    def test_an_archived_accounts_quotation_takes_no_send_plan_and_no_follow_up_until_the_restore(self):
+        from rayher_crm.services import quotations
+        from rayher_crm.services.accounts import ARCHIVED_ACCOUNT_EDIT, archive_account, unarchive_account
+        from rayher_crm.services.opportunities import archive_strategy_opportunity
+        opportunity = self._opportunity()
+        created = quotations.create_quotation({"accountId": opportunity["accountId"], "quotationType": "Service"})
+        quote_id = created["quotation"]["id"]
+        plan = service.get_planning(quote_id)
+        frappe.set_user(self.manager)
+        archive_strategy_opportunity(opportunity["id"])
+        archive_account(opportunity["accountId"])
+        frappe.set_user(self.sales)
+        modified = frappe.db.get_value("CRM Quotation", quote_id, "modified")
+        follow_up = {"title": "Service response", "due": "2030-10-01", "status": "Done", "note": ""}
+        for attempt in (
+            lambda: service.save_schedule(quote_id, {"plannedSendDate": "2030-10-14"}, plan["modified"]),
+            lambda: service.save_follow_up(quote_id, follow_up, expected_modified=plan["modified"]),
+        ):
+            with self.assertRaises(CrmApiException) as refused:
+                attempt()
+            self.assertEqual((refused.exception.code, refused.exception.public_message), ("INVALID_TRANSITION", ARCHIVED_ACCOUNT_EDIT))
+        self.assertEqual(frappe.db.get_value("CRM Quotation", quote_id, ["planned_send_date", "modified"]), (None, modified))
+        self.assertFalse(frappe.get_all("CRM Quotation Follow Up", filters={"parent": quote_id}, pluck="name"))
+        frappe.set_user(self.manager)
+        unarchive_account(opportunity["accountId"])
+        frappe.set_user(self.sales)
+        self.assertEqual(service.save_schedule(quote_id, {"plannedSendDate": "2030-10-14"}, plan["modified"])["plannedSendDate"], "2030-10-14")
+
+    def test_a_quotations_plan_answers_to_its_deals_account_now(self):
+        from rayher_crm.services.accounts import ARCHIVED_ACCOUNT_EDIT, archive_account, create_account
+        from rayher_crm.services.opportunities import get_strategy_opportunity, mark_opportunity_lost, update_strategy_opportunity
+        from rayher_crm.services.sites import create_site
+        saved, _ = self._ready_quotation()
+        quote_id = saved["quotation"]["id"]
+        deal_id = saved["quotation"]["opportunityId"]
+        first = frappe.db.get_value("CRM Opportunity", deal_id, "account")
+        suffix = frappe.generate_hash(length=6)
+        frappe.set_user(self.sales)
+        second = create_account({"name": f"Plan Move To {suffix}", "shortName": f"PM{suffix}", "segment": "Frontend",
+                                 "tier": "A", "city": "上海", "region": "华东", "owner": self.sales})
+        second_site = create_site(second["id"], {"name": f"Plan Move To {suffix} Site", "city": "上海", "type": "Fab",
+                                                 "process": "Frontend", "status": "量产"})
+        deal = update_strategy_opportunity(deal_id, {"accountId": second["id"], "siteId": second_site["id"]},
+                                           get_strategy_opportunity(deal_id)["modified"])
+        # The Account it was addressed to archived: it answers to its deal's now, and plans on.
+        frappe.set_user(self.manager)
+        archive_account(first)
+        frappe.set_user(self.sales)
+        plan = service.save_schedule(quote_id, {"plannedSendDate": "2030-10-14"}, service.get_planning(quote_id)["modified"])
+        self.assertEqual(plan["plannedSendDate"], "2030-10-14")
+        # Its deal's Account archived (the deal closed first): frozen with it.
+        mark_opportunity_lost(deal_id, {"lostReason": "Moved on"}, deal["modified"])
+        frappe.set_user(self.manager)
+        archive_account(second["id"])
+        frappe.set_user(self.sales)
+        with self.assertRaises(CrmApiException) as refused:
+            service.save_schedule(quote_id, {"plannedSendDate": None}, plan["modified"])
+        self.assertEqual((refused.exception.code, refused.exception.public_message), ("INVALID_TRANSITION", ARCHIVED_ACCOUNT_EDIT))
+        self.assertEqual(str(frappe.db.get_value("CRM Quotation", quote_id, "planned_send_date")), "2030-10-14")
+
+    def test_a_plan_whose_deal_moved_since_the_first_read_is_refused_as_changed(self):
+        from rayher_crm.services.accounts import create_account
+        saved, _ = self._ready_quotation()
+        quote_id = saved["quotation"]["id"]
+        plan = service.get_planning(quote_id)
+        suffix = frappe.generate_hash(length=6)
+        frappe.set_user(self.sales)
+        elsewhere = create_account({"name": f"Plan Elsewhere {suffix}", "shortName": f"PE{suffix}", "segment": "Frontend",
+                                    "tier": "A", "city": "上海", "region": "华东", "owner": self.sales})
+        modified = frappe.db.get_value("CRM Quotation", quote_id, "modified")
+        # A first read that has the deal under an Account it has left since: refused as changed under the deal's lock,
+        # once the scope is checked, nothing written.
+        with patch.object(service, "_quotation_account", return_value=elsewhere["id"]):
+            with self.assertRaises(CrmApiException) as changed:
+                service.save_schedule(quote_id, {"plannedSendDate": "2030-10-14"}, plan["modified"])
+        # The deal's own refusal (the version sent is current: its check has a sentence of its own).
+        self.assertEqual(
+            (changed.exception.code, changed.exception.public_message), ("VERSION_CONFLICT", "The record was changed by another request."),
+        )
+        self.assertEqual(frappe.db.get_value("CRM Quotation", quote_id, ["planned_send_date", "modified"]), (None, modified))
+        # A Sales user out of its scope is told so first, whatever moved meanwhile (the snapshot's own check of the
+        # Quotation passed over, as when the scope changed after it).
+        frappe.set_user(self.other_sales)
+        with (
+            patch.object(service, "_quotation_account", return_value=elsewhere["id"]),
+            patch.object(service, "_require_quotation") as passed_over,
+            self.assertRaises(CrmApiException) as denied,
+        ):
+            service.save_schedule(quote_id, {"plannedSendDate": "2030-10-14"}, plan["modified"])
+        passed_over.assert_called_once_with(quote_id)
+        self.assertEqual(
+            (denied.exception.code, denied.exception.public_message), ("SCOPE_DENIED", "Quotation is outside the current user scope."),
+        )
+
+    def test_the_plan_takes_the_quotation_then_its_accounts_shared_then_its_deal(self):
+        saved, _ = self._ready_quotation()
+        quote_id = saved["quotation"]["id"]
+        modified = service.get_planning(quote_id)["modified"]
+        real_sql = frappe.db.sql
+        locks: list[tuple[str, str]] = []
+
+        def watch(query, *args, **kwargs):
+            text = str(query)
+            mode = "exclusive" if "FOR UPDATE" in text else "shared" if "LOCK IN SHARE MODE" in text else None
+            # Every table the statement reads takes its lock: a join's rows, each of them.
+            for table in re.findall(r"(?:FROM|JOIN)\s+`(tab[^`]+)`", text) if mode else ():
+                locks.append((table, mode))
+            return real_sql(query, *args, **kwargs)
+
+        with patch.object(frappe.db, "sql", side_effect=watch):
+            service.locked(quote_id, modified)
+        # The order of every Quotation writer: the Quotation's row, its Accounts' (shared, by one statement), its
+        # Opportunity's; no Account's row is taken exclusively.
+        first = list(dict.fromkeys(locks))
+        self.assertEqual(first[:3], [("tabCRM Quotation", "exclusive"), ("tabCustomer", "shared"), ("tabCRM Opportunity", "exclusive")], locks)
+        self.assertNotIn(("tabCustomer", "exclusive"), locks)
+
     def test_account_only_service_quote_can_complete_and_cancel_followups(self):
         from rayher_crm.services import quotations
         opportunity = self._opportunity()

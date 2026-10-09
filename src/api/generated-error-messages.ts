@@ -40,6 +40,13 @@ const FIXED_MESSAGES: Partial<Record<string, Record<string, CopyPair>>> = {
     'An Opportunity with a Booking that is not cancelled cannot be archived; cancel the Booking first.': ['An Opportunity with a Booking that is not cancelled cannot be archived. Cancel the Booking first.', '商机还有未取消的 Booking，不能归档；请先取消该 Booking。'],
     'An Opportunity with a Demo Request in progress cannot be archived; cancel the Demo Request first.': ['An Opportunity with a Demo Request in progress cannot be archived. Cancel the Demo Request first; one under review is returned or rejected before that.', '商机还有进行中的 Demo Request，不能归档；请先取消该 Demo Request（审核中的需先退回或驳回）。'],
     'An Opportunity with a demo test in progress cannot be archived; finish or terminate the demo test first.': ['An Opportunity with a demo test in progress cannot be archived. Finish or terminate the demo test first.', '商机还有进行中的 Demo 测试，不能归档；请先完成或终止该测试。'],
+    'An archived Account cannot be changed; a Manager can restore it from the archive.': ['This Account is archived and cannot be changed; a Manager can restore it from the archive.', '该客户已归档，不能修改；经理可取消归档。'],
+    'An archived Account takes no new record; a Manager can restore it from the archive.': ['This Account is archived and takes no new record; a Manager can restore it from the archive.', '该客户已归档，不能新增关联记录；经理可取消归档。'],
+    'Nothing is reopened or restored under an archived Account; a Manager can restore the Account first.': ['Nothing is reopened or restored under an archived Account; a Manager can restore the Account first.', '该客户已归档，其下的记录不能重新打开或取消归档；请经理先取消客户归档。'],
+    'An Account with an open Opportunity cannot be archived; close or archive the Opportunity first.': ['An Account with an open Opportunity cannot be archived. Close or archive the Opportunity first.', '客户还有进行中的商机，不能归档；请先关闭或归档该商机。'],
+    'An Account with a Demo Request in progress cannot be archived; cancel the Demo Request first.': ['An Account with a Demo Request in progress cannot be archived. Cancel the Demo Request first.', '客户还有进行中的 Demo Request，不能归档；请先取消该 Demo Request。'],
+    'An Account with a demo test in progress cannot be archived; finish or terminate the demo test first.': ['An Account with a demo test in progress cannot be archived. Finish or terminate the demo test first.', '客户还有进行中的 Demo 测试，不能归档；请先完成或终止该测试。'],
+    'An Account with a Booking in progress cannot be archived; cancel or complete the Booking first.': ['An Account with a Booking in progress cannot be archived. Cancel or complete the Booking first.', '客户还有进行中的 Booking，不能归档；请先取消或完成该 Booking。'],
   },
   VALIDATION_ERROR: {
     'Invalid Review period or anchor.': ['This period cannot be shown. Choose another date.', '无法显示这个周期，请重新选择日期。'],

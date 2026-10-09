@@ -70,6 +70,12 @@ const form = ref<CreateStrategyOpportunityInput>({
   informationNeeded: props.opportunity?.informationNeeded ?? [],
 })
 const sites = computed(() => props.sitesByAccount[form.value.accountId] ?? [])
+// An edit keeps the Opportunity's own Account and Site as choices when the pickers, once they have arrived, do not
+// list them (an archived Account and its Sites are out of every picker): the form then sends them back as they were.
+const ownAccountUnlisted = computed(() => !props.referencesLoading && Boolean(props.opportunity?.accountId)
+  && !props.accounts.some((account) => account.id === props.opportunity?.accountId))
+const ownSiteUnlisted = computed(() => !props.referencesLoading && Boolean(props.opportunity?.siteId)
+  && form.value.accountId === props.opportunity?.accountId && !sites.value.some((site) => site.id === props.opportunity?.siteId))
 // The page opens the editor before the Accounts and Sites may have arrived (it reads them after its own data):
 // until they have, the editor says so and does not submit. A new Opportunity takes the first Account, and the
 // first Site of its Account, as they arrive; an edit keeps the Opportunity's own Site while the Account is still
@@ -240,8 +246,8 @@ const equipmentChoices = computed(() => props.equipmentTypes ?? EQUIPMENT_PRESET
         <small v-if="qualificationError" data-field-error="qualificationConfirmed">{{ qualificationError }}</small>
       </div>
       <label class="wide"><span>{{ t('oppEditor.name') }}<RequiredMark :show="!opportunity" /></span><input v-model="form.title" :aria-label="t('oppEditor.name')" required /></label>
-      <label><span>{{ t('oppEditor.account') }}<RequiredMark :show="!opportunity" /></span><select v-model="form.accountId" :aria-label="t('oppEditor.account')" required><option value="" disabled>{{ t('quotations.selectAccount') }}</option><option v-for="account in accounts" :key="account.id" :value="account.id">{{ account.shortName }} · {{ account.name }}</option></select></label>
-      <label><span>{{ t('oppEditor.site') }}<RequiredMark :show="!opportunity" /></span><select v-model="form.siteId" :aria-label="t('oppEditor.site')" required><option v-for="site in sites" :key="site.id" :value="site.id">{{ site.name }}</option></select></label>
+      <label><span>{{ t('oppEditor.account') }}<RequiredMark :show="!opportunity" /></span><select v-model="form.accountId" :aria-label="t('oppEditor.account')" required><option value="" disabled>{{ t('quotations.selectAccount') }}</option><option v-if="ownAccountUnlisted && opportunity" :value="opportunity.accountId" data-own-account>{{ opportunity.account }}</option><option v-for="account in accounts" :key="account.id" :value="account.id">{{ account.shortName }} · {{ account.name }}</option></select></label>
+      <label><span>{{ t('oppEditor.site') }}<RequiredMark :show="!opportunity" /></span><select v-model="form.siteId" :aria-label="t('oppEditor.site')" required><option v-if="ownSiteUnlisted && opportunity" :value="opportunity.siteId" data-own-site>{{ opportunity.site }}</option><option v-for="site in sites" :key="site.id" :value="site.id">{{ site.name }}</option></select></label>
       <label><span>{{ t('oppEditor.owner') }}<RequiredMark :show="!opportunity" /></span><PersonnelSelect owner v-model="form.owner" :roles="['Sales', 'Manager']" :ariaLabel="t('oppEditor.owner')" required /></label>
       <div class="readonly-stage"><span>{{ t('oppEditor.stage') }}</span><strong>{{ opportunityStageLabel(currentStage, locale) }}</strong></div>
       <label class="probability-level-field">

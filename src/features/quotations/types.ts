@@ -32,6 +32,8 @@ export interface QuotationSummaryDto {
   modified: string
   /** Its Opportunity is archived: the Quotation is frozen with it, read-only until the Opportunity is restored. */
   opportunityArchived?: boolean
+  /** Its Account is archived: the Quotation is frozen with it, read-only until the Account is restored. */
+  accountArchived?: boolean
 }
 
 export interface QuotationCatalogItemDto {

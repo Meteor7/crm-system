@@ -28,7 +28,8 @@ const { locale, t, message } = useI18n()
 const detail = ref<Account360Dto | null>(null), loading = ref(false), error = useLocaleMessage(), exportError = useLocaleMessage(), denied = ref(false), notFound = ref(false), requestId = ref(''), meta = ref<RequestMetaState | null>(null)
 const canExport = computed(() => app.can('account:view'))
 const canWrite = computed(() => {
-  if (!app.can('account:write') || !detail.value) return false
+  // An archived Account (a Manager's archive, in place of a delete) takes no change until it is restored.
+  if (!app.can('account:write') || !detail.value || detail.value.account.archived) return false
   return app.bootstrap?.user.role === 'Manager' || app.bootstrap?.user.id === detail.value.account.owner
 })
 const confirmedBooking = computed(() => detail.value ? moneyByCurrency(detail.value.bookings.filter((item) => item.status === 'Confirmed')) : [])

@@ -135,6 +135,10 @@ export interface AccountSummaryDto {
   nextActionDue: string
   updatedAt: string
   modified?: string
+  /** Archived by a Manager (in place of a delete): out of the list, the pickers and the figures with its Sites and Contacts, kept whole, read-only until restored. */
+  archived?: boolean
+  archivedAt?: string
+  archivedBy?: string
 }
 
 export interface CreateAccountInput {
@@ -230,6 +234,10 @@ export interface ContactTimelineItemDto {
 
 export interface ContactDetailDto {
   contact: ContactSummaryDto
+  /** The Account archived by a Manager: the Contact and its files take no change, and it starts no record, until the Account is restored. */
+  accountArchived?: boolean
+  /** The owner of the Contact's Account (the Account list leaves an archived one out). */
+  accountOwner?: string
   reportsTo?: ContactSummaryDto
   directReports: ContactSummaryDto[]
   opportunities: Array<{ id: string; title: string; stage: string; role: string; href: string }>

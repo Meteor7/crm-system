@@ -2,7 +2,7 @@
   "actions": [], "autoname": "format:CRM-BKG-{#####}", "creation": "2026-08-04 00:00:00.000000", "doctype": "DocType", "engine": "InnoDB",
   "field_order": ["account", "primary_contact", "booking_type", "equipment", "quantity", "ddl", "amount", "currency", "amount_cny", "status", "booking_date", "actual_po_date", "actual_po_date_source", "actual_po_date_note", "amount_cny_note", "booking_owner", "source", "source_opportunity", "live_source_opportunity", "installed_tool", "installed_tool_converted_at", "note", "archived", "archived_at", "archived_by"],
   "fields": [
-    {"fieldname": "account", "fieldtype": "Link", "label": "Account", "options": "Customer", "reqd": 1},
+    {"fieldname": "account", "fieldtype": "Link", "label": "Account", "options": "Customer", "reqd": 1, "search_index": 1},
     {"fieldname": "primary_contact", "fieldtype": "Link", "label": "Primary Contact", "options": "Contact", "reqd": 1},
     {"default": "Equipment", "fieldname": "booking_type", "fieldtype": "Select", "label": "Booking Type", "options": "Equipment\u000aService", "reqd": 1},
     {"fieldname": "equipment", "fieldtype": "Data", "label": "Equipment", "reqd": 1},
@@ -28,7 +28,7 @@
     {"fieldname": "archived_at", "fieldtype": "Datetime", "label": "Archived At", "read_only": 1},
     {"fieldname": "archived_by", "fieldtype": "Link", "label": "Archived By", "options": "User", "read_only": 1}
   ],
-  "index_web_pages_for_search": 0, "modified": "2026-10-07 20:00:00.000000", "modified_by": "Administrator", "module": "Rayher CRM", "name": "CRM Booking", "naming_rule": "Expression", "owner": "Administrator",
+  "index_web_pages_for_search": 0, "modified": "2026-10-08 09:00:00.000000", "modified_by": "Administrator", "module": "Rayher CRM", "name": "CRM Booking", "naming_rule": "Expression", "owner": "Administrator",
   "permissions": [
     {"read": 1, "role": "CRM Manager"},
     {"read": 1, "role": "CRM Sales"},

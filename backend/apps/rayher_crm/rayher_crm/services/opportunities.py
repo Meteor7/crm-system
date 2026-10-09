@@ -14,7 +14,16 @@ from rayher_crm.services.action_statuses import ACTION_STATUSES
 from rayher_crm.api.v1.errors import CrmApiException
 from rayher_crm.permissions.roles import assert_capability, resolve_crm_role
 from rayher_crm.permissions.scope import conditions_for_doctype, has_crm_permission
-from rayher_crm.services.accounts import _require_account
+from rayher_crm.services.accounts import (
+    ARCHIVED_ACCOUNT_EDIT,
+    ARCHIVED_ACCOUNT_LINK,
+    ARCHIVED_ACCOUNT_REOPEN,
+    _require_account,
+    account_archived,
+    assert_account_active,
+    lock_accounts,
+    require_active_account,
+)
 from rayher_crm.services.common import (
     archive_state,
     ensure_server_generated_id,
@@ -110,29 +119,46 @@ DEMO_TEST_ENDED = ("Accepted", "Rejected")
 DEMO_IN_PROGRESS_QUERY = (
     "SELECT `request`.`status` FROM `tabCRM Demo Request` AS `request` "
     "LEFT JOIN `tabCRM Evaluation` AS `test` ON `test`.`demo_request` = `request`.`name` "
-    "WHERE `request`.`opportunity` = %s AND (`request`.`status` NOT IN (%s, %s) OR `test`.`status` NOT IN (%s, %s))"
+    "WHERE {where} AND (`request`.`status` NOT IN (%s, %s) OR `test`.`status` NOT IN (%s, %s))"
 )
+# Whose demo work: an Opportunity's own Demo Requests (their Opportunity never changes); an Account's, those of its
+# Opportunities now (an Opportunity moved to another Account takes its Demo Requests along; a Demo Request keeps the
+# customer it was started for, `account`), and those it has without an Opportunity. The condition and the number of
+# times it takes the id.
+DEMO_WORK_OF = {
+    "opportunity": ("`request`.`opportunity` = %s", 1),
+    "account": (
+        "(`request`.`opportunity` IN (SELECT `name` FROM `tabCRM Opportunity` WHERE `account` = %s) "
+        "OR (COALESCE(`request`.`opportunity`, '') = '' AND `request`.`account` = %s))",
+        2,
+    ),
+}
 
 
-def _demo_in_progress(name: str) -> str | None:
-    """The sentence refusing the archive of an Opportunity with a Demo Request or a demo test in progress, or None.
+def demo_in_progress(column: str, value: str) -> str | None:
+    """What of an Opportunity's (`column` "opportunity") or an Account's ("account") demo work has not ended:
+    "request" for a Demo Request, "test" for the demo test one led to, None for neither (DEMO_WORK_OF says whose).
 
     One statement reads both, so a Demo Request approved into its demo test (one commit) is seen on one side or
     the other. It is read as committed by now, on a connection of its own (this request's snapshot may predate a
-    Demo Request started while it waited for the Opportunity's row; none is started while the row is held), and
-    as this request sees it (which the tests, writing in one transaction, need; a Demo Request that ended after the
-    snapshot may then still refuse the archive once, which a retry clears)."""
+    Demo Request started while it waited for the archive's lock; none is started while the Opportunity's or the
+    Account's row is held), and as this request sees it (which the tests, writing in one transaction, need; a Demo
+    Request that ended after the snapshot may then still refuse the archive once, which a retry clears)."""
 
-    values = (name, *DEMO_REQUEST_ENDED, *DEMO_TEST_ENDED)
+    if column not in DEMO_WORK_OF:
+        raise ValueError(f"Unsupported Demo Request column: {column}")
+    where, uses = DEMO_WORK_OF[column]
+    query = DEMO_IN_PROGRESS_QUERY.format(where=where)
+    values = (*([value] * uses), *DEMO_REQUEST_ENDED, *DEMO_TEST_ENDED)
     read, close = committed_reader()
     try:
-        rows = read(DEMO_IN_PROGRESS_QUERY, values)
+        rows = read(query, values)
     finally:
         close()
-    rows = [*rows, *frappe.db.sql(DEMO_IN_PROGRESS_QUERY, values)]
+    rows = [*rows, *frappe.db.sql(query, values)]
     if not rows:
         return None
-    return OPPORTUNITY_WITH_DEMO_TEST_ARCHIVE if rows[0][0] in DEMO_REQUEST_ENDED else OPPORTUNITY_WITH_DEMO_REQUEST_ARCHIVE
+    return "test" if rows[0][0] in DEMO_REQUEST_ENDED else "request"
 
 
 def archive_strategy_opportunity(name: str) -> dict[str, Any]:
@@ -152,9 +178,11 @@ def archive_strategy_opportunity(name: str) -> dict[str, Any]:
         return serialize_opportunity(doc)
     if live_booking(name, for_update=True):
         raise CrmApiException("INVALID_TRANSITION", OPPORTUNITY_WITH_BOOKING_ARCHIVE)
-    refusal = _demo_in_progress(name)
-    if refusal:
-        raise CrmApiException("INVALID_TRANSITION", refusal)
+    demo = demo_in_progress("opportunity", name)
+    if demo:
+        raise CrmApiException(
+            "INVALID_TRANSITION", OPPORTUNITY_WITH_DEMO_TEST_ARCHIVE if demo == "test" else OPPORTUNITY_WITH_DEMO_REQUEST_ARCHIVE,
+        )
     _set_archived(doc, True)
     return serialize_opportunity(doc)
 
@@ -163,8 +191,18 @@ def unarchive_strategy_opportunity(name: str) -> dict[str, Any]:
     """Bring an archived Opportunity back: every field as it was, its version moved on. One not archived is
     left as it is."""
 
+    # The Account's row first (a shared lock), then the Opportunity's: an Opportunity is not restored under an
+    # archived Account, which could put an open deal under it. The Account's lock is taken whatever the snapshot says
+    # of the Opportunity (one archived since is seen under its own lock below); the Account of an archived
+    # Opportunity does not change (it takes no edit).
+    current = require_manager_scoped_document("CRM Opportunity", name, "deal:write", "OPPORTUNITY_NOT_FOUND")
+    account_is_archived = account_archived(current.account, shared_lock=True)
     doc = require_manager_scoped_document("CRM Opportunity", name, "deal:write", "OPPORTUNITY_NOT_FOUND", for_update=True)
+    if doc.account != current.account:
+        raise CrmApiException("VERSION_CONFLICT", "The record was changed by another request.")
     if doc.archived:
+        if account_is_archived:
+            raise CrmApiException("INVALID_TRANSITION", ARCHIVED_ACCOUNT_REOPEN)
         _set_archived(doc, False)
     return serialize_opportunity(doc)
 
@@ -800,6 +838,9 @@ def create_strategy_opportunity(payload: dict[str, Any]) -> dict[str, Any]:
     assert_capability("deal:write")
     ensure_server_generated_id(payload)
     assert_qualification_confirmed(payload)
+    # The Account's row first (a shared lock): no Opportunity is started under an archived Account, and an
+    # archive in flight is waited for.
+    require_active_account(required_text(payload, "accountId"))
     # Every new Opportunity starts at S1 (checked just below), where the amounts may still be unknown.
     values = _validate_opportunity(
         {**payload, "stage": payload.get("stage") or QUALIFIED_OPPORTUNITY}, require_amount=False,
@@ -870,8 +911,24 @@ def update_strategy_opportunity(name: str, payload: dict[str, Any], expected_mod
     assert_capability("deal:write")
     # Before the payload and the version are looked at, so the refusal names the archive whatever the client
     # sent; an archive committed after this read is read again under the Opportunity's lock (_lock_write_scope).
-    assert_opportunity_not_archived(_require_opportunity(name))
+    current = _require_opportunity(name)
+    assert_opportunity_not_archived(current)
     identities = lock_opportunity_owners(name, payload)
+    # An Opportunity is not moved under an archived Account, nor out of one (a closed deal stays where it was
+    # archived with its Account: moved out, it could be reopened under another one). The Account it would move to
+    # in the caller's read scope first; then both flags under exclusive locks on their rows, in name order, after the
+    # owners' rows and before the Opportunity's (the order the Account's archive takes them in). Exclusive: the write
+    # scope below takes the Opportunity's own Account's row FOR UPDATE, and a lock taken shared first would be raised
+    # (two moves out of one Account would each wait for the other). One under an archived Account already is closed
+    # (the archive is refused while one is open) and otherwise keeps its own rules.
+    target_account = str(payload.get("accountId") or "").strip()
+    if target_account and target_account != current.account:
+        target_account = _require_account(target_account).name
+        archived_accounts = lock_accounts((current.account, target_account), for_update=True)
+        if archived_accounts.get(current.account):
+            raise CrmApiException("INVALID_TRANSITION", ARCHIVED_ACCOUNT_EDIT)
+        if archived_accounts.get(target_account):
+            raise CrmApiException("INVALID_TRANSITION", ARCHIVED_ACCOUNT_LINK)
     _lock_write_scope(name)
     lock_document("CRM Opportunity", name, expected_modified, "NOT_FOUND")
     doc = frappe.get_doc("CRM Opportunity", name, for_update=True)
@@ -1352,6 +1409,9 @@ def request_internal_validation(name: str, payload: dict[str, Any], expected_mod
 
 def review_internal_validation(name: str, payload: dict[str, Any], expected_modified: Any) -> dict[str, Any]:
     assert_capability("deal:internal_validation_approve")
+    # The Account's row first (a shared lock, before the Opportunity's): an approval makes a Booking, which no
+    # archived Account takes (an open deal is not under one; this keeps it so whatever the snapshot says).
+    assert_account_active(_require_opportunity(name).account, ARCHIVED_ACCOUNT_LINK)
     doc = _lock_opportunity_for_action(name, expected_modified)
     validation_id = required_text(payload, "validationId")
     decision = validate_choice(payload.get("decision"), "decision", {"approved", "rejected"})
@@ -1417,6 +1477,10 @@ def review_internal_validation(name: str, payload: dict[str, Any], expected_modi
 
 def confirm_po(name: str, payload: dict[str, Any], expected_modified: Any) -> dict[str, Any]:
     assert_capability("deal:write")
+    # The Account's row first (a shared lock, before the Opportunity's): no order is put in progress under an
+    # archived Account, a replacement Booking for a won deal whose order was cancelled included (an open deal is not
+    # under one).
+    assert_account_active(_require_opportunity(name).account, ARCHIVED_ACCOUNT_REOPEN)
     doc = _lock_opportunity_for_action(name, expected_modified)
     # At po_received the only thing left is to replace a Booking that was cancelled by hand.
     replacing = doc.stage == PO_RECEIVED
@@ -1523,8 +1587,14 @@ def rollback_opportunity_stage(
     assert_capability("deal:rollback")
     target = validate_choice(target_stage, "targetStage", set(MILESTONE_STAGES))
     rollback_reason = required_text({"reason": reason}, "reason")
-    assert_opportunity_not_archived(_require_opportunity(name))
-    # Locks are taken RFQ -> Opportunity -> internal validation -> Booking. review_rfq locks the
+    current = _require_opportunity(name)
+    assert_opportunity_not_archived(current)
+    # Nothing is reopened under an archived Account: its row (a shared lock) comes before every lock below, the order
+    # the Account's archive takes them in, whatever the snapshot says of the stage. Every deal under an archived
+    # Account is closed (lost, or won with its order cancelled: the archive is refused while one is open), and a
+    # rollback reopens it.
+    assert_account_active(current.account, ARCHIVED_ACCOUNT_REOPEN)
+    # Locks are taken Account -> RFQ -> Opportunity -> internal validation -> Booking. review_rfq locks the
     # RFQ before the Opportunity too, so a rollback cannot deadlock against an RFQ approval.
     rfq = frappe.db.sql(
         "SELECT `status` FROM `tabCRM RFQ` WHERE `opportunity` = %s FOR UPDATE", (name,), as_dict=True,

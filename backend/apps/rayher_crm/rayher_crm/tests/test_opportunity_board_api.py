@@ -86,6 +86,22 @@ class TestOpportunityBoardApi(FrappeTestCase):
             self._as(user, action)
         return caught.exception
 
+    def test_an_archived_accounts_deals_leave_the_board_and_its_totals(self):
+        from rayher_crm.services.accounts import archive_account, unarchive_account
+        from rayher_crm.services.opportunities import get_strategy_opportunity, mark_opportunity_lost
+        account = frappe.db.get_value("CRM Opportunity", self.theirs, "account")
+        self._as(self.other_sales, lambda: mark_opportunity_lost(
+            self.theirs, {"lostReason": "Budget withdrawn"}, get_strategy_opportunity(self.theirs)["modified"]))
+        query = {"scope": {"sales": [self.sales, self.other_sales]}, "conditions": [{"field": "status", "operator": "in", "value": ["lost"]}]}
+        data, total, _page, _size = self._query(self.manager, **query)
+        self.assertEqual(({row["id"] for row in data["items"]}, total, data["summary"]["count"]), ({self.theirs}, 1, 1))
+        self._as(self.manager, lambda: archive_account(account))
+        data, total, _page, _size = self._query(self.manager, **query)
+        self.assertEqual((data["items"], total, data["summary"]["count"]), ([], 0, 0))
+        self._as(self.manager, lambda: unarchive_account(account))
+        data, total, _page, _size = self._query(self.manager, **query)
+        self.assertEqual(({row["id"] for row in data["items"]}, total), ({self.theirs}, 1))
+
     def test_sales_reads_only_their_own_rows_whatever_the_conditions(self):
         data, total, _page, _size = self._query(self.sales)
         self.assertEqual(([row["id"] for row in data["items"]], total), ([self.mine], 1))

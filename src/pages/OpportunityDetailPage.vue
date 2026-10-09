@@ -56,6 +56,7 @@ import {
   type OpportunityMilestoneStage,
 } from '@/domain/opportunity-stages'
 import { readAllPages } from '@/features/shared/read-all-pages'
+import { ownAccountContacts, withContacts } from '@/features/contacts/own-account-contacts'
 import { sitesByAccountId } from '@/features/accounts/account-sites'
 import { useI18n, useLocaleMessage, localeMessage } from '@/i18n'
 import { salesEnumLabel, opportunityActionLabel } from '@/features/shared/sales-i18n'
@@ -370,8 +371,28 @@ async function rollbackStage() {
     () => { rollbackModal.value = false },
   )
 }
-function openStakeholder(stakeholder: OpportunityStakeholderDto | null = null) {
+// The stakeholder editor opened last: Contacts read for an earlier opening are dropped.
+let stakeholderSequence = 0
+async function openStakeholder(stakeholder: OpportunityStakeholderDto | null = null) {
+  // The Contacts the editor offers are the page's references and the Account's own: none before the references.
+  if (referencesLoading.value) return
+  const sequence = ++stakeholderSequence
   modalError.value = ''
+  // A deal under an archived Account (out of the pickers) keeps its Account's Contacts as the stakeholders' choices:
+  // they are read by its id first, and added to the list only for the editor opened last. A failed read is said in the
+  // editor, which opens with the Contacts it has.
+  let failure: unknown = null
+  let own: ContactSummaryDto[] = []
+  if (selected.value && app.can('contact:view')) {
+    try { own = await ownAccountContacts(props.apiClient, accounts.value.map((account) => account.id), selected.value.accountId) }
+    catch (reason) { failure = reason }
+  }
+  if (sequence !== stakeholderSequence) return
+  contacts.value = withContacts(contacts.value, own)
+  if (failure) {
+    const mapped = mapRequestError(failure)
+    modalError.value = mapped.localizedMessage ?? mapped.message
+  }
   selectedContactId.value = stakeholder?.contactId ?? ''
   editingStakeholder.value = stakeholder
   stakeholderModal.value = true
@@ -467,6 +488,9 @@ async function saveContact(input: CreateContactInput) {
 }
 
 watch(routeOpportunityId, async () => {
+  // Another Opportunity: the stakeholder editor of the one before is closed, and an opening still on its way dropped.
+  stakeholderSequence += 1
+  stakeholderModal.value = false
   if (mounted) await loadOpportunity()
 })
 onMounted(async () => {
@@ -625,14 +649,14 @@ onMounted(async () => {
 
         <aside class="detail-column detail-right">
           <section class="detail-card influence-card">
-            <header><div><Users :size="16" /><h2>{{ t('detail.buyingInfluence') }}</h2></div><button v-if="canWrite" type="button" data-testid="new-opportunity-stakeholder" @click="openStakeholder()"><Plus :size="13" />{{ t('detail.new') }}</button></header>
+            <header><div><Users :size="16" /><h2>{{ t('detail.buyingInfluence') }}</h2></div><button v-if="canWrite" type="button" data-testid="new-opportunity-stakeholder" :disabled="referencesLoading" @click="openStakeholder()"><Plus :size="13" />{{ t('detail.new') }}</button></header>
             <div class="influence-list">
               <article v-for="person in selected.stakeholders" :key="person.id" :data-stakeholder-name="person.name">
                 <RouterLink class="record-link" :to="{ name: 'contact-detail', params: { contactId: person.contactId } }"><strong>{{ person.name }}</strong><span>{{ person.title }}</span></RouterLink>
                 <small>{{ salesEnumLabel(person.role, locale) }} · {{ salesEnumLabel(person.influence, locale) }}<template v-if="person.responseMode"> · {{ t('detail.responseModeValue', { mode: salesEnumLabel(person.responseMode, locale) }) }}</template></small>
                 <b :class="stanceClass(person.stance)">{{ salesEnumLabel(person.stance, locale) }}</b>
                 <p>{{ systemValueLabel(person.coverage, locale) }}</p>
-                <div v-if="canWrite" class="compact-actions"><button type="button" data-action="edit" :aria-label="locale === 'en-US' ? 'Edit stakeholder' : '编辑关键人'" @click="openStakeholder(person)"><Pencil :size="12" /></button><button type="button" data-action="delete" :aria-label="locale === 'en-US' ? 'Delete stakeholder' : '删除关键人'" @click="removeStakeholder(person)"><Trash2 :size="12" /></button></div>
+                <div v-if="canWrite" class="compact-actions"><button type="button" data-action="edit" :aria-label="locale === 'en-US' ? 'Edit stakeholder' : '编辑关键人'" :disabled="referencesLoading" @click="openStakeholder(person)"><Pencil :size="12" /></button><button type="button" data-action="delete" :aria-label="locale === 'en-US' ? 'Delete stakeholder' : '删除关键人'" @click="removeStakeholder(person)"><Trash2 :size="12" /></button></div>
               </article>
               <p v-if="!selected.stakeholders.length" class="empty-copy">{{ t('detail.noStakeholders') }}</p>
             </div>

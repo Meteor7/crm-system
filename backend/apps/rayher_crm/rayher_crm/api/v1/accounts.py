@@ -50,10 +50,16 @@ def update_account(id: str, input: Any, expectedModified: str | None = None) -> 
     return success_response(accounts.update_account(id, as_payload(input), expectedModified))
 
 
-@frappe.whitelist(methods=["POST", "DELETE"])
+@frappe.whitelist(methods=["POST"])
 @api_endpoint
-def delete_account(id: str) -> dict:
-    return success_response(accounts.delete_account(id))
+def archive_account(id: str) -> dict:
+    return success_response(accounts.archive_account(id))
+
+
+@frappe.whitelist(methods=["POST"])
+@api_endpoint
+def unarchive_account(id: str) -> dict:
+    return success_response(accounts.unarchive_account(id))
 
 
 @frappe.whitelist(methods=["GET"])

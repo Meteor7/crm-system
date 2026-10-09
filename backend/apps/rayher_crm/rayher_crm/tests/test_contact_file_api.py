@@ -11,7 +11,8 @@ from pypdf import PdfWriter
 
 from rayher_crm.api.v1.contact_files import _read_uploads
 from rayher_crm.api.v1.errors import CrmApiException
-from rayher_crm.services.accounts import create_account, update_account
+from rayher_crm.services.accounts import ARCHIVED_ACCOUNT_EDIT, archive_account, create_account, unarchive_account, update_account
+from rayher_crm.services import contact_files as contact_file_service
 from rayher_crm.services.contact_files import (
     MAX_FILE_BYTES,
     MAX_FILES_PER_REQUEST,
@@ -95,6 +96,77 @@ class TestContactFileApi(FrappeTestCase):
 
     def _contact_input(self, account_id: str, name: str) -> dict:
         return {"accountId": account_id, "name": name, "title": "Director", "department": "Engineering", "phone": "13800000002", "email": f"{name.replace(' ', '.').lower()}@example.invalid", "relationship": "Developing", "owner": frappe.session.user, "status": "Active"}
+
+    def test_the_files_of_an_archived_accounts_contact_take_no_upload_and_no_removal(self):
+        suffix = frappe.generate_hash(length=8)
+        account = create_account(self._account_input("Contact File Archived " + suffix))
+        contact = create_contact(self._contact_input(account["id"], "ArchivedFiles" + suffix))
+        kept = upload_contact_files(contact["id"], [pdf(marker="kept-" + suffix)], scanner=Scanner())[0]
+        frappe.set_user(self.manager)
+        archive_account(account["id"])
+
+        frappe.set_user(self.sales)
+        for call in (
+            lambda: upload_contact_files(contact["id"], [pdf(marker="late-" + suffix)], scanner=Scanner()),
+            lambda: delete_contact_file(kept["id"]),
+        ):
+            with self.assertRaises(CrmApiException) as refused:
+                call()
+            self.assertEqual((refused.exception.code, refused.exception.public_message), ("INVALID_TRANSITION", ARCHIVED_ACCOUNT_EDIT))
+        self.assertEqual(frappe.db.get_value("CRM Contact File", kept["id"], "deleted"), 0)
+        self.assertEqual([row["id"] for row in list_contact_files(contact["id"])], [kept["id"]])
+        self.assertTrue(download_contact_file(kept["id"])["content"])
+
+        frappe.set_user(self.manager)
+        unarchive_account(account["id"])
+        frappe.set_user(self.sales)
+        self.assertEqual(delete_contact_file(kept["id"]), {"id": kept["id"]})
+
+    def test_a_contact_moved_to_another_account_meanwhile_takes_no_file_change(self):
+        """The Contact's Account is read again as committed under that Account's row: one moved to another Account
+        while its files were scanned (or before a removal took the row) is refused as changed, nothing written."""
+
+        suffix = frappe.generate_hash(length=8)
+        account = create_account(self._account_input("Contact File Moved " + suffix))
+        contact = create_contact(self._contact_input(account["id"], "MovedFiles" + suffix))
+        kept = upload_contact_files(contact["id"], [pdf(marker="kept-" + suffix)], scanner=Scanner())[0]
+        before = frappe.db.count("CRM Contact File", {"contact": contact["id"]})
+        with patch.object(contact_file_service, "_current_contact_accounts", return_value={"Another Account " + suffix}):
+            for call in (
+                lambda: upload_contact_files(contact["id"], [pdf(marker="moved-" + suffix)], scanner=Scanner()),
+                lambda: delete_contact_file(kept["id"]),
+            ):
+                with self.assertRaises(CrmApiException) as changed:
+                    call()
+                self.assertEqual(changed.exception.code, "VERSION_CONFLICT")
+        self.assertEqual(frappe.db.count("CRM Contact File", {"contact": contact["id"]}), before)
+        self.assertEqual(frappe.db.get_value("CRM Contact File", kept["id"], "deleted"), 0)
+        # Still under its Account: both go through.
+        self.assertEqual(len(upload_contact_files(contact["id"], [pdf(marker="stays-" + suffix)], scanner=Scanner())), 1)
+        self.assertEqual(delete_contact_file(kept["id"]), {"id": kept["id"]})
+
+    def test_an_upload_takes_its_files_content_locks_before_the_accounts_row(self):
+        suffix = frappe.generate_hash(length=8)
+        account = create_account(self._account_input("Contact File Order " + suffix))
+        contact = create_contact(self._contact_input(account["id"], "OrderFiles" + suffix))
+        real_sql = frappe.db.sql
+        order: list[str] = []
+
+        def watch(query, *args, **kwargs):
+            text = " ".join(str(query).split())
+            if "GET_LOCK" in text:
+                order.append("content")
+            elif "`tabCustomer`" in text and ("FOR UPDATE" in text or "LOCK IN SHARE MODE" in text):
+                order.append("account")
+            return real_sql(query, *args, **kwargs)
+
+        # A Status save takes its files' content locks before the Account's row: an upload does too, so neither waits
+        # for the other's while holding its own (private_file_lifecycle's rule).
+        with patch.object(frappe.db, "sql", side_effect=watch):
+            upload_contact_files(contact["id"], [pdf(marker="order-" + suffix)], scanner=Scanner())
+        self.assertIn("content", order)
+        self.assertIn("account", order)
+        self.assertLess(order.index("content"), order.index("account"))
 
     def test_contact_file_reads_follow_customer_user_permission_on_metadata(self):
         from frappe.permissions import add_user_permission, remove_user_permission
@@ -638,3 +710,36 @@ class TestContactFileApi(FrappeTestCase):
         with self.assertRaises(CrmApiException) as deleted:
             download_contact_file(uploaded["id"])
         self.assertEqual(deleted.exception.code, "NOT_FOUND")
+
+
+class TestContactAccountsAsCommitted(FrappeTestCase):
+    def test_a_contacts_accounts_are_read_as_committed_by_now(self):
+        contact = "zz-contact-moved-" + frappe.generate_hash(length=8)
+        link = "zz-link-" + frappe.generate_hash(length=8)
+        connection = None
+        try:
+            frappe.db.commit()
+            # This request's snapshot, taken before another request commits the Contact under its new Account.
+            frappe.db.sql("SELECT COUNT(*) FROM `tabDynamic Link`")
+            connection = frappe.db._get_connection()
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    "INSERT INTO `tabContact` (name, first_name, creation, modified) VALUES (%s, 'Moved', NOW(6), NOW(6))",
+                    (contact,),
+                )
+                cursor.execute(
+                    "INSERT INTO `tabDynamic Link` (name, parent, parenttype, parentfield, link_doctype, link_name, creation, modified)"
+                    " VALUES (%s, %s, 'Contact', 'links', 'Customer', 'Moved Account', NOW(6), NOW(6))",
+                    (link, contact),
+                )
+            connection.commit()
+            self.assertIsNone(frappe.db.get_value("Dynamic Link", {"parent": contact}, "link_name"))
+            self.assertEqual(contact_file_service._current_contact_accounts(contact), {"Moved Account"})
+        finally:
+            if connection:
+                with connection.cursor() as cursor:
+                    cursor.execute("DELETE FROM `tabDynamic Link` WHERE `name` = %s", (link,))
+                    cursor.execute("DELETE FROM `tabContact` WHERE `name` = %s", (contact,))
+                connection.commit()
+                connection.close()
+            frappe.db.rollback()

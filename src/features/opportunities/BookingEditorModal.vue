@@ -28,6 +28,10 @@ const { t, locale } = useI18n()
 
 // A new Booking is always an Upsell: Opportunity Bookings come from PO confirmation or an approved internal validation.
 const opportunityBooking = computed(() => props.booking?.source === 'Opportunity')
+// An edit keeps the Booking's own Account as a choice when the pickers do not list it (an archived Account is out of
+// every picker): the form then sends it back as it was.
+const ownAccountUnlisted = computed(() => Boolean(props.booking?.accountId)
+  && !props.accounts.some((account) => account.id === props.booking?.accountId))
 const form = ref({
   accountId: props.booking?.accountId ?? props.accounts[0]?.id ?? '',
   source: props.booking?.source ?? 'Upsell',
@@ -100,7 +104,7 @@ function submit() {
       <label><span>{{ t('bookingEditor.type') }}<RequiredMark :show="!booking" /></span><select v-model="form.bookingType" :aria-label="t('bookingEditor.type')" :disabled="opportunityBooking" required><option v-for="item in ['Equipment', 'Service']" :key="item" :value="item">{{ salesEnumLabel(item, locale) }}</option></select></label>
       <label v-if="opportunityBooking"><span>{{ t('bookingEditor.sourceOpportunity') }}</span><input :value="sourceOpportunityLabel" :aria-label="t('bookingEditor.sourceOpportunity')" disabled /></label>
       <label v-else><span>{{ t('bookingEditor.sourceNote') }}</span><input :value="salesEnumLabel('Existing Customer Upsell', locale)" :aria-label="t('bookingEditor.sourceNote')" disabled /></label>
-      <label><span>{{ t('detail.account') }}<RequiredMark :show="!booking" /></span><select v-model="form.accountId" :aria-label="t('detail.account')" :disabled="opportunityBooking" required><option value="" disabled>{{ t('quotations.selectAccount') }}</option><option v-for="account in accounts" :key="account.id" :value="account.id">{{ account.shortName }} · {{ account.name }}</option></select></label>
+      <label><span>{{ t('detail.account') }}<RequiredMark :show="!booking" /></span><select v-model="form.accountId" :aria-label="t('detail.account')" :disabled="opportunityBooking" required><option value="" disabled>{{ t('quotations.selectAccount') }}</option><option v-if="ownAccountUnlisted && booking" :value="booking.accountId" data-own-account>{{ booking.accountName }}</option><option v-for="account in accounts" :key="account.id" :value="account.id">{{ account.shortName }} · {{ account.name }}</option></select></label>
       <label><span>{{ t('detail.status') }}<RequiredMark :show="!booking" /></span><select v-model="form.status" :aria-label="t('detail.status')" required><option v-for="item in statusOptions" :key="item" :value="item">{{ salesEnumLabel(item, locale) }}</option></select></label>
       <label class="wide"><span>{{ actualPoDateLocked ? t('actualPoDate.label') : t('actualPoDate.optionalLabel') }}</span><input v-model="form.actualPoDate" :aria-label="t('actualPoDate.label')" type="date" :max="latestPoDate" :disabled="actualPoDateLocked" /><small v-if="actualPoDateLocked" class="field-hint">{{ t('actualPoDate.managerOnly') }}</small></label>
     </div>

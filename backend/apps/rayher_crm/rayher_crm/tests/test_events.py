@@ -116,6 +116,155 @@ class TestEvents(FrappeTestCase):
         frappe.set_user(self.sales)
         self.assertEqual(events.save_event(linked, loose["id"], loose["modified"])["opportunityId"], opportunity["id"])
 
+    def test_an_archived_account_takes_no_new_event_none_moved_in_or_out_and_none_planned_again(self):
+        from rayher_crm.services.accounts import (
+            ARCHIVED_ACCOUNT_EDIT, ARCHIVED_ACCOUNT_LINK, ARCHIVED_ACCOUNT_REOPEN, archive_account, unarchive_account,
+        )
+        from rayher_crm.services.opportunities import mark_opportunity_lost
+        account, opportunity, _ = self._records(self.sales, "Event" + frappe.generate_hash(length=6))
+        other, _, _ = self._records(self.sales, "Event" + frappe.generate_hash(length=6))
+        frappe.set_user(self.sales)
+        kept = events.save_event(self.payload(accountId=account["id"]))
+        finished = events.save_event(self.payload(accountId=account["id"], status="Done"))
+        cancelled = events.save_event(self.payload(accountId=account["id"], status="Cancelled"))
+        dealt = events.save_event(self.payload(accountId=account["id"], opportunityId=opportunity["id"]))
+        loose = events.save_event(self.payload(accountId=other["id"]))
+        mark_opportunity_lost(opportunity["id"], {"lostReason": "Budget withdrawn"}, opportunity["modified"])
+        frappe.set_user(self.manager)
+        archive_account(account["id"])
+        frappe.set_user(self.sales)
+        before = frappe.db.count(events.DOCTYPE)
+        for message, attempt in (
+            # A new Event under it, and one moved under it.
+            (ARCHIVED_ACCOUNT_LINK, lambda: events.save_event(self.payload(accountId=account["id"]))),
+            (ARCHIVED_ACCOUNT_LINK, lambda: events.save_event(self.payload(accountId=account["id"]), loose["id"], loose["modified"])),
+            # One of its own moved out, or given a deal (its closed one).
+            (ARCHIVED_ACCOUNT_EDIT, lambda: events.save_event(self.payload(accountId=other["id"]), kept["id"], kept["modified"])),
+            (ARCHIVED_ACCOUNT_EDIT, lambda: events.save_event(self.payload(accountId=account["id"], opportunityId=opportunity["id"]), kept["id"], kept["modified"])),
+            # One done or cancelled, planned again.
+            (ARCHIVED_ACCOUNT_REOPEN, lambda: events.save_event(self.payload(accountId=account["id"]), finished["id"], finished["modified"])),
+            (ARCHIVED_ACCOUNT_REOPEN, lambda: events.save_event(self.payload(accountId=account["id"]), cancelled["id"], cancelled["modified"])),
+        ):
+            with self.subTest(message=message):
+                with self.assertRaises(CrmApiException) as refused:
+                    attempt()
+                self.assertEqual((refused.exception.code, refused.exception.public_message), ("INVALID_TRANSITION", message))
+        self.assertEqual(frappe.db.count(events.DOCTYPE), before)
+        self.assertEqual(frappe.db.get_value(events.DOCTYPE, loose["id"], "account"), other["id"])
+        self.assertEqual(frappe.db.get_value(events.DOCTYPE, kept["id"], ["account", "opportunity", "status"]), (account["id"], None, "Planned"))
+        # One of its own is kept up where it is, as a Visit planned before the archive is: its title, done.
+        done = events.save_event(self.payload(accountId=account["id"], title="Exhibition, minutes written", status="Done"), kept["id"], kept["modified"])
+        self.assertEqual((done["title"], done["status"], done["accountId"]), ("Exhibition, minutes written", "Done", account["id"]))
+        # Its deal cleared: a way to keep it up once the deal's owner changed since (as assigning it to the deal's new
+        # owner is).
+        cleared = events.save_event(self.payload(accountId=account["id"]), dealt["id"], dealt["modified"])
+        self.assertEqual((cleared["accountId"], cleared["opportunityId"]), (account["id"], ""))
+        frappe.set_user(self.manager)
+        unarchive_account(account["id"])
+        frappe.set_user(self.sales)
+        self.assertEqual(events.save_event(self.payload(accountId=account["id"]))["accountId"], account["id"])
+
+    def test_an_archived_account_named_as_the_database_matches_it_takes_no_event(self):
+        # The database matches names without regard to accents or width: a variant of an archived Account's name names
+        # that Account, and the save takes the name as the database has it.
+        from rayher_crm.services.accounts import ARCHIVED_ACCOUNT_LINK, archive_account, create_account
+        frappe.set_user(self.sales)
+        suffix = frappe.generate_hash(length=6)
+        account = create_account({"name": f"Müller Event（{suffix}）", "shortName": f"Mu{suffix}", "segment": "Frontend",
+                                  "tier": "A", "city": "上海", "region": "华东", "owner": self.sales})
+        other, _, _ = self._records(self.sales, "Event" + frappe.generate_hash(length=6))
+        frappe.set_user(self.sales)
+        loose = events.save_event(self.payload(accountId=other["id"]))
+        frappe.set_user(self.manager)
+        archive_account(account["id"])
+        frappe.set_user(self.sales)
+        variant = account["id"].replace("ü", "u").replace("（", "(").replace("）", ")")
+        self.assertNotEqual(variant, account["id"])
+        self.assertEqual(frappe.db.get_value("Customer", variant, "name"), account["id"])
+        before = frappe.db.count(events.DOCTYPE)
+        for attempt in (lambda: events.save_event(self.payload(accountId=variant)),
+                        lambda: events.save_event(self.payload(accountId=variant), loose["id"], loose["modified"])):
+            with self.assertRaises(CrmApiException) as refused:
+                attempt()
+            self.assertEqual((refused.exception.code, refused.exception.public_message), ("INVALID_TRANSITION", ARCHIVED_ACCOUNT_LINK))
+        self.assertEqual(frappe.db.count(events.DOCTYPE), before)
+        self.assertEqual(frappe.db.get_value(events.DOCTYPE, loose["id"], "account"), other["id"])
+
+    def test_an_archived_account_the_desk_keeps_from_the_user_is_not_told_archived(self):
+        # Refused by the Desk's own permissions first, as it was before the archive: the Account is not shown to exist.
+        from frappe.permissions import add_user_permission, remove_user_permission
+        from rayher_crm.services.accounts import archive_account
+        from rayher_crm.services.opportunities import mark_opportunity_lost
+        allowed, _, _ = self._records(self.sales, "Event" + frappe.generate_hash(length=6))
+        hidden, deal, _ = self._records(self.sales, "Event" + frappe.generate_hash(length=6))
+        frappe.set_user(self.sales)
+        mark_opportunity_lost(deal["id"], {"lostReason": "Budget withdrawn"}, deal["modified"])
+        frappe.set_user(self.manager)
+        archive_account(hidden["id"])
+        frappe.set_user("Administrator")
+        add_user_permission("Customer", allowed["id"], self.sales, ignore_permissions=True, applicable_for="CRM Event")
+        frappe.clear_cache(user=self.sales)
+        try:
+            frappe.set_user(self.sales)
+            with self.assertRaises(CrmApiException) as refused:
+                events.save_event(self.payload(accountId=hidden["id"]))
+            self.assertEqual(refused.exception.code, "SCOPE_DENIED")
+        finally:
+            frappe.set_user("Administrator")
+            remove_user_permission("Customer", allowed["id"], self.sales, ignore_permissions=True)
+            frappe.clear_cache(user=self.sales)
+
+    def test_a_stale_save_assigning_an_inactive_owner_is_told_of_the_version_first(self):
+        # The save's own order, whatever order its locks are taken in: the Event's scope and version, then its owner.
+        inactive = self._user("event-inactive@example.invalid", "CRM Sales")
+        frappe.db.set_value("User", inactive, "enabled", 0)
+        frappe.set_user(self.manager)
+        row = events.save_event(self.payload())
+        events.save_event(self.payload(title="Industry exhibition, moved"), row["id"], row["modified"])
+        with self.assertRaises(CrmApiException) as stale:
+            events.save_event(self.payload(owner=inactive), row["id"], row["modified"])
+        self.assertEqual(stale.exception.code, "VERSION_CONFLICT")
+
+    def test_an_event_takes_the_user_the_event_its_accounts_shared_then_its_deals(self):
+        account, opportunity, _ = self._records(self.sales, "Event" + frappe.generate_hash(length=6))
+        other, other_deal, _ = self._records(self.sales, "Event" + frappe.generate_hash(length=6))
+        frappe.set_user(self.sales)
+        row = events.save_event(self.payload(accountId=account["id"], opportunityId=opportunity["id"]))
+        real_sql = frappe.db.sql
+        locks: list[tuple[str, str]] = []
+
+        def watch(query, *args, **kwargs):
+            text = str(query)
+            mode = "exclusive" if "FOR UPDATE" in text else "shared" if "LOCK IN SHARE MODE" in text else None
+            # Every table the statement reads takes its lock: a join's rows, each of them.
+            for table in re.findall(r"(?:FROM|JOIN)\s+`(tab[^`]+)`", text) if mode else ():
+                locks.append((table, mode))
+            return real_sql(query, *args, **kwargs)
+
+        with patch.object(frappe.db, "sql", side_effect=watch):
+            moved = events.save_event(self.payload(accountId=other["id"], opportunityId=other_deal["id"]), row["id"], row["modified"])
+        self.assertEqual((moved["accountId"], moved["opportunityId"]), (other["id"], other_deal["id"]))
+        # The User first (as a native rename holds it), the Event, the Accounts (shared, by one statement), the
+        # Opportunities: the order the Account's archive and every writer under an Account take them in.
+        first = list(dict.fromkeys(locks))
+        self.assertEqual(first[:4], [
+            ("tabUser", "exclusive"), ("tabCRM Event", "exclusive"), ("tabCustomer", "shared"), ("tabCRM Opportunity", "exclusive"),
+        ], locks)
+        self.assertNotIn(("tabCustomer", "exclusive"), locks)
+        # Assigned to another owner (the Account public, its deal cleared): the owner's roles after the Event's row and
+        # before the Accounts'.
+        frappe.db.set_value("Customer", other["id"], "custom_crm_visibility", "Public")
+        locks.clear()
+        frappe.set_user(self.manager)
+        with patch.object(frappe.db, "sql", side_effect=watch):
+            assigned = events.save_event(self.payload(owner=self.other_sales, accountId=other["id"]), moved["id"], moved["modified"])
+        self.assertEqual(assigned["owner"], self.other_sales)
+        first = list(dict.fromkeys(locks))
+        self.assertEqual(first[:4], [
+            ("tabUser", "exclusive"), ("tabCRM Event", "exclusive"), ("tabHas Role", "exclusive"), ("tabCustomer", "shared"),
+        ], locks)
+        self.assertNotIn(("tabCustomer", "exclusive"), locks)
+
     def test_validation_pagination_and_manager_assignment(self):
         for invalid in ({"endDate": "2030-09-19"}, {"startDate": "not-a-date"}, {"status": "X"}, {"region": "not-registered"}, {"title": "a" * 141}, {"owner": self.other_sales}):
             with self.subTest(invalid=invalid), self.assertRaises(CrmApiException):

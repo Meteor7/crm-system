@@ -6,7 +6,7 @@
   "engine": "InnoDB",
   "field_order": ["quotation", "quotation_version", "attempt_no", "status", "submitted_by", "submitted_at", "decided_by", "decided_at", "decision_comment"],
   "fields": [
-    {"fieldname": "quotation", "fieldtype": "Link", "label": "Quotation", "options": "CRM Quotation", "reqd": 1, "read_only": 1, "in_list_view": 1},
+    {"fieldname": "quotation", "fieldtype": "Link", "label": "Quotation", "options": "CRM Quotation", "reqd": 1, "read_only": 1, "in_list_view": 1, "search_index": 1},
     {"fieldname": "quotation_version", "fieldtype": "Link", "label": "Quotation Version", "options": "CRM Quotation Version", "reqd": 1, "read_only": 1, "in_list_view": 1},
     {"fieldname": "attempt_no", "fieldtype": "Int", "label": "Attempt", "reqd": 1, "read_only": 1},
     {"default": "Pending", "fieldname": "status", "fieldtype": "Select", "label": "Status", "options": "Pending\nApproved\nRejected", "reqd": 1, "read_only": 1, "in_list_view": 1},
@@ -17,7 +17,7 @@
     {"fieldname": "decision_comment", "fieldtype": "Small Text", "label": "Decision Comment", "read_only": 1}
   ],
   "index_web_pages_for_search": 0,
-  "modified": "2026-08-17 00:00:00.000000",
+  "modified": "2026-10-08 09:00:00.000000",
   "modified_by": "Administrator",
   "module": "Rayher CRM",
   "name": "CRM Quotation Approval",

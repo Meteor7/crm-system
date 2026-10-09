@@ -80,6 +80,45 @@ beforeEach(() => {
 })
 
 describe('QuotationDetailPage', () => {
+  it('shows a Quotation of an archived Account read-only, with its own notice', async () => {
+    const { client, save } = api()
+    const frozen = structuredClone(detail)
+    frozen.quotation.accountArchived = true
+    vi.mocked(client.getQuotation).mockResolvedValue({ data: frozen, warnings: [] })
+    const page = await mountPage(client)
+    expect(page.attributes('data-editable')).toBe('false')
+    expect(page.getComponent(QuotationEditor).props('readonly')).toBe(true)
+    for (const control of ['submit-quotation-approval', 'discard-quotation-draft']) expect(page.find(`[data-testid="${control}"]`).exists(), control).toBe(false)
+    expect(page.get('[data-testid="quotation-account-archived"]').text()).toContain('所属客户已归档')
+    expect(page.find('[data-testid="quotation-opportunity-archived"]').exists()).toBe(false)
+    // Its send plan and its follow-ups are frozen with it.
+    expect(page.getComponent(QuotationPlanningPanel).props('canWrite')).toBe(false)
+    page.unmount()
+
+    // Its published version takes no new version and no customer result; one awaiting a Manager is neither approved
+    // nor rejected.
+    const published = structuredClone(frozen)
+    published.version.status = 'Published'
+    published.quotation.currentPublishedVersionId = published.version.id
+    published.versions = [published.version]
+    vi.mocked(client.getQuotation).mockResolvedValue({ data: published, warnings: [] })
+    const publishedPage = await mountPage(client)
+    expect(publishedPage.find('[data-testid="create-quotation-version"]').exists()).toBe(false)
+    expect(publishedPage.findAll('button').some((button) => button.text().includes('记录客户结果'))).toBe(false)
+    publishedPage.unmount()
+    client.getBootstrap = vi.fn(async () => ({ data: { user: { id: 'manager@example.com', name: 'Manager', initials: 'M', role: 'Manager', team: 'Sales' }, capabilities: ['quotation:view', 'quotation:write', 'quotation:approve', 'quotation:publish'], today: '2026-08-10', environment: 'Frappe' }, warnings: [] })) as unknown as CrmApi['getBootstrap']
+    const pending = structuredClone(frozen)
+    pending.version.approvalStatus = 'Pending'
+    pending.quotation.approvalStatus = 'Pending'
+    pending.versions = [pending.version]
+    vi.mocked(client.getQuotation).mockResolvedValue({ data: pending, warnings: [] })
+    const pendingPage = await mountPage(client)
+    for (const control of ['approve-quotation', 'reject-quotation']) expect(pendingPage.find(`[data-testid="${control}"]`).exists(), control).toBe(false)
+    expect(pendingPage.find('[data-testid="quotation-account-archived"]').exists()).toBe(true)
+    pendingPage.unmount()
+    expect(save).not.toHaveBeenCalled()
+  })
+
   it('shows a Quotation of an archived Opportunity read-only, with the notice and none of its writes', async () => {
     const { client, save } = api()
     const frozen = (shape: QuotationDetailDto, archived: boolean) => {

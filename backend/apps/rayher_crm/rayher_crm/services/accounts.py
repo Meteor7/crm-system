@@ -14,10 +14,11 @@ from rayher_crm.api.v1.errors import CrmApiException
 from rayher_crm.permissions.roles import assert_capability, capabilities_for_user, resolve_crm_role
 from rayher_crm.permissions.scope import conditions_for_doctype
 from rayher_crm.services.common import (
-    delete_manager_scoped_document,
+    archive_state,
     ensure_server_generated_id,
     normalize_pagination,
     read_all_pages,
+    require_manager_scoped_document,
     required_text,
     resolve_write_owner,
     to_iso_timestamp,
@@ -32,6 +33,25 @@ from rayher_crm.services.regions import collapse_region, list_regions, matching_
 DEFAULT_ACCOUNT_SEGMENTS = ("Frontend", "Advanced Packaging")
 ACCOUNT_TIERS = {"S", "A", "B"}
 ACCOUNT_VISIBILITY = {"Private", "Public"}
+
+# The archive of an Account (a Manager's, in place of the delete there was). The Account, its Sites and its
+# Contacts take no change while it is archived; nothing new is started under it; nothing closed under it is
+# reopened or restored; and it is archived only once nothing is open under it.
+ARCHIVED_ACCOUNT_EDIT = "An archived Account cannot be changed; a Manager can restore it from the archive."
+ARCHIVED_ACCOUNT_LINK = "An archived Account takes no new record; a Manager can restore it from the archive."
+ARCHIVED_ACCOUNT_REOPEN = "Nothing is reopened or restored under an archived Account; a Manager can restore the Account first."
+ACCOUNT_WITH_OPEN_OPPORTUNITY_ARCHIVE = (
+    "An Account with an open Opportunity cannot be archived; close or archive the Opportunity first."
+)
+ACCOUNT_WITH_LIVE_BOOKING_ARCHIVE = (
+    "An Account with a Booking in progress cannot be archived; cancel or complete the Booking first."
+)
+ACCOUNT_WITH_DEMO_REQUEST_ARCHIVE = (
+    "An Account with a Demo Request in progress cannot be archived; cancel the Demo Request first."
+)
+ACCOUNT_WITH_DEMO_TEST_ARCHIVE = (
+    "An Account with a demo test in progress cannot be archived; finish or terminate the demo test first."
+)
 
 
 def _customer_kind(value):
@@ -98,8 +118,162 @@ def _register_account_segment(segment: str) -> None:
     frappe.clear_cache(doctype="Customer")
 
 
-def delete_account(name: str) -> dict[str, str]:
-    return delete_manager_scoped_document("Customer", name, "account:write", "ACCOUNT_NOT_FOUND")
+def account_archived(name: str, *, shared_lock: bool = False, for_update: bool = False) -> bool:
+    """Whether the Account is archived (an Account that is not there is not).
+
+    With a lock, the flag is read under a lock on the Account's row held to the end of this transaction: the value
+    as committed, not this transaction's snapshot; an archive (which takes the row `FOR UPDATE`) waits for the
+    write that read it, and a write that starts after the archive sees it. `shared_lock` (`LOCK IN SHARE MODE`)
+    lets other writers read it so too. `for_update` is for a writer that takes the row `FOR UPDATE` later anyway:
+    a Contact's, an Address's or a Lead's save does, in its before_save hook (permissions.scope.
+    _lock_customer_groups). Taken exclusive from the start, the lock is never raised from shared to exclusive,
+    which two such writers (or one and an archive waiting for the row) would each wait on the other for. Without a
+    lock, the snapshot's value."""
+
+    lock = " FOR UPDATE" if for_update else " LOCK IN SHARE MODE" if shared_lock else ""
+    if lock:
+        rows = frappe.db.sql(f"SELECT `custom_crm_archived` FROM `tabCustomer` WHERE `name` = %s{lock}", (name,))
+        return bool(rows and rows[0][0])
+    return bool(frappe.db.get_value("Customer", name, "custom_crm_archived"))
+
+
+def require_active_account(name: str, message: str = ARCHIVED_ACCOUNT_LINK, *, for_update: bool = False):
+    """The Account a new record is started under, or one of its own records (a Site, a Contact, a file) is
+    changed through: in the caller's read scope and not archived, the flag read under a lock on the Account's row
+    (shared, or exclusive for a writer that saves a Contact, an Address or a Lead of it: see account_archived).
+    Taken before the rows the request shares with the Account's archive (its Opportunities and Bookings), the order
+    the archive takes them in, so the two cannot wait on each other (a Quotation's paths take a Quotation's rows first,
+    a Lead's conversion the Lead's row)."""
+
+    doc = _require_account(name)
+    if account_archived(name, shared_lock=True, for_update=for_update):
+        raise CrmApiException("INVALID_TRANSITION", message)
+    return doc
+
+
+def assert_account_active(name: str | None, message: str, *, for_update: bool = False) -> None:
+    """The Account of a record the caller reads already (one of their deals, orders, Quotations or Contacts): its
+    flag read under a lock on the Account's row, as require_active_account reads it, without the Account's own
+    read scope. An Account that is not there (a legacy Contact's) is not archived."""
+
+    if name and account_archived(name, shared_lock=True, for_update=for_update):
+        raise CrmApiException("INVALID_TRANSITION", message)
+
+
+def lock_accounts(names, *, for_update: bool = False) -> dict[str, bool]:
+    """The archive flags of the Accounts a record touches (the one it is under, the one it moves to), read under locks
+    on their rows (shared, or exclusive with `for_update`) taken by one statement in the database's own name order,
+    the order permissions.scope._lock_customer_groups takes them in: two writers never take the same two rows in turns.
+    An Account that is not there is not archived. Each name's flag is the one of the row the database matched it to,
+    by its own comparison in the same statement (its collation sets case, accents, width and the like aside), so a
+    name a caller spelt otherwise than the record (a variant, or the record renamed so since the caller's snapshot
+    named it) reads that record's flag."""
+
+    names = sorted({str(name) for name in names if name})
+    if not names:
+        return {}
+    lock = "FOR UPDATE" if for_update else "LOCK IN SHARE MODE"
+    matches = ", ".join(["`name` = %s"] * len(names))
+    rows = frappe.db.sql(
+        f"SELECT `custom_crm_archived`, {matches} FROM `tabCustomer` WHERE `name` IN ({', '.join(['%s'] * len(names))}) "
+        f"ORDER BY `name` {lock}",
+        (*names, *names),
+    )
+    flags = dict.fromkeys(names, False)
+    for archived, *matched in rows:
+        for name, match in zip(names, matched):
+            if match:
+                flags[name] = flags[name] or bool(archived)
+    return flags
+
+
+def _set_archived(doc, archived: bool) -> None:
+    """Write the three archive columns of the Customer, read under its row lock, and nothing else: no full save
+    (ERPNext's Customer validation, its naming and its links do not run for a flag flip). `modified` moves with
+    it, so an edit prepared on the record before is refused by its version check (`lock_document`). The archive
+    and the restore each leave a comment on the Customer: who, and when."""
+
+    frappe.db.set_value("Customer", doc.name, {
+        "custom_crm_archived": 1 if archived else 0,
+        "custom_crm_archived_at": frappe.utils.now_datetime() if archived else None,
+        "custom_crm_archived_by": frappe.session.user if archived else None,
+    })
+    frappe.get_doc({
+        "doctype": "Comment", "comment_type": "Info", "reference_doctype": "Customer", "reference_name": doc.name,
+        "content": "Archived" if archived else "Restored from the archive",
+    }).insert(ignore_permissions=True)
+    doc.reload()
+
+
+# The Account's Opportunities and Bookings, read under their row locks through the index on their `account` (a scan
+# would lock every row of the table). Every row of the Account the read passes is locked, open or not, which keeps
+# one from being reopened or moved in before the archive commits. The DocTypes declare the index (`search_index`),
+# so Frappe keeps it through every schema sync; its name is Frappe's (`account` when it creates the table,
+# `account_index` when it adds the index to one), so it is looked up by its column.
+def _account_index_hint(doctype: str) -> str:
+    index = frappe.db.get_column_index(f"tab{doctype}", "account", unique=False)
+    return f"FORCE INDEX (`{index.Key_name}`) " if index else ""
+
+
+def open_opportunity_query() -> str:
+    return (
+        f"SELECT `name` FROM `tabCRM Opportunity` {_account_index_hint('CRM Opportunity')}"
+        f"WHERE `account` = %s AND `archived` = 0 AND `stage` IN ({', '.join(['%s'] * len(OPEN_STAGES))}) FOR UPDATE"
+    )
+
+
+def live_booking_query() -> str:
+    return (
+        f"SELECT `name` FROM `tabCRM Booking` {_account_index_hint('CRM Booking')}"
+        "WHERE `account` = %s AND `archived` = 0 AND `status` IN ('Confirmed', 'Pending') FOR UPDATE"
+    )
+
+
+def _assert_nothing_open(name: str) -> None:
+    """Refuse the archive while business is open under the Account: an Opportunity at an open stage (not archived
+    itself), a Booking in progress (confirmed or pending, not archived), or a Demo Request or a demo test of one of
+    its deals that has not ended: the deals, orders and work the Account stands behind. The
+    Opportunities and Bookings are read under their locks, after the Account's, so a stage action or a Booking edit
+    in flight is waited for and seen; the Demo Requests and their tests as committed by now and as this request sees
+    them (none is started under the Account while its row is held). What is closed (a deal won or lost, a cancelled or
+    completed Booking, an ended Demo Request and test) stays under the archived Account; a Visit planned before is
+    still held, and its Quotations are frozen with it."""
+
+    if frappe.db.sql(open_opportunity_query(), (name, *OPEN_STAGES)):
+        raise CrmApiException("INVALID_TRANSITION", ACCOUNT_WITH_OPEN_OPPORTUNITY_ARCHIVE)
+    if frappe.db.sql(live_booking_query(), (name,)):
+        raise CrmApiException("INVALID_TRANSITION", ACCOUNT_WITH_LIVE_BOOKING_ARCHIVE)
+    from rayher_crm.services.opportunities import demo_in_progress  # that module imports this one
+
+    demo = demo_in_progress("account", name)
+    if demo:
+        raise CrmApiException(
+            "INVALID_TRANSITION", ACCOUNT_WITH_DEMO_TEST_ARCHIVE if demo == "test" else ACCOUNT_WITH_DEMO_REQUEST_ARCHIVE,
+        )
+
+
+def archive_account(name: str) -> dict[str, Any]:
+    """Archive an Account, a Manager's action (the delete it replaces was one): the Account leaves the list, the
+    pickers, the cockpit and the figures, with its Sites and Contacts, keeps all it holds, and is brought back by
+    unarchive_account. Refused while an Opportunity is open, a Booking in progress or a Demo Request or demo test
+    not ended under it. Archiving an Account archived already changes nothing."""
+
+    doc = require_manager_scoped_document("Customer", name, "account:write", "ACCOUNT_NOT_FOUND", for_update=True)
+    if doc.custom_crm_archived:
+        return serialize_account(doc)
+    _assert_nothing_open(name)
+    _set_archived(doc, True)
+    return serialize_account(doc)
+
+
+def unarchive_account(name: str) -> dict[str, Any]:
+    """Bring an archived Account back: every field as it was, its version moved on. An Account not archived is
+    left as it is."""
+
+    doc = require_manager_scoped_document("Customer", name, "account:write", "ACCOUNT_NOT_FOUND", for_update=True)
+    if doc.custom_crm_archived:
+        _set_archived(doc, False)
+    return serialize_account(doc)
 
 
 def _account_counts(customer: str) -> tuple[int, int]:
@@ -174,9 +348,17 @@ def serialize_account(doc) -> dict[str, Any]:
         "customer_name", "custom_crm_short_name", "custom_crm_segment",
         "custom_crm_tier", "custom_crm_city", "custom_crm_region", "custom_crm_owner",
     ))
+    archived = bool(doc.get("custom_crm_archived"))
     return {
         "id": doc.name,
         "name": doc.customer_name,
+        # Archived by a Manager (in place of a delete): out of the list, the pickers and the figures, read-only.
+        "archived": archived,
+        # When and by whom, while it is archived (as a Lead's, a Booking's and an Opportunity's).
+        **({
+            "archivedAt": to_iso_timestamp(doc.custom_crm_archived_at) if doc.get("custom_crm_archived_at") else "",
+            "archivedBy": doc.get("custom_crm_archived_by") or "",
+        } if archived else {}),
         "shortName": doc.custom_crm_short_name or doc.customer_name,
         "segment": doc.custom_crm_segment,
         "tier": doc.custom_crm_tier,
@@ -330,6 +512,8 @@ def _assert_name_free(payload: dict[str, Any], name: str, *, except_account: str
 def _require_account(name: str):
     # One answer for an Account that does not exist and for a Private Account of someone else. The id of an
     # Account is its name: two answers would let a Sales user list the company's Accounts by trying names.
+    # An archived Account is read as any other (its page opens, read-only); the writers under it ask
+    # require_active_account instead.
     if frappe.db.exists("Customer", name):
         doc = frappe.get_doc("Customer", name)
         if frappe.has_permission("Customer", "read", doc=doc, user=frappe.session.user):
@@ -342,6 +526,12 @@ def list_accounts(query: dict[str, Any]) -> tuple[list[dict[str, Any]], int, int
     page, page_size, offset = normalize_pagination(query.get("page"), query.get("pageSize"))
     where = [f"({conditions_for_doctype('Customer')})"]
     values: list[Any] = []
+    # Archived Accounts (a Manager's archive, in place of a delete) are listed only when asked for; the pickers
+    # and the dashboard read the list without asking, so they never see one.
+    state = archive_state(query)
+    if state != "all":
+        where.append("`custom_crm_archived` = %s")
+        values.append(1 if state == "archived" else 0)
     account_id = str(query.get("accountId") or "").strip()
     if account_id:
         where.append("`name` = %s")
@@ -434,6 +624,10 @@ def update_account(
     current = _require_account(name)
     if resolve_crm_role() == "Sales" and current.custom_crm_owner != frappe.session.user:
         raise CrmApiException("SCOPE_DENIED", "Only the Account owner or a Manager may edit this Account.")
+    # Before the payload and the version are looked at, so the refusal names the archive whatever the client
+    # sent; an archive committed after this read moves the Account's version, which the lock then refuses.
+    if current.custom_crm_archived:
+        raise CrmApiException("INVALID_TRANSITION", ARCHIVED_ACCOUNT_EDIT)
     values = _validate_account_input(payload, current.custom_crm_owner, current.custom_crm_visibility or "Private")
     if values["name"] != current.customer_name:
         _assert_name_free(payload, values["name"], except_account=name)

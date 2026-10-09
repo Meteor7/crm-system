@@ -6,6 +6,7 @@ import base64
 import io
 import hashlib
 import re
+from collections.abc import Callable
 from contextlib import suppress
 from decimal import Decimal
 from pathlib import Path
@@ -21,12 +22,17 @@ from rayher_crm.services.opportunity_archive import (
     ARCHIVED_OPPORTUNITY_EDIT,
     ARCHIVED_OPPORTUNITY_LINK,
     assert_opportunity_not_archived,
-    opportunity_archived,
 )
 from rayher_crm.permissions.scope import conditions_for_doctype, has_crm_permission
 from rayher_crm.services.common import normalize_pagination, required_text, to_iso_timestamp
 from rayher_crm.services.concurrency import committed_reader, lock_document
-from rayher_crm.services.accounts import _require_account
+from rayher_crm.services.accounts import (
+    ARCHIVED_ACCOUNT_EDIT,
+    ARCHIVED_ACCOUNT_LINK,
+    _require_account,
+    account_archived,
+    assert_account_active,
+)
 from rayher_crm.services.contacts import _contact_account, _require_contact
 from rayher_crm.services.money import decimal_string
 from rayher_crm.services.notifications import create_notification, notify_if_reachable
@@ -124,7 +130,9 @@ def _upsert_catalog_item(level: str, name: str, parent_id: str | None = None) ->
             "doctype": "CRM Quotation Catalog Item", "item_level": level,
             "item_name": normalized, "parent_item": parent_id, "catalog_key": key,
         }).insert(ignore_permissions=True).name
-    except Exception:
+    except frappe.UniqueValidationError:
+        # Only its key taken meanwhile. Another failure (a deadlock rolls the transaction back, its locks with it) is
+        # not answered with the item: the request would go on writing in a new transaction, without its earlier writes.
         existing = frappe.db.get_value("CRM Quotation Catalog Item", {"catalog_key": key}, "name")
         if existing:
             return existing
@@ -238,16 +246,56 @@ def _lock_quotation(name: str):
     return doc
 
 
-def _assert_quotation_opportunity_active(master) -> None:
-    """A Quotation of an archived Opportunity is frozen with it until the restore: no draft saved or discarded, no
-    new version, no submission, no rejection of its approval, no customer decision. The flag is read under the
-    Opportunity's lock, after the Quotation's, so an archive committed meanwhile is seen and one in flight is waited
-    for. A publication (direct, or by an approval) writes its PDF first and reads the flag under the Opportunity's
-    lock after it, in advance_opportunity_for_event: no file's content lock is taken while the Opportunity's row is
-    held (private_file_lifecycle's rule), and the refusal takes the PDF back out."""
+def _quotation_account(master) -> str | None:
+    """The Account a Quotation answers to: its Opportunity's now (an Opportunity moved to another Account takes its
+    Quotation along; the Quotation keeps the customer it was addressed to, `account`), or its own when it has no
+    Opportunity (an "Others" Quotation)."""
 
     if master.opportunity:
-        assert_opportunity_not_archived(opportunity_archived(master.opportunity, for_update=True), ARCHIVED_OPPORTUNITY_EDIT)
+        return frappe.db.get_value("CRM Opportunity", master.opportunity, "account")
+    return master.account
+
+
+def _locked_deal(opportunity_id: str, account: str | None) -> bool:
+    """The Opportunity's row under its lock, after its Account's: refused as changed when it is under another Account
+    than `account`, the one this request locked for it (it moved since the first read), so nothing of a Quotation is
+    written on an Account's flag read for a deal that left it. Returns its archive flag."""
+
+    current = frappe.db.get_value("CRM Opportunity", opportunity_id, ["account", "archived"], as_dict=True, for_update=True)
+    if current and (current.account or None) != (account or None):
+        raise CrmApiException("VERSION_CONFLICT", "The record was changed by another request.")
+    return bool(current and current.archived)
+
+
+def _assert_quotation_writable(master) -> None:
+    """A Quotation whose Account (see _quotation_account) or Opportunity is archived is frozen with it until the
+    restore: no draft saved or discarded, no new version, no submission, no rejection of its approval, no customer
+    decision. Read under the locks, after the Quotation's row (its writer holds it): the Account's flag under a shared
+    lock on its row, then the Opportunity's row, refused as changed if it moved to another Account since the first
+    read; an archive committed meanwhile is seen and one in flight is waited for.
+
+    Every path takes them in that order: a Quotation's rows, its Account's, its Opportunity's (a link takes its
+    Quotation's row before the Account's; a creation has none yet, and counts its date's reference last, on its date's
+    row in tabSeries, which locks no Quotation). None holds the Account's row while it waits for a Quotation's: an
+    exclusive request queued on that row (a Contact's edit, a status record, the Account's archive) holds back every
+    shared request after it, and with one path waiting for a Quotation's row under the Account's and a writer of that
+    Quotation waiting for the Account's, the three would wait on each other. And none writes anything before the
+    Account's and the Opportunity's rows: a publication (direct, or by an approval) renders its PDF in memory and takes
+    its content lock first, then reads them under the locks (_publish_locked): no file's content lock is waited for
+    while an Account's or the Opportunity's row is held (private_file_lifecycle's rule)."""
+
+    account = _quotation_account(master)
+    assert_account_active(account, ARCHIVED_ACCOUNT_EDIT)
+    if master.opportunity:
+        assert_opportunity_not_archived(_locked_deal(master.opportunity, account), ARCHIVED_OPPORTUNITY_EDIT)
+
+
+def _refuse_frozen_as_seen(master) -> None:
+    """A publication's first refusal, as this request sees the Account (its read under the lock comes after its PDF,
+    in _publish_locked)."""
+
+    if account_archived(_quotation_account(master) or ""):
+        raise CrmApiException("INVALID_TRANSITION", ARCHIVED_ACCOUNT_EDIT)
 
 
 # The Opportunity's one Quotation, and whether it is the one named (the one a link would link).
@@ -284,6 +332,41 @@ def _assert_opportunity_has_no_quotation(opportunity_id: str, linking: str = "")
         raise CrmApiException("QUOTATION_ALREADY_EXISTS", "This Opportunity already has a Quotation.")
 
 
+def _undo_to(savepoint: str, what: str) -> None:
+    """Undo a failed write to its savepoint. A deadlock rolls the whole transaction back, the savepoint with it: the
+    `ROLLBACK TO SAVEPOINT` then raises, and would hide the error that explains the failure. The transaction is then
+    rolled back whole (nothing of it is left to keep), so that nothing a step wrote after the deadlock is committed:
+    the request edge commits after a refusal it answers (a CrmApiException)."""
+
+    try:
+        frappe.db.rollback(save_point=savepoint)
+    except Exception:
+        with suppress(Exception):
+            frappe.logger("rayher_crm").error(f"Quotation {what} could not roll back to its savepoint", exc_info=True)
+        with suppress(Exception):
+            frappe.db.rollback()
+
+
+# The number of a Quotation's last approval.
+APPROVAL_ATTEMPTS_QUERY = "SELECT COALESCE(MAX(`attempt_no`), 0) FROM `tabCRM Quotation Approval` WHERE `quotation` = %s"
+
+
+def _next_attempt_no(quotation: str) -> int:
+    """The number of a Quotation's next approval: one past its last, read without a lock under the Quotation's row
+    (every submission of it holds that row, so none is added meanwhile), as committed by now on a connection of its own
+    (this request's snapshot may predate one committed while it waited for the row) and as this request sees it. A
+    locking read through the `quotation` index would take the gap the newest Quotations' approvals share, and two
+    submissions would each wait for the other's insert (the approvals' naming row between them)."""
+
+    read, close = committed_reader()
+    try:
+        committed = read(APPROVAL_ATTEMPTS_QUERY, (quotation,))[0][0]
+    finally:
+        close()
+    own = frappe.db.sql(APPROVAL_ATTEMPTS_QUERY, (quotation,))[0][0]
+    return max(int(committed or 0), int(own or 0)) + 1
+
+
 def _require_version(master, version_id: str | None, *, fallback: str | None = None):
     selected_id = version_id or fallback
     if not selected_id or not frappe.db.exists("CRM Quotation Version", selected_id):
@@ -300,8 +383,8 @@ def _require_opportunity(name: str, archived_message: str = ARCHIVED_OPPORTUNITY
     if not has_crm_permission(doc, user=frappe.session.user, permission_type="read"):
         raise CrmApiException("SCOPE_DENIED", "The Opportunity is outside the current user scope.")
     # No Quotation is created for or linked to an archived Opportunity ("takes no new record"); one it has is frozen
-    # with it ("cannot be changed"): its writers refuse under the Opportunity's lock (_assert_quotation_opportunity_active;
-    # a publication in advance_opportunity_for_event), and first here, as the request sees it.
+    # with it ("cannot be changed"): its writers refuse under the Opportunity's lock (_assert_quotation_writable;
+    # a publication in _publish_locked, before it writes), and first here, as the request sees it.
     assert_opportunity_not_archived(doc, archived_message)
     return doc
 
@@ -523,8 +606,9 @@ def _serialize_master(master) -> dict[str, Any]:
     return {
         "id": master.name, "refNo": master.ref_no, "quotationType": master.quotation_type or "Device", "opportunityId": master.opportunity or "",
         "opportunityTitle": (frappe.db.get_value("CRM Opportunity", master.opportunity, "title") or master.opportunity) if master.opportunity else "Others",
-        # A Quotation of an archived Opportunity is frozen with it (_assert_quotation_opportunity_active).
+        # A Quotation of an archived Opportunity or Account is frozen with it (_assert_quotation_writable).
         "opportunityArchived": bool(master.opportunity and frappe.db.get_value("CRM Opportunity", master.opportunity, "archived")),
+        "accountArchived": account_archived(_quotation_account(master) or ""),
         "accountId": master.account, "accountName": frappe.db.get_value("Customer", master.account, "customer_name") or master.account,
         "owner": master.quotation_owner, "status": status,
         "approvalStatus": (version.approval_status or "Not Submitted") if version else "Not Submitted",
@@ -610,7 +694,11 @@ def create_quotation(payload: dict[str, Any]) -> dict[str, Any]:
     if opportunity and frappe.db.exists("CRM Quotation", {"opportunity": opportunity.name}):
         raise CrmApiException("QUOTATION_ALREADY_EXISTS", "This Opportunity already has a Quotation.")
     account = opportunity.account if opportunity else required_text(payload, "accountId")
-    account_doc = _require_account(account)
+    # No Quotation is started under an archived Account: refused here as this request sees the Account, and read
+    # again under the Account's lock below, before the Quotation's row is written.
+    _require_account(account)
+    if account_archived(account):
+        raise CrmApiException("INVALID_TRANSITION", ARCHIVED_ACCOUNT_LINK)
     _assert_quotation_address_scope(
         account,
         "Only the Account owner or a Manager may create quotations containing Site/Address data.",
@@ -626,14 +714,19 @@ def create_quotation(payload: dict[str, Any]) -> dict[str, Any]:
     master = None
     for attempt in range(1, QUOTATION_CREATE_ATTEMPTS + 1):
         try:
-            # Read again under the Opportunity's lock, and its one Quotation looked for, before the date's reference is
-            # counted and the Quotation's row is written: the order its link takes them in (the Opportunity, then the
-            # Quotation), so a creation and a link of one Opportunity never wait on each other over its one Quotation,
-            # and the second is told it has one. Taken on each attempt: a retry below rolls the whole transaction back,
-            # the lock with it, and the look sees a Quotation another request gave the Opportunity meanwhile. An
-            # archive committed since the read above is seen, and one in flight is waited for.
+            # The Account's row (a shared lock), then the Opportunity's, read under their locks, and the Opportunity's
+            # one Quotation looked for, before the date's reference is counted and the Quotation's row is written: the
+            # order every path takes them in after a Quotation's own row (_assert_quotation_writable), which a creation
+            # has none of yet; and the order a link to the Opportunity takes them in (its Quotation's row, the Account's,
+            # the Opportunity's), so the two never wait on each other over the Opportunity's one Quotation, and the
+            # second is told it has one. The reference is counted last, on its date's row in tabSeries, which no writer
+            # of a Quotation holds while it waits for an Account's or an Opportunity's row. Taken on each attempt: a
+            # retry below rolls the whole transaction back, the locks with it, and the look sees a Quotation another
+            # request gave the Opportunity meanwhile. An archive committed since the reads above is seen, one in flight
+            # is waited for, and an Opportunity moved to another Account since is refused as changed.
+            assert_account_active(account, ARCHIVED_ACCOUNT_LINK)
             if opportunity:
-                assert_opportunity_not_archived(opportunity_archived(opportunity.name, for_update=True), ARCHIVED_OPPORTUNITY_LINK)
+                assert_opportunity_not_archived(_locked_deal(opportunity.name, account), ARCHIVED_OPPORTUNITY_LINK)
                 _assert_opportunity_has_no_quotation(opportunity.name)
             # Validate before the first write on every attempt: a rollback starts a new transaction, where
             # Contact status, customer links and address snapshots may have changed. The API commits a handled
@@ -651,10 +744,11 @@ def create_quotation(payload: dict[str, Any]) -> dict[str, Any]:
             frappe.clear_last_message()  # Frappe's "must be unique", which this answer replaces
         except frappe.QueryDeadlockError:
             # The database rolled this request's transaction back to break a deadlock: a cycle of transactions, each
-            # waiting for a row the next one holds (the Opportunity's, which this request holds from the read above,
-            # and the naming series' row, which every `format:` name takes and this request holds from its insert on,
-            # are two). Nothing is written before this loop, so the attempt is made again in a new transaction. The
-            # last attempt's deadlock reaches the API edge, which logs it and answers it as a failure to retry.
+            # waiting for a row the next one holds (the Account's and the Opportunity's, which this request holds from
+            # the reads above, and the naming series' row, which every `format:` name takes and this request holds from
+            # its insert on, are three). Nothing is written before this loop, so the attempt is made again in a new
+            # transaction. The last attempt's deadlock reaches the API edge, which logs it and answers it as a failure
+            # to retry.
             frappe.db.rollback()
             if attempt == QUOTATION_CREATE_ATTEMPTS:
                 raise
@@ -675,16 +769,19 @@ def link_quotation_opportunity(
     frappe.db.savepoint(savepoint)
     try:
         opportunity = _require_opportunity(required_text({"opportunityId": opportunity_id}, "opportunityId"))
-        # The Opportunity's row first, the flag read under its lock and its one Quotation looked for, then the
-        # Quotation's row: the order a Quotation's creation takes them in, so a link and a creation of one Opportunity
-        # never wait on each other over its one Quotation (the unique `opportunity` the link writes). Looked for before
-        # the Quotation's row is waited for: an Opportunity with a Quotation, this one included (a stale page), is
-        # refused without waiting on a row whose writers may hold it while they wait for this Opportunity's (a
-        # Quotation's writers take its row, then its Opportunity's). A Quotation with no Opportunity has no writer
-        # waiting for one.
-        assert_opportunity_not_archived(opportunity_archived(opportunity.name, for_update=True), ARCHIVED_OPPORTUNITY_LINK)
-        _assert_opportunity_has_no_quotation(opportunity.name, linking=name)
+        # The Quotation's row first, then the Account's (a shared lock) and the Opportunity's, the flags read under
+        # their locks, and the Opportunity's one Quotation looked for: the order every path takes them in
+        # (_assert_quotation_writable), so this one never holds the Account's row while it waits for a Quotation's;
+        # and the order a creation for the Opportunity takes the Account's and the Opportunity's in (it has no
+        # Quotation's row yet, and counts its date's reference last), so the two never wait on each other over the
+        # Opportunity's one Quotation (the unique `opportunity` the link writes), and the second is told it has one; a
+        # Quotation linked to it already (a stale page) is told so. The Account read is the Opportunity's, the
+        # Quotation's own too (refused below otherwise), and an Opportunity moved to another Account since the first
+        # read is refused as changed.
         master = _lock_quotation(name)
+        assert_account_active(opportunity.account, ARCHIVED_ACCOUNT_LINK)
+        assert_opportunity_not_archived(_locked_deal(opportunity.name, opportunity.account), ARCHIVED_OPPORTUNITY_LINK)
+        _assert_opportunity_has_no_quotation(opportunity.name, linking=name)
         version = lock_document("CRM Quotation Version", master.current_version, expected_modified, "NOT_FOUND")
         master.reload()
         if version.name != master.current_version:
@@ -705,13 +802,7 @@ def link_quotation_opportunity(
         frappe.clear_last_message()  # Frappe's "must be unique", which this answer replaces
         raise CrmApiException("QUOTATION_ALREADY_EXISTS", "This Opportunity already has a Quotation.") from exc
     except Exception:
-        try:
-            frappe.db.rollback(save_point=savepoint)
-        except Exception:
-            # A deadlock rolls the whole transaction back, savepoint included; the `ROLLBACK TO SAVEPOINT` would then
-            # raise and hide the error that explains the failure. The request edge still rolls back in full.
-            with suppress(Exception):
-                frappe.logger("rayher_crm").error("Quotation link could not roll back to its savepoint", exc_info=True)
+        _undo_to(savepoint, "link")
         raise
 
 
@@ -726,7 +817,7 @@ def _apply_values(version, values: dict[str, Any]) -> None:
 def save_draft(name: str, payload: dict[str, Any], expected_modified: str | None = None) -> dict[str, Any]:
     assert_capability("quotation:write")
     master = _lock_quotation(name)
-    _assert_quotation_opportunity_active(master)
+    _assert_quotation_writable(master)
     version = lock_document("CRM Quotation Version", master.current_version, expected_modified, "NOT_FOUND")
     master.reload()
     if version.name != master.current_version:
@@ -763,7 +854,7 @@ def _version_payload(version) -> dict[str, Any]:
 def create_version(name: str) -> dict[str, Any]:
     assert_capability("quotation:write")
     master = _lock_quotation(name)
-    _assert_quotation_opportunity_active(master)
+    _assert_quotation_writable(master)
     current = _require_version(master, None, fallback=master.current_version)
     if current.status == "Draft": raise CrmApiException("QUOTATION_DRAFT_EXISTS", "Finish or discard the current draft before creating a new version.")
     source = _require_version(master, None, fallback=master.current_published_version or master.current_version)
@@ -781,7 +872,7 @@ def discard_draft(name: str, expected_modified: str | None = None) -> dict[str, 
     frappe.db.savepoint(savepoint)
     try:
         master = _lock_quotation(name)
-        _assert_quotation_opportunity_active(master)
+        _assert_quotation_writable(master)
         version = lock_document("CRM Quotation Version", master.current_version, expected_modified, "NOT_FOUND")
         master.reload()
         if version.quotation != master.name or version.name != master.current_version:
@@ -808,7 +899,7 @@ def discard_draft(name: str, expected_modified: str | None = None) -> dict[str, 
         master.delete(ignore_permissions=True)
         return {"id": name, "deleted": True}
     except Exception:
-        frappe.db.rollback(save_point=savepoint)
+        _undo_to(savepoint, "discard")
         raise
 
 def _catalog_item_for_row(row, level: str, parent_id: str | None) -> str:
@@ -937,20 +1028,44 @@ def render_quotation_pdf(master, version) -> bytes:
     return output.getvalue()
 
 
+def _pdf_name(master, version) -> str:
+    return f"{master.ref_no}-V{int(version.version_no)}.pdf"
+
+
 def _release_pdf(master, version, pdf_content: bytes) -> str:
     from rayher_crm.services.private_file_lifecycle import save_private_file as save_file
-    filename = f"{master.ref_no}-V{int(version.version_no)}.pdf"
-    return save_file(filename, pdf_content, "CRM Quotation Version", version.name, is_private=1, attached_to_field="pdf_file").file_url
+    return save_file(_pdf_name(master, version), pdf_content, "CRM Quotation Version", version.name, is_private=1, attached_to_field="pdf_file").file_url
 
 
-def _publish_locked(master, version, approval_status: str) -> None:
+def _publish_locked(master, version, approval_status: str, decide: Callable[[], None] | None = None) -> None:
+    """Publish the current version. Its values are applied and its PDF rendered in memory, and the PDF's content lock
+    taken; then the Account's flag is read under a shared lock on its row and the Opportunity's row taken (refused as
+    changed if the deal moved to another Account since the first read, as archived if it is); only then is anything
+    written: the approval's decision (`decide`), the catalog, the version, the PDF's File, the version it supersedes,
+    the Opportunity's advance.
+
+    Every other writer of a Quotation writes under the Account's row (_assert_quotation_writable). A publication that
+    wrote first (a version's lines, a catalog item's naming row, an approval) and then asked for the Account's row
+    could wait behind an exclusive request queued on that row while such a writer waited for what it wrote: the three
+    would wait on each other. No content lock is waited for while the Account's or the Opportunity's row is held
+    (private_file_lifecycle's rule): the PDF's is taken before them, and its File's insert finds it held. A refusal
+    under those rows comes before any write; a failure after the PDF's File is written takes the File back out."""
+
+    from rayher_crm.services.private_file_lifecycle import lock_upload_contents
+
     released_file = None
     try:
         _apply_values(version, _validated_values(master, _version_payload(version), True))
-        _register_version_catalog(version)
         previous = master.current_published_version
-        version.save(ignore_permissions=True)
         pdf_content = render_quotation_pdf(master, version)
+        lock_upload_contents([(_pdf_name(master, version), pdf_content)])
+        account = _quotation_account(master)
+        assert_account_active(account, ARCHIVED_ACCOUNT_EDIT)
+        if master.opportunity:
+            assert_opportunity_not_archived(_locked_deal(master.opportunity, account), ARCHIVED_OPPORTUNITY_EDIT)
+        if decide:
+            decide()
+        _register_version_catalog(version)
         version.status = "Published"
         version.approval_status = approval_status
         version.published_at = now_datetime()
@@ -1000,7 +1115,7 @@ def submit_for_approval(name: str, expected_modified: str | None = None) -> dict
     frappe.db.savepoint(savepoint)
     try:
         master = _lock_quotation(name)
-        _assert_quotation_opportunity_active(master)
+        _assert_quotation_writable(master)
         _assert_publishable_opportunity(master, "Opportunity must reach the quotation stage before approval.")
         version = lock_document("CRM Quotation Version", master.current_version, expected_modified, "NOT_FOUND")
         master.reload()
@@ -1016,15 +1131,11 @@ def submit_for_approval(name: str, expected_modified: str | None = None) -> dict
         ]
         if not managers:
             raise CrmApiException("VALIDATION_ERROR", "No active CRM Manager is available to approve this quotation.")
-        last_attempt = frappe.db.sql(
-            "SELECT COALESCE(MAX(`attempt_no`), 0) FROM `tabCRM Quotation Approval` WHERE `quotation` = %s FOR UPDATE",
-            (master.name,),
-        )[0][0]
         approval = frappe.get_doc({
             "doctype": "CRM Quotation Approval",
             "quotation": master.name,
             "quotation_version": version.name,
-            "attempt_no": int(last_attempt or 0) + 1,
+            "attempt_no": _next_attempt_no(master.name),
             "status": "Pending",
             "submitted_by": frappe.session.user,
             "submitted_at": now_datetime(),
@@ -1046,7 +1157,7 @@ def submit_for_approval(name: str, expected_modified: str | None = None) -> dict
             )
         return get_quotation(master.name)
     except Exception:
-        frappe.db.rollback(save_point=savepoint)
+        _undo_to(savepoint, "submission")
         raise
 
 
@@ -1082,7 +1193,9 @@ def review_approval(
     try:
         master = _lock_quotation(name)
         if decision == "Rejected":
-            _assert_quotation_opportunity_active(master)
+            _assert_quotation_writable(master)
+        else:
+            _refuse_frozen_as_seen(master)
         version = _require_version(master, None, fallback=master.current_version)
         if not version.current_approval:
             raise CrmApiException("NOT_FOUND", "Quotation approval was not found.")
@@ -1093,18 +1206,22 @@ def review_approval(
             raise CrmApiException("QUOTATION_VERSION_LOCKED", "Only the current pending quotation can be reviewed.")
         if approval.quotation != master.name or approval.quotation_version != version.name:
             raise CrmApiException("QUOTATION_VERSION_LOCKED", "The pending approval does not match the current quotation version.")
-        approval.status = decision
-        approval.decided_by = frappe.session.user
-        approval.decided_at = now_datetime()
-        approval.decision_comment = normalized_comment
-        approval.flags.allow_approval_decision = True
-        approval.save(ignore_permissions=True)
+
+        def decide() -> None:
+            approval.status = decision
+            approval.decided_by = frappe.session.user
+            approval.decided_at = now_datetime()
+            approval.decision_comment = normalized_comment
+            approval.flags.allow_approval_decision = True
+            approval.save(ignore_permissions=True)
+
         if decision == "Approved":
             _assert_publishable_opportunity(master, "Opportunity must remain in a publishable stage.")
-            version.approval_status = "Approved"
-            version.save(ignore_permissions=True)
-            _publish_locked(master, version, "Approved")
+            # The decision is written with the publication, once the Account's and the Opportunity's rows are held:
+            # nothing is written before them (_publish_locked).
+            _publish_locked(master, version, "Approved", decide)
         else:
+            decide()
             version.approval_status = "Rejected"
             version.save(ignore_permissions=True)
             master.status = "Draft"
@@ -1121,7 +1238,7 @@ def review_approval(
             )
         return get_quotation(master.name)
     except Exception:
-        frappe.db.rollback(save_point=savepoint)
+        _undo_to(savepoint, "review")
         raise
 
 
@@ -1131,6 +1248,7 @@ def publish_version(name: str, expected_modified: str | None = None) -> dict[str
     frappe.db.savepoint(savepoint)
     try:
         master = _lock_quotation(name)
+        _refuse_frozen_as_seen(master)
         _assert_publishable_opportunity(master, "Opportunity must reach the quotation stage before publishing.")
         version = lock_document("CRM Quotation Version", master.current_version, expected_modified, "NOT_FOUND")
         master.reload()
@@ -1141,7 +1259,7 @@ def publish_version(name: str, expected_modified: str | None = None) -> dict[str
         _publish_locked(master, version, "Not Required")
         return get_quotation(master.name)
     except Exception:
-        frappe.db.rollback(save_point=savepoint)
+        _undo_to(savepoint, "publication")
         raise
 
 
@@ -1155,7 +1273,7 @@ def record_decision(name: str, decision: str, feedback_date: str, feedback_note:
     except Exception as exc:
         raise CrmApiException("VALIDATION_ERROR", "Customer feedback date must be valid.") from exc
     master = _lock_quotation(name)
-    _assert_quotation_opportunity_active(master)
+    _assert_quotation_writable(master)
     if not master.current_published_version:
         raise CrmApiException("QUOTATION_VERSION_LOCKED", "A formal quotation version is required before recording a decision.")
     version = lock_document("CRM Quotation Version", master.current_published_version, expected_modified, "NOT_FOUND")
@@ -1172,9 +1290,15 @@ def expire_quotations() -> int:
     rows = frappe.get_all("CRM Quotation Version", filters={"status": "Published", "valid_until": ["<", today()]}, fields=["name", "quotation"])
     expired = 0
     for row in rows:
-        master_rows = frappe.db.sql("SELECT `name` FROM `tabCRM Quotation` WHERE `name` = %s FOR UPDATE", (row.quotation,))
+        # The Quotation's current versions read under its row's lock, as committed by now: the job's snapshot may
+        # predate a new draft, which leaves the formal version Published and the Quotation a Draft.
+        master_rows = frappe.db.sql(
+            "SELECT `name`, `current_version`, `current_published_version` FROM `tabCRM Quotation` WHERE `name` = %s FOR UPDATE",
+            (row.quotation,), as_dict=True,
+        )
         if not master_rows:
             continue
+        master = master_rows[0]
         version_rows = frappe.db.sql(
             "SELECT `status`, `valid_until`, `quotation` FROM `tabCRM Quotation Version` WHERE `name` = %s FOR UPDATE",
             (row.name,), as_dict=True,
@@ -1182,14 +1306,14 @@ def expire_quotations() -> int:
         if not version_rows:
             continue
         current = version_rows[0]
-        master = frappe.get_doc("CRM Quotation", row.quotation)
         if current.status != "Published" or current.quotation != master.name or not current.valid_until or getdate(current.valid_until) >= getdate(today()):
             continue
         if master.current_published_version != row.name or master.current_version != row.name:
             continue
-        version = frappe.get_doc("CRM Quotation Version", row.name)
-        version.status = "Expired"; version.save(ignore_permissions=True)
-        master.status = "Expired"; master.save(ignore_permissions=True)
+        # The two status columns alone, under the rows locked above: a save would rewrite the version's lines, whose gap
+        # locks, held across the job's Quotations, a writer of another Quotation waits for under its Account's row.
+        frappe.db.set_value("CRM Quotation Version", row.name, "status", "Expired")
+        frappe.db.set_value("CRM Quotation", master.name, "status", "Expired")
         expired += 1
     return expired
 

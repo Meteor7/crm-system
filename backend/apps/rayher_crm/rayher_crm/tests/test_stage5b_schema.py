@@ -20,6 +20,9 @@ EXPECTED_FIELDS = {
         "custom_crm_city": ("Data", None),
         "custom_crm_region": ("Select", "\nEast China\nSouth China\nWest China\nNorth China\nCentral China"),
         "custom_crm_visibility": ("Select", "Private\nPublic"),
+        "custom_crm_archived": ("Check", None),
+        "custom_crm_archived_at": ("Datetime", None),
+        "custom_crm_archived_by": ("Link", "User"),
     },
     "Contact": {
         "custom_crm_owner": ("Link", "User"),

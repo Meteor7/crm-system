@@ -11,7 +11,14 @@ from frappe.model.naming import append_number_if_name_exists
 from rayher_crm.api.v1.errors import CrmApiException
 from rayher_crm.permissions.roles import assert_capability, capabilities_for_user, resolve_crm_role
 from rayher_crm.permissions.scope import conditions_for_doctype, has_crm_permission
-from rayher_crm.services.accounts import _require_account
+from rayher_crm.services.accounts import (
+    ARCHIVED_ACCOUNT_EDIT,
+    ARCHIVED_ACCOUNT_LINK,
+    _require_account,
+    account_archived,
+    assert_account_active,
+    lock_accounts,
+)
 from rayher_crm.services.common import (
     ensure_server_generated_id,
     normalize_pagination,
@@ -163,7 +170,22 @@ def _assert_new_contact_name_fits(name: str, account_id: str) -> None:
 
 def _validated_contact(payload: dict[str, Any], contact_id: str | None = None) -> dict[str, Any]:
     account_id = required_text(payload, "accountId")
+    # No Contact is created under or moved under an archived Account ("takes no new record"), and none of an
+    # archived Account's Contacts is edited or moved out ("cannot be changed"). The Account it goes under in the
+    # caller's read scope; then both flags read under exclusive locks on the Accounts' rows, in name order, before the
+    # Contact's is locked: the Contact's save takes them so in its hook (permissions.scope._lock_customer_groups, in
+    # name order too), so a lock is never raised from shared to exclusive. The Account it is under now is looked at
+    # for its flag alone (one that is gone is not archived, and its Contact may still move to another).
+    current_account = _contact_account(contact_id) if contact_id else None
     account = _require_account(account_id)
+    account_id = account.name
+    archived_accounts = lock_accounts((current_account, account_id), for_update=True)
+    if current_account and current_account != account_id and archived_accounts.get(current_account):
+        raise CrmApiException("INVALID_TRANSITION", ARCHIVED_ACCOUNT_EDIT)
+    if archived_accounts.get(account_id):
+        raise CrmApiException(
+            "INVALID_TRANSITION", ARCHIVED_ACCOUNT_EDIT if current_account == account_id else ARCHIVED_ACCOUNT_LINK,
+        )
     if resolve_crm_role() == "Sales" and account.custom_crm_owner != frappe.session.user:
         raise CrmApiException("SCOPE_DENIED", "Only the Account owner or a Manager may edit contacts.")
     if contact_id is None and str(payload.get("name") or "").strip():
@@ -234,6 +256,10 @@ def list_contacts(query: dict[str, Any]) -> tuple[list[dict[str, Any]], int, int
     if account_id and account_id != "All":
         where.append("`crm_link`.`link_name` = %s")
         values.append(account_id)
+    elif not contact_id:
+        # The Contacts of an archived Account (a Manager's archive, in place of a delete) leave the list and the
+        # pickers with it; they are read through the Account's own page (its id asked for) and their own.
+        where.append("COALESCE(`crm_account`.`custom_crm_archived`, 0) = 0")
     site_id = str(query.get("siteId") or "").strip()
     if site_id and site_id != "All":
         from rayher_crm.services.sites import _site_account, can_read_site_data
@@ -262,6 +288,8 @@ def list_contacts(query: dict[str, Any]) -> tuple[list[dict[str, Any]], int, int
     base = (
         " FROM `tabContact` INNER JOIN `tabDynamic Link` AS `crm_link` ON `crm_link`.`parent` = `tabContact`.`name` "
         "AND `crm_link`.`parenttype` = 'Contact' AND `crm_link`.`parentfield` = 'links' AND `crm_link`.`link_doctype` = 'Customer' "
+        # LEFT: a Contact whose link names no Customer (left behind by an old delete) is listed as before.
+        "LEFT JOIN `tabCustomer` AS `crm_account` ON `crm_account`.`name` = `crm_link`.`link_name` "
     )
     where_sql = " AND ".join(where)
     total = int(frappe.db.sql(f"SELECT COUNT(DISTINCT `tabContact`.`name`){base} WHERE {where_sql}", tuple(values))[0][0])
@@ -402,8 +430,15 @@ def get_contact(name: str) -> dict[str, Any]:
         } for item in bookings],
     ]
     timeline.sort(key=lambda item: (item["at"], item["id"]), reverse=True)
+    account = _contact_account(doc.name)
     result = {
         "contact": serialize_contact(doc),
+        # The Account archived (a Manager's archive, in place of a delete): the Contact takes no change, nor its
+        # files, and starts no record, until the Account is restored.
+        "accountArchived": bool(account) and account_archived(account),
+        # The owner of the Contact's Account, whom the page compares with its reader (the Account list leaves an
+        # archived Account out).
+        "accountOwner": (frappe.db.get_value("Customer", account, "custom_crm_owner") or "") if account else "",
         "directReports": direct_reports,
         "opportunities": opportunity_rows,
         "visits": visit_rows,
@@ -441,8 +476,12 @@ def merge_contacts(
     if account != _contact_account(duplicate.name):
         raise CrmApiException("CONTACT_MERGE_CONFLICT", "Contacts from different accounts cannot be merged.")
     # The Account's row first: the merges of one Account take turns, so the second reads the lines the first
-    # committed (two merges whose locks did not meet could otherwise close a loop between them).
-    frappe.db.sql("SELECT `name` FROM `tabCustomer` WHERE `name` = %s FOR UPDATE", (account,))
+    # committed (two merges whose locks did not meet could otherwise close a loop between them). Read under
+    # that lock, the Account's archive (a Manager's, in place of a delete) refuses the merge: its Contacts take
+    # no change until it is restored.
+    held = frappe.db.sql("SELECT `custom_crm_archived` FROM `tabCustomer` WHERE `name` = %s FOR UPDATE", (account,))
+    if held and held[0][0]:
+        raise CrmApiException("INVALID_TRANSITION", ARCHIVED_ACCOUNT_EDIT)
     _lock_contact_pair(survivor_id, duplicate_id)
     # Under the locks, both Contacts are read again with a locking read, which returns the rows as committed by
     # now (lines and `modified` alike: another merge may have moved them while this one waited, and a save with
@@ -541,6 +580,10 @@ def delete_contact(
 
     assert_capability("contact:delete")
     doc = _require_contact(name)
+    # A Contact of an archived Account takes no change, this one included. The Account's row is taken FOR UPDATE (the
+    # Contact's save takes it so in its hook) before the Contact's, the order every writer of an Account's Contacts
+    # keeps; an Account that is gone is not archived.
+    assert_account_active(_contact_account(name), ARCHIVED_ACCOUNT_EDIT, for_update=True)
     frappe.db.sql("SELECT `name` FROM `tabContact` WHERE `name` = %s FOR UPDATE", (name,))
     savepoint = f"crm_contact_delete_{frappe.generate_hash(length=8)}"
     frappe.db.savepoint(savepoint)

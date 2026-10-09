@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { systemValueLabel } from '@/features/shared/system-labels'
 import { computed, onMounted, ref, watch } from 'vue'
-import { ArrowLeft, Cpu, Edit3, ExternalLink, MapPin, Wrench } from '@lucide/vue'
+import { Archive, ArchiveRestore, ArrowLeft, Cpu, Edit3, ExternalLink, MapPin, Wrench } from '@lucide/vue'
 import { RouterLink, useRoute, useRouter } from 'vue-router'
 import { api as defaultApi, CrmApiError, type CrmApi } from '@/api'
 import { mapRequestError } from '@/api/request-state'
@@ -15,6 +15,7 @@ import RequiredMark from '@/design-system/RequiredMark.vue'
 import PersonnelSelect from '@/design-system/PersonnelSelect.vue'
 import AccountSegmentSelect from '@/features/accounts/AccountSegmentSelect.vue'
 import { REGION_PRESETS, regionLabel } from '@/domain/regions'
+import { formatDisplayDateTime } from '@/domain/time'
 import SectionCard from '@/design-system/SectionCard.vue'
 import StatusBadge from '@/design-system/StatusBadge.vue'
 import { useI18n, useLocaleMessage } from '@/i18n'
@@ -49,17 +50,65 @@ const siteDrafts = ref<Array<SiteDto & { isNew?: boolean }>>([])
 const removedSiteIds = ref<string[]>([])
 const accountId = computed(() => String(route.params.accountId || ''))
 const relatedTools = computed(() => tools.value.filter((item) => item.accountId === accountId.value))
+const isManager = computed(() => app.bootstrap?.user.role === 'Manager')
+// Archived (by a Manager, in place of a delete): out of the list, the pickers and the figures with its Sites and
+// Contacts, read-only here until restored.
+// The Account the page shows: the one read for the Account in the URL (while another one loads, none), so that the
+// archive, its dialog and the edit act on the Account they name.
+const sameAccount = (left: string | undefined, right: string | undefined) => Boolean(left && right) && left!.trim().toLowerCase() === right!.trim().toLowerCase()
+const shownAccount = computed(() => sameAccount(accountDetail.value?.account.id, accountId.value) ? accountDetail.value!.account : null)
+const isArchived = computed(() => shownAccount.value?.archived === true)
 const canWrite = computed(() => {
-  if (!app.can('account:write') || !accountDetail.value) return false
-  return app.bootstrap?.user.role === 'Manager' || app.bootstrap?.user.id === accountDetail.value.account.owner
+  if (!app.can('account:write') || !shownAccount.value || isArchived.value) return false
+  return app.bootstrap?.user.role === 'Manager' || app.bootstrap?.user.id === shownAccount.value.owner
 })
+const canArchive = computed(() => isManager.value && Boolean(shownAccount.value) && !isArchived.value)
+const canUnarchive = computed(() => isManager.value && isArchived.value)
+const archiveOpen = ref(false), archiving = ref(false), archiveError = useLocaleMessage(), archiveRequestId = ref('')
+// The notice says how the Account comes back: a Manager restores it here, anyone else asks a Manager.
+const archivedNotice = computed(() => !shownAccount.value ? '' : t(isManager.value ? 'detail.archivedAccountNotice' : 'detail.archivedAccountNoticeReadOnly', {
+  by: personnelDisplayName(shownAccount.value.archivedBy ?? ''), at: formatDisplayDateTime(shownAccount.value.archivedAt ?? ''),
+}))
+function resetArchiveState() {
+  archiveOpen.value = false
+  archiveError.value = ''
+  archiveRequestId.value = ''
+}
+async function setArchived(archived: boolean) {
+  if (!shownAccount.value || archiving.value) return
+  const id = shownAccount.value.id
+  archiving.value = true
+  archiveError.value = ''
+  archiveRequestId.value = ''
+  try {
+    const result = await (archived ? props.apiClient.archiveAccount(id) : props.apiClient.unarchiveAccount(id))
+    // Answered for the Account shown: a page moved on to another Account meanwhile keeps that one.
+    if (!sameAccount(accountId.value, id) || accountDetail.value?.account.id !== id) return
+    accountDetail.value = { ...accountDetail.value, account: result.data }
+    archiveOpen.value = false
+    editOpen.value = false
+    // The profile reads the Account again: its own controls (the Sites) follow the archive.
+    profileVersion.value += 1
+  } catch (reason) {
+    if (!sameAccount(accountId.value, id)) return
+    const mapped = mapRequestError(reason)
+    archiveError.value = mapped.localizedMessage ?? mapped.message
+    archiveRequestId.value = mapped.requestId
+  } finally {
+    if (sameAccount(accountId.value, id)) archiving.value = false
+  }
+}
 let equipmentSequence = 0
 const regionOptionLabel = (value: string) => regionLabel(value, locale.value)
 
 function captureAccount(detail: Account360Dto) { accountDetail.value = detail }
+// The Account the profile editor was opened for, and its version then: a save goes to that one alone. While a save is
+// in flight no editor opens (its Sites are written from the drafts it was submitted with).
+const editedAccount = ref<{ id: string; modified?: string } | null>(null)
 function openEdit() {
-  if (!accountDetail.value) return
-  const account = accountDetail.value.account
+  if (editBusy.value || !shownAccount.value || !accountDetail.value) return
+  const account = shownAccount.value
+  editedAccount.value = { id: account.id, modified: account.modified }
   accountForm.value = { name: account.name, shortName: account.shortName, segment: account.segment, tier: account.tier, city: account.city, region: account.region, owner: account.owner, visibility: account.visibility ?? 'Private', customerKind: account.customerKind ?? '' }
   siteDrafts.value = accountDetail.value.sites.map((site) => ({ ...site }))
   removedSiteIds.value = []
@@ -70,34 +119,44 @@ function openEdit() {
 function submitEdit() { accountForm.value.confirmDuplicate = false; return saveAccount() }
 function saveAnyway() { accountForm.value.confirmDuplicate = true; return saveAccount() }
 async function saveAccount() {
+  if (!editedAccount.value) return
+  const { id, modified } = editedAccount.value
+  // The Sites as this editor submitted them (copies; its fields wait while the save is in flight): written to its
+  // Account, and each answer given back to the draft of the same id, so a retry after a failure repeats none of them.
+  const drafts = siteDrafts.value.map((site) => ({ ...site }))
+  const removed = [...removedSiteIds.value]
+  const current = () => editedAccount.value?.id === id
   askedName.value = accountForm.value.name
   editBusy.value = true
   editError.value = ''
   duplicateAccounts.value = ''
   try {
-    const accountResult = await props.apiClient.updateAccount(accountId.value, accountForm.value, accountDetail.value?.account.modified)
+    const accountResult = await props.apiClient.updateAccount(id, accountForm.value, modified)
+    // The version this save wrote: a retry after one of the Sites failed goes with it.
+    if (editedAccount.value?.id === id) editedAccount.value = { id, modified: accountResult.data.modified }
     if (!segments.value.includes(accountResult.data.segment)) segments.value = [...segments.value, accountResult.data.segment]
     if (accountResult.data.region && !regions.value.includes(accountResult.data.region)) regions.value = [...regions.value, accountResult.data.region]
-    if (accountDetail.value) {
+    if (accountDetail.value?.account.id === id) {
       accountDetail.value = { ...accountDetail.value, account: accountResult.data }
     }
-    for (let index = 0; index < siteDrafts.value.length; index += 1) {
-      const site = siteDrafts.value[index]!
+    for (const site of drafts) {
       const input = { name: site.name, city: site.city, type: site.type, process: site.process, status: site.status }
       const result = site.isNew
-        ? await props.apiClient.createAccountSite(accountId.value, input)
-        : await props.apiClient.updateAccountSite(accountId.value, site.id, input)
-      siteDrafts.value[index] = result.data
+        ? await props.apiClient.createAccountSite(id, input)
+        : await props.apiClient.updateAccountSite(id, site.id, input)
+      const at = siteDrafts.value.findIndex((draft) => draft.id === site.id)
+      if (at >= 0) siteDrafts.value[at] = result.data
     }
-    while (removedSiteIds.value.length) {
-      const siteId = removedSiteIds.value[0]!
-      await props.apiClient.deleteAccountSite(accountId.value, siteId)
-      removedSiteIds.value.shift()
+    for (const siteId of removed) {
+      await props.apiClient.deleteAccountSite(id, siteId)
+      removedSiteIds.value = removedSiteIds.value.filter((removedId) => removedId !== siteId)
     }
-    editOpen.value = false
+    if (current()) editOpen.value = false
     profileVersion.value += 1
     await loadEquipment()
   } catch (reason) {
+    // Said in this Account's editor; one closed when the page moved on is not reopened for it.
+    if (!current()) return
     const mapped = mapRequestError(reason)
     editError.value = mapped.localizedMessage ?? mapped.message
     // Accounts named like the new name: the server names the ones the user may see and waits for their word.
@@ -168,13 +227,16 @@ async function loadRegions() {
   }
 }
 
-watch(accountId, loadEquipment)
+// Another Account: its archive state, error and dialog are its own.
+watch(accountId, () => { resetArchiveState(); archiving.value = false; editOpen.value = false; editedAccount.value = null; void loadEquipment() })
 onMounted(() => { void loadEquipment(); void loadSegments(); void loadRegions() })
 </script>
 
 <template>
   <div class="account-detail-page">
-    <div class="detail-actions"><RouterLink class="detail-back-button" :to="backTo"><ArrowLeft :size="14" />{{ t('detail.backAccounts') }}</RouterLink><button v-if="canWrite" class="primary-button" type="button" data-testid="edit-account" :disabled="!accountDetail" @click="openEdit"><Edit3 :size="14" />{{ t('detail.editProfile') }}</button></div>
+    <div class="detail-actions"><RouterLink class="detail-back-button" :to="backTo"><ArrowLeft :size="14" />{{ t('detail.backAccounts') }}</RouterLink><div class="detail-action-group"><button v-if="canArchive" class="secondary-button archive-button" type="button" data-archive-account :disabled="archiving" @click="archiveError = ''; archiveOpen = true"><Archive :size="14" />{{ t('detail.archiveAccount') }}</button><button v-if="canUnarchive" class="secondary-button" type="button" data-unarchive-account :disabled="archiving" @click="setArchived(false)"><ArchiveRestore :size="14" />{{ t('detail.unarchiveAccount') }}</button><button v-if="canWrite" class="primary-button" type="button" data-testid="edit-account" :disabled="!accountDetail || editBusy" @click="openEdit"><Edit3 :size="14" />{{ t('detail.editProfile') }}</button></div></div>
+    <p v-if="archiveError && !archiveOpen" class="form-error" data-archive-error>{{ archiveError }} <small v-if="archiveRequestId">{{ locale === 'en-US' ? 'Request ID' : '请求编号' }} {{ archiveRequestId }}</small></p>
+    <p v-if="isArchived" class="archived-notice" data-archived-notice>{{ archivedNotice }}</p>
     <div class="account-detail-layout">
       <AccountProfile :key="profileVersion" :account-id="accountId" :api-client="props.apiClient" @loaded="captureAccount" @manage-sites="openEdit" />
       <aside class="equipment-column">
@@ -196,9 +258,14 @@ onMounted(() => { void loadEquipment(); void loadSegments(); void loadRegions() 
         </SectionCard>
       </aside>
     </div>
+    <ModalShell v-if="archiveOpen && shownAccount" :title="t('detail.archiveAccount')" eyebrow="ARCHIVE" :busy="archiving" :submit-label="t('detail.archiveAccountAction')" danger @close="resetArchiveState" @submit="setArchived(true)">
+      <p class="archive-note">{{ t('detail.archiveAccountWarning', { name: shownAccount.name }) }}</p>
+      <p v-if="archiveError" class="form-error" data-archive-error>{{ archiveError }} <small v-if="archiveRequestId">{{ locale === 'en-US' ? 'Request ID' : '请求编号' }} {{ archiveRequestId }}</small></p>
+    </ModalShell>
     <ModalShell v-if="editOpen" :title="t('detail.editAccount')" eyebrow="ACCOUNT MASTER" :busy="editBusy" @close="editOpen = false" @submit="submitEdit">
       <p v-if="editError" class="form-error">{{ editError }}</p>
       <p v-if="duplicateAccounts && accountForm.name === askedName" class="form-error duplicate-accounts" data-duplicate-accounts>{{ t('accounts.duplicateHint', { names: duplicateAccounts }) }} <button type="button" class="secondary-button" data-save-anyway :disabled="editBusy" @click="saveAnyway">{{ t('accounts.saveAnyway') }}</button></p>
+      <fieldset class="account-editor-fields" :disabled="editBusy" data-account-editor-fields>
       <div class="account-form-grid">
         <label><span>{{ t('detail.accountName') }}<RequiredMark /></span><input v-model="accountForm.name" :aria-label="t('detail.accountName')" required /></label>
         <label><span>{{ t('detail.accountShortName') }}<RequiredMark /></span><input v-model="accountForm.shortName" :aria-label="t('detail.accountShortName')" required /></label>
@@ -226,12 +293,13 @@ onMounted(() => { void loadEquipment(); void loadSegments(); void loadRegions() 
           <button type="button" class="site-remove" :data-remove-site="site.id" @click="removeSiteDraft(index)">{{ t('detail.removeSite') }}</button>
         </article>
       </section>
+      </fieldset>
     </ModalShell>
   </div>
 </template>
 
 <style scoped>
 .account-detail-page{display:grid;gap:14px}.detail-back-button{justify-self:start}.account-detail-layout{display:grid;grid-template-columns:minmax(0,1fr) 278px;gap:14px;align-items:start}.equipment-column{position:sticky;top:16px}.equipment-heading{display:flex;align-items:center;gap:9px;margin-bottom:12px;padding:11px;background:var(--crm-surface);border:1px solid var(--crm-line);border-radius:10px}.equipment-heading>span{display:grid;width:34px;height:34px;place-items:center;color:var(--crm-brand-ink);background:var(--crm-teal-soft);border-radius:9px}.equipment-heading>div{display:grid;gap:3px}.equipment-heading strong{color:var(--crm-navy);font-size:12px}.equipment-heading small{color:var(--crm-text-muted);font-size:9px}.equipment-list{display:grid;gap:9px}.equipment-list article{display:grid;gap:6px;padding:11px;background:#fff;border:1px solid var(--crm-line);border-radius:10px}.equipment-list header{display:flex;align-items:center;justify-content:space-between;gap:7px}.equipment-list header strong{font-size:11px}.equipment-list b{color:var(--crm-teal);font-size:9px}.equipment-list p{display:flex;align-items:center;gap:5px;margin:0;color:var(--crm-text-muted);font-size:9px}.equipment-list a,.equipment-more{display:flex;align-items:center;justify-content:space-between;color:var(--crm-link);font-size:9px;font-weight:750}.equipment-more{margin-top:12px;padding-top:10px;border-top:1px solid var(--crm-line)}.equipment-empty,.equipment-warning{margin:0;padding:16px 8px;color:var(--crm-text-muted);font-size:10px;line-height:1.6;text-align:center}.equipment-warning{color:#7b5c15;background:var(--crm-warning-soft);border-radius:9px}@media(max-width:1100px){.account-detail-layout{grid-template-columns:1fr}.equipment-column{position:static}.equipment-list{grid-template-columns:repeat(2,minmax(0,1fr))}}@media(max-width:620px){.equipment-list{grid-template-columns:1fr}}
-.detail-actions{display:flex;align-items:center;justify-content:space-between;gap:12px}.detail-actions .primary-button{display:flex;align-items:center;gap:6px}.detail-actions .primary-button:disabled{opacity:.5;cursor:not-allowed}.account-form-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}.account-form-grid label{display:grid;gap:6px}.account-form-grid label.wide{grid-column:1/-1}.account-form-grid span{color:var(--crm-text-muted);font-size:9px;font-weight:700}.account-form-grid input,.account-form-grid select{height:38px;padding:0 10px;background:#fff;border:1px solid var(--crm-line);border-radius:8px;font:inherit}.account-form-grid input:focus,.account-form-grid select:focus{border-color:var(--crm-teal);outline:0}.form-error{margin:0 0 12px;padding:10px;color:var(--crm-danger);background:var(--crm-danger-soft);border-radius:8px;font-size:9px}@media(max-width:560px){.account-form-grid{grid-template-columns:1fr}.account-form-grid label.wide{grid-column:auto}.detail-actions{align-items:stretch;flex-direction:column}.detail-actions>*{justify-content:center}}
-.site-editor{display:grid;gap:12px;margin-top:18px;padding-top:16px;border-top:1px solid var(--crm-line)}.site-editor>header{display:flex;align-items:center;justify-content:space-between;gap:12px}.site-editor>header div{display:grid;gap:3px}.site-editor>header strong{color:var(--crm-navy);font-size:11px}.site-editor>header small,.site-empty{color:var(--crm-text-muted);font-size:8px}.site-empty{margin:0;padding:14px;background:var(--crm-surface);border-radius:8px;text-align:center}.site-draft{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;padding:12px;background:var(--crm-surface);border:1px solid var(--crm-line);border-radius:10px}.site-draft>b{grid-column:1/-1;color:var(--crm-teal);font-size:9px}.site-draft label{display:grid;gap:5px}.site-draft label:last-child{grid-column:1/-1}.site-draft span{color:var(--crm-text-muted);font-size:8px;font-weight:700}.site-draft input,.site-draft select{height:36px;padding:0 9px;background:#fff;border:1px solid var(--crm-line);border-radius:8px;font:inherit}.site-remove{grid-column:1/-1;justify-self:start;margin-top:2px;padding:6px 12px;font-size:9px;font-weight:700;color:var(--crm-danger);background:var(--crm-danger-soft);border:1px solid transparent;border-radius:8px;cursor:pointer}@media(max-width:560px){.site-editor>header{align-items:stretch;flex-direction:column}.site-draft{grid-template-columns:1fr}.site-draft>b,.site-draft label:last-child{grid-column:auto}}
+.detail-actions{display:flex;align-items:center;justify-content:space-between;gap:12px}.detail-action-group{display:flex;align-items:center;gap:8px}.detail-actions .primary-button,.detail-actions .secondary-button{display:flex;align-items:center;gap:6px}.detail-actions .archive-button{color:var(--crm-danger);background:var(--crm-danger-soft);border-color:transparent}.archived-notice{margin:0;padding:10px 12px;color:#5c4a16;background:#fff5df;border:1px solid #f0dda9;border-radius:9px;font-size:10px;line-height:1.6}.archive-note{margin:0 0 10px;color:var(--crm-text);font-size:11px;line-height:1.6}.detail-actions .primary-button:disabled{opacity:.5;cursor:not-allowed}.account-form-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}.account-form-grid label{display:grid;gap:6px}.account-form-grid label.wide{grid-column:1/-1}.account-form-grid span{color:var(--crm-text-muted);font-size:9px;font-weight:700}.account-form-grid input,.account-form-grid select{height:38px;padding:0 10px;background:#fff;border:1px solid var(--crm-line);border-radius:8px;font:inherit}.account-form-grid input:focus,.account-form-grid select:focus{border-color:var(--crm-teal);outline:0}.form-error{margin:0 0 12px;padding:10px;color:var(--crm-danger);background:var(--crm-danger-soft);border-radius:8px;font-size:9px}@media(max-width:560px){.account-form-grid{grid-template-columns:1fr}.account-form-grid label.wide{grid-column:auto}.detail-actions{align-items:stretch;flex-direction:column}.detail-actions>*{justify-content:center}}
+.account-editor-fields{min-width:0;margin:0;padding:0;border:0}.site-editor{display:grid;gap:12px;margin-top:18px;padding-top:16px;border-top:1px solid var(--crm-line)}.site-editor>header{display:flex;align-items:center;justify-content:space-between;gap:12px}.site-editor>header div{display:grid;gap:3px}.site-editor>header strong{color:var(--crm-navy);font-size:11px}.site-editor>header small,.site-empty{color:var(--crm-text-muted);font-size:8px}.site-empty{margin:0;padding:14px;background:var(--crm-surface);border-radius:8px;text-align:center}.site-draft{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;padding:12px;background:var(--crm-surface);border:1px solid var(--crm-line);border-radius:10px}.site-draft>b{grid-column:1/-1;color:var(--crm-teal);font-size:9px}.site-draft label{display:grid;gap:5px}.site-draft label:last-child{grid-column:1/-1}.site-draft span{color:var(--crm-text-muted);font-size:8px;font-weight:700}.site-draft input,.site-draft select{height:36px;padding:0 9px;background:#fff;border:1px solid var(--crm-line);border-radius:8px;font:inherit}.site-remove{grid-column:1/-1;justify-self:start;margin-top:2px;padding:6px 12px;font-size:9px;font-weight:700;color:var(--crm-danger);background:var(--crm-danger-soft);border:1px solid transparent;border-radius:8px;cursor:pointer}@media(max-width:560px){.site-editor>header{align-items:stretch;flex-direction:column}.site-draft{grid-template-columns:1fr}.site-draft>b,.site-draft label:last-child{grid-column:auto}}
 </style>

@@ -35,7 +35,9 @@ MAX_DEFINITION_BYTES = 256 * 1024
 MAX_ID = 140
 _CONTROL_CHARACTERS = re.compile(r"[\x00-\x1f\x7f]")
 
-# `tabCRM Opportunity` stays unaliased: the row scope condition refers to it by that name.
+# `tabCRM Opportunity` stays unaliased: the row scope condition refers to it by that name. An archived Opportunity
+# leaves the board, and so do the deals of an archived Account (closed, or archived themselves), as they leave the
+# cockpit's other figures.
 _ROWS_SQL = """
 SELECT `tabCRM Opportunity`.`name` AS `name`, `tabCRM Opportunity`.`title` AS `title`,
     `tabCRM Opportunity`.`account` AS `account`, `crm_board_customer`.`customer_name` AS `customer_name`,
@@ -48,7 +50,7 @@ SELECT `tabCRM Opportunity`.`name` AS `name`, `tabCRM Opportunity`.`title` AS `t
     CAST(`tabCRM Opportunity`.`amount_cny` AS CHAR) AS `amount_cny`
 FROM `tabCRM Opportunity`
 LEFT JOIN `tabCustomer` AS `crm_board_customer` ON `crm_board_customer`.`name` = `tabCRM Opportunity`.`account`
-WHERE `tabCRM Opportunity`.`archived` = 0 AND ({scope})
+WHERE `tabCRM Opportunity`.`archived` = 0 AND COALESCE(`crm_board_customer`.`custom_crm_archived`, 0) = 0 AND ({scope})
 """
 _ACTIONS_SQL = """
 SELECT `crm_board_action`.`name` AS `name`, `crm_board_action`.`opportunity` AS `opportunity`,
@@ -56,8 +58,9 @@ SELECT `crm_board_action`.`name` AS `name`, `crm_board_action`.`opportunity` AS 
     `crm_board_action`.`status` AS `status`, `crm_board_action`.`archived` AS `archived`
 FROM `tabCRM Opportunity Action` AS `crm_board_action`
 INNER JOIN `tabCRM Opportunity` ON `tabCRM Opportunity`.`name` = `crm_board_action`.`opportunity`
+LEFT JOIN `tabCustomer` AS `crm_board_action_customer` ON `crm_board_action_customer`.`name` = `tabCRM Opportunity`.`account`
 WHERE `crm_board_action`.`status` IN ('Open', 'In Progress', 'Blocked', 'Rescheduled') AND `crm_board_action`.`archived` = 0
-  AND `tabCRM Opportunity`.`archived` = 0 AND ({scope})
+  AND `tabCRM Opportunity`.`archived` = 0 AND COALESCE(`crm_board_action_customer`.`custom_crm_archived`, 0) = 0 AND ({scope})
 """
 
 

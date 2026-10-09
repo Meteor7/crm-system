@@ -13,7 +13,7 @@ from rayher_crm.api.v1.errors import CrmApiException
 from rayher_crm.permissions.roles import assert_capability, resolve_crm_role
 from rayher_crm.permissions.scope import conditions_for_doctype, has_crm_permission
 from rayher_crm.services.opportunity_archive import ARCHIVED_OPPORTUNITY_LINK, assert_opportunity_not_archived
-from rayher_crm.services.accounts import _require_account
+from rayher_crm.services.accounts import require_active_account
 from rayher_crm.services.common import (
     ensure_server_generated_id,
     normalize_pagination,
@@ -166,7 +166,10 @@ def _validate_input(payload: dict[str, Any]) -> dict[str, Any]:
     if request_mode not in {"Opportunity", "Self Test"}:
         raise CrmApiException("VALIDATION_ERROR", "requestMode must be Opportunity or Self Test.")
     account_id = required_text(payload, "accountId") if request_mode == "Opportunity" else ""
-    account = _require_account(account_id) if account_id else None
+    # No Demo Request is started under an archived Account (the flag read under a shared lock on the Account's
+    # row, before the Opportunity's lock below and the Demo Request's). One it has has ended (the Account's archive
+    # waits for every one to end), so none of its own is edited either.
+    account = require_active_account(account_id) if account_id else None
     contact_id = str(payload.get("primaryContactId") or "").strip() if account_id else ""
     if request_mode == "Opportunity" and not contact_id:
         raise CrmApiException(

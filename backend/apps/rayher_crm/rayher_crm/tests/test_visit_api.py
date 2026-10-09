@@ -15,7 +15,7 @@ from rayher_crm.services.opportunity_stages import QUALIFIED_OPPORTUNITY
 from rayher_crm.services.sites import create_site
 from rayher_crm.services.visit_meetings import update_record as update_meeting_record
 from rayher_crm.services.visit_meetings import upload as upload_meeting_file
-from rayher_crm.services.visits import create_visit, delete_visit, get_visit, list_visits, review_visit, update_visit
+from rayher_crm.services.visits import create_visit, get_visit, list_visits, review_visit, update_visit
 
 class TestVisitApi(FrappeTestCase):
     def setUp(self):
@@ -1379,16 +1379,3 @@ class TestVisitApi(FrappeTestCase):
         self.assertTrue(roles["CRM Sales"].read)
         self.assertFalse(bool(roles["CRM Sales"].write) or bool(roles["CRM Sales"].create))
         self.assertFalse(bool(roles["CRM Engineer"].read))
-
-    def test_only_manager_can_delete_visit(self):
-        account, contact = self._records(self.other_sales, "Delete")
-        visit = create_visit(self._input(account, contact, self.other_sales))
-
-        frappe.set_user(self.sales)
-        with self.assertRaises(frappe.PermissionError):
-            delete_visit(visit["id"])
-        self.assertTrue(frappe.db.exists("CRM Visit", visit["id"]))
-
-        frappe.set_user(self.manager)
-        self.assertEqual(delete_visit(visit["id"]), {"id": visit["id"], "status": "Deleted"})
-        self.assertFalse(frappe.db.exists("CRM Visit", visit["id"]))

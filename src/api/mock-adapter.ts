@@ -146,11 +146,6 @@ export function createMockApi(options: {
     meta: { requestId: requestId(), generatedAt: now },
     warnings,
   })
-  const assertManagerDelete = () => {
-    if (role !== 'Manager') {
-      throw new CrmApiError('PERMISSION_DENIED', '只有 Manager 可以删除 Sales 业务记录', requestId(), false)
-    }
-  }
   const pageResponse = <T>(items: T[], query: ListQuery = {}) => {
     const page = Number.isInteger(query.page) && Number(query.page) > 0 ? Number(query.page) : 1
     const pageSize = Number.isInteger(query.pageSize) && Number(query.pageSize) > 0
@@ -1843,15 +1838,14 @@ export function createMockApi(options: {
       return response(currentAccounts().find((item) => item.id === id)!)
     },
 
-    async deleteAccount(id: string) {
+    // The archive is a server rule with no behaviour here; tests stub these (AGENTS.md).
+    async archiveAccount(id: string) {
       await wait()
-      assertManagerDelete()
-      const index = localAccounts.findIndex((item) => item.id === id)
-      if (index < 0) throw new CrmApiError('ACCOUNT_NOT_FOUND', '未找到该客户', requestId(), false)
-      localAccounts.splice(index, 1)
-      delete localSites[id]
-      salesRepository.save()
-      return response({ id, status: 'Deleted' as const })
+      throw new CrmApiError('INVALID_TRANSITION', `The mock API does not archive Accounts (${id}).`, requestId(), false)
+    },
+    async unarchiveAccount(id: string) {
+      await wait()
+      throw new CrmApiError('INVALID_TRANSITION', `The mock API does not archive Accounts (${id}).`, requestId(), false)
     },
 
     async listAccountSites() {

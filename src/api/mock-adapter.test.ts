@@ -949,14 +949,13 @@ describe('mock CRM API', () => {
       .rejects.toMatchObject({ code: 'PERMISSION_DENIED' })
   })
 
-  it('allows only Manager to delete top-level Sales records', async () => {
-    const sales = createMockApi({ latency: 0, role: 'Sales', userName: 'Demo Staff 01' })
-    await expect(sales.deleteAccount('ACC-001')).rejects.toMatchObject({ code: 'PERMISSION_DENIED' })
-
+  it('has no archive of its own for Accounts: the stubs refuse, and tests stub them', async () => {
     const manager = createMockApi({ latency: 0, role: 'Manager' })
     const accountId = (await manager.listAccounts({ pageSize: 1 })).data.items[0].id
 
-    await expect(manager.deleteAccount(accountId)).resolves.toMatchObject({ data: { id: accountId, status: 'Deleted' } })
+    await expect(manager.archiveAccount(accountId)).rejects.toMatchObject({ code: 'INVALID_TRANSITION' })
+    await expect(manager.unarchiveAccount(accountId)).rejects.toMatchObject({ code: 'INVALID_TRANSITION' })
+    expect((await manager.listAccounts({ accountId })).data.items.map((item) => item.id)).toEqual([accountId])
   })
 
   it('gives equipment engineers assigned technical access without CRM write access', async () => {

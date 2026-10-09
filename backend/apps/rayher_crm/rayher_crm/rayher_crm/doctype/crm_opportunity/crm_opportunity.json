@@ -7,7 +7,7 @@
   "engine": "InnoDB",
   "field_order": ["account", "site", "source_lead", "title", "amount", "currency", "original_amount", "amount_cny", "po_date", "shipment_date", "fat_date", "opportunity_owner", "tool_type", "stage", "stage_changed_at", "pending_stage_advance", "budget_approved_on", "probability_level", "forecast", "probability", "score", "sale_type", "sub_region", "payment_milestones", "competition", "competitors", "single_sales_objective", "win_reason", "lost_reason", "lost_at_stage", "lost_at", "lost_by", "strengths", "red_flags", "red_flag_records", "information_needed", "product_scorecard_url", "deal_scorecard_url", "legacy_stage", "archived", "archived_at", "archived_by"],
   "fields": [
-    {"fieldname": "account", "fieldtype": "Link", "in_list_view": 1, "label": "Account", "options": "Customer", "reqd": 1},
+    {"fieldname": "account", "fieldtype": "Link", "in_list_view": 1, "label": "Account", "options": "Customer", "reqd": 1, "search_index": 1},
     {"fieldname": "site", "fieldtype": "Link", "in_list_view": 1, "label": "Site", "options": "Address", "reqd": 1},
     {"fieldname": "source_lead", "fieldtype": "Link", "label": "Source Lead", "options": "Lead", "unique": 1},
     {"fieldname": "title", "fieldtype": "Data", "in_list_view": 1, "label": "Title", "reqd": 1},
@@ -53,7 +53,7 @@
   "index_web_pages_for_search": 0,
   "is_submittable": 0,
   "links": [],
-  "modified": "2026-10-03 09:00:00.000000",
+  "modified": "2026-10-08 09:00:00.000000",
   "modified_by": "Administrator",
   "module": "Rayher CRM",
   "name": "CRM Opportunity",

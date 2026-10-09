@@ -14,7 +14,8 @@ from rayher_crm.api.v1.errors import CrmApiException
 from rayher_crm.permissions.roles import assert_capability, resolve_crm_role
 from rayher_crm.permissions.scope import conditions_for_doctype
 from rayher_crm.services.contacts import _contact_account, _require_contact
-from rayher_crm.services.accounts import _require_account
+from rayher_crm.services.accounts import ARCHIVED_ACCOUNT_EDIT, _require_account, assert_account_active
+from rayher_crm.services.private_file_lifecycle import lock_upload_contents
 from rayher_crm.services.file_security import (
     MAX_FILE_BYTES,
     MAX_FILES_PER_REQUEST,
@@ -23,6 +24,7 @@ from rayher_crm.services.file_security import (
     validate_and_scan,
 )
 from rayher_crm.services.common import normalize_pagination, to_iso_timestamp
+from rayher_crm.services.concurrency import committed_reader
 
 
 def _part(part: Mapping[str, Any]) -> tuple[str, str, bytes]:
@@ -62,6 +64,32 @@ def _audit(entity_id: str, account: str | None, outcome: str, reason: str = "") 
     frappe.local.flags.commit = True
 
 
+# A Contact and the Accounts it links (none: one row, its link empty).
+CONTACT_ACCOUNTS_QUERY = (
+    "SELECT `crm_link`.`link_name` FROM `tabContact` AS `crm_contact` LEFT JOIN `tabDynamic Link` AS `crm_link`"
+    " ON `crm_link`.`parent` = `crm_contact`.`name` AND `crm_link`.`parenttype` = 'Contact'"
+    " AND `crm_link`.`parentfield` = 'links' AND `crm_link`.`link_doctype` = 'Customer'"
+    " WHERE `crm_contact`.`name` = %s"
+)
+
+
+def _current_contact_accounts(contact: str) -> set[str]:
+    """The Accounts a Contact links as committed by now, read on a connection of its own (no lock: a locking read of
+    the Contact's links would lock a range of the Dynamic Link index other Contacts and Addresses share); a Contact
+    this transaction made and has not committed, as the request sees it. Read under its Account's row, held shared
+    to the commit, which every move of the Contact takes exclusively (its save locks the Accounts it leaves and
+    joins, permissions.scope.revoke_contact_shares_entering_crm), the answer holds to the commit."""
+
+    read, close = committed_reader()
+    try:
+        rows = read(CONTACT_ACCOUNTS_QUERY, (contact,))
+    finally:
+        close()
+    if not rows:
+        rows = frappe.db.sql(CONTACT_ACCOUNTS_QUERY, (contact,))
+    return {row[0] for row in rows if row[0]}
+
+
 def upload_contact_files(contact_id: str, uploads: Sequence[Mapping[str, Any]], scanner: MalwareScanner | None = None) -> list[dict[str, Any]]:
     assert_capability("contact:write")
     contact = _require_contact(contact_id)
@@ -78,6 +106,16 @@ def upload_contact_files(contact_id: str, uploads: Sequence[Mapping[str, Any]], 
         raise CrmApiException("VALIDATION_ERROR", "Upload exceeds the 100 MiB request limit.")
 
     validated = [(name, validate_and_scan(name, mime, content, scanner), content) for name, mime, content in parts]
+    # The files' content locks first, as a Status save takes them (private_file_lifecycle: no content lock is waited
+    # for while the Account's row is held). Then the files of an archived Account's Contacts take no change: the flag
+    # is read under a shared lock on the Account's row once the files are scanned (the scan takes a while; the row is
+    # held from here to the commit), before they are written.
+    lock_upload_contents((name, content) for name, _, content in validated)
+    assert_account_active(account, ARCHIVED_ACCOUNT_EDIT)
+    # A Contact moved to another Account while its files were scanned (that Account may be archived) is refused as
+    # changed, before anything is written.
+    if account not in _current_contact_accounts(contact.name):
+        raise CrmApiException("VERSION_CONFLICT", "The record was changed by another request.")
     savepoint = f"crm_contact_files_{frappe.generate_hash(length=8)}"
     frappe.db.savepoint(savepoint)
     result = []
@@ -156,6 +194,13 @@ def delete_contact_file(file_id: str) -> dict[str, str]:
         raise CrmApiException("CONTACT_FILE_NOT_FOUND", "Contact file was not found.")
     if not frappe.has_permission("CRM Contact File", "read", doc=meta, user=frappe.session.user):
         raise CrmApiException("SCOPE_DENIED", "The file is outside the current user scope.")
+    # The files of an archived Account's Contacts take no change (the Contact's Account as it stands now, the
+    # one the file was uploaded under if the Contact has none; one that is gone is not archived).
+    account = _contact_account(meta.contact) or meta.account
+    assert_account_active(account, ARCHIVED_ACCOUNT_EDIT)
+    # A Contact moved meanwhile is refused as changed, as an upload is.
+    if account not in (_current_contact_accounts(meta.contact) or {meta.account}):
+        raise CrmApiException("VERSION_CONFLICT", "The record was changed by another request.")
     meta.deleted = 1
     meta.deleted_by = frappe.session.user
     meta.deleted_at = now_datetime()

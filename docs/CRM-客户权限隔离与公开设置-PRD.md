@@ -18,7 +18,7 @@
 - Sales 默认只能查看和编辑自己负责的私有客户。
 - 客户创建或编辑时可设置客户可见性：`Private`（私有）或 `Public`（公开）。
 - 公开客户仅将客户主档和联系人开放给所有 Sales 只读；Site、Pipeline 指标、客户文件及下游业务记录不因 Public 自动开放。
-- Manager 对全部客户拥有完整查看、创建、编辑、删除和权限变更能力。
+- Manager 对全部客户拥有完整查看、创建、编辑、归档（及取消归档）和权限变更能力。
 - Contact 继承 Account 的访问范围；Site、Pipeline 指标和客户文件仅 Account 负责人及 Manager 可见。
 - Opportunity、Booking、Installed Tool、Demo、Evaluation、Visit、Quotation、RFQ 等对象保留独立负责人范围，同时必须受 Private Account 的父级边界约束。
 - 后端强制执行权限，前端隐藏或禁用不能替代后端校验。
@@ -55,7 +55,7 @@
 | 修改公开/私有设置 | 是 | 否 | 是 | 否 | 是 |
 | 修改客户负责人 | 否，提交后由 Manager 处理 | 否 | 否，提交后由 Manager 处理 | 否 | 是 |
 | 创建客户 | 是，默认 Private | 是，不能代他人创建 | 是，可选择 Public | 是，不能代他人创建 | 是 |
-| 删除客户 | 否 | 否 | 否 | 否 | 是 |
+| 归档 / 取消归档客户 | 否 | 否 | 否 | 否 | 是 |
 | 查看关联联系人 | 是 | 否 | 是 | 是 | 是 |
 | 编辑关联联系人 | 是 | 否 | 是 | 否 | 是 |
 | 查看 Site、Pipeline 指标 | 是 | 否 | 是 | 否 | 是 |
@@ -110,7 +110,7 @@
 Manager 无论 Account 为 Private 还是 Public，均可：
 
 - 查看全部客户及全部关联数据；
-- 创建、编辑、删除客户；
+- 创建、编辑、归档和取消归档客户；
 - 修改负责人和 visibility；
 - 处理 Sales 的负责人转移申请；
 - 查看权限变更审计记录。
@@ -236,7 +236,7 @@ AND (account.owner == user OR account.visibility == Public)
 - `visibility` 必须校验为合法枚举值。
 - Sales 写入 Account 时只能使用本人作为 owner。
 - Sales 修改 Account 时必须是 owner；Manager 可修改任意 Account。
-- 非负责人 Sales 对 Public Account 的编辑、负责人变更、删除请求统一返回 `SCOPE_DENIED` 或 `PERMISSION_DENIED`。
+- 非负责人 Sales 对 Public Account 的编辑、负责人变更、归档请求统一返回 `SCOPE_DENIED` 或 `PERMISSION_DENIED`。
 - 返回错误不得包含私有客户的敏感字段。
 
 ### 7.3 审计日志
@@ -246,7 +246,7 @@ AND (account.owner == user OR account.visibility == Public)
 - 客户创建；
 - visibility 从 Private/Public 的变更；
 - 客户负责人变更；
-- Manager 删除客户；
+- Manager 归档和取消归档客户；
 - 越权访问或写入拒绝。
 
 审计字段包括：操作者、客户 ID、旧值、新值、操作时间、请求 ID、结果。
@@ -275,7 +275,7 @@ Public 客户改回 Private 后，Sales B 立即无法继续访问客户详情�
 
 ### AC-04 Manager 全量权限
 
-Manager 可以查看、编辑、删除任意 Private/Public 客户，并可修改负责人和 visibility。
+Manager 可以查看、编辑、归档（及取消归档）任意 Private/Public 客户，并可修改负责人和 visibility。
 
 ### AC-05 越权接口防护
 

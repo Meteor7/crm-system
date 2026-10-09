@@ -10,7 +10,15 @@ import frappe
 from rayher_crm.api.v1.errors import CrmApiException
 from rayher_crm.permissions.roles import assert_capability, resolve_crm_role
 from rayher_crm.permissions.scope import conditions_for_doctype
-from rayher_crm.services.accounts import _require_account
+from rayher_crm.services.accounts import (
+    ARCHIVED_ACCOUNT_EDIT,
+    ARCHIVED_ACCOUNT_LINK,
+    ARCHIVED_ACCOUNT_REOPEN,
+    _require_account,
+    account_archived,
+    lock_accounts,
+    require_active_account,
+)
 from rayher_crm.services.common import (
     archive_state,
     ensure_server_generated_id,
@@ -154,8 +162,18 @@ def unarchive_booking(name: str) -> dict[str, Any]:
     """Bring an archived Booking back: every field as it was, its version moved on. A Booking not archived is left
     as it is."""
 
+    # The Account's row first (a shared lock), then the Booking's: a Booking is not restored under an archived
+    # Account, which would put an order in progress under it. The Account's lock is taken whatever the snapshot says
+    # of the Booking (one archived since is seen under its own lock below); the Account of an archived Booking does
+    # not change (it takes no edit).
+    current = require_manager_scoped_document("CRM Booking", name, "deal:write", "BOOKING_NOT_FOUND")
+    account_is_archived = account_archived(current.account, shared_lock=True)
     doc = require_manager_scoped_document("CRM Booking", name, "deal:write", "BOOKING_NOT_FOUND", for_update=True)
+    if doc.account != current.account:
+        raise CrmApiException("VERSION_CONFLICT", "The record was changed by another request.")
     if doc.archived:
+        if account_is_archived:
+            raise CrmApiException("INVALID_TRANSITION", ARCHIVED_ACCOUNT_REOPEN)
         _set_archived(doc, False)
     return serialize_booking(doc)
 
@@ -218,7 +236,13 @@ def _validate_source(account_id: str, source: str, source_opportunity: str, book
 
 def _validate_booking(payload: dict[str, Any], booking_id: str | None = None) -> dict[str, Any]:
     account_id = required_text(payload, "accountId")
-    _require_account(account_id)
+    # No Booking is created under an archived Account (the flag read under a shared lock on the Account's row,
+    # before any other lock of the request). An edit reads the flag before its locks too, and decides in
+    # update_booking (no move under an archived Account, no order put back in progress under one).
+    if booking_id is None:
+        require_active_account(account_id)
+    else:
+        _require_account(account_id)
     contact_id = required_text(payload, "primaryContactId")
     _validate_contact(contact_id, account_id)
     status = validate_choice(payload.get("status"), "status", BOOKING_STATUSES)
@@ -566,6 +590,14 @@ def update_booking(name: str, payload: dict[str, Any], expected_modified: Any) -
     assert_booking_not_archived(current)
     if current.installed_tool or current.status == "Completed":
         raise CrmApiException("BOOKING_LOCKED", "Converted Booking cannot be edited.")
+    # The Accounts the edit touches, the Booking's own and the one it would move to (that one in the caller's read
+    # scope first: an id guessed answers as one that does not exist, archived or not): their flags read under shared
+    # locks on their rows, in name order, before the Opportunity's and the Booking's (the order the Account's
+    # archive takes them in).
+    target_account = str(payload.get("accountId") or "").strip() or current.account
+    if target_account != current.account:
+        target_account = _require_account(target_account).name
+    archived_accounts = lock_accounts((current.account, target_account))
     _lock_source_opportunity(current)
     doc = lock_document("CRM Booking", name, expected_modified, "NOT_FOUND")
     if not frappe.has_permission("CRM Booking", "read", doc=doc, user=frappe.session.user):
@@ -573,6 +605,9 @@ def update_booking(name: str, payload: dict[str, Any], expected_modified: Any) -
     assert_booking_not_archived_now(doc.name)
     if doc.installed_tool or doc.status == "Completed":
         raise CrmApiException("BOOKING_LOCKED", "Converted Booking cannot be edited.")
+    if doc.account != current.account:
+        # Moved by another request since the Accounts were locked (its version moved too).
+        raise CrmApiException("VERSION_CONFLICT", "The record was changed by another request.")
     merged = _current_input(doc)
     recorded_amount_cny = merged["amountCny"]
     merged.update(payload)
@@ -582,6 +617,17 @@ def update_booking(name: str, payload: dict[str, Any], expected_modified: Any) -
         raise CrmApiException("BOOKING_SOURCE_INVALID", "A Booking's source cannot change.")
     if doc.source == "Opportunity":
         _assert_opportunity_booking_edit(doc, merged)
+    if target_account != doc.account and archived_accounts.get(doc.account):
+        # Nothing moves out of an archived Account: its orders stay where they were archived with it (moved out, a
+        # cancelled one could be put back in progress under another Account).
+        raise CrmApiException("INVALID_TRANSITION", ARCHIVED_ACCOUNT_EDIT)
+    if archived_accounts.get(target_account):
+        # No Booking is moved under an archived Account, and none under one is put back in progress (the archive
+        # is refused while one is): a cancelled order under it stays cancelled; its other details may be corrected.
+        if target_account != doc.account:
+            raise CrmApiException("INVALID_TRANSITION", ARCHIVED_ACCOUNT_LINK)
+        if str(merged.get("status") or "") in {"Confirmed", "Pending"}:
+            raise CrmApiException("INVALID_TRANSITION", ARCHIVED_ACCOUNT_REOPEN)
     actual_po_date = _edited_actual_po_date(doc, merged.get("actualPoDate"))
     _assert_amount_cny_edit(doc, recorded_amount_cny, merged)
     previous_owner = doc.booking_owner

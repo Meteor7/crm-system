@@ -23,6 +23,10 @@ CRM_CUSTOM_FIELDS = {
         {"fieldname": "custom_crm_city", "label": "CRM City", "fieldtype": "Data", "insert_after": "custom_crm_tier"},
         {"fieldname": "custom_crm_region", "label": "CRM Region", "fieldtype": "Select", "options": options_text(list(REGION_PRESETS)), "insert_after": "custom_crm_city"},
         {"fieldname": "custom_crm_visibility", "label": "CRM Visibility", "fieldtype": "Select", "options": "Private\nPublic", "default": "Private", "insert_after": "custom_crm_region"},
+        # Archived by a Manager (the delete this replaces): out of the list, the pickers and the figures, kept whole.
+        {"fieldname": "custom_crm_archived", "label": "CRM Archived", "fieldtype": "Check", "insert_after": "custom_crm_visibility", "read_only": 1},
+        {"fieldname": "custom_crm_archived_at", "label": "CRM Archived At", "fieldtype": "Datetime", "insert_after": "custom_crm_archived", "read_only": 1},
+        {"fieldname": "custom_crm_archived_by", "label": "CRM Archived By", "fieldtype": "Link", "options": "User", "insert_after": "custom_crm_archived_at", "read_only": 1},
     ],
     "Contact": [
         {"fieldname": "custom_crm_owner", "label": "CRM Owner", "fieldtype": "Link", "options": "User", "insert_after": "first_name"},

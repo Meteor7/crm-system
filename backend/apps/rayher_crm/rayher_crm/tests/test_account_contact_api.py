@@ -7,7 +7,27 @@ from unittest.mock import patch
 from rayher_crm.api.v1.accounts import create_account as create_account_endpoint
 from rayher_crm.api.v1.errors import CrmApiException
 from rayher_crm.services import accounts as account_service
-from rayher_crm.services.accounts import create_account, delete_account, get_account_360, list_accounts, update_account
+from rayher_crm.services import cockpit
+from rayher_crm.services.accounts import (
+    ACCOUNT_WITH_DEMO_REQUEST_ARCHIVE,
+    ACCOUNT_WITH_DEMO_TEST_ARCHIVE,
+    ACCOUNT_WITH_LIVE_BOOKING_ARCHIVE,
+    ACCOUNT_WITH_OPEN_OPPORTUNITY_ARCHIVE,
+    ARCHIVED_ACCOUNT_EDIT,
+    ARCHIVED_ACCOUNT_LINK,
+    ARCHIVED_ACCOUNT_REOPEN,
+    archive_account,
+    create_account,
+    get_account_360,
+    list_accounts,
+    unarchive_account,
+    update_account,
+)
+from rayher_crm.services import bookings as booking_service
+from rayher_crm.services import opportunities as opportunity_service
+from rayher_crm.services import opportunity_status
+from rayher_crm.services import quotations as quotation_service
+from rayher_crm.services.bookings import archive_booking, create_booking, get_booking, unarchive_booking, update_booking
 from rayher_crm.services.contacts import (
     create_contact,
     delete_contact,
@@ -17,8 +37,32 @@ from rayher_crm.services.contacts import (
     update_contact,
     contacts_for_account,
 )
-from rayher_crm.services.sites import _require_site, create_site, list_account_sites, sites_for_account
-from rayher_crm.services.visits import create_visit
+from rayher_crm.services.demo_requests import create_demo_request
+from rayher_crm.services.opportunities import (
+    archive_strategy_opportunity,
+    confirm_po,
+    create_strategy_opportunity,
+    get_strategy_opportunity,
+    mark_opportunity_lost,
+    request_internal_validation,
+    review_internal_validation,
+    rollback_opportunity_stage,
+    unarchive_strategy_opportunity,
+    update_strategy_opportunity,
+)
+from rayher_crm.services.opportunity_stages import OPEN_STAGES, QUALIFIED_OPPORTUNITY
+from rayher_crm.setup import indexes
+from rayher_crm.services.quotations import (
+    create_quotation,
+    discard_draft,
+    get_quotation,
+    link_quotation_opportunity,
+    save_draft,
+    submit_for_approval,
+)
+from rayher_crm.tests._opportunity_fixtures import advance_opportunity_fixture
+from rayher_crm.services.sites import _require_site, create_site, delete_site, list_account_sites, sites_for_account, update_site
+from rayher_crm.services.visits import create_visit, update_visit
 
 
 class TestAccountContactApi(FrappeTestCase):
@@ -385,34 +429,685 @@ class TestAccountContactApi(FrappeTestCase):
 
         self.assertIn("昆山", account_service.list_account_cities())
 
-    def test_only_manager_can_delete_account(self):
+    def _opportunity_input(self, account: dict, site: dict, owner: str, title: str) -> dict:
+        return {
+            "accountId": account["id"], "siteId": site["id"], "title": title, "owner": owner,
+            "amount": "125000.25", "intentScore": 35, "poDate": "2026-12-31", "toolType": "Inspection",
+            "saleType": "New Equipment", "subRegion": "华东", "currency": "CNY", "originalAmount": "125000.25",
+            "amountCny": "125000.25", "qualificationConfirmed": True, "probabilityLevel": "pipeline",
+            "stage": QUALIFIED_OPPORTUNITY,
+        }
+
+    def _upsell_input(self, account: dict, contact: dict, owner: str, **overrides) -> dict:
+        payload = {
+            "accountId": account["id"], "primaryContactId": contact["id"], "equipment": "Inspection 3000",
+            "quantity": 1, "ddl": "2027-01-31", "amount": "20000.00", "currency": "CNY", "status": "Confirmed",
+            "owner": owner, "source": "Upsell", "sourceOpportunityId": "", "note": "Spare parts",
+        }
+        payload.update(overrides)
+        return payload
+
+    def _visit_input(self, account: dict, owner: str, subject: str) -> dict:
+        return {
+            "accountId": account["id"], "primaryContactId": "", "subject": subject, "date": "2026-08-20",
+            "type": "On-site", "owner": owner, "objective": "Keep the account linked",
+        }
+
+    def _account_ids(self, query: dict) -> set[str]:
+        items, _, _, _ = list_accounts({"pageSize": "200", **query})
+        return {item["id"] for item in items}
+
+    def _refused(self, message: str, call, *args, **kwargs) -> None:
+        with self.assertRaises(CrmApiException) as refused:
+            call(*args, **kwargs)
+        self.assertEqual((refused.exception.code, refused.exception.public_message), ("INVALID_TRANSITION", message))
+
+    def test_only_a_manager_archives_an_account_which_then_takes_no_change_and_no_new_record_and_is_restored_whole(self):
         frappe.set_user(self.other_sales)
-        account = create_account(self._account_input("Delete Account"))
+        account = create_account(self._account_input("Archive Account"))
+        # When and by whom it was archived, only while it is.
+        self.assertFalse(account["archived"])
+        self.assertNotIn("archivedAt", account)
+        self.assertNotIn("archivedBy", account)
+        site = create_site(account["id"], self._site_input("Archive Site"))
+        contact = create_contact(self._contact_input(account["id"], "Archive Contact", siteId=site["id"]))
+        twin = create_contact(self._contact_input(account["id"], "Archive Twin"))
+        # What stays under the Account: a lost deal, an archived deal, an archived order and a planned Visit.
+        lost = create_strategy_opportunity(self._opportunity_input(account, site, self.other_sales, "Lost Deal"))
+        lost = mark_opportunity_lost(lost["id"], {"lostReason": "No budget"}, lost["modified"])
+        shelved = create_strategy_opportunity(self._opportunity_input(account, site, self.other_sales, "Shelved Deal"))
+        order = create_booking(self._upsell_input(account, contact, self.other_sales))
+        # A cancelled order, which stays cancelled under the archived Account.
+        spare = create_booking(self._upsell_input(account, contact, self.other_sales, equipment="Spare kit"))
+        spare = update_booking(spare["id"], {"status": "Cancelled"}, spare["modified"])
+        visit = create_visit(self._visit_input(account, self.other_sales, "Planned before the archive"))
+        frappe.set_user(self.manager)
+        archive_strategy_opportunity(shelved["id"])
+        archive_booking(order["id"])
 
         frappe.set_user(self.sales)
         with self.assertRaises(frappe.PermissionError):
-            delete_account(account["id"])
-        self.assertTrue(frappe.db.exists("Customer", account["id"]))
+            archive_account(account["id"])
+        self.assertEqual(frappe.db.get_value("Customer", account["id"], "custom_crm_archived"), 0)
 
-        frappe.set_user("Administrator")
-        self.assertEqual(delete_account(account["id"]), {"id": account["id"], "status": "Deleted"})
-        self.assertFalse(frappe.db.exists("Customer", account["id"]))
+        frappe.set_user(self.manager)
+        with self.assertRaises(CrmApiException) as missing:
+            archive_account("ACC-MISSING-ARCHIVE")
+        # ACCOUNT_NOT_FOUND is published as the NOT_FOUND contract code.
+        self.assertEqual(missing.exception.code, "NOT_FOUND")
+        archived = archive_account(account["id"])
+        self.assertTrue(archived["archived"])
+        self.assertEqual(archived["archivedBy"], self.manager)
+        self.assertTrue(archived["archivedAt"])
+        self.assertEqual(archived["name"], "Archive Account")
+        self.assertNotEqual(archived["modified"], account["modified"])
+        self.assertEqual(archive_account(account["id"])["modified"], archived["modified"])
+        columns = frappe.db.get_value(
+            "Customer", account["id"], ["custom_crm_archived", "custom_crm_archived_at", "custom_crm_archived_by"], as_dict=True,
+        )
+        self.assertEqual((columns.custom_crm_archived, columns.custom_crm_archived_by), (1, self.manager))
+        self.assertTrue(columns.custom_crm_archived_at)
+        comments = {"reference_doctype": "Customer", "reference_name": account["id"], "comment_type": "Info"}
+        self.assertEqual(frappe.get_all("Comment", filters=comments, pluck="content"), ["Archived"])
 
-    def test_manager_delete_maps_link_conflict_without_partial_mutation(self):
+        # Out of the list unless asked for, the pickers, the cockpit; its Sites and Contacts leave with it.
+        self.assertNotIn(account["id"], self._account_ids({}))
+        self.assertNotIn(account["id"], self._account_ids({"archiveState": "active"}))
+        self.assertIn(account["id"], self._account_ids({"archiveState": "archived"}))
+        self.assertIn(account["id"], self._account_ids({"archiveState": "all"}))
+        with self.assertRaises(CrmApiException) as unknown:
+            list_accounts({"archiveState": "gone"})
+        self.assertEqual(unknown.exception.code, "VALIDATION_ERROR")
+        self.assertNotIn(site["id"], {row["id"] for row in list_account_sites()})
+        self.assertNotIn(contact["id"], {row["id"] for row in list_contacts({"pageSize": "200"})[0]})
+        self.assertIn(contact["id"], {row["id"] for row in list_contacts({"accountId": account["id"]})[0]})
+        self.assertNotIn(account["id"], {row["name"] for row in cockpit.options()[0]})
+        # Still read whole, by id: the Account 360, its Sites, its Contacts (the Contact knows of the archive).
+        detail = get_account_360(account["id"])
+        self.assertTrue(detail["account"]["archived"])
+        self.assertEqual({row["id"] for row in detail["sites"]}, {site["id"]})
+        self.assertIn(contact["id"], {row["id"] for row in detail["contacts"]})
+        self.assertTrue(get_contact(contact["id"])["accountArchived"])
+        # The Contact page compares its reader with the Account's owner, which the Account list does not give for an
+        # archived Account.
+        self.assertEqual(get_contact(contact["id"])["accountOwner"], self.other_sales)
+        self.assertFalse(get_contact(create_contact(self._contact_input(
+            create_account(self._account_input("Archive Neighbour"))["id"], "Neighbour Contact",
+        ))["id"])["accountArchived"])
+
+        # No change to the Account, its Sites or its Contacts, with the current version, an older one or a bad payload.
         frappe.set_user(self.other_sales)
-        account = create_account(self._account_input("Referenced Account"))
-        visit = create_visit({
-            "accountId": account["id"], "primaryContactId": "", "subject": "Referenced visit",
-            "date": "2026-08-20", "type": "On-site", "owner": self.other_sales,
-            "objective": "Keep the account linked",
-        })
+        payload = {**self._account_input("Archive Account"), "city": "苏州"}
+        self._refused(ARCHIVED_ACCOUNT_EDIT, update_account, account["id"], payload, archived["modified"])
+        self._refused(ARCHIVED_ACCOUNT_EDIT, update_account, account["id"], payload, account["modified"])
+        self._refused(ARCHIVED_ACCOUNT_EDIT, update_account, account["id"], {}, archived["modified"])
+        self._refused(ARCHIVED_ACCOUNT_LINK, create_site, account["id"], self._site_input("Archive Site Two"))
+        self._refused(ARCHIVED_ACCOUNT_EDIT, update_site, account["id"], site["id"], self._site_input("Archive Site Renamed"))
+        self._refused(ARCHIVED_ACCOUNT_EDIT, delete_site, account["id"], site["id"])
+        self._refused(ARCHIVED_ACCOUNT_EDIT, update_contact, contact["id"], self._contact_input(account["id"], "Archive Contact Renamed"), contact["modified"])
+        frappe.set_user(self.manager)
+        # A Contact's archive and a merge are a Manager's (contact:delete, contact:merge).
+        self._refused(ARCHIVED_ACCOUNT_EDIT, delete_contact, contact["id"])
+        self._refused(ARCHIVED_ACCOUNT_EDIT, merge_contacts, contact["id"], twin["id"])
+        self.assertEqual(frappe.db.get_value("Customer", account["id"], "custom_crm_city"), "上海")
+        self.assertEqual(frappe.db.get_value("Contact", contact["id"], "custom_crm_status"), "Active")
+        self.assertEqual(frappe.db.get_value("Contact", twin["id"], "custom_crm_merged_into"), None)
+        self.assertTrue(frappe.db.exists("Address", site["id"]))
 
+        # Nothing new under it: a Contact, an Opportunity, a Booking, a Visit, a Demo Request, a Quotation; nothing
+        # of another Account moved under it; none of its Contacts moved out.
+        frappe.set_user(self.other_sales)
+        self._refused(ARCHIVED_ACCOUNT_LINK, create_contact, self._contact_input(account["id"], "Archive Contact Late"))
+        self._refused(ARCHIVED_ACCOUNT_LINK, create_strategy_opportunity, self._opportunity_input(account, site, self.other_sales, "Late Deal"))
+        self._refused(ARCHIVED_ACCOUNT_LINK, create_booking, self._upsell_input(account, contact, self.other_sales))
+        self._refused(ARCHIVED_ACCOUNT_LINK, create_visit, self._visit_input(account, self.other_sales, "Late visit"))
+        self._refused(ARCHIVED_ACCOUNT_LINK, create_demo_request, {
+            "accountId": account["id"], "primaryContactId": contact["id"], "opportunityId": lost["id"],
+        })
+        self._refused(ARCHIVED_ACCOUNT_LINK, create_quotation, {"opportunityId": lost["id"]})
+        neighbour = create_account(self._account_input("Archive Mover"))
+        neighbour_site = create_site(neighbour["id"], self._site_input("Archive Mover Site"))
+        mover = create_contact(self._contact_input(neighbour["id"], "Archive Mover Contact"))
+        mover_deal = create_strategy_opportunity(self._opportunity_input(neighbour, neighbour_site, self.other_sales, "Mover Deal"))
+        mover_order = create_booking(self._upsell_input(neighbour, mover, self.other_sales))
+        self._refused(ARCHIVED_ACCOUNT_LINK, update_contact, mover["id"], self._contact_input(account["id"], "Archive Mover Contact"), mover["modified"])
+        self._refused(
+            ARCHIVED_ACCOUNT_LINK, update_strategy_opportunity, mover_deal["id"],
+            {"accountId": account["id"], "siteId": site["id"]}, mover_deal["modified"],
+        )
+        self._refused(
+            ARCHIVED_ACCOUNT_LINK, update_booking, mover_order["id"],
+            {"accountId": account["id"], "primaryContactId": contact["id"]}, mover_order["modified"],
+        )
+        self._refused(ARCHIVED_ACCOUNT_EDIT, update_contact, contact["id"], self._contact_input(neighbour["id"], "Archive Contact"), contact["modified"])
+        self.assertEqual(frappe.db.count("CRM Opportunity", {"account": account["id"]}), 2)
+        self.assertEqual(frappe.db.count("CRM Booking", {"account": account["id"]}), 2)
+        self.assertEqual(frappe.db.count("CRM Visit", {"account": account["id"]}), 1)
+        self.assertEqual(frappe.db.count("Dynamic Link", {"link_doctype": "Customer", "link_name": account["id"], "parenttype": "Contact"}), 2)
+
+        # Nothing reopened or restored under it (a Manager's actions: a rollback, the restores); what it has goes on
+        # under its own rules (the Visit happens).
+        frappe.set_user(self.manager)
+        self._refused(ARCHIVED_ACCOUNT_REOPEN, rollback_opportunity_stage, lost["id"], QUALIFIED_OPPORTUNITY, "Budget back", lost["modified"])
+        self.assertEqual(frappe.db.get_value("CRM Opportunity", lost["id"], "stage"), lost["stage"])
+        self._refused(ARCHIVED_ACCOUNT_REOPEN, unarchive_strategy_opportunity, shelved["id"])
+        self._refused(ARCHIVED_ACCOUNT_REOPEN, unarchive_booking, order["id"])
+        self.assertEqual(frappe.db.get_value("CRM Opportunity", shelved["id"], "archived"), 1)
+        self.assertEqual(frappe.db.get_value("CRM Booking", order["id"], "archived"), 1)
+        frappe.set_user(self.other_sales)
+        # A cancelled order under it is not put back in progress; its details may still be corrected, and a closed
+        # deal under it is edited as before.
+        self._refused(ARCHIVED_ACCOUNT_REOPEN, update_booking, spare["id"], {"status": "Confirmed"}, spare["modified"])
+        self._refused(ARCHIVED_ACCOUNT_REOPEN, update_booking, spare["id"], {"status": "Pending"}, spare["modified"])
+        noted = update_booking(spare["id"], {"note": "Kept for the record"}, spare["modified"])
+        self.assertEqual((noted["status"], noted["note"]), ("Cancelled", "Kept for the record"))
+        renamed = update_strategy_opportunity(lost["id"], {"title": "Lost Deal, renamed"}, lost["modified"])
+        self.assertEqual((renamed["title"], renamed["stage"]), ("Lost Deal, renamed", lost["stage"]))
+        visited = update_visit(visit["id"], {"type": "advance", "status": "Visited", "outcome": "Met anyway"}, visit["modified"])
+        self.assertEqual(visited["status"], "Visited")
+
+        # Restored whole by a Manager: the columns cleared, the trace kept, the list and the writers back.
+        frappe.set_user(self.sales)
+        with self.assertRaises(frappe.PermissionError):
+            unarchive_account(account["id"])
+        frappe.set_user(self.manager)
+        restored = unarchive_account(account["id"])
+        self.assertFalse(restored["archived"])
+        self.assertNotIn("archivedAt", restored)
+        self.assertNotIn("archivedBy", restored)
+        self.assertEqual(restored["name"], "Archive Account")
+        self.assertNotEqual(restored["modified"], archived["modified"])
+        self.assertEqual(unarchive_account(account["id"])["modified"], restored["modified"])
+        self.assertEqual(
+            frappe.db.get_value("Customer", account["id"], ["custom_crm_archived", "custom_crm_archived_at", "custom_crm_archived_by"]),
+            (0, None, None),
+        )
+        self.assertEqual(frappe.get_all("Comment", filters=comments, pluck="content", order_by="creation asc"), ["Archived", "Restored from the archive"])
+        self.assertIn(account["id"], self._account_ids({}))
+        self.assertNotIn(account["id"], self._account_ids({"archiveState": "archived"}))
+        self.assertIn(site["id"], {row["id"] for row in list_account_sites()})
+        self.assertIn(contact["id"], {row["id"] for row in list_contacts({"pageSize": "200"})[0]})
+        self.assertFalse(get_contact(contact["id"])["accountArchived"])
+        self.assertFalse(unarchive_strategy_opportunity(shelved["id"])["archived"])
+        frappe.set_user(self.other_sales)
+        self.assertEqual(update_account(account["id"], payload, restored["modified"])["city"], "苏州")
+        self.assertEqual(create_contact(self._contact_input(account["id"], "Archive Contact Late"))["accountId"], account["id"])
+
+    def test_the_archive_reads_an_accounts_rows_through_its_index(self):
+        """The archive locks the rows it reads: through the Account's index, its own rows only, not the tables. The
+        DocTypes declare the index, so Frappe's schema sync makes it (named as Frappe names it) and keeps it (it drops
+        an index a field does not declare); there is one."""
+
+        for doctype, query, values in (
+            ("CRM Opportunity", account_service.open_opportunity_query(), ("ACC-INDEX-PLAN", *OPEN_STAGES)),
+            ("CRM Booking", account_service.live_booking_query(), ("ACC-INDEX-PLAN",)),
+        ):
+            self.assertTrue(frappe.get_meta(doctype).get_field("account").search_index, doctype)
+            columns: dict[str, list[str]] = {}
+            for row in frappe.db.sql(f"SHOW INDEX FROM `tab{doctype}`", as_dict=True):
+                columns.setdefault(row.Key_name, []).append(row.Column_name)
+            on_account = [name for name, names in columns.items() if names == ["account"]]
+            self.assertEqual(len(on_account), 1, (doctype, on_account))
+            plan = frappe.db.sql(f"EXPLAIN {query}", values, as_dict=True)
+            self.assertEqual(plan[0]["key"], on_account[0], query)
+
+    def test_the_lookup_indexes_are_made_after_a_migrate_only_when_their_column_has_none(self):
+        import inspect
+
+        # On this site each column has its index: no second one (and no statement that changes the schema).
+        with patch.object(frappe.db, "add_index") as add_index:
+            indexes.install_lookup_indexes()
+        add_index.assert_not_called()
+        # On a site where Frappe's sync made none: made under the name the sync gives one.
+        with patch.object(frappe.db, "get_column_index", return_value=None), patch.object(frappe.db, "add_index") as add_index:
+            indexes.install_lookup_indexes()
+        self.assertEqual(
+            [call.args for call in add_index.call_args_list],
+            [
+                ("CRM Opportunity", ["account"], "account_index"), ("CRM Booking", ["account"], "account_index"),
+                ("CRM Quotation Approval", ["quotation"], "quotation_index"),
+            ],
+        )
+        # Run after every migrate (and the install), with the app's other indexes: a statement of the function's own
+        # body, under no condition, with nothing before it that could leave the function.
+        import ast
+        import textwrap
+
+        body = ast.parse(textwrap.dedent(inspect.getsource(indexes.install_stage5f_indexes))).body[0].body
+        calls = [
+            index for index, node in enumerate(body)
+            if isinstance(node, ast.Expr) and isinstance(node.value, ast.Call)
+            and isinstance(node.value.func, ast.Name) and node.value.func.id == "install_lookup_indexes"
+        ]
+        self.assertEqual(len(calls), 1, calls)
+        self.assertFalse([node for statement in body[:calls[0]] for node in ast.walk(statement) if isinstance(node, (ast.Return, ast.Raise))])
+
+    def test_an_account_with_an_open_opportunity_or_a_booking_in_progress_is_archived_only_once_they_are_closed(self):
+        frappe.set_user(self.other_sales)
+        account = create_account(self._account_input("Busy Account"))
+        site = create_site(account["id"], self._site_input("Busy Site"))
+        contact = create_contact(self._contact_input(account["id"], "Busy Contact"))
+        deal = create_strategy_opportunity(self._opportunity_input(account, site, self.other_sales, "Busy Deal"))
+
+        frappe.set_user(self.manager)
+        self._refused(ACCOUNT_WITH_OPEN_OPPORTUNITY_ARCHIVE, archive_account, account["id"])
+        self.assertEqual(frappe.db.get_value("Customer", account["id"], "custom_crm_archived"), 0)
+        # An Opportunity archived on its own is not open; a Booking in progress (confirmed or pending) is.
+        archive_strategy_opportunity(deal["id"])
+        frappe.set_user(self.other_sales)
+        order = create_booking(self._upsell_input(account, contact, self.other_sales))
+        pending = create_booking(self._upsell_input(account, contact, self.other_sales, status="Pending"))
+        frappe.set_user(self.manager)
+        self._refused(ACCOUNT_WITH_LIVE_BOOKING_ARCHIVE, archive_account, account["id"])
+        frappe.set_user(self.other_sales)
+        update_booking(order["id"], {"status": "Cancelled"}, order["modified"])
+        frappe.set_user(self.manager)
+        self._refused(ACCOUNT_WITH_LIVE_BOOKING_ARCHIVE, archive_account, account["id"])
+        frappe.set_user(self.other_sales)
+        update_booking(pending["id"], {"status": "Cancelled"}, pending["modified"])
+        frappe.set_user(self.manager)
+        self.assertTrue(archive_account(account["id"])["archived"])
+        self.assertEqual(frappe.db.get_value("Customer", account["id"], "custom_crm_archived"), 1)
+        self.assertEqual(frappe.db.get_value("CRM Opportunity", deal["id"], "archived"), 1)
+        self.assertEqual(frappe.db.get_value("CRM Booking", order["id"], "status"), "Cancelled")
+
+    def test_a_closed_deal_or_order_under_an_archived_account_is_neither_reopened_nor_moved_out(self):
+        frappe.set_user(self.other_sales)
+        account = create_account(self._account_input("Closed Account"))
+        site = create_site(account["id"], self._site_input("Closed Site"))
+        contact = create_contact(self._contact_input(account["id"], "Closed Contact", siteId=site["id"]))
+        order_draft = {
+            "primaryContactId": contact["id"], "equipment": "Inspection 3000", "quantity": 1, "ddl": "2027-01-31",
+            "amount": "200000.00", "currency": "CNY", "owner": self.other_sales, "note": "PO",
+        }
+        # A won deal whose order was cancelled by hand (nothing open under the Account then), a lost deal, a cancelled
+        # Upsell order.
+        won = advance_opportunity_fixture(
+            create_strategy_opportunity(self._opportunity_input(account, site, self.other_sales, "Won Deal")),
+            "po_received", booking=order_draft,
+        )
+        live = get_booking(won["liveBooking"]["id"])
+        update_booking(live["id"], {"status": "Cancelled"}, live["modified"])
+        won = get_strategy_opportunity(won["id"])
+        lost = create_strategy_opportunity(self._opportunity_input(account, site, self.other_sales, "Lost Deal"))
+        lost = mark_opportunity_lost(lost["id"], {"lostReason": "No budget"}, lost["modified"])
+        spare = create_booking(self._upsell_input(account, contact, self.other_sales, equipment="Spare kit"))
+        spare = update_booking(spare["id"], {"status": "Cancelled"}, spare["modified"])
+        other = create_account(self._account_input("Closed Neighbour"))
+        other_site = create_site(other["id"], self._site_input("Closed Neighbour Site"))
+        other_contact = create_contact(self._contact_input(other["id"], "Closed Neighbour Contact"))
+        frappe.set_user(self.manager)
+        self.assertTrue(archive_account(account["id"])["archived"])
+
+        # Nothing reopened under it: the won deal rolled back, a replacement order for it; nothing written.
+        self._refused(ARCHIVED_ACCOUNT_REOPEN, rollback_opportunity_stage, won["id"], "quotation_sent", "Order lost", won["modified"])
+        frappe.set_user(self.other_sales)
+        self._refused(ARCHIVED_ACCOUNT_REOPEN, confirm_po, won["id"], {"booking": order_draft, "actualPoDate": "2026-10-01"}, won["modified"])
+        self.assertEqual(frappe.db.get_value("CRM Opportunity", won["id"], "stage"), "po_received")
+        self.assertEqual(frappe.db.count("CRM Booking", {"source_opportunity": won["id"]}), 1)
+        # Nothing moved out (to be reopened under the other Account); nothing written.
+        self._refused(
+            ARCHIVED_ACCOUNT_EDIT, update_strategy_opportunity, lost["id"],
+            {"accountId": other["id"], "siteId": other_site["id"]}, lost["modified"],
+        )
+        self._refused(
+            ARCHIVED_ACCOUNT_EDIT, update_booking, spare["id"],
+            {"accountId": other["id"], "primaryContactId": other_contact["id"], "status": "Confirmed"}, spare["modified"],
+        )
+        self.assertEqual(frappe.db.get_value("CRM Opportunity", lost["id"], "account"), account["id"])
+        self.assertEqual(frappe.db.get_value("CRM Booking", spare["id"], ["account", "status"]), (account["id"], "Cancelled"))
+
+    def test_an_account_out_of_reach_answers_a_move_as_one_that_does_not_exist_archived_or_not(self):
+        frappe.set_user(self.other_sales)
+        hidden = create_account(self._account_input("Hidden Archived Account"))
+        frappe.set_user(self.manager)
+        archive_account(hidden["id"])
+        frappe.set_user(self.sales)
+        own = create_account(self._account_input("Own Order Account"))
+        own_contact = create_contact(self._contact_input(own["id"], "Own Order Contact"))
+        order = create_booking(self._upsell_input(own, own_contact, self.sales))
+
+        def refusal(account_id: str) -> tuple[str, str]:
+            with self.assertRaises(CrmApiException) as refused:
+                update_booking(order["id"], {"accountId": account_id, "primaryContactId": own_contact["id"]}, order["modified"])
+            return refused.exception.code, refused.exception.public_message
+
+        # Another user's private Account, archived, answers as one that is not there: the archive is not told.
+        self.assertEqual(refusal(hidden["id"]), refusal("ACC-NOBODY-MOVE"))
+        self.assertEqual(frappe.db.get_value("CRM Booking", order["id"], "account"), own["id"])
+
+    def test_an_account_with_a_demo_request_or_a_demo_test_in_progress_is_archived_only_once_they_have_ended(self):
+        engineer = self._user("crm-account-contact-engineer@example.invalid", "CRM Engineer")
+        frappe.set_user(self.other_sales)
+        account = create_account(self._account_input("Demo Work Account"))
+        site = create_site(account["id"], self._site_input("Demo Work Site"))
+        # A deal lost while its Demo Request was still in review: nothing open under the Account but the demo work.
+        deal = create_strategy_opportunity(self._opportunity_input(account, site, self.other_sales, "Demo Work Deal"))
+        mark_opportunity_lost(deal["id"], {"lostReason": "Moved on"}, deal["modified"])
         frappe.set_user("Administrator")
-        with self.assertRaises(CrmApiException) as conflict:
-            delete_account(account["id"])
-        self.assertEqual(conflict.exception.code, "CONFLICT")
-        self.assertTrue(frappe.db.exists("Customer", account["id"]))
-        self.assertTrue(frappe.db.exists("CRM Visit", visit["id"]))
+        request = frappe.get_doc({
+            "doctype": "CRM Demo Request", "request_mode": "Opportunity", "account": account["id"],
+            "opportunity": deal["id"], "sales_owner": self.other_sales, "created_by_user": self.other_sales,
+            "title": "Demo work", "objective": "Show the recipe", "requested_equipment": "Inspection Tool",
+            "sample_type": "Wafer", "sample_quantity": 1, "target_date": "2026-12-20",
+            "customer_expected_date": "2026-12-15", "priority": "Medium", "acceptance_criteria": "Clean wafers",
+            "status": "Engineer Review", "engineer_owner": engineer, "form_data": "{}",
+        }).insert(ignore_permissions=True)
+        frappe.set_user(self.manager)
+        self._refused(ACCOUNT_WITH_DEMO_REQUEST_ARCHIVE, archive_account, account["id"])
+        # Approved, the request has ended and its demo test runs: the archive waits for the test.
+        frappe.db.set_value("CRM Demo Request", request.name, "status", "Converted")
+        test = frappe.get_doc({
+            "doctype": "CRM Evaluation", "demo_request": request.name, "account": account["id"], "title": "Demo work test",
+            "status": "Scheduled", "evaluation_owner": engineer, "planned_end": "2026-12-20",
+            "wafer_preparation_status": "Pending", "test_preparation_status": "Pending", "acceptance": "Pending",
+            "report_status": "Not Ready",
+        }).insert(ignore_permissions=True)
+        self._refused(ACCOUNT_WITH_DEMO_TEST_ARCHIVE, archive_account, account["id"])
+        self.assertEqual(frappe.db.get_value("Customer", account["id"], "custom_crm_archived"), 0)
+        frappe.db.set_value("CRM Evaluation", test.name, "status", "Rejected")
+        self.assertTrue(archive_account(account["id"])["archived"])
+
+    def _demo_request(self, account_id: str, opportunity_id: str | None, engineer: str, title: str):
+        frappe.set_user("Administrator")
+        try:
+            return frappe.get_doc({
+                "doctype": "CRM Demo Request", "request_mode": "Opportunity" if opportunity_id else "Self Test",
+                "account": account_id, "opportunity": opportunity_id, "sales_owner": self.other_sales,
+                "created_by_user": self.other_sales, "title": title, "objective": "Show the recipe",
+                "requested_equipment": "Inspection Tool", "sample_type": "Wafer", "sample_quantity": 1,
+                "target_date": "2026-12-20", "customer_expected_date": "2026-12-15", "priority": "Medium",
+                "acceptance_criteria": "Clean wafers", "status": "Engineer Review", "engineer_owner": engineer, "form_data": "{}",
+            }).insert(ignore_permissions=True)
+        finally:
+            frappe.set_user(self.other_sales)
+
+    def test_an_accounts_demo_work_is_that_of_its_deals_now_and_its_own_without_a_deal(self):
+        engineer = self._user("crm-account-contact-engineer@example.invalid", "CRM Engineer")
+        frappe.set_user(self.other_sales)
+        first = create_account(self._account_input("Demo Move From"))
+        first_site = create_site(first["id"], self._site_input("Demo Move From Site"))
+        second = create_account(self._account_input("Demo Move To"))
+        second_site = create_site(second["id"], self._site_input("Demo Move To Site"))
+        deal = create_strategy_opportunity(self._opportunity_input(first, first_site, self.other_sales, "Demo Move Deal"))
+        self._demo_request(first["id"], deal["id"], engineer, "Demo of a moved deal")
+        # The deal moves to the second Account (its Demo Request keeps the customer it was started for), then is lost.
+        deal = update_strategy_opportunity(deal["id"], {"accountId": second["id"], "siteId": second_site["id"]}, deal["modified"])
+        mark_opportunity_lost(deal["id"], {"lostReason": "Moved on"}, deal["modified"])
+
+        frappe.set_user(self.manager)
+        # The work is the second Account's now: its archive waits for it; the first one's does not.
+        self._refused(ACCOUNT_WITH_DEMO_REQUEST_ARCHIVE, archive_account, second["id"])
+        self.assertTrue(archive_account(first["id"])["archived"])
+
+        # A Demo Request without a deal (a self test) is its own Account's.
+        frappe.set_user(self.other_sales)
+        own = create_account(self._account_input("Demo Self Test"))
+        self._demo_request(own["id"], None, engineer, "Self test")
+        frappe.set_user(self.manager)
+        self._refused(ACCOUNT_WITH_DEMO_REQUEST_ARCHIVE, archive_account, own["id"])
+
+    def test_a_deal_moved_to_another_account_takes_both_rows_exclusively_from_the_start(self):
+        frappe.set_user(self.other_sales)
+        first = create_account(self._account_input("Exclusive Move From"))
+        first_site = create_site(first["id"], self._site_input("Exclusive Move From Site"))
+        second = create_account(self._account_input("Exclusive Move To"))
+        second_site = create_site(second["id"], self._site_input("Exclusive Move To Site"))
+        deal = create_strategy_opportunity(self._opportunity_input(first, first_site, self.other_sales, "Exclusive Move Deal"))
+        real_sql = frappe.db.sql
+        locks: list[str] = []
+
+        def watch(query, *args, **kwargs):
+            text = str(query)
+            if "`tabCustomer`" in text and ("FOR UPDATE" in text or "LOCK IN SHARE MODE" in text):
+                locks.append("shared" if "LOCK IN SHARE MODE" in text else "exclusive")
+            return real_sql(query, *args, **kwargs)
+
+        with patch.object(frappe.db, "sql", side_effect=watch):
+            moved = update_strategy_opportunity(deal["id"], {"accountId": second["id"], "siteId": second_site["id"]}, deal["modified"])
+        self.assertEqual(moved["accountId"], second["id"])
+        # The edit's write scope (opportunity_status._lock_write_scope) takes its Account's row exclusively: the move
+        # takes both rows so from the start, never one shared before (two moves out of one Account would each wait for
+        # the other to raise it).
+        self.assertTrue(locks)
+        self.assertEqual(locks[0], "exclusive", locks)
+        self.assertNotIn("shared", locks)
+
+    def test_the_accounts_locked_are_matched_as_the_database_matches_their_names(self):
+        # The database matches a name without regard to accents or width as well as case: an Account named by such a
+        # variant (renamed so since a caller's snapshot named it) answers with its own flag, under either lock.
+        frappe.set_user(self.other_sales)
+        account = create_account(self._account_input(f"Müller Lock（{frappe.generate_hash(length=6)}）"))
+        frappe.set_user(self.manager)
+        archive_account(account["id"])
+        variant = account["id"].replace("ü", "u").replace("（", "(").replace("）", ")")
+        self.assertNotEqual(variant.casefold(), account["id"].casefold())
+        self.assertEqual(account_service.lock_accounts((variant,)), {variant: True})
+        self.assertEqual(account_service.lock_accounts((variant,), for_update=True), {variant: True})
+        self.assertEqual(account_service.lock_accounts((account["id"].upper(),)), {account["id"].upper(): True})
+        # Two spellings of the record in one call read its flag each; a name that matches no record is not archived.
+        missing = f"No Such Account {frappe.generate_hash(length=6)}"
+        locked = account_service.lock_accounts((account["id"], variant, missing))
+        self.assertEqual(locked, {account["id"]: True, variant: True, missing: False})
+
+    def test_a_quotation_answers_to_its_deals_account_now(self):
+        frappe.set_user(self.other_sales)
+        first = create_account(self._account_input("Quotation Move From"))
+        first_site = create_site(first["id"], self._site_input("Quotation Move From Site"))
+        second = create_account(self._account_input("Quotation Move To"))
+        second_site = create_site(second["id"], self._site_input("Quotation Move To Site"))
+        elsewhere = create_account(self._account_input("Quotation Move Elsewhere"))
+        deal = create_strategy_opportunity(self._opportunity_input(first, first_site, self.other_sales, "Quotation Move Deal"))
+        created = create_quotation({"opportunityId": deal["id"]})
+        quotation_id, version = created["quotation"]["id"], created["version"]
+        payload = {key: version[key] for key in ("primaryContactId", "addressId", "quoteDate", "validityMonths", "items")}
+        # The deal moves to the second Account and takes its Quotation along (which keeps the customer it was
+        # addressed to), then is lost.
+        deal = update_strategy_opportunity(deal["id"], {"accountId": second["id"], "siteId": second_site["id"]}, deal["modified"])
+        mark_opportunity_lost(deal["id"], {"lostReason": "Moved on"}, deal["modified"])
+
+        # The first Account archived: the Quotation is not its any more, and takes its writes.
+        frappe.set_user(self.manager)
+        archive_account(first["id"])
+        frappe.set_user(self.other_sales)
+        self.assertFalse(get_quotation(quotation_id)["quotation"]["accountArchived"])
+        version = save_draft(quotation_id, payload, version["modified"])["version"]
+        # A first read that has the deal under an Account it has left since: refused as changed under the deal's lock.
+        with patch.object(quotation_service, "_quotation_account", return_value=elsewhere["id"]):
+            with self.assertRaises(CrmApiException) as changed:
+                save_draft(quotation_id, payload, version["modified"])
+        self.assertEqual(changed.exception.code, "VERSION_CONFLICT")
+        # The second one archived: frozen with it.
+        frappe.set_user(self.manager)
+        archive_account(second["id"])
+        frappe.set_user(self.other_sales)
+        self.assertTrue(get_quotation(quotation_id)["quotation"]["accountArchived"])
+        self._refused(ARCHIVED_ACCOUNT_EDIT, save_draft, quotation_id, payload, version["modified"])
+
+    def test_no_quotation_is_linked_to_a_deal_of_an_archived_account(self):
+        frappe.set_user(self.other_sales)
+        account = create_account(self._account_input("Link Archived Account"))
+        site = create_site(account["id"], self._site_input("Link Archived Site"))
+        deal = create_strategy_opportunity(self._opportunity_input(account, site, self.other_sales, "Link Archived Deal"))
+        mark_opportunity_lost(deal["id"], {"lostReason": "No budget"}, deal["modified"])
+        quotation = create_quotation({"accountId": account["id"]})
+        frappe.set_user(self.manager)
+        archive_account(account["id"])
+
+        frappe.set_user(self.other_sales)
+        self._refused(
+            ARCHIVED_ACCOUNT_LINK, link_quotation_opportunity,
+            quotation["quotation"]["id"], deal["id"], quotation["version"]["modified"],
+        )
+        self.assertFalse(frappe.db.get_value("CRM Quotation", quotation["quotation"]["id"], "opportunity"))
+
+    def test_an_internal_validation_is_not_approved_into_a_booking_under_an_archived_account(self):
+        frappe.set_user(self.other_sales)
+        account = create_account(self._account_input("Validation Account"))
+        site = create_site(account["id"], self._site_input("Validation Site"))
+        contact = create_contact(self._contact_input(account["id"], "Validation Contact", siteId=site["id"]))
+        deal = advance_opportunity_fixture(
+            create_strategy_opportunity(self._opportunity_input(account, site, self.other_sales, "Validation Deal")),
+            "quotation_sent",
+        )
+        requested = request_internal_validation(deal["id"], {
+            "reason": "Long lead time", "expectedPoDate": "2026-11-30",
+            "booking": {
+                "primaryContactId": contact["id"], "equipment": "Inspection 3000", "quantity": 1, "ddl": "2027-03-31",
+                "amount": "880000", "currency": "cny", "owner": self.other_sales, "note": "Start before the PO",
+            },
+        }, deal["modified"])
+        # Archived under it as no archive does (an open deal holds the archive off), as a snapshot may still say it
+        # is not: the approval, which makes a Booking, is refused all the same.
+        frappe.db.set_value("Customer", account["id"], "custom_crm_archived", 1)
+        frappe.set_user(self.manager)
+        self._refused(
+            ARCHIVED_ACCOUNT_LINK, review_internal_validation, deal["id"],
+            {"validationId": requested["internalValidation"]["id"], "decision": "approved"}, requested["modified"],
+        )
+        self.assertEqual(frappe.db.count("CRM Booking", {"source_opportunity": deal["id"]}), 0)
+        self.assertEqual(frappe.db.get_value("CRM Opportunity Internal Validation", requested["internalValidation"]["id"], "status"), "pending")
+
+    def test_a_restore_of_a_record_moved_since_its_first_read_is_refused_as_changed(self):
+        frappe.set_user(self.other_sales)
+        account = create_account(self._account_input("Restore Move Account"))
+        site = create_site(account["id"], self._site_input("Restore Move Site"))
+        contact = create_contact(self._contact_input(account["id"], "Restore Move Contact"))
+        other = create_account(self._account_input("Restore Move Other"))
+        deal = create_strategy_opportunity(self._opportunity_input(account, site, self.other_sales, "Restore Move Deal"))
+        order = create_booking(self._upsell_input(account, contact, self.other_sales))
+        frappe.set_user(self.manager)
+        archive_strategy_opportunity(deal["id"])
+        archive_booking(order["id"])
+
+        for service, restore, record, doctype in (
+            (opportunity_service, unarchive_strategy_opportunity, deal, "CRM Opportunity"),
+            (booking_service, unarchive_booking, order, "CRM Booking"),
+        ):
+            real = service.require_manager_scoped_document
+
+            def first_read(doctype, name, *args, real=real, **kwargs):
+                doc = real(doctype, name, *args, **kwargs)
+                if not kwargs.get("for_update"):
+                    doc.account = other["id"]  # the first read still has it under the other Account
+                return doc
+
+            with self.subTest(record=record["id"]):
+                with patch.object(service, "require_manager_scoped_document", side_effect=first_read):
+                    with self.assertRaises(CrmApiException) as changed:
+                        restore(record["id"])
+                self.assertEqual(changed.exception.code, "VERSION_CONFLICT")
+                self.assertEqual(frappe.db.get_value(doctype, record["id"], "archived"), 1)
+
+    def test_every_write_of_a_quotation_of_an_archived_account_waits_for_the_restore(self):
+        frappe.set_user(self.other_sales)
+        account = create_account(self._account_input("Quotation Account"))
+        created = create_quotation({"accountId": account["id"]})
+        quotation_id, version = created["quotation"]["id"], created["version"]
+        self.assertFalse(created["quotation"]["accountArchived"])
+        frappe.set_user(self.manager)
+        archive_account(account["id"])
+
+        # Frozen with its Account, and said so: no draft saved or discarded, no submission.
+        frappe.set_user(self.other_sales)
+        self.assertTrue(get_quotation(quotation_id)["quotation"]["accountArchived"])
+        payload = {key: version[key] for key in ("primaryContactId", "addressId", "quoteDate", "validityMonths", "items")}
+        self._refused(ARCHIVED_ACCOUNT_EDIT, save_draft, quotation_id, payload, version["modified"])
+        self._refused(ARCHIVED_ACCOUNT_EDIT, discard_draft, quotation_id, version["modified"])
+        self._refused(ARCHIVED_ACCOUNT_EDIT, submit_for_approval, quotation_id, version["modified"])
+        self.assertTrue(frappe.db.exists("CRM Quotation", quotation_id))
+
+        # Restored, it takes its writes again.
+        frappe.set_user(self.manager)
+        unarchive_account(account["id"])
+        frappe.set_user(self.other_sales)
+        self.assertFalse(get_quotation(quotation_id)["quotation"]["accountArchived"])
+        self.assertTrue(discard_draft(quotation_id, version["modified"])["deleted"])
+
+    def test_the_writers_of_an_accounts_contacts_and_sites_take_its_row_exclusively_from_the_start(self):
+        frappe.set_user(self.other_sales)
+        account = create_account(self._account_input("Exclusive Account"))
+        real_sql = frappe.db.sql
+        locks: list[str] = []
+
+        def watch(query, *args, **kwargs):
+            text = str(query)
+            if "`tabCustomer`" in text and ("FOR UPDATE" in text or "LOCK IN SHARE MODE" in text):
+                locks.append("shared" if "LOCK IN SHARE MODE" in text else "exclusive")
+            return real_sql(query, *args, **kwargs)
+
+        leaving = create_contact(self._contact_input(account["id"], "Exclusive Leaver"))
+
+        def delete_as_manager():
+            frappe.set_user(self.manager)
+            try:
+                return delete_contact(leaving["id"])
+            finally:
+                frappe.set_user(self.other_sales)
+
+        # The Contact's and the Address's saves take the Account's row exclusively in their hooks: it is taken so from
+        # the start, never held shared first (two such writers would each wait for the other to raise it).
+        for write in (
+            lambda: create_contact(self._contact_input(account["id"], "Exclusive Contact")),
+            lambda: create_site(account["id"], self._site_input("Exclusive Site")),
+            delete_as_manager,
+        ):
+            locks.clear()
+            with patch.object(frappe.db, "sql", side_effect=watch):
+                write()
+            self.assertTrue(locks)
+            self.assertEqual(locks[0], "exclusive", locks)
+            self.assertNotIn("shared", locks)
+
+    def test_a_status_record_takes_the_accounts_row_before_the_opportunitys(self):
+        frappe.set_user(self.other_sales)
+        account = create_account(self._account_input("Status Order Account"))
+        site = create_site(account["id"], self._site_input("Status Order Site"))
+        deal = create_strategy_opportunity(self._opportunity_input(account, site, self.other_sales, "Status Order Deal"))
+        real_sql = frappe.db.sql
+        order: list[str] = []
+
+        def watch(query, *args, **kwargs):
+            text = " ".join(str(query).split())
+            if "FOR UPDATE" in text:
+                order.append("opportunity" if "`tabCRM Opportunity`" in text else "account" if "`tabCustomer`" in text else "other")
+            return real_sql(query, *args, **kwargs)
+
+        # The order the Account's archive takes them in (the Account, then its Opportunities), so neither waits on the
+        # other in a cycle.
+        with patch.object(frappe.db, "sql", side_effect=watch):
+            opportunity_status._lock_write_scope(deal["id"])
+        self.assertEqual(order, ["account", "opportunity"])
+
+        # Moved to another Account since the snapshot named its Account: refused as changed, the other Account's row
+        # not taken after the Opportunity's (the reverse of the archive's order).
+        other = create_account(self._account_input("Status Order Other"))
+        real_get_value = frappe.db.get_value
+
+        def snapshot(doctype, *args, **kwargs):
+            if doctype == "CRM Opportunity" and args[:2] == (deal["id"], "account"):
+                return other["id"]
+            return real_get_value(doctype, *args, **kwargs)
+
+        order.clear()
+        with patch.object(frappe.db, "get_value", side_effect=snapshot), patch.object(frappe.db, "sql", side_effect=watch):
+            with self.assertRaises(CrmApiException) as changed:
+                opportunity_status._lock_write_scope(deal["id"])
+        self.assertEqual(changed.exception.code, "VERSION_CONFLICT")
+        self.assertEqual(order, ["account", "opportunity"])
+
+    def test_a_contact_whose_account_is_gone_still_moves_to_another(self):
+        frappe.set_user(self.other_sales)
+        gone = create_account(self._account_input("Gone Account"))
+        mover = create_contact(self._contact_input(gone["id"], "Gone Mover"))
+        target = create_account(self._account_input("Gone Target"))
+        frappe.db.sql("DELETE FROM `tabCustomer` WHERE `name` = %s", (gone["id"],))
+        # A Contact left naming an Account that is not there: that Account's archive flag reads as not archived (it is
+        # not asked for its read scope either), so the Contact still moves to an Account, as before the Account's
+        # archive. (Its own archive fails in Frappe's Contact validation, which reads every linked record, as before.)
+        frappe.set_user(self.manager)
+        moved = update_contact(mover["id"], self._contact_input(target["id"], "Gone Mover"), mover["modified"])
+        self.assertEqual(moved["accountId"], target["id"])
 
     def test_account_360_derives_contact_names_and_read_does_not_write(self):
         frappe.set_user(self.sales)

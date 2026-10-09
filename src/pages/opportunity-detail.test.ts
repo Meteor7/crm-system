@@ -665,6 +665,9 @@ describe('Opportunity detail', () => {
     expect(wrapper.get('[data-testid="references-loading"]').text()).toBe('客户和厂区列表加载中，到了再保存。')
     expect(wrapper.get('[data-modal-submit]').attributes('disabled')).toBeDefined()
     expect((wrapper.get('[aria-label="厂区"]').element as HTMLSelectElement).value).toBe('')
+    // The Opportunity's own Account and Site are not offered before the pickers have arrived.
+    expect(wrapper.find('[data-own-account]').exists()).toBe(false)
+    expect(wrapper.find('[data-own-site]').exists()).toBe(false)
 
     release!()
     await flushPromises()

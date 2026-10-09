@@ -18,6 +18,7 @@ import BookingAmountCnyModal from '@/features/opportunities/BookingAmountCnyModa
 import BookingEditorModal from '@/features/opportunities/BookingEditorModal.vue'
 import ContactModal from '@/features/contacts/ContactModal.vue'
 import { readAllPages } from '@/features/shared/read-all-pages'
+import { contactsWithOwnAccount } from '@/features/contacts/own-account-contacts'
 import { formatMoney } from '@/domain/money'
 import { formatDisplayDate, formatDisplayDateTime } from '@/domain/time'
 import { useAppStore } from '@/stores/app'
@@ -136,6 +137,8 @@ async function openEdit() {
       readActiveContacts(),
       props.apiClient.listPipeline({}).then((result) => result.data.opportunities),
     ])
+    // A Booking under an archived Account (out of the pickers) keeps its own Contact as a choice.
+    editContacts.value = await contactsWithOwnAccount(props.apiClient, editContacts.value, editAccounts.value.map((account) => account.id), booking.value.accountId)
     selectedContactId.value = booking.value.primaryContactId ?? ''
     editOpen.value = true
   } catch (reason) {

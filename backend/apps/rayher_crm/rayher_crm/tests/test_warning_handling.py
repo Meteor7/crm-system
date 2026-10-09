@@ -7,7 +7,7 @@ from frappe.tests.utils import FrappeTestCase
 
 from rayher_crm.api.v1.errors import CrmApiException
 from rayher_crm.services import cockpit, cockpit_settings, warning_handling, warning_notifications
-from rayher_crm.services.accounts import create_account
+from rayher_crm.services.accounts import archive_account, create_account
 from rayher_crm.services.opportunities import archive_strategy_opportunity, create_strategy_opportunity
 from rayher_crm.services.sites import create_site
 from rayher_crm.services.warning_notifications import send_warning_notifications
@@ -561,6 +561,33 @@ class TestWarningHandling(FrappeTestCase):
         send_warning_notifications()
         for user in {self.manager, frappe.db.get_value("CRM Quotation", quote_id, "quotation_owner")}:
             self.assertEqual(self._notices(user, version_id), [])
+
+    def test_an_archived_accounts_expiring_quotation_is_no_warning_and_takes_no_step(self):
+        frappe.set_user(self.sales)
+        saved, _ = self._ready_quotation()
+        published = self._publish(saved["quotation"]["id"], saved["version"]["modified"])
+        quote_id, version_id = published["quotation"]["id"], published["version"]["id"]
+        frappe.db.set_value("CRM Quotation Version", version_id, {"published_at": "2030-03-01 10:00:00", "valid_until": "2030-03-25"}, update_modified=False)
+        # A Quotation without a deal (an "Others" one), which answers to its own Account.
+        opportunity_id = frappe.db.get_value("CRM Quotation", quote_id, "opportunity")
+        frappe.db.set_value("CRM Quotation", quote_id, "opportunity", None, update_modified=False)
+        frappe.set_user(self.manager)
+        row = next(r for r in self._warnings()["quotationExpiryItems"] if r["id"] == quote_id)
+        source = {k: row["handling"][k] for k in ("warningType", "sourceId", "sourceEvent")}
+        archive_strategy_opportunity(opportunity_id)
+        archive_account(frappe.db.get_value("CRM Quotation", quote_id, "account"))
+
+        # Out of the Warnings page with its Account, and no next step for it: the Account's flag read under a shared
+        # lock on its row, after the Quotation's.
+        self.assertNotIn(quote_id, {r["id"] for r in self._warnings()["quotationExpiryItems"]})
+        with patch.object(frappe.db, "sql", wraps=frappe.db.sql) as queries:
+            self.assertEqual(self._code(lambda: warning_handling.save_plan({**source, "nextStep": "Renew with the customer"}, None)), "INVALID_TRANSITION")
+        statements = [" ".join(str(call.args[0]).split()) for call in queries.call_args_list if call.args]
+        quotation = [i for i, statement in enumerate(statements) if "`tabCRM Quotation`" in statement and "FOR UPDATE" in statement]
+        account = [i for i, statement in enumerate(statements) if "`tabCustomer`" in statement and "LOCK IN SHARE MODE" in statement]
+        self.assertTrue(quotation and account, statements)
+        self.assertLess(quotation[0], account[0])
+        self.assertFalse(frappe.db.exists("CRM Warning Handling", {"source_id": quote_id}))
 
     def test_a_past_week_keys_a_stage6_deal_by_its_current_entry(self):
         first = self._to_stage6(45)

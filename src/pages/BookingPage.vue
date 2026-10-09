@@ -18,6 +18,7 @@ import ContactModal from '@/features/contacts/ContactModal.vue'
 import { formatMoney, formatSummedTotals, moneyByCurrency } from '@/domain/money'
 import { formatDisplayDate } from '@/domain/time'
 import { readAllPages } from '@/features/shared/read-all-pages'
+import { ownAccountContacts, withContacts } from '@/features/contacts/own-account-contacts'
 import PaginationControls from '@/features/shared/PaginationControls.vue'
 import { useI18n, useLocaleMessage, localeMessage } from '@/i18n'
 import { salesEnumLabel, salesUnits } from '@/features/shared/sales-i18n'
@@ -121,16 +122,29 @@ async function load() {
     if (current === sequence) loading.value = false
   }
 }
+// The editor opened last: a Booking's Contacts read for an earlier one are dropped.
+let editSequence = 0
 function openCreate() {
+  editSequence += 1
   editing.value = null
   selectedContactId.value = ''
   modalError.value = ''
   modalOpen.value = true
 }
-function openEdit(booking: BookingDto) {
+async function openEdit(booking: BookingDto) {
+  const sequence = ++editSequence
+  // A Booking under an archived Account (out of the pickers) keeps its own Contact as a choice: its Account's Contacts
+  // are read by its id first, and added to the list only for the editor opened last. A failed read is said in the
+  // editor, which opens with the Contacts it has.
+  let failure: unknown = null
+  let own: ContactSummaryDto[] = []
+  try { own = await ownAccountContacts(props.apiClient, accounts.value.map((account) => account.id), booking.accountId) }
+  catch (reason) { failure = reason }
+  if (sequence !== editSequence) return
+  contacts.value = withContacts(contacts.value, own)
   editing.value = booking
   selectedContactId.value = booking.primaryContactId ?? ''
-  modalError.value = ''
+  modalError.value = failure ? (mapRequestError(failure).localizedMessage ?? mapRequestError(failure).message) : ''
   modalOpen.value = true
 }
 function openContact(accountId: string) {

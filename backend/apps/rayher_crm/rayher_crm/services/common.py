@@ -175,7 +175,7 @@ def require_manager_scoped_document(
     *,
     for_update: bool = False,
 ):
-    """The record a Manager-only action (an archive, a delete) is about: the capability, the Manager role, the
+    """The record a Manager-only action (an archive or a restore) is about: the capability, the Manager role, the
     record and the caller's read scope are checked in that order. With for_update the record is read with its row
     locked (`SELECT … FOR UPDATE`, a locking read: the row as committed, not this transaction's snapshot), so the
     action decides on the current record and no other write lands on it before the action commits."""
@@ -198,28 +198,3 @@ def require_manager_scoped_document(
     if not frappe.has_permission(doctype, "read", doc=doc, user=frappe.session.user):
         raise CrmApiException("SCOPE_DENIED", f"{doctype} is outside the current user scope.")
     return doc
-
-
-def delete_manager_scoped_document(
-    doctype: str,
-    name: str,
-    capability: str,
-    not_found_code: str,
-) -> dict[str, str]:
-    """Delete a Sales-domain document, but only for the CRM Manager role."""
-
-    import frappe
-
-    require_manager_scoped_document(doctype, name, capability, not_found_code)
-
-    savepoint = "crm_manager_delete"
-    frappe.db.savepoint(savepoint)
-    try:
-        frappe.delete_doc(doctype, name, ignore_permissions=True)
-    except frappe.LinkExistsError as exc:
-        frappe.db.rollback(save_point=savepoint)
-        raise CrmApiException("CONFLICT", f"{doctype} is referenced by another record.") from exc
-    except Exception:
-        frappe.db.rollback(save_point=savepoint)
-        raise
-    return {"id": name, "status": "Deleted"}

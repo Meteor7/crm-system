@@ -47,26 +47,32 @@ const actionError = useLocaleMessage()
 const referencesReady = ref(false)
 const referencesError = useLocaleMessage()
 const currentAccount = computed(() => accounts.value.find((account) => account.id === detail.value?.contact.accountId))
+// The owner of the Contact's Account: from the Account list, or from the Contact's own answer when the list does not
+// have it (an archived Account is out of the list).
+const accountOwner = computed(() => currentAccount.value?.owner ?? detail.value?.accountOwner ?? '')
+// The Account archived (a Manager's archive, in place of a delete): the Contact and its files take no change,
+// no merge, no archive, and start no Opportunity or Visit, until the Account is restored.
+const accountArchived = computed(() => detail.value?.accountArchived === true)
 const canWrite = computed(() => {
   const user = app.bootstrap?.user
-  if (!user || !detail.value || !app.can('contact:write')) return false
+  if (!user || !detail.value || !app.can('contact:write') || accountArchived.value) return false
   if (user.role === 'Manager') return true
-  return user.role === 'Sales' && currentAccount.value?.owner === user.id
+  return user.role === 'Sales' && accountOwner.value === user.id
 })
 const canDeleteContactFiles = computed(() => canWrite.value)
 const siteRestricted = computed(() => {
   const user = app.bootstrap?.user
-  return user?.role === 'Sales' && Boolean(currentAccount.value) && currentAccount.value?.owner !== user.id
+  return user?.role === 'Sales' && Boolean(accountOwner.value) && accountOwner.value !== user.id
 })
 const siteDisplay = computed(() => {
   if (siteRestricted.value) return t('contacts.ownerOnly')
   return detail.value?.contact.siteName || detail.value?.contact.siteId || t('detail.notSpecified')
 })
-const canMerge = computed(() => app.can('contact:merge'))
+const canMerge = computed(() => app.can('contact:merge') && !accountArchived.value)
 const canCreateOpportunity = computed(() => canWrite.value && app.can('deal:write'))
 const canCreateVisit = computed(() => canWrite.value && app.can('visit:create') && app.can('visit:write'))
 const isActive = computed(() => detail.value?.contact.status === 'Active')
-const canDelete = computed(() => app.can('contact:delete'))
+const canDelete = computed(() => app.can('contact:delete') && !accountArchived.value)
 const statusTone = computed<Tone>(() => detail.value?.contact.status === 'Active' ? 'positive' : detail.value?.contact.status === 'Left Company' ? 'warning' : 'neutral')
 let loadSequence = 0
 
@@ -209,6 +215,7 @@ onMounted(async () => {
         <button v-if="isActive && canMerge" class="secondary-button merge-action" type="button" data-testid="merge-contact" @click="actionError = ''; mergeOpen = true"><GitMerge :size="14" />{{ locale === 'en-US' ? 'Merge duplicate' : '合并重复联系人' }}</button>
         <button v-if="canDelete" class="delete-button" type="button" data-testid="delete-contact" @click="actionError = ''; deleteOpen = true"><Trash2 :size="14" />{{ t('detail.archiveContact') }}</button>
       </PageHeader>
+      <p v-if="accountArchived" class="account-archived-notice" data-account-archived-notice>{{ t('detail.contactAccountArchived') }}</p>
 
       <div class="contact-summary">
         <span class="avatar"><UserRound :size="24" /></span>
@@ -263,5 +270,6 @@ onMounted(async () => {
 </template>
 
 <style scoped>
+.account-archived-notice{margin:0 0 12px;padding:10px 12px;color:#5c4a16;background:#fff5df;border:1px solid #f0dda9;border-radius:9px;font-size:10px;line-height:1.6}
 .back-link{display:inline-flex;align-items:center;gap:5px;margin-bottom:14px;color:var(--crm-link);font-size:11px;font-weight:700}.primary-button,.secondary-button{display:flex;align-items:center;gap:6px}.merge-action{white-space:nowrap}.delete-button{display:inline-flex;min-height:36px;align-items:center;justify-content:center;gap:6px;padding:0 12px;color:var(--crm-danger);background:#fffafa;border:1px solid #e3b9b9;border-radius:8px;outline:0;font:inherit;font-size:11px;font-weight:800;white-space:nowrap;cursor:pointer;transition:background-color .16s ease,border-color .16s ease,box-shadow .16s ease,transform .16s ease}.delete-button:hover{color:#a93333;background:var(--crm-danger-soft);border-color:#cf8585;box-shadow:0 3px 10px rgba(166,51,51,.1);transform:translateY(-1px)}.delete-button:focus-visible{border-color:var(--crm-danger);box-shadow:0 0 0 3px rgba(182,69,69,.16)}.delete-button:active{transform:translateY(0)}.contact-summary{display:grid;grid-template-columns:auto repeat(4,minmax(0,1fr));align-items:center;gap:12px;margin-bottom:14px;padding:14px 16px;background:#fff;border:1px solid var(--crm-line);border-radius:13px}.contact-summary .avatar{display:grid;width:46px;height:46px;place-items:center;color:var(--crm-brand-ink);background:var(--crm-teal-soft);border-radius:13px}.contact-summary div{display:grid;gap:5px}.contact-summary small{color:var(--crm-text-muted);font-size:9px}.contact-summary strong{color:var(--crm-navy);font-size:11px}.detail-grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.15fr) minmax(240px,.72fr);gap:14px;align-items:start}.profile-list{display:grid;margin:0}.profile-list div{display:grid;grid-template-columns:90px minmax(0,1fr);gap:10px;padding:11px 0;border-bottom:1px solid var(--crm-line)}.profile-list div:last-child{border-bottom:0}.profile-list dt{color:var(--crm-text-muted);font-size:10px}.profile-list dd{display:flex;flex-wrap:wrap;gap:7px;margin:0;color:var(--crm-navy);font-size:11px}.profile-list a{display:inline-flex;align-items:center;gap:5px;color:var(--crm-link);font-weight:700}.report-link+.report-link::before{content:'·';margin-right:7px;color:var(--crm-text-muted)}.timeline{display:grid;gap:9px}.timeline>a{position:relative;display:grid;gap:4px;padding:11px 12px 11px 18px;color:inherit;background:var(--crm-surface);border:1px solid var(--crm-line);border-radius:10px}.timeline>a::before{position:absolute;top:15px;left:8px;width:4px;height:4px;background:var(--crm-teal);border-radius:50%;content:''}.timeline span,.timeline time{color:var(--crm-text-muted);font-size:8px}.timeline strong{color:var(--crm-navy);font-size:11px}.timeline p{margin:0;color:var(--crm-text-muted);font-size:10px;line-height:1.5}.related-column{display:grid;gap:14px}.related-links{display:grid;gap:8px}.related-links a{display:flex;align-items:center;justify-content:space-between;padding:11px 12px;color:var(--crm-navy);background:var(--crm-surface);border:1px solid var(--crm-line);border-radius:9px;font-size:10px}.related-links strong{display:grid;width:26px;height:26px;place-items:center;color:var(--crm-brand-ink);background:var(--crm-teal-soft);border-radius:8px}@media(max-width:1080px){.detail-grid{grid-template-columns:1fr 1fr}.related-column{grid-column:1/-1;grid-template-columns:1fr 1fr}}@media(max-width:700px){.contact-summary{grid-template-columns:auto 1fr 1fr}.detail-grid,.related-column{grid-template-columns:1fr}.related-column{grid-column:auto}.profile-list div{grid-template-columns:1fr}}
 </style>

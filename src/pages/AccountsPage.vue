@@ -3,7 +3,7 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { Building2, Plus } from '@lucide/vue'
 import { api as defaultApi, CrmApiError, type CrmApi } from '@/api'
-import type { AccountSummaryDto, CreateAccountInput, SiteDto, Tone } from '@/types/crm'
+import type { AccountSummaryDto, ArchiveState, CreateAccountInput, SiteDto, Tone } from '@/types/crm'
 import { useAppStore } from '@/stores/app'
 import PageHeader from '@/design-system/PageHeader.vue'
 import DataState from '@/design-system/DataState.vue'
@@ -27,7 +27,9 @@ const router = useRouter()
 const app = useAppStore()
 const { locale, t, message: translatedMessage } = useI18n()
 const rows = ref<AccountSummaryDto[]>([]), total = ref(0), loading = ref(false), error = useLocaleMessage(), denied = ref(false), requestId = ref(''), meta = ref<RequestMetaState | null>(null)
-const deletingId = ref(''), deleteError = useLocaleMessage(), deleteRequestId = ref('')
+// Archived Accounts (a Manager's archive, in place of a delete) are shown only when asked for.
+const normalizeArchive = (value: unknown): ArchiveState => value === 'archived' || value === 'all' ? value : 'active'
+const archiveState = ref<ArchiveState>(normalizeArchive(route.query.archive))
 const page = ref(typeof route.query.page === 'string' && Number(route.query.page) > 0 ? Number(route.query.page) : 1)
 const pageSize = ref(typeof route.query.pageSize === 'string' && [10, 25, 50].includes(Number(route.query.pageSize)) ? Number(route.query.pageSize) : 10)
 const segment = ref(typeof route.query.segment === 'string' ? route.query.segment : 'All'), city = ref(typeof route.query.city === 'string' ? route.query.city : 'All')
@@ -43,7 +45,6 @@ const accountModal = ref(false), busy = ref(false), modalError = useLocaleMessag
 // The Accounts named like the one being created, which the server refused until the user says it is another company.
 const duplicateAccounts = ref('')
 const canWrite = computed(() => app.can('account:write'))
-const canDelete = computed(() => app.bootstrap?.user.role === 'Manager')
 const accountForm = ref<CreateAccountInput>({ name: '', shortName: '', segment: 'Frontend', tier: 'A', city: '上海', region: 'East China', owner: preferredPersonnelId('Sales', app.bootstrap?.user.id), visibility: 'Private', customerKind: '' })
 // The name the last submission asked about: the refusal, and the offer to go on, are for that name alone,
 // whatever the field says by the time the answer arrives.
@@ -62,7 +63,7 @@ const visibilityLabel = (account: AccountSummaryDto) => account.visibility === '
 async function load() {
   const sequence = ++loadSequence; loading.value = true; error.value = ''; denied.value = false; meta.value = null
   try {
-    const result = await props.apiClient.listAccounts({ search: search.value.trim() || undefined, segment: segment.value, city: city.value, page: page.value, pageSize: pageSize.value })
+    const result = await props.apiClient.listAccounts({ search: search.value.trim() || undefined, segment: segment.value, city: city.value, archiveState: archiveState.value, page: page.value, pageSize: pageSize.value })
     if (sequence !== loadSequence) return
     rows.value = result.data.items; total.value = result.meta?.total ?? rows.value.length; meta.value = readRequestMeta(result)
     rows.value.forEach((account) => includeCity(account.city))
@@ -108,9 +109,9 @@ function includeCity(value: string) {
 }
 // The filter watcher reloads on each change it sees; the reset reloads once for both, and also when they already
 // stood at "All", which used to leave the page where it was (F1-03).
-function reset() { restoringRoute = true; search.value = ''; searchDraft.value = ''; segment.value = 'All'; city.value = 'All'; restoringRoute = false; changeFilters() }
+function reset() { restoringRoute = true; search.value = ''; searchDraft.value = ''; segment.value = 'All'; city.value = 'All'; archiveState.value = 'active'; restoringRoute = false; changeFilters() }
 let restoringRoute = false
-function syncUrl() { if (!restoringRoute) void router.replace({ name: 'accounts', query: { ...route.query, page: String(page.value), pageSize: String(pageSize.value), search: search.value.trim() || undefined, segment: segment.value === 'All' ? undefined : segment.value, city: city.value === 'All' ? undefined : city.value } }) }
+function syncUrl() { if (!restoringRoute) void router.replace({ name: 'accounts', query: { ...route.query, page: String(page.value), pageSize: String(pageSize.value), search: search.value.trim() || undefined, segment: segment.value === 'All' ? undefined : segment.value, city: city.value === 'All' ? undefined : city.value, archive: archiveState.value === 'active' ? undefined : archiveState.value } }) }
 function changeFilters() { if (restoringRoute) return; page.value = 1; syncUrl(); void load() }
 // The search runs on Enter and is written into the URL, as a change of a filter is: a list is what its URL says
 // (back, a reload and the link bring the search back). A reload per keystroke would rebuild the page under the
@@ -193,36 +194,20 @@ async function createAccount() {
   finally { busy.value = false }
 }
 // Synchronous, so that a reset or a route restore (which set `restoringRoute` around their assignments) is one reload.
-watch([segment, city], changeFilters, { flush: 'sync' })
-watch(() => [route.query.page, route.query.pageSize, route.query.search, route.query.segment, route.query.city], ([nextPage, nextSize, nextSearch, nextSegment, nextCity]) => {
+watch([segment, city, archiveState], changeFilters, { flush: 'sync' })
+watch(() => [route.query.page, route.query.pageSize, route.query.search, route.query.segment, route.query.city, route.query.archive], ([nextPage, nextSize, nextSearch, nextSegment, nextCity, nextArchive]) => {
   const restoredPage = typeof nextPage === 'string' && Number(nextPage) > 0 ? Number(nextPage) : 1
   const restoredSize = typeof nextSize === 'string' && [10, 25, 50].includes(Number(nextSize)) ? Number(nextSize) : 10
   const restoredSearch = typeof nextSearch === 'string' ? nextSearch : ''
   const restoredSegment = typeof nextSegment === 'string' ? nextSegment : 'All'
   const restoredCity = typeof nextCity === 'string' ? nextCity : 'All'
-  if (restoredPage === page.value && restoredSize === pageSize.value && restoredSearch === search.value.trim() && restoredSegment === segment.value && restoredCity === city.value) return
-  restoringRoute = true; page.value = restoredPage; pageSize.value = restoredSize; search.value = restoredSearch; searchDraft.value = restoredSearch; segment.value = restoredSegment; city.value = restoredCity; restoringRoute = false; void load()
+  const restoredArchive = normalizeArchive(nextArchive)
+  if (restoredPage === page.value && restoredSize === pageSize.value && restoredSearch === search.value.trim() && restoredSegment === segment.value && restoredCity === city.value && restoredArchive === archiveState.value) return
+  restoringRoute = true; page.value = restoredPage; pageSize.value = restoredSize; search.value = restoredSearch; searchDraft.value = restoredSearch; segment.value = restoredSegment; city.value = restoredCity; archiveState.value = restoredArchive; restoringRoute = false; void load()
 })
 onMounted(() => { void load(); void loadSegments(); void loadRegions(); void loadCities() })
 // The record carries the list's URL, for its "Back to Accounts" control.
 function openDetail(account: AccountSummaryDto) { void router.push({ name: 'account-detail', params: { accountId: account.id }, query: { from: route.fullPath } }) }
-async function deleteAccount(account: AccountSummaryDto) {
-  if (deletingId.value || !window.confirm(`${t('accounts.delete')} ${t('accounts.account').toLowerCase()} ${account.name}?`)) return
-  deletingId.value = account.id
-  deleteError.value = ''
-  deleteRequestId.value = ''
-  try {
-    await props.apiClient.deleteAccount(account.id)
-    if (rows.value.length === 1 && page.value > 1) page.value -= 1
-    await load()
-  } catch (reason) {
-    const mapped = mapRequestError(reason)
-    deleteError.value = mapped.localizedMessage ?? mapped.message
-    deleteRequestId.value = mapped.requestId
-  } finally {
-    deletingId.value = ''
-  }
-}
 </script>
 
 <template>
@@ -231,9 +216,8 @@ async function deleteAccount(account: AccountSummaryDto) {
       <button v-if="canWrite" class="primary-button" type="button" data-testid="new-account" @click="openAccountModal"><Plus :size="15" />{{ t('accounts.new') }}</button>
     </PageHeader>
     <section v-if="!denied" class="account-stats"><div><span>{{ t('accounts.total') }}</span><strong>{{ total }}</strong><small>{{ t('accounts.scope') }}</small></div><div><span>{{ t('accounts.completeness') }}</span><strong>{{ rows.length ? Math.round(rows.reduce((sum, item) => sum + item.completeness, 0) / rows.length) : 0 }}%</strong><small>{{ t('accounts.completenessHint') }}</small></div></section>
-    <FilterBar :result-label="t('accounts.result', { count: total })" @reset="reset"><input v-model="searchDraft" class="filter-control filter-search" type="search" data-account-search :placeholder="t('accounts.searchPlaceholder')" :aria-label="t('accounts.searchPlaceholder')" @keydown.enter="submitSearch" /><select v-model="segment" class="filter-control" :aria-label="locale === 'en-US' ? 'Business area' : '业务领域'"><option value="All">{{ t('accounts.allSegments') }}</option><option v-for="item in segments" :key="item" :value="item">{{ item }}</option></select><select v-model="city" class="filter-control" :aria-label="locale === 'en-US' ? 'City' : '城市'"><option value="All">{{ t('accounts.allCities') }}</option><option v-for="item in cities" :key="item" :value="item">{{ item }}</option></select></FilterBar>
+    <FilterBar :result-label="t('accounts.result', { count: total })" @reset="reset"><input v-model="searchDraft" class="filter-control filter-search" type="search" data-account-search :placeholder="t('accounts.searchPlaceholder')" :aria-label="t('accounts.searchPlaceholder')" @keydown.enter="submitSearch" /><select v-model="segment" class="filter-control" :aria-label="locale === 'en-US' ? 'Business area' : '业务领域'"><option value="All">{{ t('accounts.allSegments') }}</option><option v-for="item in segments" :key="item" :value="item">{{ item }}</option></select><select v-model="city" class="filter-control" :aria-label="locale === 'en-US' ? 'City' : '城市'"><option value="All">{{ t('accounts.allCities') }}</option><option v-for="item in cities" :key="item" :value="item">{{ item }}</option></select><select v-model="archiveState" class="filter-control" :aria-label="t('accounts.archiveState')"><option value="active">{{ t('accounts.archiveActive') }}</option><option value="archived">{{ t('accounts.archiveArchived') }}</option><option value="all">{{ t('accounts.archiveAll') }}</option></select></FilterBar>
     <DataNotice v-if="meta?.stale" :message="meta.localizedMessage ?? meta.message" :request-id="meta.requestId" @refresh="load" />
-    <p v-if="deleteError" class="form-error" data-delete-error>{{ deleteError }}<small v-if="deleteRequestId">{{ locale === 'en-US' ? 'Request ID' : '请求编号' }} {{ deleteRequestId }}</small></p>
 
     <section class="accounts-card">
       <DataState v-if="loading && !rows.length" type="loading" />
@@ -242,17 +226,16 @@ async function deleteAccount(account: AccountSummaryDto) {
       <DataState v-else-if="!rows.length" type="empty" :title="t('accounts.emptyTitle')" :message="t('accounts.emptyMessage')" />
       <div v-else class="table-scroll">
         <table class="crm-table accounts-table">
-          <thead><tr><th>{{ t('accounts.account') }}</th><th>{{ t('accounts.businessRegion') }}</th><th>{{ t('accounts.owner') }}</th><th>{{ t('accounts.contactsSites') }}</th><th>{{ t('accounts.pipelineIntent') }}</th><th>{{ t('accounts.nextStep') }}</th><th>{{ t('accounts.risk') }}</th><th>{{ t('accounts.completeness') }}</th><th>{{ t('accounts.updated') }}</th><th v-if="canDelete">{{ t('accounts.actions') }}</th></tr></thead>
+          <thead><tr><th>{{ t('accounts.account') }}</th><th>{{ t('accounts.businessRegion') }}</th><th>{{ t('accounts.owner') }}</th><th>{{ t('accounts.contactsSites') }}</th><th>{{ t('accounts.pipelineIntent') }}</th><th>{{ t('accounts.nextStep') }}</th><th>{{ t('accounts.risk') }}</th><th>{{ t('accounts.completeness') }}</th><th>{{ t('accounts.updated') }}</th></tr></thead>
           <tbody>
             <tr v-for="account in rows" :key="account.id" :data-account-id="account.id">
-              <td><button class="account-link record-name-link" type="button" :data-open-account-detail="account.id" @click="openDetail(account)"><span><Building2 :size="14" /></span><div><strong>{{ account.shortName }}</strong><small>{{ account.name }}</small></div></button><StatusBadge class="visibility-badge" :data-account-visibility="account.visibility ?? 'Private'" :label="visibilityLabel(account)" :tone="account.visibility === 'Public' ? 'info' : 'neutral'" :dot="false" /></td>
+              <td><button class="account-link record-name-link" type="button" :data-open-account-detail="account.id" @click="openDetail(account)"><span><Building2 :size="14" /></span><div><strong>{{ account.shortName }}</strong><small>{{ account.name }}</small></div></button><StatusBadge class="visibility-badge" :data-account-visibility="account.visibility ?? 'Private'" :label="visibilityLabel(account)" :tone="account.visibility === 'Public' ? 'info' : 'neutral'" :dot="false" /><StatusBadge v-if="account.archived" class="visibility-badge" :data-account-archived="account.id" :label="t('accounts.archiveArchived')" tone="neutral" :dot="false" /></td>
               <td><strong>{{ account.segment }}</strong><small>{{ account.city }} · {{ regionLabel(account.region, locale) }}</small></td>
               <td>{{ personnelDisplayName(account.owner) }}</td><td><strong>{{ t('accounts.contactsCount', { count: account.stakeholderCount }) }}</strong><small>{{ account.metricsRestricted ? t('accounts.ownerOnly') : t('accounts.sitesCount', { count: account.siteCount }) }}</small></td>
               <!-- A Sales user who does not own the Account gets these zeroed by the server: said so, not shown as numbers (F1-11). -->
               <td v-if="account.metricsRestricted" :data-account-owner-only="account.id"><small>{{ t('accounts.ownerOnly') }}</small></td>
               <td v-else><strong :data-account-pipeline="account.id">{{ pipelineText(account) }}</strong><small v-if="account.pipelineMissingAmountCount" :data-account-pipeline-missing="account.id">{{ t('opportunities.unknownAmountCount', { count: account.pipelineMissingAmountCount }) }}</small><small>{{ locale === 'en-US' ? 'Intent score' : '意愿评分' }} {{ account.intentScore }}</small></td><td><strong>{{ account.metricsRestricted ? t('accounts.ownerOnly') : (account.nextAction || t('accounts.none')) }}</strong><small v-if="!account.metricsRestricted">{{ account.nextActionDue ? formatDisplayDate(account.nextActionDue) : t('accounts.unscheduled') }}</small></td>
               <td><StatusBadge v-if="account.metricsRestricted" :label="t('accounts.ownerOnly')" tone="neutral" /><StatusBadge v-else :label="account.risk === '高风险' ? t('accounts.riskHigh') : account.risk === '关注' ? t('accounts.riskWatch') : t('accounts.riskStable')" :tone="riskTone(account.risk)" /></td><td>{{ account.completeness }}%</td><td>{{ formatDisplayDate(account.updatedAt) }}</td>
-              <td v-if="canDelete"><button type="button" class="site-remove" :data-delete-account="account.id" :disabled="Boolean(deletingId)" @click="deleteAccount(account)">{{ t('accounts.delete') }}</button></td>
             </tr>
           </tbody>
         </table>

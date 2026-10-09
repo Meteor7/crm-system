@@ -222,7 +222,10 @@ export interface CrmApi {
   listAccountCities(): Promise<ApiResponse<string[]>>
   createAccount(input: CreateAccountInput): Promise<ApiResponse<AccountSummaryDto>>
   updateAccount(id: string, input: CreateAccountInput, expectedModified?: string): Promise<ApiResponse<AccountSummaryDto>>
-  deleteAccount(id: string): Promise<ApiResponse<{ id: string; status: 'Deleted' }>>
+  /** A Manager archives an Account in place of deleting it: out of the list, the pickers and the figures with its Sites and Contacts, read-only, restorable. */
+  archiveAccount(id: string): Promise<ApiResponse<AccountSummaryDto>>
+  /** Brings an archived Account back as it was (Manager). */
+  unarchiveAccount(id: string): Promise<ApiResponse<AccountSummaryDto>>
   getAccount360(id: string): Promise<ApiResponse<Account360Dto>>
   /** Every Site the user may read, across Accounts, in one request. */
   listAccountSites(): Promise<ApiResponse<AccountSiteDto[]>>

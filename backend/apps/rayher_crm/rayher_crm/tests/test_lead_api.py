@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+from unittest.mock import patch
+
 import frappe
 from frappe.tests.utils import FrappeTestCase
 
 from rayher_crm.api.v1.errors import CrmApiException
 from rayher_crm.api.v1.leads import create_lead as create_lead_endpoint
-from rayher_crm.services.accounts import create_account, get_account_360
+from rayher_crm.services.accounts import ARCHIVED_ACCOUNT_LINK, archive_account, create_account, get_account_360
 from rayher_crm.services.contacts import create_contact, get_contact
 from rayher_crm.services.leads import (
     ARCHIVED_LEAD_CONVERT,
@@ -540,6 +542,72 @@ class TestLeadApi(FrappeTestCase):
         modified = frappe.db.get_value("Lead", untraced["id"], "modified")
         self.assertTrue(archive_lead(untraced["id"])["archived"])
         self.assertEqual(frappe.db.get_value("Lead", untraced["id"], "modified"), modified)
+
+    def test_a_lead_is_not_converted_into_an_archived_account(self):
+        frappe.set_user(self.sales)
+        account = create_account(self._account_input("Archived Target Account"))
+        create_site(account["id"], self._site_input("Archived Target Site"))
+        lead = create_lead(self._input("Archived Target Lead"))
+        frappe.set_user(self.manager)
+        archive_account(account["id"])
+
+        frappe.set_user(self.sales)
+        with self.assertRaises(CrmApiException) as refused:
+            convert_lead(lead["id"], self._conversion_input(accountId=account["id"]))
+        self.assertEqual((refused.exception.code, refused.exception.public_message), ("INVALID_TRANSITION", ARCHIVED_ACCOUNT_LINK))
+        self.assertEqual(frappe.db.get_value("Lead", lead["id"], "custom_crm_status"), "New")
+        self.assertEqual(frappe.db.count("CRM Opportunity", {"account": account["id"]}), 0)
+
+    def test_a_lead_converted_into_an_account_takes_its_row_exclusively_from_the_start(self):
+        frappe.set_user(self.sales)
+        account = create_account(self._account_input("Exclusive Target Account"))
+        site = create_site(account["id"], self._site_input("Exclusive Target Site"))
+        lead = create_lead(self._input("Exclusive Target Lead"))
+        real_sql = frappe.db.sql
+        locks: list[str] = []
+
+        def watch(query, *args, **kwargs):
+            text = str(query)
+            if "`tabCustomer`" in text and ("FOR UPDATE" in text or "LOCK IN SHARE MODE" in text):
+                locks.append("shared" if "LOCK IN SHARE MODE" in text else "exclusive")
+            return real_sql(query, *args, **kwargs)
+
+        with patch.object(frappe.db, "sql", side_effect=watch):
+            convert_lead(lead["id"], self._conversion_input(
+                accountId=account["id"], siteId=site["id"],
+                newContact=self._contact_input(account["id"], "Exclusive Target Contact"),
+            ))
+        # The Lead's and the Contact's saves take the Account's row exclusively in their hooks: it is taken so first,
+        # never held shared before (two conversions into one Account would each wait for the other to raise it).
+        self.assertTrue(locks)
+        self.assertEqual(locks[0], "exclusive", locks)
+
+    def test_a_conversion_takes_the_lead_owners_user_row_before_any_accounts(self):
+        frappe.set_user(self.sales)
+        account = create_account(self._account_input("User First Account"))
+        site = create_site(account["id"], self._site_input("User First Site"))
+        lead = create_lead(self._input("User First Lead"))
+        real_sql = frappe.db.sql
+        order: list[str] = []
+
+        def watch(query, *args, **kwargs):
+            text = str(query)
+            if "FOR UPDATE" in text or "LOCK IN SHARE MODE" in text:
+                if "`tabUser`" in text:
+                    order.append("user")
+                elif "`tabCustomer`" in text:
+                    order.append("account")
+            return real_sql(query, *args, **kwargs)
+
+        with patch.object(frappe.db, "sql", side_effect=watch):
+            convert_lead(lead["id"], self._conversion_input(
+                accountId=account["id"], siteId=site["id"],
+                newContact=self._contact_input(account["id"], "User First Contact"),
+            ))
+        # The Lead's save takes its owner's User row in its hook; every writer that locks a User (an Opportunity's
+        # edit, an Event's save) takes it before an Account's row, so the conversion takes it first too.
+        self.assertIn("account", order)
+        self.assertEqual(order[0], "user", order)
 
     def test_lead_create_fails_closed_if_erpnext_auto_contact_is_reenabled(self):
         frappe.set_user(self.sales)

@@ -4,9 +4,10 @@ import frappe
 from rayher_crm.api.v1.errors import CrmApiException
 from rayher_crm.permissions.roles import assert_capability, resolve_crm_role
 from rayher_crm.services.common import as_payload, normalize_expected_modified, optional_date, required_text, to_iso_timestamp
+from rayher_crm.services.accounts import ARCHIVED_ACCOUNT_EDIT, lock_accounts
 from rayher_crm.services.opportunity_archive import assert_opportunity_not_archived
 from rayher_crm.services.opportunity_stages import OPEN_STAGES
-from rayher_crm.services.quotations import _require_quotation
+from rayher_crm.services.quotations import _quotation_account, _require_quotation
 
 
 def dto(master):
@@ -24,29 +25,47 @@ def get_planning(quotation_id):
 
 def locked(quotation_id, expected_modified):
     assert_capability("quotation:write")
-    # Check authorization before returning a version conflict; lock both current
-    # ownership rows so an earlier RR snapshot cannot retain revoked access.
+    # Check authorization before returning a version conflict; read both current
+    # ownership rows under locks so an earlier RR snapshot cannot retain revoked access.
     _require_quotation(quotation_id)
+    # The rows in the order every Quotation writer takes them in (quotations._assert_quotation_writable): the
+    # Quotation's, then its Accounts' (shared, as those writers take them, by one statement in name order: the one it
+    # is addressed to, whose owner and visibility scope it, and the one it answers to, its deal's now), then its
+    # Opportunity's, refused as changed if it moved to another Account since the first read. An archive committed
+    # meanwhile is seen, and one in flight (it takes the Account's row exclusively) is waited for.
+    quotes = frappe.db.sql(
+        "SELECT `account`, `opportunity` FROM `tabCRM Quotation` WHERE `name` = %s FOR UPDATE", (quotation_id,), as_dict=True,
+    )
+    if not quotes:
+        raise CrmApiException("NOT_FOUND", "Quotation was not found.")
+    deal_account = _quotation_account(quotes[0])
+    archived_accounts = lock_accounts((quotes[0].account, deal_account))
+    deal = frappe.db.get_value(
+        "CRM Opportunity", quotes[0].opportunity, ["account", "archived"], as_dict=True, for_update=True,
+    ) if quotes[0].opportunity else None
     rows = frappe.db.sql(
         """SELECT q.quotation_owner, q.modified, q.current_version, q.current_published_version,
                   c.name AS account, c.custom_crm_owner, c.custom_crm_visibility,
-                  q.opportunity, o.stage, o.archived AS opportunity_archived
+                  q.opportunity, o.stage
              FROM `tabCRM Quotation` q
              LEFT JOIN `tabCustomer` c ON c.name=q.account
              LEFT JOIN `tabCRM Opportunity` o ON o.name=q.opportunity
-            WHERE q.name=%s FOR UPDATE""", (quotation_id,), as_dict=True,
+            WHERE q.name=%s LOCK IN SHARE MODE""", (quotation_id,), as_dict=True,
     )
-    if not rows:
-        raise CrmApiException("NOT_FOUND", "Quotation was not found.")
     row = rows[0]
     if resolve_crm_role() == "Sales" and (
         row.quotation_owner != frappe.session.user or not row.account
         or (row.custom_crm_owner != frappe.session.user and row.custom_crm_visibility != "Public")
     ):
         raise CrmApiException("SCOPE_DENIED", "Quotation is outside the current user scope.")
-    # A Quotation of an archived Opportunity is frozen with it, its send plan and its follow-ups too: the flag as
-    # committed, the Opportunity's row read under its lock by the join above, after the Quotation's and its Account's.
-    assert_opportunity_not_archived(row.opportunity_archived)
+    # A deal moved to another Account since the first read is refused as changed (as quotations._locked_deal refuses
+    # it), once the scope is checked. A Quotation whose Account (its deal's now) or Opportunity is archived is frozen
+    # with it, its send plan and its follow-ups too: the flags as committed, under the locks above.
+    if deal and (deal.account or None) != (deal_account or None):
+        raise CrmApiException("VERSION_CONFLICT", "The record was changed by another request.")
+    if archived_accounts.get(deal_account):
+        raise CrmApiException("INVALID_TRANSITION", ARCHIVED_ACCOUNT_EDIT)
+    assert_opportunity_not_archived(bool(deal and deal.archived))
     if normalize_expected_modified(expected_modified) != to_iso_timestamp(row.modified):
         raise CrmApiException("VERSION_CONFLICT", "Quotation changed; reload before saving its plan.")
     return frappe.get_doc("CRM Quotation", quotation_id, for_update=True), row

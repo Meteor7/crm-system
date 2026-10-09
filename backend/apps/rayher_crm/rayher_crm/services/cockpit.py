@@ -45,7 +45,9 @@ def options():
     segment = meta.get_field("custom_crm_segment")
     regions = [v.strip() for v in (region.options or "").splitlines() if v.strip()] if region else []
     markets = [v.strip() for v in (segment.options or "").splitlines() if v.strip()] if segment else []
-    customers = read("Customer", "name customer_name custom_crm_region custom_crm_segment")
+    # An archived Account (a Manager's archive, in place of a delete) is out of the cockpit with everything
+    # under it: the figures below are keyed on these ids.
+    customers = read("Customer", "name customer_name custom_crm_region custom_crm_segment", {"custom_crm_archived": 0})
     ready = bool(frappe.conf.get("crm_cockpit_region_migration_verified") and region and region.fieldtype == "Select"
                  and regions and all(not r.get("custom_crm_region") or r["custom_crm_region"] in regions for r in customers))
     sales_ids = {r["parent"] for r in read("Has Role", "parent", {"role": "CRM Sales", "parenttype": "User"})}

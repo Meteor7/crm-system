@@ -107,24 +107,32 @@ def _storage_name(part: dict) -> str:
 
 
 def _lock_write_scope(opportunity_id: str) -> None:
-    # A locking join is a current read for BOTH ownership rows under REPEATABLE READ.
+    # The Account's row first, then the Opportunity's: the order the Account's archive, and every writer that starts
+    # a record under an Account, take them in. Each is read under its own lock, as committed (a current read under
+    # REPEATABLE READ): the Account named by the snapshot's Opportunity, then the Opportunity alone. One moved to
+    # another Account meanwhile is refused as changed, and that Account's row is not taken (after the Opportunity's,
+    # it would reverse the order).
+    account = frappe.db.get_value("CRM Opportunity", opportunity_id, "account")
+    customers = frappe.db.sql(
+        "SELECT `name`, `custom_crm_owner`, `custom_crm_visibility` FROM `tabCustomer` WHERE `name` = %s FOR UPDATE",
+        (account,), as_dict=True,
+    ) if account else []
     rows = frappe.db.sql(
-        """SELECT opportunity.opportunity_owner, opportunity.archived, customer.name AS account,
-                  customer.custom_crm_owner, customer.custom_crm_visibility
-             FROM `tabCRM Opportunity` opportunity
-             LEFT JOIN `tabCustomer` customer ON customer.name = opportunity.account
-            WHERE opportunity.name = %s FOR UPDATE""",
+        "SELECT `opportunity_owner`, `archived`, `account` FROM `tabCRM Opportunity` WHERE `name` = %s FOR UPDATE",
         (opportunity_id,), as_dict=True,
     )
     if not rows:
         raise CrmApiException("NOT_FOUND", "Opportunity was not found.")
-    scope = rows[0]
+    opportunity = rows[0]
+    if (opportunity.account or None) != (account or None):
+        raise CrmApiException("VERSION_CONFLICT", "The record was changed by another request.")
+    customer = customers[0] if customers else None
     # As committed now: an archived Opportunity takes no status record and no scorecard link.
-    assert_opportunity_not_archived(scope.archived)
+    assert_opportunity_not_archived(opportunity.archived)
     # Match the existing Sales policy: owned opportunity AND an owned/public account.
     if resolve_crm_role() == "Sales" and (
-        scope.opportunity_owner != frappe.session.user or not scope.account
-        or (scope.custom_crm_owner != frappe.session.user and scope.custom_crm_visibility != "Public")
+        opportunity.opportunity_owner != frappe.session.user or not customer
+        or (customer.custom_crm_owner != frappe.session.user and customer.custom_crm_visibility != "Public")
     ):
         raise CrmApiException("SCOPE_DENIED", "The Opportunity is outside the current user scope.")
 

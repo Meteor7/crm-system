@@ -46,8 +46,27 @@ def install_notification_indexes() -> None:
 DEMO_REQUEST_SUBMISSION_INDEX = "idx_crm_demo_request_history_submission"
 
 
+# The single-column indexes the reads of one parent's rows go through: the Account's archive reads its Opportunities
+# and Bookings under their locks (accounts._account_index_hint), which then lock those rows and not the table; a
+# submission for approval numbers its approval from its Quotation's approvals, read without a lock
+# (quotations._next_attempt_no).
+LOOKUP_INDEXES = (("CRM Opportunity", "account"), ("CRM Booking", "account"), ("CRM Quotation Approval", "quotation"))
+
+
+def install_lookup_indexes() -> None:
+    """The DocTypes declare these indexes (`search_index`) and Frappe's schema sync makes them, but the sync looks for
+    an index on a column by the table's name alone, in every database of the server, and counts one the column leads:
+    on a server with another site's table, or with such an index, it makes none. Made here only when the column has
+    no single-column index, under the name the sync gives one it adds, so never a second one."""
+
+    for doctype, column in LOOKUP_INDEXES:
+        if frappe.db.table_exists(doctype) and not frappe.db.get_column_index(f"tab{doctype}", column, unique=False):
+            frappe.db.add_index(doctype, [column], f"{column}_index")
+
+
 def install_stage5f_indexes() -> None:
     install_notification_indexes()
+    install_lookup_indexes()
     if frappe.db.table_exists("CRM Cockpit Target"):
         frappe.db.add_index("CRM Cockpit Target", ["period", "anchor"], "idx_crm_target_period")
         frappe.db.add_index("CRM Cockpit Target", ["period", "sales_owner", "metric", "anchor"], "idx_crm_target_defaults")

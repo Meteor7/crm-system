@@ -9,7 +9,7 @@ import frappe
 from rayher_crm.api.v1.errors import CrmApiException
 from rayher_crm.permissions.roles import assert_capability, resolve_crm_role
 from rayher_crm.permissions.scope import conditions_for_doctype
-from rayher_crm.services.accounts import _require_account
+from rayher_crm.services.accounts import ARCHIVED_ACCOUNT_EDIT, ARCHIVED_ACCOUNT_LINK, _require_account, require_active_account
 from rayher_crm.services.common import ensure_server_generated_id, required_text, resolve_write_owner, validate_choice
 
 
@@ -88,8 +88,12 @@ def _require_site(name: str, account_id: str | None = None):
     return frappe.get_doc("Address", name)
 
 
-def _assert_site_write_scope(account_id: str) -> None:
-    account = _require_account(account_id)
+def _assert_site_write_scope(account_id: str, message: str = ARCHIVED_ACCOUNT_EDIT) -> None:
+    # An archived Account takes no new Site, and its Sites take no change (a Manager restores the Account first):
+    # the flag is read under an exclusive lock on the Account's row, before the Site's is written (the Address's
+    # save takes the row so in its hook, permissions.scope._lock_customer_groups: the lock is not raised from shared
+    # to exclusive).
+    account = require_active_account(account_id, message, for_update=True)
     if resolve_crm_role() == "Sales" and account.custom_crm_owner != frappe.session.user:
         raise CrmApiException("SCOPE_DENIED", "Only the Account owner or a Manager may edit sites.")
 
@@ -128,7 +132,8 @@ def list_account_sites() -> list[dict[str, Any]]:
     """
 
     assert_capability("account:view")
-    scope = conditions_for_doctype("Customer")
+    # The Sites of an archived Account (out of every picker, as the Account is) are read through its own page.
+    scope = f"({conditions_for_doctype('Customer')}) AND `tabCustomer`.`custom_crm_archived` = 0"
     values: list[Any] = []
     if resolve_crm_role() == "Sales":
         scope = f"({scope}) AND `tabCustomer`.`custom_crm_owner` = %s"
@@ -151,7 +156,7 @@ def list_account_sites() -> list[dict[str, Any]]:
 
 def create_site(account_id: str, payload: dict[str, Any]) -> dict[str, Any]:
     assert_capability("account:write")
-    _assert_site_write_scope(account_id)
+    _assert_site_write_scope(account_id, ARCHIVED_ACCOUNT_LINK)
     _require_account(account_id)
     ensure_server_generated_id(payload)
     values = {

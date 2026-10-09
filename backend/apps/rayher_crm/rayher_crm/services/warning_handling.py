@@ -16,6 +16,7 @@ from rayher_crm.setup.indexes import OPPORTUNITY_FIELD_HISTORY_INDEX
 
 from rayher_crm.api.v1.errors import CrmApiException
 from rayher_crm.permissions.roles import resolve_crm_role
+from rayher_crm.services.accounts import account_archived
 from rayher_crm.services.common import as_payload, to_iso_timestamp
 from rayher_crm.services.concurrency import lock_document
 from rayher_crm.services.cockpit_metrics import (
@@ -142,12 +143,16 @@ def _source(payload) -> tuple[str, str, str, str | None]:
             raise _gone()
         return kind, source_id, event, row.opportunity
     if kind == "quotation_expiry":
-        row = frappe.db.get_value("CRM Quotation", source_id, ["opportunity", "current_published_version"], as_dict=True, for_update=True)
+        row = frappe.db.get_value("CRM Quotation", source_id, ["opportunity", "current_published_version", "account"], as_dict=True, for_update=True)
         version = frappe.db.get_value("CRM Quotation Version", event, ["quotation", "status", "valid_until"], as_dict=True) if row else None
-        # The quotation of a closed deal, or of an archived one (its stage reads as none), is no warning. The stage is
-        # read under the Opportunity's lock, after the Quotation's: the order the Quotation's writers take them in.
-        parent_stage = stage(row.opportunity) if row and row.opportunity else ""
-        if (not row or row.current_published_version != event or not version or version.quotation != source_id
+        # The quotation of a closed deal, or of an archived one (its stage reads as none), is no warning; nor is one of
+        # an archived Account (a Manager's archive, in place of a delete), out of the warnings with it: its `account`,
+        # the customer it was addressed to, which the warnings list it by. The Account's flag is read under a shared
+        # lock on its row, then the stage under the Opportunity's lock, after the Quotation's: the order the
+        # Quotation's writers take them in.
+        archived = bool(row and row.account and account_archived(row.account, shared_lock=True))
+        parent_stage = stage(row.opportunity) if row and row.opportunity and not archived else ""
+        if (not row or archived or row.current_published_version != event or not version or version.quotation != source_id
                 or version.status != "Published" or not version.valid_until or str(version.valid_until)[:10] < today.isoformat()
                 or parent_stage is None or parent_stage in {"po_received", "lost"}):
             raise _gone()
