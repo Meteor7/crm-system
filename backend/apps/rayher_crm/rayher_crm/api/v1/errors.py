@@ -215,6 +215,15 @@ def api_endpoint(function):
             error = CrmApiException(code, message)
             frappe.local.response["http_status_code"] = HTTP_STATUS_BY_CODE[code]
             return error_response(error)
+        except frappe.TimestampMismatchError:
+            # Frappe's own version check on save (a locking read of `modified`): the record was written by another
+            # request after this one read it. The same answer as the services' own check (`lock_document`), not a
+            # server failure: the client reads the record again before it tries again.
+            frappe.db.rollback()
+            frappe.clear_last_message()
+            error = CrmApiException("VERSION_CONFLICT", "The record was changed by another request.")
+            frappe.local.response["http_status_code"] = HTTP_STATUS_BY_CODE[error.code]
+            return error_response(error)
         except Exception as failure:
             frappe.db.rollback()
             refused = input_error(failure)

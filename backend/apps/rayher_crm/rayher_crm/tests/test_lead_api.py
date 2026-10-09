@@ -7,7 +7,21 @@ from rayher_crm.api.v1.errors import CrmApiException
 from rayher_crm.api.v1.leads import create_lead as create_lead_endpoint
 from rayher_crm.services.accounts import create_account, get_account_360
 from rayher_crm.services.contacts import create_contact, get_contact
-from rayher_crm.services.leads import MAX_ACTIVITIES, convert_lead, create_lead, delete_lead, get_lead, list_leads, update_lead
+from rayher_crm.services.leads import (
+    ARCHIVED_LEAD_CONVERT,
+    ARCHIVED_LEAD_EDIT,
+    CONVERTED_LEAD_ARCHIVE,
+    DUPLICATE_LEAD_EMAIL,
+    MAX_ACTIVITIES,
+    _duplicate_email,
+    archive_lead,
+    convert_lead,
+    create_lead,
+    get_lead,
+    list_leads,
+    unarchive_lead,
+    update_lead,
+)
 from rayher_crm.services.opportunities import get_strategy_opportunity
 from rayher_crm.services.opportunity_stages import QUALIFIED_OPPORTUNITY
 from rayher_crm.services.sites import create_site
@@ -289,18 +303,243 @@ class TestLeadApi(FrappeTestCase):
         self.assertEqual(detail["id"], created["id"])
         self.assertEqual(frappe.db.get_value("Lead", created["id"], "modified"), modified_before)
 
-    def test_only_manager_can_delete_lead(self):
+    def _listed(self, query: dict) -> set[str]:
+        return {item["id"] for item in list_leads({**query, "pageSize": 200})[0]}
+
+    def test_only_a_manager_archives_a_lead_and_the_archive_is_reversible(self):
         frappe.set_user(self.other_sales)
-        lead = create_lead(self._input("Delete Lead"))
+        lead = create_lead(self._input("Archive Lead"))
 
         frappe.set_user(self.sales)
         with self.assertRaises(frappe.PermissionError):
-            delete_lead(lead["id"])
-        self.assertTrue(frappe.db.exists("Lead", lead["id"]))
+            archive_lead(lead["id"])
+        self.assertEqual(frappe.db.get_value("Lead", lead["id"], "custom_crm_archived"), 0)
 
-        frappe.set_user("Administrator")
-        self.assertEqual(delete_lead(lead["id"]), {"id": lead["id"], "status": "Deleted"})
-        self.assertFalse(frappe.db.exists("Lead", lead["id"]))
+        frappe.set_user(self.manager)
+        with self.assertRaises(CrmApiException) as missing:
+            archive_lead("LEAD-NOBODY")
+        self.assertEqual(missing.exception.code, "NOT_FOUND")
+        archived = archive_lead(lead["id"])
+        self.assertTrue(archived["archived"])
+        self.assertEqual(archived["archivedBy"], self.manager)
+        self.assertRegex(archived["archivedAt"], r"Z$")
+        self.assertEqual(archived["status"], "New")
+        self.assertTrue(frappe.db.exists("Lead", lead["id"]))
+        # Archived again, nothing changes.
+        self.assertEqual(archive_lead(lead["id"])["archivedAt"], archived["archivedAt"])
+
+        # Out of the list unless the archive is asked for.
+        self.assertNotIn(lead["id"], self._listed({}))
+        self.assertNotIn(lead["id"], self._listed({"archiveState": "active"}))
+        self.assertIn(lead["id"], self._listed({"archiveState": "archived"}))
+        self.assertIn(lead["id"], self._listed({"archiveState": "all"}))
+        with self.assertRaises(CrmApiException) as invalid:
+            list_leads({"archiveState": "deleted"})
+        self.assertEqual(invalid.exception.code, "VALIDATION_ERROR")
+
+        # The archive moved the Lead's version, so a page opened before it holds an older one, and left a comment
+        # on the Lead (which keeps no versions): who, and when.
+        self.assertNotEqual(archived["modified"], lead["modified"])
+        comments = {"reference_doctype": "Lead", "reference_name": lead["id"], "comment_type": "Info"}
+        self.assertEqual(frappe.get_all("Comment", filters=comments, pluck="content"), ["Archived"])
+
+        # Its owner still opens it, cannot edit or convert it, and does not restore it. An edit prepared on the
+        # page before the archive (the older version) is refused for the archive, not for the version; one
+        # with a bad payload too.
+        frappe.set_user(self.other_sales)
+        self.assertTrue(get_lead(lead["id"])["archived"])
+        self.assertIn(lead["id"], self._listed({"archiveState": "archived"}))
+        changed = self._input("Archive Lead", owner=self.other_sales, interest="Changed while archived")
+        for payload, version in ((changed, archived["modified"]), (changed, lead["modified"]), ({**changed, "source": "Nowhere"}, lead["modified"])):
+            with self.assertRaises(CrmApiException) as edit:
+                update_lead(lead["id"], payload, version)
+            self.assertEqual((edit.exception.code, edit.exception.public_message), ("INVALID_TRANSITION", ARCHIVED_LEAD_EDIT))
+        conversion = self._conversion_input(
+            newAccount=self._account_input("Archived Lead Account"),
+            newSite=self._site_input("Archived Lead Site"),
+            newContact=self._contact_input("placeholder", "Archived Lead Contact"),
+        )
+        with self.assertRaises(CrmApiException) as convert:
+            convert_lead(lead["id"], conversion)
+        self.assertEqual((convert.exception.code, convert.exception.public_message), ("INVALID_TRANSITION", ARCHIVED_LEAD_CONVERT))
+        self.assertEqual(frappe.db.get_value("Lead", lead["id"], "custom_crm_status"), "New")
+        self.assertFalse(frappe.db.exists("Customer", {"customer_name": "Archived Lead Account"}))
+        with self.assertRaises(frappe.PermissionError):
+            unarchive_lead(lead["id"])
+
+        frappe.set_user(self.manager)
+        restored = unarchive_lead(lead["id"])
+        self.assertFalse(restored["archived"])
+        self.assertNotIn("archivedAt", restored)
+        self.assertNotIn("archivedBy", restored)
+        self.assertEqual(
+            frappe.db.get_value("Lead", lead["id"], ["custom_crm_archived", "custom_crm_archived_at", "custom_crm_archived_by"]),
+            (0, None, None),
+        )
+        self.assertIn(lead["id"], self._listed({}))
+        self.assertNotIn(lead["id"], self._listed({"archiveState": "archived"}))
+        self.assertEqual(frappe.get_all("Comment", filters=comments, pluck="content", order_by="creation asc"), ["Archived", "Restored from the archive"])
+        # Restored again, nothing changes; and back as it was, the Lead is edited again.
+        self.assertEqual(unarchive_lead(lead["id"])["modified"], restored["modified"])
+        frappe.set_user(self.other_sales)
+        self.assertEqual(update_lead(lead["id"], changed, restored["modified"])["interest"], "Changed while archived")
+
+    def test_the_archive_writes_its_columns_without_the_leads_validation(self):
+        """A legacy pair of Leads with one email (allowed while CRM Settings let emails repeat) is archived and
+        restored all the same: a full save would refuse the duplicate email; the archive writes its columns alone."""
+
+        frappe.set_user(self.sales)
+        frappe.db.set_single_value("CRM Settings", "allow_lead_duplication_based_on_emails", 1)
+        try:
+            first = create_lead(self._input("Twin Email One", email="twins@example.invalid"))
+            second = create_lead(self._input("Twin Email Two", email="twins@example.invalid"))
+        finally:
+            frappe.db.set_single_value("CRM Settings", "allow_lead_duplication_based_on_emails", 0)
+        # The validation is on again: a save of either Lead is refused for the email.
+        with self.assertRaises(CrmApiException) as refused:
+            update_lead(first["id"], self._input("Twin Email One", email="twins@example.invalid", interest="Saved"), first["modified"])
+        self.assertEqual(refused.exception.code, "CONFLICT")
+
+        frappe.set_user(self.manager)
+        archived = archive_lead(first["id"])
+        self.assertTrue(archived["archived"])
+        restored = unarchive_lead(first["id"])
+        self.assertFalse(restored["archived"])
+        self.assertEqual(frappe.db.get_value("Lead", second["id"], ["email_id", "custom_crm_archived"]), ("twins@example.invalid", 0))
+        # A conversion saves the Lead too: the twin refuses it the same way, and nothing it wrote before stays.
+        frappe.set_user(self.sales)
+        # The message log is the process's: the earlier tests of the class left theirs in it.
+        frappe.clear_messages()
+        with self.assertRaises(CrmApiException) as converted:
+            convert_lead(first["id"], self._conversion_input(
+                newAccount=self._account_input("Twin Email Account"),
+                newSite=self._site_input("Twin Email Site"),
+                newContact=self._contact_input("placeholder", "Twin Email Contact"),
+            ))
+        self.assertEqual((converted.exception.code, converted.exception.public_message), ("CONFLICT", DUPLICATE_LEAD_EMAIL))
+        self.assertFalse(frappe.local.message_log)
+        self.assertEqual(frappe.db.get_value("Lead", first["id"], "custom_crm_status"), "New")
+        self.assertFalse(frappe.db.exists("Customer", {"customer_name": "Twin Email Account"}))
+        # Only the email's refusal is answered that way; any other duplicate is still a failure of the server.
+        self.assertFalse(_duplicate_email(frappe.DuplicateEntryError("Lead", "Twin"), {"email": "twins@example.invalid"}))
+
+    def test_an_email_an_archived_lead_holds_is_refused_to_another_lead_as_a_conflict(self):
+        """ERPNext keeps a Lead's email unique over every Lead (CRM Settings), archived ones included; the
+        refusal names the field instead of failing the request."""
+
+        # The rule is CRM Settings' (off on this site, said so here, as the twin test turns it on for a moment).
+        frappe.db.set_single_value("CRM Settings", "allow_lead_duplication_based_on_emails", 0)
+        frappe.set_user(self.sales)
+        kept = create_lead(self._input("Email Keeper Lead", email="keeper@example.invalid"))
+        frappe.set_user(self.manager)
+        archive_lead(kept["id"])
+
+        frappe.set_user(self.sales)
+        before = frappe.db.count("Lead")
+        # The message log is the process's: the earlier tests of the class left theirs in it.
+        frappe.clear_messages()
+        with self.assertRaises(CrmApiException) as taken:
+            create_lead(self._input("Email Taker Lead", email="keeper@example.invalid"))
+        self.assertEqual(
+            (taken.exception.code, taken.exception.public_message, taken.exception.field_errors),
+            ("CONFLICT", DUPLICATE_LEAD_EMAIL, {"email": "Already used"}),
+        )
+        # The refusal's own message (ERPNext's) is cleared from the answer.
+        self.assertFalse(frappe.local.message_log)
+        self.assertEqual(frappe.db.count("Lead"), before)
+        other = create_lead(self._input("Email Other Lead", email="other@example.invalid"))
+        with self.assertRaises(CrmApiException) as retaken:
+            update_lead(other["id"], self._input("Email Other Lead", email="keeper@example.invalid"), other["modified"])
+        self.assertEqual(retaken.exception.code, "CONFLICT")
+        self.assertEqual(frappe.db.get_value("Lead", other["id"], "email_id"), "other@example.invalid")
+
+    def test_a_converted_lead_is_its_accounts_history_and_is_not_archived(self):
+        frappe.set_user(self.sales)
+        lead = create_lead(self._input("Converted Stays Lead"))
+        convert_lead(lead["id"], self._conversion_input(
+            newAccount=self._account_input("Converted Stays Account"),
+            newSite=self._site_input("Converted Stays Site"),
+            newContact=self._contact_input("placeholder", "Converted Stays Contact"),
+        ))
+
+        frappe.set_user(self.manager)
+        with self.assertRaises(CrmApiException) as refused:
+            archive_lead(lead["id"])
+        self.assertEqual((refused.exception.code, refused.exception.public_message), ("INVALID_TRANSITION", CONVERTED_LEAD_ARCHIVE))
+        self.assertEqual(frappe.db.get_value("Lead", lead["id"], "custom_crm_archived"), 0)
+        self.assertIn(lead["id"], self._listed({"status": "Converted"}))
+
+    def test_a_lead_a_conversion_left_a_trace_on_is_not_archived_whatever_the_trace(self):
+        # The archive reads these traces of a conversion, each enough alone: the status, the CRM's or ERPNext's own
+        # (the column and the value ERPNext's Customer writes when it is made from the Lead in the Desk), each of the
+        # Lead's four conversion columns, a Customer naming it as the Lead it was made from (ERPNext's own mark of a
+        # conversion, its status following only when ERPNext works it out again), a deal naming it as its source, a
+        # conversion in a deal's stage history (the cockpit and the board find a Lead's conversion by its column naming
+        # the deal or by that history). A legacy conversion, or one repaired in the Desk, can leave any one of them
+        # behind.
+        frappe.set_user(self.sales)
+        source = create_lead(self._input("Traced Source Lead"))
+        converted = convert_lead(source["id"], self._conversion_input(
+            newAccount=self._account_input("Traced Source Account"),
+            newSite=self._site_input("Traced Source Site"),
+            newContact=self._contact_input("placeholder", "Traced Source Contact"),
+        ))
+        deal = converted["opportunityId"]
+        # The converted Lead keeps the deal's stage history alone: its own status and columns cleared, the deal's
+        # source given to another Lead, which keeps that alone.
+        columns = ("custom_crm_converted_at", "custom_crm_converted_account", "custom_crm_converted_contact", "custom_crm_converted_opportunity")
+        frappe.db.set_value("Lead", source["id"], {
+            "custom_crm_status": source["status"], "status": "Lead", **{column: None for column in columns},
+        }, update_modified=False)
+        sourced = create_lead(self._input("Traced Deal Source Lead"))
+        frappe.db.set_value("CRM Opportunity", deal, "source_lead", sourced["id"], update_modified=False)
+        # Each of the two keeps its one trace alone.
+        self.assertEqual(frappe.db.get_value("CRM Opportunity", deal, "source_lead"), sourced["id"])
+        self.assertEqual(
+            frappe.db.get_value("Lead", source["id"], ["custom_crm_status", "status", *columns]),
+            (source["status"], "Lead", None, None, None, None),
+        )
+        self.assertFalse(frappe.db.exists("Customer", {"lead_name": source["id"]}))
+        self.assertTrue(frappe.db.exists("CRM Opportunity Stage History", {
+            "event": "lead_converted", "reference_doctype": "Lead", "reference_name": source["id"],
+        }))
+        traces = {"stage history": source, "deal source": sourced}
+        for label, values in (
+            ("status", {"custom_crm_status": "Converted"}),
+            ("ERPNext's status", {"status": "Converted"}),
+            ("converted at", {"custom_crm_converted_at": frappe.utils.now_datetime()}),
+            ("converted account", {"custom_crm_converted_account": converted["accountId"]}),
+            ("converted contact", {"custom_crm_converted_contact": converted["contactId"]}),
+            ("converted opportunity", {"custom_crm_converted_opportunity": deal}),
+        ):
+            lead = create_lead(self._input(f"Traced {label.title()} Lead"))
+            frappe.db.set_value("Lead", lead["id"], values, update_modified=False)
+            traces[label] = lead
+        # A Customer given the Lead as the one it was made from after its insert: the Lead's status as it was.
+        linked = create_lead(self._input("Traced Customer Link Lead"))
+        frappe.db.set_value("Customer", converted["accountId"], "lead_name", linked["id"], update_modified=False)
+        self.assertEqual(frappe.db.get_value("Lead", linked["id"], "status"), "Lead")
+        traces["customer naming it"] = linked
+        # ERPNext's status other than Converted (Interested, as ERPNext leaves a Lead whose Customer is deleted), and
+        # no trace: the Lead is archived.
+        untraced = create_lead(self._input("Untraced Interested Lead"))
+        frappe.db.set_value("Lead", untraced["id"], "status", "Interested", update_modified=False)
+
+        frappe.set_user(self.manager)
+        for label, lead in traces.items():
+            with self.subTest(trace=label):
+                with self.assertRaises(CrmApiException) as refused:
+                    archive_lead(lead["id"])
+                self.assertEqual((refused.exception.code, refused.exception.public_message), ("INVALID_TRANSITION", CONVERTED_LEAD_ARCHIVE))
+                self.assertEqual(frappe.db.get_value("Lead", lead["id"], "custom_crm_archived"), 0)
+        self.assertTrue(archive_lead(untraced["id"])["archived"])
+        # ERPNext's own conversion in the Desk reads no archive flag: a Customer made from the archived Lead leaves it
+        # archived, converted, and archiving it again changes nothing, as for any archived Lead.
+        frappe.db.set_value("Customer", converted["accountId"], "lead_name", untraced["id"], update_modified=False)
+        frappe.db.set_value("Lead", untraced["id"], "status", "Converted", update_modified=False)
+        modified = frappe.db.get_value("Lead", untraced["id"], "modified")
+        self.assertTrue(archive_lead(untraced["id"])["archived"])
+        self.assertEqual(frappe.db.get_value("Lead", untraced["id"], "modified"), modified)
 
     def test_lead_create_fails_closed_if_erpnext_auto_contact_is_reenabled(self):
         frappe.set_user(self.sales)
@@ -746,3 +985,108 @@ class TestLeadApi(FrappeTestCase):
         self.assertEqual(not_confirmed.exception.code, "VALIDATION_ERROR")
         self.assertEqual(not_confirmed.exception.field_errors, {"qualificationConfirmed": "Required"})
         self.assertEqual(frappe.db.count("CRM Opportunity"), before)
+
+
+class TestLeadConversionConcurrency(FrappeTestCase):
+    def test_an_archive_reads_the_status_under_the_lock_as_a_conversion_committed_it(self):
+        """The archive reads the Lead under its row lock, as committed: a conversion committed after the request's
+        snapshot (which has the Lead new) is seen there, and the Lead is refused as converted, nothing written."""
+
+        users = {}
+        for label, role in (("owner", "CRM Sales"), ("manager", "CRM Manager")):
+            email = f"crm-lead-archive-race-{label}@example.invalid"
+            if not frappe.db.exists("User", email):
+                frappe.get_doc({
+                    "doctype": "User", "email": email, "first_name": label, "enabled": 1,
+                    "send_welcome_email": 0, "roles": [{"role": role}],
+                }).insert(ignore_permissions=True)
+            users[label] = email
+        lead = "CRM-LEAD-RACE-" + frappe.generate_hash(length=8)
+        original_user = frappe.session.user
+        connection = None
+        try:
+            frappe.db.commit()
+            connection = frappe.db._get_connection()
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    "INSERT INTO `tabLead` (name, first_name, lead_name, lead_owner, custom_crm_status, creation, modified)"
+                    " VALUES (%s, 'Race', 'Race', %s, 'New', NOW(6) - INTERVAL 1 MINUTE, NOW(6) - INTERVAL 1 MINUTE)",
+                    (lead, users["owner"]),
+                )
+            connection.commit()
+            # This request's snapshot, which has the Lead new ...
+            frappe.db.sql("SELECT COUNT(*) FROM `tabLead`")
+            # ... converted by another request committed after it.
+            with connection.cursor() as cursor:
+                cursor.execute("UPDATE `tabLead` SET `custom_crm_status` = 'Converted', `modified` = NOW(6) WHERE `name` = %s", (lead,))
+            connection.commit()
+            self.assertEqual(frappe.db.get_value("Lead", lead, "custom_crm_status"), "New")
+            frappe.set_user(users["manager"])
+            with self.assertRaises(CrmApiException) as refused:
+                archive_lead(lead)
+            self.assertEqual((refused.exception.code, refused.exception.public_message), ("INVALID_TRANSITION", CONVERTED_LEAD_ARCHIVE))
+            self.assertEqual(frappe.db.sql("SELECT `custom_crm_archived` FROM `tabLead` WHERE `name` = %s FOR UPDATE", (lead,))[0][0], 0)
+        finally:
+            frappe.set_user(original_user)
+            # The Lead's row lock released before the other connection removes the row.
+            frappe.db.rollback()
+            if connection:
+                with connection.cursor() as cursor:
+                    cursor.execute("DELETE FROM `tabLead` WHERE `name` = %s", (lead,))
+                connection.commit()
+                connection.close()
+
+    def test_a_conversion_whose_snapshot_predates_the_lead_it_locked_is_refused_as_changed(self):
+        """The scope is read as the request's snapshot has the Lead, the Lead itself under its lock as committed: a
+        reassignment committed between the request's snapshot and its lock would leave the old owner deciding. Such a
+        conversion is refused as changed, before it writes; its retry reads both anew and is refused the new owner's
+        Lead."""
+
+        users = []
+        for label in ("before", "after"):
+            email = f"crm-lead-race-{label}@example.invalid"
+            if not frappe.db.exists("User", email):
+                frappe.get_doc({
+                    "doctype": "User", "email": email, "first_name": label, "enabled": 1,
+                    "send_welcome_email": 0, "roles": [{"role": "CRM Sales"}],
+                }).insert(ignore_permissions=True)
+            users.append(email)
+        before, after = users
+        lead = "CRM-LEAD-RACE-" + frappe.generate_hash(length=8)
+        original_user = frappe.session.user
+        connection = None
+        try:
+            frappe.db.commit()
+            connection = frappe.db._get_connection()
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    "INSERT INTO `tabLead` (name, first_name, lead_name, lead_owner, custom_crm_status, creation, modified)"
+                    " VALUES (%s, 'Race', 'Race', %s, 'New', NOW(6) - INTERVAL 1 MINUTE, NOW(6) - INTERVAL 1 MINUTE)",
+                    (lead, before),
+                )
+            connection.commit()
+            # This request's snapshot, which has the Lead under its first owner ...
+            frappe.db.sql("SELECT COUNT(*) FROM `tabLead`")
+            # ... reassigned by another request committed after it.
+            with connection.cursor() as cursor:
+                cursor.execute("UPDATE `tabLead` SET `lead_owner` = %s, `modified` = NOW(6) WHERE `name` = %s", (after, lead))
+            connection.commit()
+            self.assertEqual(frappe.db.get_value("Lead", lead, "lead_owner"), before)
+            frappe.set_user(before)
+            with self.assertRaises(CrmApiException) as changed:
+                convert_lead(lead, {})
+            self.assertEqual(changed.exception.code, "VERSION_CONFLICT")
+            # The retry, a request of its own, reads the Lead as its new owner has it.
+            frappe.db.rollback()
+            with self.assertRaises(CrmApiException) as refused:
+                convert_lead(lead, {})
+            self.assertEqual(refused.exception.code, "SCOPE_DENIED")
+        finally:
+            frappe.set_user(original_user)
+            # The Lead's row lock released before the other connection removes the row.
+            frappe.db.rollback()
+            if connection:
+                with connection.cursor() as cursor:
+                    cursor.execute("DELETE FROM `tabLead` WHERE `name` = %s", (lead,))
+                connection.commit()
+                connection.close()

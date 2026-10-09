@@ -65,8 +65,12 @@ export interface BootstrapDto {
   }>
 }
 
+/** What a list shows of the archive: the active records (the default), the archived ones, or both. */
+export type ArchiveState = 'active' | 'archived' | 'all'
+
 export interface ListQuery {
   search?: string
+  archiveState?: ArchiveState
   segment?: string
   city?: string
   region?: string
@@ -268,9 +272,13 @@ export interface LeadDto {
   convertedOpportunityId?: string
   convertedReusedAccount?: boolean
   convertedReusedContact?: boolean
+  /** Archived by a Manager (in place of a delete): out of the list and the figures, kept whole, read-only until restored. */
+  archived?: boolean
+  archivedAt?: string
+  archivedBy?: string
 }
 
-export type CreateLeadInput = Omit<LeadDto, 'id' | 'createdAt' | 'updatedAt' | 'modified' | 'convertedAt' | 'convertedAccountId' | 'convertedContactId' | 'convertedOpportunityId' | 'convertedReusedAccount' | 'convertedReusedContact'>
+export type CreateLeadInput = Omit<LeadDto, 'id' | 'createdAt' | 'updatedAt' | 'modified' | 'convertedAt' | 'convertedAccountId' | 'convertedContactId' | 'convertedOpportunityId' | 'convertedReusedAccount' | 'convertedReusedContact' | 'archived' | 'archivedAt' | 'archivedBy'>
 export type UpdateLeadInput = CreateLeadInput
 
 export interface LeadListQuery extends ListQuery {

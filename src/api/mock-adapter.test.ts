@@ -952,18 +952,15 @@ describe('mock CRM API', () => {
   it('allows only Manager to delete top-level Sales records', async () => {
     const sales = createMockApi({ latency: 0, role: 'Sales', userName: 'Demo Staff 01' })
     await expect(sales.deleteAccount('ACC-001')).rejects.toMatchObject({ code: 'PERMISSION_DENIED' })
-    await expect(sales.deleteLead('LEAD-001')).rejects.toMatchObject({ code: 'PERMISSION_DENIED' })
     await expect(sales.deleteStrategyOpportunity('OPP-001')).rejects.toMatchObject({ code: 'PERMISSION_DENIED' })
     await expect(sales.deleteBooking('BKG-001')).rejects.toMatchObject({ code: 'PERMISSION_DENIED' })
 
     const manager = createMockApi({ latency: 0, role: 'Manager' })
     const accountId = (await manager.listAccounts({ pageSize: 1 })).data.items[0].id
-    const leadId = (await manager.listLeads({ pageSize: 1 })).data.items[0].id
     const opportunityId = (await manager.listStrategyOpportunities({ pageSize: 1 })).data.items[0].id
     const bookingId = (await manager.listPipeline({})).data.bookings[0].id
 
     await expect(manager.deleteAccount(accountId)).resolves.toMatchObject({ data: { id: accountId, status: 'Deleted' } })
-    await expect(manager.deleteLead(leadId)).resolves.toMatchObject({ data: { id: leadId, status: 'Deleted' } })
     await expect(manager.deleteStrategyOpportunity(opportunityId)).resolves.toMatchObject({ data: { id: opportunityId, status: 'Deleted' } })
     await expect(manager.deleteBooking(bookingId)).resolves.toMatchObject({ data: { id: bookingId, status: 'Deleted' } })
   })

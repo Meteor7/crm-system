@@ -6,7 +6,7 @@ import { useRouter } from 'vue-router'
 import { api as defaultApi, type CrmApi } from '@/api'
 import { mapRequestError } from '@/api/request-state'
 import { useAppStore } from '@/stores/app'
-import type { CreateLeadInput, LeadDto, LeadSource, LeadStatus, Tone } from '@/types/crm'
+import type { ArchiveState, CreateLeadInput, LeadDto, LeadSource, LeadStatus, Tone } from '@/types/crm'
 import DataState from '@/design-system/DataState.vue'
 import FilterBar from '@/features/shared/FilterBar.vue'
 import PaginationControls from '@/features/shared/PaginationControls.vue'
@@ -32,6 +32,8 @@ const requestId = ref('')
 const status = ref<LeadStatus | 'All'>('All')
 const source = ref<LeadSource | 'All'>('All')
 const owner = ref('All')
+// Archived Leads (a Manager's archive, in place of a delete) are shown only when asked for.
+const archiveState = ref<ArchiveState>('active')
 const editorOpen = ref(false)
 const editing = ref<LeadDto | null>(null)
 const busy = ref(false)
@@ -52,7 +54,7 @@ async function load() {
   error.value = ''
   denied.value = false
   try {
-    const result = await props.apiClient.listLeads({ status: status.value, source: source.value, owner: owner.value, page: page.value, pageSize: pageSize.value })
+    const result = await props.apiClient.listLeads({ status: status.value, source: source.value, owner: owner.value, archiveState: archiveState.value, page: page.value, pageSize: pageSize.value })
     if (current !== sequence) return
     rows.value = result.data.items
     total.value = result.meta?.total ?? rows.value.length
@@ -73,6 +75,7 @@ function resetFilters() {
   status.value = 'All'
   source.value = 'All'
   owner.value = 'All'
+  archiveState.value = 'active'
 }
 function changeFilters() { page.value = 1; void load() }
 function goPage(target: number) { page.value = target; void load() }
@@ -109,7 +112,7 @@ function openDetail(lead: LeadDto) {
   void router.push({ name: 'lead-detail', params: { leadId: lead.id } })
 }
 
-watch([status, source, owner], changeFilters)
+watch([status, source, owner, archiveState], changeFilters)
 onMounted(async () => {
   await app.loadBootstrap(props.apiClient)
   await load()
@@ -126,6 +129,7 @@ onMounted(async () => {
        <select v-model="status" class="filter-control" :aria-label="t('leads.status')"><option value="All">{{ t('leads.allStatuses') }}</option><option v-for="item in ['New', 'Working', 'Qualified', 'Nurturing', 'Disqualified', 'Converted']" :key="item" :value="item">{{ salesEnumLabel(item, locale) }}</option></select>
        <select v-model="source" class="filter-control" :aria-label="t('leads.source')"><option value="All">{{ t('leads.allSources') }}</option><option v-for="item in ['Website', 'Trade Show', 'Partner Referral', 'Outbound', 'Customer Referral', 'Other']" :key="item" :value="item">{{ salesEnumLabel(item, locale) }}</option></select>
       <select v-model="owner" class="filter-control" :aria-label="t('leads.owner')"><option value="All">{{ t('leads.allOwners') }}</option><option v-for="item in owners" :key="item" :value="item">{{ personnelDisplayName(item) }}</option></select>
+      <select v-model="archiveState" class="filter-control" :aria-label="t('leads.archiveState')"><option value="active">{{ t('leads.archiveActive') }}</option><option value="archived">{{ t('leads.archiveArchived') }}</option><option value="all">{{ t('leads.archiveAll') }}</option></select>
     </FilterBar>
 
     <section class="lead-table-card">
@@ -142,11 +146,11 @@ onMounted(async () => {
               <td><strong>{{ lead.company }}</strong><small>{{ lead.title }}</small></td>
               <td><strong>{{ lead.phone || '—' }}</strong><small>{{ lead.email || '—' }}</small></td>
                <td>{{ salesEnumLabel(lead.source, locale) }}</td>
-               <td><StatusBadge :label="salesEnumLabel(lead.status, locale)" :tone="statusTone(lead.status)" /></td>
+               <td><span class="status-badges"><StatusBadge :label="salesEnumLabel(lead.status, locale)" :tone="statusTone(lead.status)" /><StatusBadge v-if="lead.archived" :label="salesEnumLabel('Archived', locale)" tone="neutral" data-lead-archived /></span></td>
               <td>{{ personnelDisplayName(lead.owner) }}</td>
               <td><strong>{{ lead.nextAction || '—' }}</strong><small>{{ lead.nextActionDue || t('leads.noDate') }}</small></td>
               <td>{{ formatDisplayDate(lead.updatedAt) }}</td>
-              <td v-if="canWrite"><button v-if="lead.status !== 'Converted'" class="edit-button" type="button" data-testid="edit-lead" @click="openEdit(lead)"><Edit3 :size="13" />{{ t('leads.edit') }}</button></td>
+              <td v-if="canWrite"><button v-if="lead.status !== 'Converted' && !lead.archived" class="edit-button" type="button" data-testid="edit-lead" @click="openEdit(lead)"><Edit3 :size="13" />{{ t('leads.edit') }}</button></td>
             </tr>
           </tbody>
         </table>
@@ -158,5 +162,5 @@ onMounted(async () => {
 </template>
 
 <style scoped>
-.lead-list-view{display:grid;gap:12px}.lead-actions{display:flex;align-items:flex-end;justify-content:space-between;gap:16px;padding:14px 16px;background:#fff;border:1px solid var(--crm-line);border-radius:12px}.lead-actions>div{display:grid;gap:3px}.lead-actions span{color:var(--crm-teal);font-size:8px;font-weight:800;letter-spacing:.12em}.lead-actions strong{color:var(--crm-navy);font-size:15px}.lead-actions small{color:var(--crm-text-muted);font-size:10px}.lead-actions button{display:flex;align-items:center;gap:6px}.lead-table-card{overflow:hidden;background:#fff;border:1px solid var(--crm-line);border-radius:12px}.lead-link{display:inline-flex;align-items:center;gap:7px;padding:0;color:var(--crm-link);background:transparent;border:0;cursor:pointer}.lead-link span{display:grid;width:27px;height:27px;place-items:center;color:var(--crm-brand-ink);background:var(--crm-teal-soft);border-radius:8px}.lead-table td>strong,.lead-table td>small{display:block}.lead-table td>small{margin-top:3px;color:var(--crm-text-muted);font-size:9px}.edit-button{display:inline-flex;align-items:center;gap:4px;padding:6px 8px;color:var(--crm-navy);background:#fff;border:1px solid var(--crm-line);border-radius:7px;cursor:pointer}@media(max-width:700px){.lead-actions{align-items:stretch;flex-direction:column}.lead-actions button{justify-content:center}}
+.lead-list-view{display:grid;gap:12px}.status-badges{display:inline-flex;flex-wrap:wrap;gap:4px}.lead-actions{display:flex;align-items:flex-end;justify-content:space-between;gap:16px;padding:14px 16px;background:#fff;border:1px solid var(--crm-line);border-radius:12px}.lead-actions>div{display:grid;gap:3px}.lead-actions span{color:var(--crm-teal);font-size:8px;font-weight:800;letter-spacing:.12em}.lead-actions strong{color:var(--crm-navy);font-size:15px}.lead-actions small{color:var(--crm-text-muted);font-size:10px}.lead-actions button{display:flex;align-items:center;gap:6px}.lead-table-card{overflow:hidden;background:#fff;border:1px solid var(--crm-line);border-radius:12px}.lead-link{display:inline-flex;align-items:center;gap:7px;padding:0;color:var(--crm-link);background:transparent;border:0;cursor:pointer}.lead-link span{display:grid;width:27px;height:27px;place-items:center;color:var(--crm-brand-ink);background:var(--crm-teal-soft);border-radius:8px}.lead-table td>strong,.lead-table td>small{display:block}.lead-table td>small{margin-top:3px;color:var(--crm-text-muted);font-size:9px}.edit-button{display:inline-flex;align-items:center;gap:4px;padding:6px 8px;color:var(--crm-navy);background:#fff;border:1px solid var(--crm-line);border-radius:7px;cursor:pointer}@media(max-width:700px){.lead-actions{align-items:stretch;flex-direction:column}.lead-actions button{justify-content:center}}
 </style>

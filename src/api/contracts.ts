@@ -255,7 +255,10 @@ export interface CrmApi {
   getLead(id: string): Promise<ApiResponse<LeadDto>>
   createLead(input: CreateLeadInput): Promise<ApiResponse<LeadDto>>
   updateLead(id: string, input: UpdateLeadInput, expectedModified?: string): Promise<ApiResponse<LeadDto>>
-  deleteLead(id: string): Promise<ApiResponse<{ id: string; status: 'Deleted' }>>
+  /** Manager only. The Lead leaves the list and the figures and keeps all it holds; a converted Lead is refused. */
+  archiveLead(id: string): Promise<ApiResponse<LeadDto>>
+  /** Manager only. The Lead is back as it was. */
+  unarchiveLead(id: string): Promise<ApiResponse<LeadDto>>
   convertLead(id: string, input: LeadConversionInput): Promise<ApiResponse<LeadConversionResult>>
   listStakeholders(query: ListQuery): Promise<ApiResponse<PageData<ContactDto>>>
   createStakeholder(input: CreateStakeholderInput): Promise<ApiResponse<ContactDto>>

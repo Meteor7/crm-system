@@ -55,6 +55,10 @@ CRM_CUSTOM_FIELDS = {
         {"fieldname": "custom_crm_converted_at", "label": "CRM Converted At", "fieldtype": "Datetime", "insert_after": "custom_crm_converted_opportunity", "read_only": 1},
         {"fieldname": "custom_crm_reused_account", "label": "CRM Reused Account", "fieldtype": "Check", "insert_after": "custom_crm_converted_at", "read_only": 1},
         {"fieldname": "custom_crm_reused_contact", "label": "CRM Reused Contact", "fieldtype": "Check", "insert_after": "custom_crm_reused_account", "read_only": 1},
+        # Archived by a Manager (the delete this replaces): out of the list and the figures, kept whole.
+        {"fieldname": "custom_crm_archived", "label": "CRM Archived", "fieldtype": "Check", "insert_after": "custom_crm_reused_contact", "read_only": 1},
+        {"fieldname": "custom_crm_archived_at", "label": "CRM Archived At", "fieldtype": "Datetime", "insert_after": "custom_crm_archived", "read_only": 1},
+        {"fieldname": "custom_crm_archived_by", "label": "CRM Archived By", "fieldtype": "Link", "options": "User", "insert_after": "custom_crm_archived_at", "read_only": 1},
     ],
 }
 

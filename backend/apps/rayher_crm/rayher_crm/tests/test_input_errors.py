@@ -197,6 +197,28 @@ class TestInputErrors(FrappeTestCase):
                 accepted = create_contact_endpoint(self._contact(f"Input Errors Accepted {index}", phone=phone))
                 self.assertEqual(accepted["data"]["phone"], phone)
 
+    def test_a_version_check_frappe_refuses_on_save_is_a_version_conflict(self):
+        # Frappe's own check on save (`check_if_latest`, a locking read of `modified`): the record was written by
+        # another request after this one read it. The services' own answer, not a server failure; nothing logged.
+        @api_endpoint
+        def stale():
+            frappe.get_doc({"doctype": "ToDo", "description": "Input errors: version conflict"}).insert(ignore_permissions=True)
+            # As `check_if_latest` raises it: its sentence queued as a message, then the exception.
+            frappe.throw("Error: Document has been modified after you have opened it", frappe.TimestampMismatchError)
+
+        failures = frappe.db.count("Error Log", FAILURE_LOG)
+        frappe.clear_messages()
+        frappe.msgprint("A message Frappe queued before the refusal", raise_exception=False)
+        response = stale()
+        self.assertEqual((response["error"]["code"], response["error"]["retryable"]), ("VERSION_CONFLICT", False))
+        self.assertEqual(response["error"]["message"], "The record was changed by another request.")
+        self.assertEqual(frappe.local.response["http_status_code"], 409)
+        # The refusal's own message is gone from the response; what was queued before it stays.
+        self.assertEqual(len(frappe.local.message_log), 1)
+        self.assertIn("queued before the refusal", str(frappe.local.message_log[0]))
+        self.assertEqual(frappe.db.count("Error Log", FAILURE_LOG), failures)
+        self.assertFalse(frappe.db.exists("ToDo", {"description": "Input errors: version conflict"}))
+
     def test_other_failures_are_still_reported_as_failures_of_the_server(self):
         # A name error that is not about < or >, a duplicate, and any other validation error are not
         # known to be the user's input.

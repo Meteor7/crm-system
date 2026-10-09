@@ -2165,14 +2165,15 @@ export function createMockApi(options: {
       return saveLeadInternal(input, id)
     },
 
-    async deleteLead(id: string) {
+    // The archive is a server rule with no behaviour here; tests stub these (AGENTS.md).
+    async archiveLead(id: string) {
       await wait()
-      assertManagerDelete()
-      const index = localLeads.findIndex((item) => item.id === id)
-      if (index < 0) throw new CrmApiError('LEAD_NOT_FOUND', '未找到该 Lead', requestId(), false)
-      localLeads.splice(index, 1)
-      salesRepository.save()
-      return response({ id, status: 'Deleted' as const })
+      throw new CrmApiError('INVALID_TRANSITION', `The mock API does not archive Leads (${id}).`, requestId(), false)
+    },
+
+    async unarchiveLead(id: string) {
+      await wait()
+      throw new CrmApiError('INVALID_TRANSITION', `The mock API does not archive Leads (${id}).`, requestId(), false)
     },
 
     async convertLead(id: string, input: LeadConversionInput) {

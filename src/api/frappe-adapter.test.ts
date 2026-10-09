@@ -165,7 +165,8 @@ describe('Frappe method contract', () => {
       getLead: 'leads.get_lead',
       createLead: 'leads.create_lead',
       updateLead: 'leads.update_lead',
-      deleteLead: 'leads.delete_lead',
+      archiveLead: 'leads.archive_lead',
+      unarchiveLead: 'leads.unarchive_lead',
       convertLead: 'leads.convert_lead',
       listStakeholders: 'stakeholders.list_stakeholders',
       createStakeholder: 'stakeholders.create_stakeholder',
@@ -285,19 +286,31 @@ describe('Frappe JSON transport', () => {
     const api = createFrappeApi({ fetchImpl: fetchMock })
 
     await api.deleteAccount('ACC-DEL')
-    await api.deleteLead('LEAD-DEL')
     await api.deleteStrategyOpportunity('OPP-DEL')
     await api.deleteBooking('BOOK-DEL')
 
     expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([
       '/api/method/rayher_crm.api.v1.accounts.delete_account',
-      '/api/method/rayher_crm.api.v1.leads.delete_lead',
       '/api/method/rayher_crm.api.v1.opportunities.delete_strategy_opportunity',
       '/api/method/rayher_crm.api.v1.bookings.delete_booking',
     ])
     expect(fetchMock.mock.calls.map(([, init]) => new URLSearchParams(String(init.body)).get('id'))).toEqual([
-      'ACC-DEL', 'LEAD-DEL', 'OPP-DEL', 'BOOK-DEL',
+      'ACC-DEL', 'OPP-DEL', 'BOOK-DEL',
     ])
+  })
+
+  it('posts the Lead id to the archive and restore endpoints', async () => {
+    const fetchMock = vi.fn().mockImplementation(() => Promise.resolve(success({ id: 'LEAD-ARC', archived: true })))
+    const api = createFrappeApi({ fetchImpl: fetchMock })
+
+    await api.archiveLead('LEAD-ARC')
+    await api.unarchiveLead('LEAD-ARC')
+
+    expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([
+      '/api/method/rayher_crm.api.v1.leads.archive_lead',
+      '/api/method/rayher_crm.api.v1.leads.unarchive_lead',
+    ])
+    expect(fetchMock.mock.calls.map(([, init]) => new URLSearchParams(String(init.body)).get('id'))).toEqual(['LEAD-ARC', 'LEAD-ARC'])
   })
 
   it('unwraps the Frappe message envelope and encodes defined GET query fields', async () => {

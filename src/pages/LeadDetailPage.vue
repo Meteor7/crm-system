@@ -2,7 +2,7 @@
 import { personnelDisplayName } from '@/demo/personnel'
 import { computed, onMounted, ref, watch } from 'vue'
 import { ArrowLeft, Building2, CheckCircle2, Edit3, Mail, Phone, Plus, UserRoundSearch } from '@lucide/vue'
-import { RouterLink, useRoute, useRouter } from 'vue-router'
+import { RouterLink, useRoute } from 'vue-router'
 import { api as defaultApi, CrmApiError, type CrmApi } from '@/api'
 import { mapRequestError } from '@/api/request-state'
 import { useAppStore } from '@/stores/app'
@@ -11,11 +11,12 @@ import PageHeader from '@/design-system/PageHeader.vue'
 import DataState from '@/design-system/DataState.vue'
 import SectionCard from '@/design-system/SectionCard.vue'
 import StatusBadge from '@/design-system/StatusBadge.vue'
+import ModalShell from '@/design-system/ModalShell.vue'
 import LeadEditorModal from '@/features/leads/LeadEditorModal.vue'
 import LeadConvertModal from '@/features/leads/LeadConvertModal.vue'
 import { readAllPages } from '@/features/shared/read-all-pages'
 import { sitesInAccountOrder } from '@/features/accounts/account-sites'
-import { formatDisplayDate } from '@/domain/time'
+import { formatDisplayDate, formatDisplayDateTime } from '@/domain/time'
 import { useI18n, useLocaleMessage } from '@/i18n'
 import { salesEnumLabel } from '@/features/shared/sales-i18n'
 import { REGION_PRESETS } from '@/domain/regions'
@@ -24,7 +25,6 @@ import { loadEquipmentTypes } from '@/features/opportunities/equipment-types'
 
 const props = withDefaults(defineProps<{ apiClient?: CrmApi }>(), { apiClient: () => defaultApi })
 const route = useRoute()
-const router = useRouter()
 const app = useAppStore()
 const { locale, t, message } = useI18n()
 const lead = ref<LeadDto | null>(null)
@@ -42,7 +42,6 @@ const editOpen = ref(false)
 const convertOpen = ref(false)
 const busy = ref(false)
 const actionError = useLocaleMessage()
-const deleting = ref(false), deleteError = useLocaleMessage(), deleteRequestId = ref('')
 const referencesMessage = useLocaleMessage()
 const conversion = ref<LeadConversionResult | null>(null)
 const qualificationOpen = ref(false)
@@ -52,24 +51,55 @@ const arrangementOpen = ref(false)
 const arrangementAction = ref('')
 const arrangementDue = ref('')
 const canWrite = computed(() => app.can('deal:write'))
-const canDelete = computed(() => app.bootstrap?.user.role === 'Manager')
-async function deleteLead() {
-  if (!lead.value || deleting.value || !window.confirm(t('leadDetail.deleteConfirm', { name: lead.value.name }))) return
-  deleting.value = true
-  deleteError.value = ''
-  deleteRequestId.value = ''
+const isManager = computed(() => app.bootstrap?.user.role === 'Manager')
+// Archived (by a Manager, in place of a delete): out of the list and the figures, read-only here until restored.
+const isArchived = computed(() => lead.value?.archived === true)
+const editable = computed(() => canWrite.value && lead.value?.status !== 'Converted' && !isArchived.value)
+// A converted Lead is its Account's history: its status, or a conversion's columns on it whatever the status (the
+// server also refuses a Lead a deal names, which the page does not see).
+const conversionLeft = computed(() => lead.value?.status === 'Converted' || Boolean(lead.value?.convertedAt || lead.value?.convertedAccountId || lead.value?.convertedContactId || lead.value?.convertedOpportunityId))
+const canArchive = computed(() => isManager.value && !isArchived.value && !conversionLeft.value)
+const canUnarchive = computed(() => isManager.value && isArchived.value)
+const archiveOpen = ref(false), archiving = ref(false), archiveError = useLocaleMessage(), archiveRequestId = ref('')
+// The notice says how the Lead comes back: a Manager restores it here, anyone else asks a Manager.
+const archivedNotice = computed(() => !lead.value ? '' : t(isManager.value ? 'leadDetail.archivedNotice' : 'leadDetail.archivedNoticeReadOnly', {
+  by: personnelDisplayName(lead.value.archivedBy ?? ''), at: formatDisplayDateTime(lead.value.archivedAt),
+}))
+function resetArchiveState() {
+  archiveOpen.value = false
+  archiveError.value = ''
+  archiveRequestId.value = ''
+}
+async function setArchived(archived: boolean) {
+  if (!lead.value || archiving.value) return
+  const id = lead.value.id
+  archiving.value = true
+  archiveError.value = ''
+  archiveRequestId.value = ''
   try {
-    await props.apiClient.deleteLead(lead.value.id)
-    await router.push({ name: 'leads' })
+    const result = await (archived ? props.apiClient.archiveLead(id) : props.apiClient.unarchiveLead(id))
+    // Answered for the Lead shown: a page moved on to another Lead meanwhile keeps that one.
+    if (lead.value?.id !== id) return
+    lead.value = result.data
+    archiveOpen.value = false
+    if (archived) {
+      // What was being edited is read-only now.
+      editOpen.value = false
+      convertOpen.value = false
+      qualificationOpen.value = false
+      arrangementOpen.value = false
+    }
   } catch (reason) {
+    if (lead.value?.id !== id) return
     const mapped = mapRequestError(reason)
-    deleteError.value = mapped.localizedMessage ?? mapped.message
-    deleteRequestId.value = mapped.requestId
+    archiveError.value = mapped.localizedMessage ?? mapped.message
+    archiveRequestId.value = mapped.requestId
   } finally {
-    deleting.value = false
+    // The busy state is the shown Lead's: an answer for another one (load() freed the button already) leaves it.
+    if (lead.value?.id === id) archiving.value = false
   }
 }
-const canConvert = computed(() => canWrite.value && lead.value?.status !== 'Converted')
+const canConvert = computed(() => editable.value)
 const timelineActivities = computed<LeadActivityDto[]>(() => {
   if (!lead.value) return []
   if (lead.value.activities?.length) return lead.value.activities
@@ -119,6 +149,8 @@ async function load() {
   denied.value = false
   error.value = ''
   lead.value = null
+  resetArchiveState()
+  archiving.value = false
   try {
     const result = await props.apiClient.getLead(String(route.params.leadId))
     if (current !== sequence) return
@@ -255,15 +287,17 @@ onMounted(async () => {
     <template v-else>
       <RouterLink class="back-link detail-back-button" :to="{ name: 'leads' }"><ArrowLeft :size="14" />{{ locale === 'en-US' ? 'Back to Leads' : '返回 Leads' }}</RouterLink>
       <PageHeader eyebrow="LEAD 360" :title="lead.name" :description="`${lead.company} · ${lead.title} · ${personnelDisplayName(lead.owner)}`">
-        <button v-if="canDelete" class="danger-button" type="button" data-delete-lead :disabled="deleting" @click="deleteLead">{{ locale === 'en-US' ? 'Delete lead' : '删除 Lead' }}</button>
+        <button v-if="canArchive" class="danger-button" type="button" data-archive-lead :disabled="archiving" @click="archiveError = ''; archiveOpen = true">{{ t('leadDetail.archive') }}</button>
+        <button v-if="canUnarchive" class="secondary-button" type="button" data-unarchive-lead :disabled="archiving" @click="setArchived(false)">{{ t('leadDetail.unarchive') }}</button>
         <button v-if="canConvert" class="primary-button" type="button" data-testid="convert-lead" @click="actionError = ''; convertOpen = true"><CheckCircle2 :size="14" />{{ locale === 'en-US' ? 'Convert lead' : '转换 Lead' }}</button>
-        <button v-if="canWrite && lead.status !== 'Converted'" class="secondary-button" type="button" data-testid="edit-lead" @click="actionError = ''; editOpen = true"><Edit3 :size="14" />{{ locale === 'en-US' ? 'Edit lead' : '编辑 Lead' }}</button>
+        <button v-if="editable" class="secondary-button" type="button" data-testid="edit-lead" @click="actionError = ''; editOpen = true"><Edit3 :size="14" />{{ locale === 'en-US' ? 'Edit lead' : '编辑 Lead' }}</button>
       </PageHeader>
-      <p v-if="deleteError" class="inline-error" data-delete-error>{{ deleteError }}<small v-if="deleteRequestId">Request ID {{ deleteRequestId }}</small></p>
+      <p v-if="archiveError && !archiveOpen" class="inline-error" data-archive-error>{{ archiveError }} <small v-if="archiveRequestId">{{ t('leadDetail.requestId') }} {{ archiveRequestId }}</small></p>
+      <p v-if="isArchived" class="archived-notice" data-archived-notice>{{ archivedNotice }}</p>
 
       <div class="lead-summary">
         <span class="avatar"><UserRoundSearch :size="24" /></span>
-         <div><small>{{ locale === 'en-US' ? 'Lead status' : 'Lead 状态' }}</small><StatusBadge :label="salesEnumLabel(lead.status, locale)" :tone="statusTone" /></div>
+         <div><small>{{ locale === 'en-US' ? 'Lead status' : 'Lead 状态' }}</small><span class="status-badges"><StatusBadge :label="salesEnumLabel(lead.status, locale)" :tone="statusTone" /><StatusBadge v-if="isArchived" :label="salesEnumLabel('Archived', locale)" tone="neutral" /></span></div>
         <div><small>{{ locale === 'en-US' ? 'Source' : '线索来源' }}</small><strong>{{ salesEnumLabel(lead.source, locale) }}</strong></div>
         <div><small>{{ locale === 'en-US' ? 'Owner' : '负责人' }}</small><strong>{{ personnelDisplayName(lead.owner) }}</strong></div>
         <div><small>{{ locale === 'en-US' ? 'Updated' : '最近更新' }}</small><strong>{{ formatDisplayDate(lead.updatedAt) }}</strong></div>
@@ -290,10 +324,10 @@ onMounted(async () => {
           </dl>
         </SectionCard>
         <SectionCard :title="locale === 'en-US' ? 'First contact & qualification' : '首次联系与判断'" eyebrow="QUALIFICATION">
-          <template v-if="canWrite && lead.status !== 'Converted'" #action>
+          <template v-if="editable" #action>
             <button class="card-action" type="button" data-testid="edit-qualification" @click="startQualificationEdit"><Edit3 :size="13" />{{ locale === 'en-US' ? 'Edit' : '更改' }}</button>
           </template>
-          <form v-if="qualificationOpen" class="inline-form" @submit.prevent="saveQualification">
+          <form v-if="qualificationOpen && editable" class="inline-form" @submit.prevent="saveQualification">
             <label><span>{{ locale === 'en-US' ? 'First contact & qualification' : '首次联系与判断' }}</span><textarea v-model="qualificationNote" :aria-label="locale === 'en-US' ? 'First contact and qualification' : '首次联系与判断'" rows="4" required /></label>
              <label><span>{{ locale === 'en-US' ? 'Qualification result' : '判断结果' }}</span><select v-model="qualificationStatus" :aria-label="locale === 'en-US' ? 'Qualification result' : '判断结果'"><option v-for="item in ['New', 'Working', 'Qualified', 'Nurturing', 'Disqualified']" :key="item" :value="item">{{ salesEnumLabel(item, locale) }}</option></select></label>
             <p v-if="actionError" class="inline-error">{{ actionError }}</p>
@@ -305,10 +339,10 @@ onMounted(async () => {
           </template>
         </SectionCard>
         <SectionCard :title="locale === 'en-US' ? 'Activity timeline' : '活动时间线'" eyebrow="ACTIVITY TIMELINE">
-          <template v-if="canWrite && lead.status !== 'Converted'" #action>
+          <template v-if="editable" #action>
             <button class="card-action" type="button" data-testid="add-arrangement" @click="startArrangement"><Plus :size="13" />{{ locale === 'en-US' ? 'Add activity' : '增添安排' }}</button>
           </template>
-          <form v-if="arrangementOpen" class="inline-form arrangement-form" @submit.prevent="saveArrangement">
+          <form v-if="arrangementOpen && editable" class="inline-form arrangement-form" @submit.prevent="saveArrangement">
             <label><span>{{ locale === 'en-US' ? 'Next action' : '后续安排' }}</span><input v-model="arrangementAction" :aria-label="locale === 'en-US' ? 'Next action' : '后续安排'" maxlength="140" required /></label>
             <label><span>{{ locale === 'en-US' ? 'Due date' : '安排日期' }}</span><input v-model="arrangementDue" :aria-label="locale === 'en-US' ? 'Due date' : '安排日期'" type="date" required /></label>
             <p v-if="actionError" class="inline-error">{{ actionError }}</p>
@@ -323,6 +357,10 @@ onMounted(async () => {
         </SectionCard>
       </div>
 
+      <ModalShell v-if="archiveOpen" :title="t('leadDetail.archive')" eyebrow="ARCHIVE" :busy="archiving" :submit-label="t('leadDetail.archiveAction')" danger @close="resetArchiveState" @submit="setArchived(true)">
+        <p class="archive-note">{{ t('leadDetail.archiveWarning', { name: lead.name }) }}</p>
+        <p v-if="archiveError" class="inline-error" data-archive-error>{{ archiveError }} <small v-if="archiveRequestId">{{ t('leadDetail.requestId') }} {{ archiveRequestId }}</small></p>
+      </ModalShell>
       <LeadEditorModal v-if="editOpen" :lead="lead" :busy="busy" :error="actionError" @close="editOpen = false" @submit="saveLead" />
       <LeadConvertModal v-if="convertOpen" :lead="lead" :accounts="accounts" :contacts="contacts" :sites="sites" :segments="segments" :regions="regions" :equipment-types="equipmentTypes" :busy="busy" :error="actionError" :duplicate-accounts="convertDuplicates" @close="convertOpen = false; convertDuplicates = ''" @submit="convertLead" />
     </template>
@@ -330,5 +368,5 @@ onMounted(async () => {
 </template>
 
 <style scoped>
-.back-link{display:inline-flex;align-items:center;gap:5px;margin-bottom:14px;color:var(--crm-link);font-size:11px;font-weight:700}.lead-detail-page :deep(.page-header-actions){align-items:center}.lead-summary{display:grid;grid-template-columns:auto repeat(4,minmax(0,1fr));align-items:center;gap:12px;margin-bottom:14px;padding:14px 16px;background:#fff;border:1px solid var(--crm-line);border-radius:13px}.lead-summary .avatar{display:grid;width:46px;height:46px;place-items:center;color:var(--crm-brand-ink);background:var(--crm-teal-soft);border-radius:13px}.lead-summary div{display:grid;gap:5px}.lead-summary small{color:var(--crm-text-muted);font-size:9px}.lead-summary strong{color:var(--crm-navy);font-size:11px}.reference-note{margin:0 0 12px;color:var(--crm-warning);font-size:10px}.conversion-result{display:grid;grid-template-columns:auto minmax(220px,1fr) repeat(3,auto);align-items:center;gap:12px;margin-bottom:14px;padding:13px 15px;color:var(--crm-brand-ink);background:#edf8f5;border:1px solid #b8ded7;border-radius:12px}.conversion-result>div{display:grid;gap:3px}.conversion-result p{margin:0;color:var(--crm-text-muted);font-size:9px}.conversion-result a{padding:8px 9px;color:var(--crm-link);background:#fff;border:1px solid #cfe6e1;border-radius:8px;font-size:9px;font-weight:800}.detail-grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px;align-items:start}.profile-list{display:grid;margin:0}.profile-list div{display:grid;grid-template-columns:85px minmax(0,1fr);gap:10px;padding:11px 0;border-bottom:1px solid var(--crm-line)}.profile-list div:last-child{border-bottom:0}.profile-list dt{color:var(--crm-text-muted);font-size:10px}.profile-list dd{display:flex;align-items:center;flex-wrap:wrap;gap:6px;margin:0;color:var(--crm-navy);font-size:11px}.profile-list a{display:inline-flex;align-items:center;gap:5px;color:var(--crm-link)}.card-action{display:inline-flex;align-items:center;gap:5px;padding:6px 9px;color:var(--crm-teal);background:#fff;border:1px solid var(--crm-line);border-radius:7px;font-size:9px;font-weight:800;cursor:pointer}.note-card{padding:13px;background:var(--crm-surface);border:1px solid var(--crm-line);border-radius:10px}.note-card small{color:var(--crm-teal);font-size:8px;font-weight:800;letter-spacing:.08em}.note-card p,.qualification-copy p{margin:7px 0 0;color:var(--crm-text-muted);font-size:10px;line-height:1.65}.qualification-copy{margin-top:12px;padding:13px;color:var(--crm-navy);background:#fff8ea;border-left:3px solid var(--crm-warning);border-radius:8px}.qualification-copy strong{font-size:10px}.inline-form{display:grid;gap:10px;margin-bottom:14px;padding:12px;background:var(--crm-surface);border:1px solid var(--crm-line);border-radius:10px}.inline-form label{display:grid;gap:5px;color:var(--crm-text-muted);font-size:9px;font-weight:800}.inline-form input,.inline-form select,.inline-form textarea{width:100%;min-height:36px;padding:8px 9px;color:var(--crm-text);background:#fff;border:1px solid var(--crm-line);border-radius:7px;outline:0;font:inherit}.inline-form textarea{resize:vertical}.inline-form input:focus,.inline-form select:focus,.inline-form textarea:focus{border-color:var(--crm-teal)}.inline-actions{display:flex;justify-content:flex-end;gap:8px}.inline-actions .compact{min-height:32px;padding:6px 11px;font-size:9px}.text-button{padding:6px 9px;color:var(--crm-text-muted);background:transparent;border:0;font-size:9px;font-weight:800;cursor:pointer}.inline-error{margin:0;color:var(--crm-danger);font-size:9px}.timeline{display:grid;gap:12px}.timeline article{display:grid;grid-template-columns:10px 1fr;gap:8px}.timeline article>span{width:7px;height:7px;margin-top:4px;background:var(--crm-teal);border:2px solid #d9efeb;border-radius:50%}.timeline article>div{display:grid;gap:3px}.timeline small{color:var(--crm-text-muted);font-size:8px}.timeline strong{color:var(--crm-navy);font-size:10px}.timeline p{margin:0;color:var(--crm-text-muted);font-size:9px}@media(max-width:1100px){.detail-grid{grid-template-columns:1fr 1fr}.detail-grid>*:last-child{grid-column:1/-1}.conversion-result{grid-template-columns:auto 1fr}.conversion-result a{grid-column:2}}@media(max-width:700px){.lead-summary,.detail-grid{grid-template-columns:1fr}.lead-summary{grid-template-columns:auto 1fr 1fr}.detail-grid>*:last-child{grid-column:auto}.profile-list div{grid-template-columns:1fr}}
+.back-link{display:inline-flex;align-items:center;gap:5px;margin-bottom:14px;color:var(--crm-link);font-size:11px;font-weight:700}.lead-detail-page :deep(.page-header-actions){align-items:center}.lead-summary{display:grid;grid-template-columns:auto repeat(4,minmax(0,1fr));align-items:center;gap:12px;margin-bottom:14px;padding:14px 16px;background:#fff;border:1px solid var(--crm-line);border-radius:13px}.lead-summary .avatar{display:grid;width:46px;height:46px;place-items:center;color:var(--crm-brand-ink);background:var(--crm-teal-soft);border-radius:13px}.lead-summary div{display:grid;gap:5px}.lead-summary small{color:var(--crm-text-muted);font-size:9px}.lead-summary strong{color:var(--crm-navy);font-size:11px}.reference-note{margin:0 0 12px;color:var(--crm-warning);font-size:10px}.archived-notice{margin:0 0 12px;padding:10px 12px;color:#5c4a16;background:#fff5df;border:1px solid #f0dda9;border-radius:9px;font-size:10px;line-height:1.6}.archive-note{margin:0 0 10px;color:var(--crm-text);font-size:11px;line-height:1.6}.status-badges{display:inline-flex;flex-wrap:wrap;gap:5px}.conversion-result{display:grid;grid-template-columns:auto minmax(220px,1fr) repeat(3,auto);align-items:center;gap:12px;margin-bottom:14px;padding:13px 15px;color:var(--crm-brand-ink);background:#edf8f5;border:1px solid #b8ded7;border-radius:12px}.conversion-result>div{display:grid;gap:3px}.conversion-result p{margin:0;color:var(--crm-text-muted);font-size:9px}.conversion-result a{padding:8px 9px;color:var(--crm-link);background:#fff;border:1px solid #cfe6e1;border-radius:8px;font-size:9px;font-weight:800}.detail-grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px;align-items:start}.profile-list{display:grid;margin:0}.profile-list div{display:grid;grid-template-columns:85px minmax(0,1fr);gap:10px;padding:11px 0;border-bottom:1px solid var(--crm-line)}.profile-list div:last-child{border-bottom:0}.profile-list dt{color:var(--crm-text-muted);font-size:10px}.profile-list dd{display:flex;align-items:center;flex-wrap:wrap;gap:6px;margin:0;color:var(--crm-navy);font-size:11px}.profile-list a{display:inline-flex;align-items:center;gap:5px;color:var(--crm-link)}.card-action{display:inline-flex;align-items:center;gap:5px;padding:6px 9px;color:var(--crm-teal);background:#fff;border:1px solid var(--crm-line);border-radius:7px;font-size:9px;font-weight:800;cursor:pointer}.note-card{padding:13px;background:var(--crm-surface);border:1px solid var(--crm-line);border-radius:10px}.note-card small{color:var(--crm-teal);font-size:8px;font-weight:800;letter-spacing:.08em}.note-card p,.qualification-copy p{margin:7px 0 0;color:var(--crm-text-muted);font-size:10px;line-height:1.65}.qualification-copy{margin-top:12px;padding:13px;color:var(--crm-navy);background:#fff8ea;border-left:3px solid var(--crm-warning);border-radius:8px}.qualification-copy strong{font-size:10px}.inline-form{display:grid;gap:10px;margin-bottom:14px;padding:12px;background:var(--crm-surface);border:1px solid var(--crm-line);border-radius:10px}.inline-form label{display:grid;gap:5px;color:var(--crm-text-muted);font-size:9px;font-weight:800}.inline-form input,.inline-form select,.inline-form textarea{width:100%;min-height:36px;padding:8px 9px;color:var(--crm-text);background:#fff;border:1px solid var(--crm-line);border-radius:7px;outline:0;font:inherit}.inline-form textarea{resize:vertical}.inline-form input:focus,.inline-form select:focus,.inline-form textarea:focus{border-color:var(--crm-teal)}.inline-actions{display:flex;justify-content:flex-end;gap:8px}.inline-actions .compact{min-height:32px;padding:6px 11px;font-size:9px}.text-button{padding:6px 9px;color:var(--crm-text-muted);background:transparent;border:0;font-size:9px;font-weight:800;cursor:pointer}.inline-error{margin:0;color:var(--crm-danger);font-size:9px}.timeline{display:grid;gap:12px}.timeline article{display:grid;grid-template-columns:10px 1fr;gap:8px}.timeline article>span{width:7px;height:7px;margin-top:4px;background:var(--crm-teal);border:2px solid #d9efeb;border-radius:50%}.timeline article>div{display:grid;gap:3px}.timeline small{color:var(--crm-text-muted);font-size:8px}.timeline strong{color:var(--crm-navy);font-size:10px}.timeline p{margin:0;color:var(--crm-text-muted);font-size:9px}@media(max-width:1100px){.detail-grid{grid-template-columns:1fr 1fr}.detail-grid>*:last-child{grid-column:1/-1}.conversion-result{grid-template-columns:auto 1fr}.conversion-result a{grid-column:2}}@media(max-width:700px){.lead-summary,.detail-grid{grid-template-columns:1fr}.lead-summary{grid-template-columns:auto 1fr 1fr}.detail-grid>*:last-child{grid-column:auto}.profile-list div{grid-template-columns:1fr}}
 </style>

@@ -28,6 +28,10 @@ const FIXED_MESSAGES: Partial<Record<string, Record<string, CopyPair>>> = {
     // The Warnings page's handling records (services/warning_handling.py).
     'Only stage 6 and postponed PO warnings take a recorded action; the others clear through their own records.': ['Only stage 6 and postponed PO warnings take a recorded action; the others clear through their own records.', '只有“第 6 阶段超期无 PO”和“预计 PO 跨季度推迟”预警可以记录处理行动，其他预警通过各自的记录解除。'],
     'This warning has changed or cleared. Reload the page.': ['This warning has changed or cleared. Reload the page.', '这条预警已变化或已解除，请刷新页面。'],
+    // The archive (a Manager's, in place of a delete).
+    'An archived Lead cannot be edited; a Manager can restore it from the archive.': ['This Lead is archived and cannot be edited; a Manager can restore it from the archive.', '该 Lead 已归档，不能编辑；经理可取消归档。'],
+    'An archived Lead cannot be converted; a Manager can restore it from the archive.': ['This Lead is archived and cannot be converted; a Manager can restore it from the archive.', '该 Lead 已归档，不能转换；经理可取消归档。'],
+    "A converted Lead is part of its Account's history and cannot be archived.": ["A converted Lead is part of its Account's history and cannot be archived.", '已转换的 Lead 是客户的历史记录，不能归档。'],
   },
   VALIDATION_ERROR: {
     'Invalid Review period or anchor.': ['This period cannot be shown. Choose another date.', '无法显示这个周期，请重新选择日期。'],
@@ -119,6 +123,7 @@ const FIXED_MESSAGES: Partial<Record<string, Record<string, CopyPair>>> = {
     'Upload exceeds the 100 MiB request limit.': ['The files of one upload may not exceed 100 MiB together.', '一次上传的文件总大小不能超过 100 MiB。'],
   },
   CONFLICT: {
+    'Another Lead already uses this email address.': ['Another Lead already uses this email address; it may be archived or out of your scope, so ask a Manager.', '已有其他 Lead 使用这个邮箱（可能已归档或不在你的范围内，请联系经理）。'],
     'A Contact merged or archived already cannot be merged.': ['A Contact merged or archived already cannot be merged.', '已被合并或已归档的联系人不能再合并。'],
     'An Account with this name exists already.': ['An account with this name exists already.', '已有同名的客户。'],
     'Another request is naming an Account like this; try again.': ['Another request is naming an account like this; try again.', '另一个请求正在用同样的名字新建或修改客户，请稍后再试。'],

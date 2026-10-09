@@ -154,6 +154,39 @@ def normalize_expected_modified(value: Any) -> str:
         raise CrmApiException("VALIDATION_ERROR", "expectedModified must be an ISO timestamp.") from exc
 
 
+def require_manager_scoped_document(
+    doctype: str,
+    name: str,
+    capability: str,
+    not_found_code: str,
+    *,
+    for_update: bool = False,
+):
+    """The record a Manager-only action (an archive, a delete) is about: the capability, the Manager role, the
+    record and the caller's read scope are checked in that order. With for_update the record is read with its row
+    locked (`SELECT … FOR UPDATE`, a locking read: the row as committed, not this transaction's snapshot), so the
+    action decides on the current record and no other write lands on it before the action commits."""
+
+    import frappe
+
+    assert_capability(capability)
+    if resolve_crm_role() != "Manager":
+        raise frappe.PermissionError("CRM Manager role is required.")
+    if for_update:
+        try:
+            doc = frappe.get_doc(doctype, name, for_update=True)
+        except frappe.DoesNotExistError as exc:
+            frappe.clear_last_message()
+            raise CrmApiException(not_found_code, f"{doctype} was not found.") from exc
+    else:
+        if not frappe.db.exists(doctype, name):
+            raise CrmApiException(not_found_code, f"{doctype} was not found.")
+        doc = frappe.get_doc(doctype, name)
+    if not frappe.has_permission(doctype, "read", doc=doc, user=frappe.session.user):
+        raise CrmApiException("SCOPE_DENIED", f"{doctype} is outside the current user scope.")
+    return doc
+
+
 def delete_manager_scoped_document(
     doctype: str,
     name: str,
@@ -164,14 +197,7 @@ def delete_manager_scoped_document(
 
     import frappe
 
-    assert_capability(capability)
-    if resolve_crm_role() != "Manager":
-        raise frappe.PermissionError("CRM Manager role is required.")
-    if not frappe.db.exists(doctype, name):
-        raise CrmApiException(not_found_code, f"{doctype} was not found.")
-    doc = frappe.get_doc(doctype, name)
-    if not frappe.has_permission(doctype, "read", doc=doc, user=frappe.session.user):
-        raise CrmApiException("SCOPE_DENIED", f"{doctype} is outside the current user scope.")
+    require_manager_scoped_document(doctype, name, capability, not_found_code)
 
     savepoint = "crm_manager_delete"
     frappe.db.savepoint(savepoint)

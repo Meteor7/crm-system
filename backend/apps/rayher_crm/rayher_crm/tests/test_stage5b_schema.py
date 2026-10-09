@@ -61,6 +61,9 @@ EXPECTED_FIELDS = {
         "custom_crm_converted_at": ("Datetime", None),
         "custom_crm_reused_account": ("Check", None),
         "custom_crm_reused_contact": ("Check", None),
+        "custom_crm_archived": ("Check", None),
+        "custom_crm_archived_at": ("Datetime", None),
+        "custom_crm_archived_by": ("Link", "User"),
     },
 }
 

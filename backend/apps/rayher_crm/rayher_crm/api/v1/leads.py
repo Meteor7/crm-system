@@ -37,10 +37,16 @@ def update_lead(id: str, input: Any, expectedModified: str | None = None) -> dic
     return success_response(leads.update_lead(id, as_payload(input), expectedModified))
 
 
-@frappe.whitelist(methods=["POST", "DELETE"])
+@frappe.whitelist(methods=["POST"])
 @api_endpoint
-def delete_lead(id: str) -> dict:
-    return success_response(leads.delete_lead(id))
+def archive_lead(id: str) -> dict:
+    return success_response(leads.archive_lead(id))
+
+
+@frappe.whitelist(methods=["POST"])
+@api_endpoint
+def unarchive_lead(id: str) -> dict:
+    return success_response(leads.unarchive_lead(id))
 
 
 @frappe.whitelist(methods=["POST"])

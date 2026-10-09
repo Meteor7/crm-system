@@ -11,14 +11,14 @@ import frappe
 from frappe.utils import validate_email_address
 from frappe.utils.html_utils import sanitize_html
 
-from rayher_crm.api.v1.errors import CrmApiException
+from rayher_crm.api.v1.errors import CrmApiException, _raising_frame_locals
 from rayher_crm.permissions.roles import assert_capability, resolve_crm_role
 from rayher_crm.permissions.scope import conditions_for_doctype
 from rayher_crm.services.common import (
-    delete_manager_scoped_document,
     ensure_server_generated_id,
     normalize_pagination,
     optional_date,
+    require_manager_scoped_document,
     required_text,
     resolve_write_owner,
     to_iso_timestamp,
@@ -37,10 +37,102 @@ MAX_OPPORTUNITY_AMOUNT = Decimal("999999999999999999.99")
 MAX_ACTIVITIES = 200
 # The latest arrangement is written to custom_crm_next_action as well, a Data field of Frappe 15: 140 characters.
 MAX_ACTIVITY_ACTION = 140
+# What a list shows of the archive: the active records (the default), the archived ones, or both.
+ARCHIVE_STATES = ("active", "archived", "all")
+ARCHIVED_LEAD_EDIT = "An archived Lead cannot be edited; a Manager can restore it from the archive."
+ARCHIVED_LEAD_CONVERT = "An archived Lead cannot be converted; a Manager can restore it from the archive."
+CONVERTED_LEAD_ARCHIVE = "A converted Lead is part of its Account's history and cannot be archived."
+# ERPNext keeps a Lead's email unique (CRM Settings, allow_lead_duplication_based_on_emails off), archived Leads
+# included: its refusal on save is answered as a conflict that names the field, not as a server failure.
+DUPLICATE_LEAD_EMAIL = "Another Lead already uses this email address."
 
 
-def delete_lead(name: str) -> dict[str, str]:
-    return delete_manager_scoped_document("Lead", name, "deal:write", "LEAD_NOT_FOUND")
+def archive_state(query: dict[str, Any]) -> str:
+    """The archive filter of a list query: `archiveState`, "active" when absent."""
+
+    state = str(query.get("archiveState") or "active")
+    if state not in ARCHIVE_STATES:
+        raise CrmApiException(
+            "VALIDATION_ERROR", "archiveState must be active, archived or all.", field_errors={"archiveState": "Invalid value"},
+        )
+    return state
+
+
+def _set_archived(doc, archived: bool) -> None:
+    """Write the three archive columns of the Lead, read under its row lock, and nothing else: a full save would
+    run ERPNext's Lead validation (the email's uniqueness over every Lead, a legacy duplicate included) for a flag
+    flip. `modified` moves with it, so an edit prepared on the record before is refused by its version check
+    (`lock_document`) rather than written over the archive; a conversion sends no version and reads the flag under
+    the Lead's lock instead, where it is refused. The Lead keeps no versions, so the archive and the restore each
+    leave a comment on it: who, and when."""
+
+    frappe.db.set_value("Lead", doc.name, {
+        "custom_crm_archived": 1 if archived else 0,
+        "custom_crm_archived_at": frappe.utils.now_datetime() if archived else None,
+        "custom_crm_archived_by": frappe.session.user if archived else None,
+    })
+    frappe.get_doc({
+        "doctype": "Comment", "comment_type": "Info", "reference_doctype": "Lead", "reference_name": doc.name,
+        "content": "Archived" if archived else "Restored from the archive",
+    }).insert(ignore_permissions=True)
+    doc.reload()
+
+
+def _duplicate_email(error: frappe.DuplicateEntryError, values: dict[str, Any]) -> bool:
+    """Whether ERPNext's save refused the Lead for its email (`check_email_id_is_unique`), and not for anything
+    else a DuplicateEntryError stands for (a document name taken, say)."""
+
+    return bool(values["email"]) and bool(_raising_frame_locals(error, "check_email_id_is_unique"))
+
+
+def archive_lead(name: str) -> dict[str, Any]:
+    """Archive a Lead, a Manager's action (the delete it replaces was one): the Lead leaves the list and the
+    figures, keeps all it holds, and is brought back by unarchive_lead. A converted Lead is its Account's history
+    and stays. Archiving a Lead archived already changes nothing."""
+
+    doc = require_manager_scoped_document("Lead", name, "deal:write", "LEAD_NOT_FOUND", for_update=True)
+    # Archived already: nothing changes, whatever befell the Lead since (ERPNext's own conversion in the Desk reads no
+    # archive flag).
+    if doc.custom_crm_archived:
+        return serialize_lead(doc)
+    if _converted(doc):
+        raise CrmApiException("INVALID_TRANSITION", CONVERTED_LEAD_ARCHIVE)
+    _set_archived(doc, True)
+    return serialize_lead(doc)
+
+
+def _converted(doc) -> bool:
+    """Whether the Lead was converted: its status says so, the CRM's or ERPNext's own, or a conversion left a trace of
+    it (one of its conversion columns; a Customer naming it as the Lead it was made from, ERPNext's own mark of a
+    conversion, from which ERPNext sets its status on the Customer's insert and whenever it works the Lead's status out
+    again (the Lead's save, an ERPNext Opportunity or Quotation of its own), not when the link is given later; a deal
+    naming it as its source; a conversion in a deal's stage history). The cockpit and the board find a Lead's conversion
+    by its column naming the deal or by the deal's stage history, and count it whatever the Lead's status; a legacy
+    conversion, or one repaired in the Desk, can leave the status, or any one trace, behind. The Lead's row (its
+    statuses and its columns) is read under its lock, which the CRM's conversion takes before it writes anything and
+    ERPNext's (a Customer made from the Lead in the Desk) takes to write the status, so one committed meanwhile is seen;
+    the Customers and the deals that name it are read as the snapshot has them, a past conversion's."""
+
+    if doc.custom_crm_status == "Converted" or doc.status == "Converted" or doc.custom_crm_converted_at:
+        return True
+    if doc.custom_crm_converted_account or doc.custom_crm_converted_contact or doc.custom_crm_converted_opportunity:
+        return True
+    if frappe.db.exists("Customer", {"lead_name": doc.name}):
+        return True
+    if frappe.db.exists("CRM Opportunity", {"source_lead": doc.name}):
+        return True
+    return bool(frappe.db.exists("CRM Opportunity Stage History", {
+        "event": "lead_converted", "reference_doctype": "Lead", "reference_name": doc.name,
+    }))
+
+
+def unarchive_lead(name: str) -> dict[str, Any]:
+    """Bring an archived Lead back: every field as it was, its version moved on. A Lead not archived is left as it is."""
+
+    doc = require_manager_scoped_document("Lead", name, "deal:write", "LEAD_NOT_FOUND", for_update=True)
+    if doc.custom_crm_archived:
+        _set_archived(doc, False)
+    return serialize_lead(doc)
 
 
 def serialize_lead(doc) -> dict[str, Any]:
@@ -65,7 +157,11 @@ def serialize_lead(doc) -> dict[str, Any]:
         "createdAt": to_iso_timestamp(doc.creation),
         "updatedAt": to_iso_timestamp(doc.modified),
         "modified": to_iso_timestamp(doc.modified),
+        "archived": bool(doc.custom_crm_archived),
     }
+    if doc.custom_crm_archived:
+        result["archivedAt"] = to_iso_timestamp(doc.custom_crm_archived_at) if doc.custom_crm_archived_at else ""
+        result["archivedBy"] = doc.custom_crm_archived_by or ""
     converted_fields = {
         "convertedAt": doc.custom_crm_converted_at,
         "convertedAccountId": doc.custom_crm_converted_account,
@@ -176,6 +272,10 @@ def list_leads(query: dict[str, Any]) -> tuple[list[dict[str, Any]], int, int, i
     page, page_size, offset = normalize_pagination(query.get("page"), query.get("pageSize"))
     where = [f"({conditions_for_doctype('Lead')})"]
     values: list[Any] = []
+    state = archive_state(query)
+    if state != "all":
+        where.append("`custom_crm_archived` = %s")
+        values.append(1 if state == "archived" else 0)
     search = str(query.get("search") or "").strip()
     if search:
         pattern = f"%{search}%"
@@ -276,6 +376,12 @@ def create_lead(payload: dict[str, Any]) -> dict[str, Any]:
                 message=f"You are now responsible for {doc.lead_name}.",
                 route=f"/leads/{doc.name}", source_doctype="Lead", source_name=doc.name,
             )
+    except frappe.DuplicateEntryError as exc:
+        frappe.db.rollback(save_point=savepoint)
+        if not _duplicate_email(exc, values):
+            raise
+        frappe.clear_last_message()
+        raise CrmApiException("CONFLICT", DUPLICATE_LEAD_EMAIL, field_errors={"email": "Already used"}) from exc
     except Exception:
         frappe.db.rollback(save_point=savepoint)
         raise
@@ -288,6 +394,10 @@ def update_lead(name: str, payload: dict[str, Any], expected_modified: Any) -> d
     existing = _require_lead(name)
     if existing.custom_crm_status == "Converted":
         raise CrmApiException("LEAD_ALREADY_CONVERTED", "Converted Leads cannot be edited.")
+    # Before the payload and the version are looked at, so the refusal names the archive whatever the client sent;
+    # an archive committed after this read moves the Lead's version, which the lock below then refuses.
+    if existing.custom_crm_archived:
+        raise CrmApiException("INVALID_TRANSITION", ARCHIVED_LEAD_EDIT)
     values = _validate_lead(payload)
     if values["status"] == "Converted":
         raise CrmApiException("VALIDATION_ERROR", "Use the Lead conversion endpoint to convert a Lead.")
@@ -306,6 +416,12 @@ def update_lead(name: str, payload: dict[str, Any], expected_modified: Any) -> d
                 message=f"You are now responsible for {doc.lead_name}.",
                 route=f"/leads/{doc.name}", source_doctype="Lead", source_name=doc.name,
             )
+    except frappe.DuplicateEntryError as exc:
+        frappe.db.rollback(save_point=savepoint)
+        if not _duplicate_email(exc, values):
+            raise
+        frappe.clear_last_message()
+        raise CrmApiException("CONFLICT", DUPLICATE_LEAD_EMAIL, field_errors={"email": "Already used"}) from exc
     except Exception:
         frappe.db.rollback(save_point=savepoint)
         raise
@@ -353,10 +469,18 @@ def _conversion_result(doc) -> dict[str, Any]:
 
 
 def _lock_lead_for_conversion(name: str):
-    rows = frappe.db.sql("SELECT `name` FROM `tabLead` WHERE `name` = %s FOR UPDATE", (name,))
-    if not rows:
-        raise CrmApiException("LEAD_NOT_FOUND", "Lead was not found.")
-    doc = frappe.get_doc("Lead", name)
+    # A locking read (the row as committed): a conversion or an archive committed meanwhile is seen.
+    try:
+        doc = frappe.get_doc("Lead", name, for_update=True)
+    except frappe.DoesNotExistError as exc:
+        frappe.clear_last_message()
+        raise CrmApiException("LEAD_NOT_FOUND", "Lead was not found.") from exc
+    # The scope is read as this request's snapshot has the Lead (a plain read): a snapshot older than the row locked
+    # (anything committed to the Lead between the request's snapshot and its lock: a reassignment, another
+    # conversion, an archive) would decide on the Lead it had then. The request is refused as changed, before it
+    # writes anything; a retry reads both anew.
+    if frappe.db.get_value("Lead", name, "modified") != doc.modified:
+        raise CrmApiException("VERSION_CONFLICT", "The record was changed by another request.")
     if not frappe.has_permission("Lead", "read", doc=doc, user=frappe.session.user):
         raise CrmApiException("SCOPE_DENIED", "The lead is outside the current user scope.")
     return doc
@@ -433,6 +557,8 @@ def convert_lead(
         if all(result[key] for key in ("accountId", "contactId", "opportunityId")):
             return result
         raise CrmApiException("LEAD_CONVERSION_INCOMPLETE", "The Lead has an incomplete conversion record.")
+    if lead.custom_crm_archived:
+        raise CrmApiException("INVALID_TRANSITION", ARCHIVED_LEAD_CONVERT)
 
     values = _validate_conversion(payload)
     savepoint = f"crm_convert_{frappe.generate_hash(length=8)}"
@@ -539,6 +665,14 @@ def convert_lead(
         lead.save(ignore_permissions=True)
         if failure_injector:
             failure_injector("lead")
+    except frappe.DuplicateEntryError as exc:
+        # The save runs ERPNext's email uniqueness: a legacy twin of this Lead's email (or one archived) refuses
+        # it, as it refuses an edit; the Account, Site, Contact and Opportunity written above are rolled back.
+        frappe.db.rollback(save_point=savepoint)
+        if not _duplicate_email(exc, {"email": lead.email_id}):
+            raise
+        frappe.clear_last_message()
+        raise CrmApiException("CONFLICT", DUPLICATE_LEAD_EMAIL, field_errors={"email": "Already used"}) from exc
     except Exception:
         frappe.db.rollback(save_point=savepoint)
         raise
