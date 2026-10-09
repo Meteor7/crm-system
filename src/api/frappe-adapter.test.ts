@@ -787,6 +787,22 @@ describe('Frappe multipart and binary transport', () => {
     expect(await download.blob.text()).toBe('pdf')
   })
 
+  it.each([
+    // The header the backend writes for a Chinese name: ASCII fallback plus the UTF-8 form.
+    ["attachment; filename=\"___ 2026.pdf\"; filename*=UTF-8''%E6%8A%A5%E4%BB%B7%E5%8D%95%202026.pdf", '报价单 2026.pdf'],
+    // A quoted fallback that only looks like it carries parameters stays one name.
+    ["attachment; filename=\"a; filename*=UTF-8''evil.html; b.pdf\"", "a; filename*=UTF-8''evil.html; b.pdf"],
+    ['inline; filename="quote _final_.pdf"; filename*=UTF-8\'\'quote%20%22final%22.pdf', 'quote "final".pdf'],
+    ['attachment; filename=quote.pdf', 'quote.pdf'],
+  ])('reads the saved name from %s', async (header, expected) => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response('pdf', {
+      status: 200,
+      headers: { 'Content-Type': 'application/pdf', 'Content-Disposition': header },
+    }))
+    const download = await createFrappeApi({ fetchImpl: fetchMock }).getDemoArtifact('ART-1')
+    expect(download.fileName).toBe(expected)
+  })
+
   it('uploads the selected Test Report as multipart data', async () => {
     const fetchMock = vi.fn().mockResolvedValue(success({ id: 'ART-REPORT-1' }))
     const internalBlob = new Blob(['internal'], { type: 'application/pdf' })

@@ -18,7 +18,7 @@ $sourceDocx = Join-Path $workspaceRoot 'public\templates\demo-request-form-v2.do
 $composeArgs = @('--project-name', $ProjectName, '--env-file', $envFile, '-f', $composeFile)
 $created = [ordered]@{
     Account=$null; Site=$null; Contact=$null; Opportunity=$null; Request=$null; Evaluation=$null; ContactFile=$null; RequestArtifact=$null
-    InternalReportArtifact=$null; ExternalReportArtifact=$null
+    InternalReportArtifact=$null; ExternalReportArtifact=$null; StatusRecord=$null; StatusFile=$null
     Sales=$null; Engineer=$null; OtherSales=$null; Manager=$null; Files=@()
 }
 $temporaryFiles = @()
@@ -186,6 +186,34 @@ try {
     try { Save-Download $sessions.OtherSales 'rayher_crm.api.v1.contact_files.download_file' 'fileId' $created.ContactFile | Out-Null } catch { $contactDenied = [int]$_.Exception.Response.StatusCode }
     if ($contactDenied -ne 403) { throw "Expected foreign Contact File HTTP 403, got $contactDenied." }
 
+    # A Status attachment named outside ASCII (#92) keeps its name through a real
+    # download: an ASCII fallback plus the UTF-8 filename* form, read back by the
+    # RFC 6266 parser in .NET.
+    $statusName = (-join [char[]](0x62A5, 0x4EF7, 0x5355)) + ' 2026.docx'
+    $statusDirectory = Join-Path ([IO.Path]::GetTempPath()) ('crm-stage5f-' + [guid]::NewGuid().ToString('N'))
+    New-Item -ItemType Directory -Path $statusDirectory | Out-Null
+    $statusSource = Join-Path $statusDirectory $statusName
+    $temporaryFiles += $statusSource
+    $temporaryFiles += $statusDirectory
+    Copy-Item -LiteralPath $sourceDocx -Destination $statusSource
+    $statusInput = ConvertTo-Json -Compress -InputObject @{text='Stage 5F status with a non-ASCII attachment name'}
+    $statusRecord = Invoke-MultipartFile $sessions.Sales 'rayher_crm.api.v1.opportunity_status.save_record' @{opportunityId=$created.Opportunity;input=$statusInput} 'files' $statusSource 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+    $created.StatusRecord = $statusRecord.data.id
+    $created.StatusFile = $statusRecord.data.files[0].id
+    Remember-AttachedFiles $adminSession $created.StatusFile
+    if ($statusRecord.data.files[0].fileName -cne $statusName) { throw "Status attachment name changed on upload: $($statusRecord.data.files[0].fileName)" }
+    $statusDownload = [IO.Path]::GetTempFileName()
+    $temporaryFiles += $statusDownload
+    $statusQuery = "opportunityId=$([Uri]::EscapeDataString($created.Opportunity))&recordId=$([Uri]::EscapeDataString($created.StatusRecord))&fileId=$([Uri]::EscapeDataString($created.StatusFile))"
+    $statusResponse = Invoke-WebRequest -UseBasicParsing -Uri "$BaseUrl/api/method/rayher_crm.api.v1.opportunity_status.download_file?$statusQuery" -WebSession $sessions.Sales -OutFile $statusDownload -PassThru
+    $dispositions = @($statusResponse.Headers['Content-Disposition'])
+    $expectedDisposition = "attachment; filename=`"___ 2026.docx`"; filename*=UTF-8''%E6%8A%A5%E4%BB%B7%E5%8D%95%202026.docx"
+    if ($dispositions.Count -ne 1 -or $dispositions[0] -cne $expectedDisposition) { throw "Unexpected Status Content-Disposition: $($dispositions -join ' | ')" }
+    Add-Type -AssemblyName System.Net.Http
+    $savedName = [Net.Http.Headers.ContentDispositionHeaderValue]::Parse($dispositions[0]).FileNameStar
+    if ($savedName -cne $statusName) { throw "Status download would be saved as '$savedName'." }
+    if ((Get-FileHash -Algorithm SHA256 -LiteralPath $statusDownload).Hash -ne (Get-FileHash -Algorithm SHA256 -LiteralPath $sourceDocx).Hash) { throw 'Status attachment raw download bytes changed.' }
+
     $formData = @{
         contactPerson='forged';industry='Frontend Fab';salesContact=$created.Sales;demoOwner=$created.Engineer
         sizeShape='300 mm';material='Si(100)';specificRequest='Edge exclusion';detectMeasure='Detect particles';expectedResults='Wafer map'
@@ -347,7 +375,7 @@ try {
     $deletedStatus = 0
     try { Save-Download $sessions.Sales 'rayher_crm.api.v1.contact_files.download_file' 'fileId' $created.ContactFile | Out-Null } catch { $deletedStatus = [int]$_.Exception.Response.StatusCode }
     if ($deletedStatus -ne 404) { throw "Expected deleted Contact File HTTP 404, got $deletedStatus." }
-    Write-Output 'Stage 5F authenticated HTTP acceptance passed: multipart/private raw download/IDOR/arbitrary Test Report/Article projection/recipient notifications/read state/native File and User lists/restart persistence.'
+    Write-Output 'Stage 5F authenticated HTTP acceptance passed: multipart/private raw download/non-ASCII download name/IDOR/arbitrary Test Report/Article projection/recipient notifications/read state/native File and User lists/restart persistence.'
 } finally {
     $adminPassword=$null; $passwords=$null
     foreach ($path in @($temporaryFiles)) {
@@ -363,6 +391,9 @@ try {
     Remove-TestChildren 'CRM File Access Audit' 'entity_id' $created.InternalReportArtifact
     Remove-TestChildren 'CRM File Access Audit' 'entity_id' $created.ExternalReportArtifact
     Remove-TestChildren 'CRM Contact File' 'name' $created.ContactFile
+    Remove-TestChildren 'CRM File Access Audit' 'entity_id' $created.StatusFile
+    Remove-TestChildren 'CRM Status Attachment' 'status' $created.StatusRecord
+    Remove-TestChildren 'CRM Opportunity Status' 'name' $created.StatusRecord
     Remove-TestChildren 'CRM Demo Artifact' 'demo_request' $created.Request
     foreach ($fileName in @($created.Files)) { Remove-TestDoc 'File' $fileName }
     Remove-TestChildren 'CRM Notification Event' 'source_name' $created.Evaluation

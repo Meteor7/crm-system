@@ -349,18 +349,54 @@ function throwRequestError(payload: unknown, response: Response, fallbackRequest
 
 function parseFileName(disposition: string | null, fallback: string) {
   if (!disposition) return fallback
-  const extended = disposition.match(/filename\*\s*=\s*UTF-8''([^;]+)/i)?.[1]
+  // Parameters split on `;` outside quotes only: the quoted ASCII fallback may
+  // itself hold `;` or a `filename*=` look-alike, and must not be read as one.
+  const params = new Map<string, string>()
+  for (const segment of splitOutsideQuotes(disposition, ';').slice(1)) {
+    const separator = segment.indexOf('=')
+    if (separator < 0) continue
+    const key = segment.slice(0, separator).trim().toLowerCase()
+    let value = segment.slice(separator + 1).trim()
+    if (value.startsWith('"')) {
+      value = value.slice(1, value.length > 1 && value.endsWith('"') ? -1 : undefined).replace(/\\(.)/g, '$1')
+    }
+    params.set(key, value)
+  }
   let candidate: string | undefined
+  const extended = params.get('filename*')?.match(/^utf-8'[^']*'(.*)$/i)?.[1]
   if (extended) {
     try {
-      candidate = decodeURIComponent(extended.trim().replace(/^"|"$/g, ''))
+      candidate = decodeURIComponent(extended)
     } catch {
       candidate = undefined
     }
   }
-  candidate ??= disposition.match(/filename\s*=\s*(?:"([^"]+)"|([^;]+))/i)?.slice(1).find(Boolean)?.trim()
-  const safe = candidate?.split(/[\\/]/).pop()?.replace(/[\u0000-\u001f]/g, '').trim()
+  candidate ??= params.get('filename')
+  const safe = candidate?.split(/[/\\]/).pop()?.replace(/[\u0000-\u001f]/g, '').trim()
   return safe || fallback
+}
+
+function splitOutsideQuotes(text: string, separator: string): string[] {
+  const parts: string[] = []
+  let current = ''
+  let quoted = false
+  for (let index = 0; index < text.length; index += 1) {
+    const char = text[index]
+    if (quoted && char === '\\' && index + 1 < text.length) {
+      current += char + text[index + 1]
+      index += 1
+      continue
+    }
+    if (char === '"') quoted = !quoted
+    if (char === separator && !quoted) {
+      parts.push(current)
+      current = ''
+      continue
+    }
+    current += char
+  }
+  parts.push(current)
+  return parts
 }
 
 export function createFrappeApi(options: FrappeApiOptions = {}): CrmApi {
