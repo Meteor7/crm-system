@@ -34,7 +34,9 @@ let ready = false; let previewSequence = 0; let saveTimer: ReturnType<typeof set
 const quotationId = computed(() => String(route.params.quotationId || ''))
 const linkedVersion = computed(() => typeof route.query.version === 'string' ? route.query.version : undefined)
 const selectedIsLatest = computed(() => detail.value?.version.id === detail.value?.quotation.currentVersionId)
-const canMutateQuotation = computed(() => Boolean(app.can('quotation:write') && !detail.value?.version.addressRestricted))
+// A Quotation of an archived Opportunity is frozen with it: the server refuses every write until the restore.
+const opportunityArchived = computed(() => Boolean(detail.value?.quotation.opportunityArchived))
+const canMutateQuotation = computed(() => Boolean(app.can('quotation:write') && !detail.value?.version.addressRestricted && !opportunityArchived.value))
 const editable = computed(() => Boolean(canMutateQuotation.value && selectedIsLatest.value && detail.value?.version.status === 'Draft' && detail.value?.version.approvalStatus !== 'Pending'))
 const isSales = computed(() => app.bootstrap?.user.role === 'Sales')
 const approvalPending = computed(() => selectedIsLatest.value && detail.value?.version.approvalStatus === 'Pending')
@@ -234,8 +236,8 @@ onBeforeUnmount(()=>{ready=false;previewSequence+=1;window.removeEventListener('
         <button v-if="canDiscard" class="danger-button" data-testid="discard-quotation-draft" type="button" :disabled="busy" @click="discard"><Trash2 :size="14" />{{ (locale === 'en-US' ? 'Discard draft' : '放弃草稿') }}</button>
         <button v-if="editable && isSales && app.can('quotation:submit')" class="primary-button" data-testid="submit-quotation-approval" type="button" :disabled="busy" @click="submitApproval"><Send :size="14" />{{ ui('Submit for Manager approval', '提交经理审批') }}</button>
         <button v-if="editable && !isSales && app.can('quotation:publish')" class="primary-button" data-testid="publish-quotation" type="button" :disabled="busy" @click="publish"><Send :size="14" />{{ (locale === 'en-US' ? 'Publish official version' : '直接发布正式版本') }}</button>
-        <button v-if="approvalPending && app.can('quotation:approve')" class="primary-button" data-testid="approve-quotation" type="button" :disabled="busy" @click="openApproval('Approved')"><ShieldCheck :size="14" />{{ (locale === 'en-US' ? 'Approve and publish' : '批准并发布') }}</button>
-        <button v-if="approvalPending && app.can('quotation:approve')" class="danger-button" data-testid="reject-quotation" type="button" :disabled="busy" @click="openApproval('Rejected')"><ShieldX :size="14" />{{ (locale === 'en-US' ? 'Reject' : '驳回') }}</button>
+        <button v-if="approvalPending && !opportunityArchived && app.can('quotation:approve')" class="primary-button" data-testid="approve-quotation" type="button" :disabled="busy" @click="openApproval('Approved')"><ShieldCheck :size="14" />{{ (locale === 'en-US' ? 'Approve and publish' : '批准并发布') }}</button>
+        <button v-if="approvalPending && !opportunityArchived && app.can('quotation:approve')" class="danger-button" data-testid="reject-quotation" type="button" :disabled="busy" @click="openApproval('Rejected')"><ShieldX :size="14" />{{ (locale === 'en-US' ? 'Reject' : '驳回') }}</button>
         <button v-if="selectedIsLatest && detail.version.status!=='Draft' && canMutateQuotation" class="primary-button" data-testid="create-quotation-version" type="button" :disabled="busy" @click="createVersion"><FilePlus2 :size="14" />{{ (locale === 'en-US' ? 'Create new version' : '创建新版本') }}</button>
         <button v-if="selectedIsLatest && ['Published','Expired'].includes(detail.version.status) && canMutateQuotation" class="secondary-button" type="button" :disabled="busy" @click="decisionOpen=true"><CheckCircle2 :size="14" />{{ (locale === 'en-US' ? 'Record customer result' : '记录客户结果') }}</button>
       </template>
@@ -244,7 +246,7 @@ onBeforeUnmount(()=>{ready=false;previewSequence+=1;window.removeEventListener('
     <DataState v-else-if="denied" type="denied" :message="error" :request-id="requestId" />
     <DataState v-else-if="error||!detail||!draft" type="error" :message="error||(locale === 'en-US' ? 'Quotation failed to load' : '报价单加载失败')" :request-id="requestId" @retry="loadHeld(linkedVersion)" />
     <template v-else>
-      <QuotationPlanningPanel :quotation-id="quotationId" :quotation-modified="detail.quotation.modified" :api-client="props.apiClient" :can-write="app.can('quotation:write')" />
+      <QuotationPlanningPanel :quotation-id="quotationId" :quotation-modified="detail.quotation.modified" :api-client="props.apiClient" :can-write="app.can('quotation:write') && !opportunityArchived" />
       <section class="summary-strip">
         <div><small>{{ ui('Name', '名称') }}</small><strong>{{ detail.quotation.refNo }}</strong><span>{{ detail.quotation.accountName }}</span></div>
         <div><small>{{ ui('Type', '类型') }}</small><strong>{{ quotationTypeLabel(detail.version.quotationType) }}</strong><span>{{ detail.version.quotationType === 'Service' ? (locale === 'en-US' ? 'After-sales / repair / accessories' : '售后 / 维修 / 配件') : (locale === 'en-US' ? 'Equipment quotation' : '设备报价') }}</span></div>
@@ -258,6 +260,7 @@ onBeforeUnmount(()=>{ready=false;previewSequence+=1;window.removeEventListener('
         <span v-else-if="saveState==='error'">{{ saveError }}{{ (locale === 'en-US' ? '; previous preview retained' : '；预览保留上一次成功版本') }}</span>
         <span v-else>{{ (locale === 'en-US' ? 'Auto-saves about 1 second after editing' : '编辑后约 1 秒自动保存') }}</span>
       </div>
+      <p v-else-if="opportunityArchived" class="history-notice" data-testid="quotation-opportunity-archived">{{ ui('Its Opportunity is archived: this quotation is read-only until a Manager restores the Opportunity.', '所属商机已归档：商机取消归档前，这张报价单只读。') }}</p>
       <p v-else-if="!selectedIsLatest" class="history-notice">{{ (locale === 'en-US' ? 'Viewing a historical version; view and download only.' : '当前正在查看历史版本，仅可查看和下载。') }}</p>
       <p v-else-if="approvalPending" class="approval-notice">{{ ui('This version is awaiting Manager approval and cannot be edited or published.', '当前版本正在等待经理审批，审批完成前不可修改或发布。') }}</p>
       <p v-else-if="detail.version.addressRestricted" class="history-notice" data-testid="quotation-address-restricted">{{ ui('Customer address is visible only to the Account owner or Manager; this quotation is read-only.', '客户地址仅客户负责人或经理可见；当前报价为只读。') }}</p>

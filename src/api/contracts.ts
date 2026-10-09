@@ -343,7 +343,10 @@ export interface CrmApi {
   /** Only at the open stages and without a live Booking. */
   markOpportunityLost(id: string, input: MarkOpportunityLostInput, expectedModified?: string): Promise<ApiResponse<StrategyOpportunityDto>>
   reviewOpportunityLoss(id: string, reviewId: string, input: import('@/types/workspaces').LossReviewInput, expectedModified: string): Promise<ApiResponse<import('@/types/workspaces').LossReviewDto>>
-  deleteStrategyOpportunity(id: string): Promise<ApiResponse<{ id: string; status: 'Deleted' }>>
+  /** Manager only. The Opportunity leaves every list, the board, the cockpit and the warnings, keeps all it holds and is read-only, its Quotations frozen with it; refused while a Booking of its own is not cancelled or a Demo Request or demo test of its own has not ended. */
+  archiveStrategyOpportunity(id: string): Promise<ApiResponse<StrategyOpportunityDto>>
+  /** Manager only. The Opportunity is back as it was. */
+  unarchiveStrategyOpportunity(id: string): Promise<ApiResponse<StrategyOpportunityDto>>
   createOpportunityStakeholder(opportunityId: string, input: CreateOpportunityStakeholderInput): Promise<ApiResponse<OpportunityStakeholderDto>>
   updateOpportunityStakeholder(opportunityId: string, stakeholderId: string, input: UpdateOpportunityStakeholderInput): Promise<ApiResponse<OpportunityStakeholderDto>>
   deleteOpportunityStakeholder(opportunityId: string, stakeholderId: string): Promise<ApiResponse<{ id: string }>>

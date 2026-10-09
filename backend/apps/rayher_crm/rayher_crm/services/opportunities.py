@@ -13,21 +13,28 @@ from rayher_crm.services.action_statuses import ACTION_STATUSES
 
 from rayher_crm.api.v1.errors import CrmApiException
 from rayher_crm.permissions.roles import assert_capability, resolve_crm_role
-from rayher_crm.permissions.scope import OPPORTUNITY_CHILD_DOCTYPES, conditions_for_doctype, has_crm_permission
+from rayher_crm.permissions.scope import conditions_for_doctype, has_crm_permission
 from rayher_crm.services.accounts import _require_account
 from rayher_crm.services.common import (
-    delete_manager_scoped_document,
+    archive_state,
     ensure_server_generated_id,
     normalize_expected_modified,
     normalize_pagination,
     optional_date,
+    require_manager_scoped_document,
     required_text,
     resolve_write_owner,
     to_iso_timestamp,
     validate_choice,
 )
+from rayher_crm.services.opportunity_archive import (
+    OPPORTUNITY_WITH_BOOKING_ARCHIVE,
+    OPPORTUNITY_WITH_DEMO_REQUEST_ARCHIVE,
+    OPPORTUNITY_WITH_DEMO_TEST_ARCHIVE,
+    assert_opportunity_not_archived,
+)
 from rayher_crm.services.bookings import validate_actual_po_date
-from rayher_crm.services.concurrency import lock_document
+from rayher_crm.services.concurrency import committed_reader, lock_document
 from rayher_crm.services.sites import _require_site, can_read_site_data
 from rayher_crm.services.contacts import _contact_account, _require_contact
 from rayher_crm.services.equipment import normalize_equipment, register_equipment
@@ -81,48 +88,85 @@ AMOUNT_REQUIRED_MESSAGE = "The amount and the amount in CNY are required from De
 PENDING_AMOUNT_REASON = "Demo done pending amount"
 
 
-def delete_strategy_opportunity(name: str) -> dict[str, str]:
-    savepoint = f"crm_opportunity_delete_{frappe.generate_hash(length=8)}"
-    frappe.db.savepoint(savepoint)
+def _set_archived(doc, archived: bool) -> None:
+    """Write the three archive columns of the Opportunity, read under its row lock, and a history row; nothing
+    else is saved. `modified` moves with it, so a stage action, an edit or a workflow step prepared on the
+    record before is refused by its version check (`lock_document`, Frappe's own `check_if_latest`) rather
+    than written over the archive."""
+
+    frappe.db.set_value("CRM Opportunity", doc.name, {
+        "archived": 1 if archived else 0,
+        "archived_at": frappe.utils.now_datetime() if archived else None,
+        "archived_by": frappe.session.user if archived else None,
+    })
+    _append_history(doc.name, "archived", "1" if not archived else "0", "1" if archived else "0")
+    doc.reload()
+
+
+# A Demo Request ends Converted or Cancelled (demo_requests.FINISHED_STATUSES), a demo test Accepted or Rejected
+# (evaluations.TERMINAL_STATUSES; that module imports this one, so the statuses are named here as well).
+DEMO_REQUEST_ENDED = ("Converted", "Cancelled")
+DEMO_TEST_ENDED = ("Accepted", "Rejected")
+DEMO_IN_PROGRESS_QUERY = (
+    "SELECT `request`.`status` FROM `tabCRM Demo Request` AS `request` "
+    "LEFT JOIN `tabCRM Evaluation` AS `test` ON `test`.`demo_request` = `request`.`name` "
+    "WHERE `request`.`opportunity` = %s AND (`request`.`status` NOT IN (%s, %s) OR `test`.`status` NOT IN (%s, %s))"
+)
+
+
+def _demo_in_progress(name: str) -> str | None:
+    """The sentence refusing the archive of an Opportunity with a Demo Request or a demo test in progress, or None.
+
+    One statement reads both, so a Demo Request approved into its demo test (one commit) is seen on one side or
+    the other. It is read as committed by now, on a connection of its own (this request's snapshot may predate a
+    Demo Request started while it waited for the Opportunity's row; none is started while the row is held), and
+    as this request sees it (which the tests, writing in one transaction, need; a Demo Request that ended after the
+    snapshot may then still refuse the archive once, which a retry clears)."""
+
+    values = (name, *DEMO_REQUEST_ENDED, *DEMO_TEST_ENDED)
+    read, close = committed_reader()
     try:
-        # Lock the Opportunity first, the order the Opportunity's own writers take it in (stage moves,
-        # stakeholders, actions, post-mortems, recovery plans, overdue and S6 warning handling): a write
-        # racing this delete lands before it and is removed with the rest, or finds the Opportunity gone.
-        # Rows written under a Quotation or a Booking (quotation warnings, booking history) lock that record
-        # instead; while it links to the Opportunity, frappe.delete_doc below refuses the delete anyway.
-        frappe.db.get_value("CRM Opportunity", name, "name", for_update=True)
-        # A direct-source legacy warning must not block parent deletion.
-        frappe.db.delete("CRM Notification Event", {"source_doctype": "CRM Opportunity", "source_name": name})
-        # Slip warnings use the immutable field-history event as their source. Purge
-        # those inbox rows while parent/history locks still protect the source graph.
-        field_history = [row[0] for row in frappe.db.sql(
-            "SELECT `name` FROM `tabCRM Opportunity History` WHERE `opportunity` = %s FOR UPDATE", (name,))]
-        if field_history:
-            frappe.db.delete("CRM Notification Event", {
-                "source_doctype": "CRM Opportunity History", "source_name": ["in", field_history],
-            })
-        # History and internal validation rows link to the Opportunity; remove them first or
-        # the link check in frappe.delete_doc reports the Opportunity as still referenced.
-        # The field history, stakeholders and actions belong to this Opportunity alone (the
-        # relation APIs only archive their rows), so they go with it too.
-        for doctype in (
-            *OPPORTUNITY_CHILD_DOCTYPES,
-            "CRM Opportunity History",
-            "CRM Opportunity Stakeholder",
-            "CRM Opportunity Action",
-        ):
-            frappe.db.delete(doctype, {"opportunity": name})
-        # Warnings handling names the Opportunity in a Data field, so it never blocks the delete; it goes too.
-        # A locking read: the current rows, not this request's snapshot.
-        handlings = [row[0] for row in frappe.db.sql(
-            "SELECT `name` FROM `tabCRM Warning Handling` WHERE `opportunity` = %s FOR UPDATE", (name,))]
-        if handlings:
-            frappe.db.delete("CRM Warning Handling Revision", {"handling": ["in", handlings]})
-            frappe.db.delete("CRM Warning Handling", {"name": ["in", handlings]})
-        return delete_manager_scoped_document("CRM Opportunity", name, "deal:write", "OPPORTUNITY_NOT_FOUND")
-    except Exception:
-        frappe.db.rollback(save_point=savepoint)
-        raise
+        rows = read(DEMO_IN_PROGRESS_QUERY, values)
+    finally:
+        close()
+    rows = [*rows, *frappe.db.sql(DEMO_IN_PROGRESS_QUERY, values)]
+    if not rows:
+        return None
+    return OPPORTUNITY_WITH_DEMO_TEST_ARCHIVE if rows[0][0] in DEMO_REQUEST_ENDED else OPPORTUNITY_WITH_DEMO_REQUEST_ARCHIVE
+
+
+def archive_strategy_opportunity(name: str) -> dict[str, Any]:
+    """Archive an Opportunity, a Manager's action (the delete it replaces was one): the Opportunity leaves
+    every list, the board, the cockpit, the warnings and the figures, keeps all it holds (its stakeholders,
+    actions, history, validations, plans, post-mortems, the notices and warning handling about it), and is
+    brought back by unarchive_strategy_opportunity. Nothing of it is left in progress: a Booking of its own that
+    is not cancelled is an order the deal stands behind (the delete was refused for it too), and a Demo Request
+    or a demo test in progress is work under way on it; the archive is refused until they are cancelled or
+    ended. Archiving an Opportunity archived already changes nothing."""
+
+    # The Opportunity's row first, the order its writers take it in, then its live Booking's row, read through
+    # the unique `live_source_opportunity` index (that row, or where it would be in the index when there is none;
+    # no other Booking's row). No Demo Request is started while the Opportunity's row is held.
+    doc = require_manager_scoped_document("CRM Opportunity", name, "deal:write", "OPPORTUNITY_NOT_FOUND", for_update=True)
+    if doc.archived:
+        return serialize_opportunity(doc)
+    if live_booking(name, for_update=True):
+        raise CrmApiException("INVALID_TRANSITION", OPPORTUNITY_WITH_BOOKING_ARCHIVE)
+    refusal = _demo_in_progress(name)
+    if refusal:
+        raise CrmApiException("INVALID_TRANSITION", refusal)
+    _set_archived(doc, True)
+    return serialize_opportunity(doc)
+
+
+def unarchive_strategy_opportunity(name: str) -> dict[str, Any]:
+    """Bring an archived Opportunity back: every field as it was, its version moved on. One not archived is
+    left as it is."""
+
+    doc = require_manager_scoped_document("CRM Opportunity", name, "deal:write", "OPPORTUNITY_NOT_FOUND", for_update=True)
+    if doc.archived:
+        _set_archived(doc, False)
+    return serialize_opportunity(doc)
 
 
 STAKEHOLDER_ROLES = (
@@ -597,23 +641,36 @@ def serialize_opportunity(doc, recoveries=None, loss_reviews=None) -> dict[str, 
         # Engineers can work the opportunity but do not have contact/stakeholder access.
         "stakeholders": _stakeholders_for_opportunity(doc.name) if role in {"Manager", "Sales"} else [],
         "actions": _actions_for_opportunity(doc.name),
+        "archived": bool(doc.archived),
     }
+    if doc.archived:
+        result["archivedAt"] = to_iso_timestamp(doc.archived_at) if doc.archived_at else ""
+        result["archivedBy"] = doc.archived_by or ""
     if doc.source_lead:
         result["sourceLeadId"] = doc.source_lead
     return result
 
 
 def _require_opportunity(name: str, for_update: bool = False):
-    # A writer of rows the Opportunity delete removes (stakeholders, actions, history, post-mortems) locks
-    # the Opportunity first, the order the delete takes it in, and checks it under the lock: a write racing
-    # the delete lands before it and is removed with the rest, or finds the Opportunity gone.
-    exists = (frappe.db.get_value("CRM Opportunity", name, "name", for_update=True) if for_update
-              else frappe.db.exists("CRM Opportunity", name))
-    if not exists:
-        raise CrmApiException("OPPORTUNITY_NOT_FOUND", "Opportunity was not found.")
-    doc = frappe.get_doc("CRM Opportunity", name)
+    # A writer of the Opportunity's own rows (stakeholders, actions, post-mortems) locks the Opportunity
+    # first, the order every writer takes it in, and reads it under the lock (a locking read: the row as
+    # committed, not this transaction's snapshot): an archive committed meanwhile is seen and refuses the
+    # write; a write that landed before is what the archive found.
+    if for_update:
+        try:
+            doc = frappe.get_doc("CRM Opportunity", name, for_update=True)
+        except frappe.DoesNotExistError as exc:
+            # Frappe queued its own "not found" message; the answer is this one alone.
+            frappe.clear_last_message()
+            raise CrmApiException("OPPORTUNITY_NOT_FOUND", "Opportunity was not found.") from exc
+    else:
+        if not frappe.db.exists("CRM Opportunity", name):
+            raise CrmApiException("OPPORTUNITY_NOT_FOUND", "Opportunity was not found.")
+        doc = frappe.get_doc("CRM Opportunity", name)
     if not has_crm_permission(doc, user=frappe.session.user, permission_type="read"):
         raise CrmApiException("SCOPE_DENIED", "The Opportunity is outside the current user scope.")
+    if for_update:
+        assert_opportunity_not_archived(doc)
     return doc
 
 
@@ -622,6 +679,10 @@ def _list_filters(query: Mapping[str, Any]) -> tuple[str, list[Any]]:
 
     where_parts = [f"({conditions_for_doctype('CRM Opportunity')})"]
     values: list[Any] = []
+    state = archive_state(query)
+    if state != "all":
+        where_parts.append("`tabCRM Opportunity`.`archived` = %s")
+        values.append(1 if state == "archived" else 0)
     search = str(query.get("search") or "").strip()
     if search:
         pattern = f"%{search}%"
@@ -662,7 +723,8 @@ def _list_filters(query: Mapping[str, Any]) -> tuple[str, list[Any]]:
 def list_strategy_opportunities(query: dict[str, Any] | None = None):
     assert_capability("deal:view")
     if query is None:
-        where = f"({conditions_for_doctype('CRM Opportunity')})"
+        # Every Opportunity in scope but the archived ones, as a list query without archiveState gives it.
+        where = f"({conditions_for_doctype('CRM Opportunity')}) AND `archived` = 0"
         rows = frappe.db.sql(
             f"SELECT `name` FROM `tabCRM Opportunity` WHERE {where} ORDER BY `modified` DESC, `name` DESC",
             as_dict=True,
@@ -806,7 +868,9 @@ def update_strategy_opportunity(name: str, payload: dict[str, Any], expected_mod
     from rayher_crm.services.cockpit_identity import lock_opportunity_owners, check_current_opportunity_owner
 
     assert_capability("deal:write")
-    _require_opportunity(name)
+    # Before the payload and the version are looked at, so the refusal names the archive whatever the client
+    # sent; an archive committed after this read is read again under the Opportunity's lock (_lock_write_scope).
+    assert_opportunity_not_archived(_require_opportunity(name))
     identities = lock_opportunity_owners(name, payload)
     _lock_write_scope(name)
     lock_document("CRM Opportunity", name, expected_modified, "NOT_FOUND")
@@ -1104,7 +1168,7 @@ def _hold_stage_advance(doc, target_stage: str, *, reference_doctype: str, refer
     _append_history(doc.name, "pendingStageAdvance", "", {
         "stage": target_stage, "referenceDoctype": reference_doctype, "referenceName": reference_name,
     })
-    # Sourced from the Opportunity (delete_strategy_opportunity removes the notice) and skipped for an owner who left.
+    # Sourced from the Opportunity (kept with it through an archive) and skipped for an owner who left.
     notify_if_reachable(
         recipient=doc.opportunity_owner, category="Opportunity", title="Enter the amount to reach Demo done",
         message=(
@@ -1130,7 +1194,9 @@ def _apply_pending_stage_advance(doc) -> None:
 
 
 def _lock_opportunity_for_action(name: str, expected_modified: Any):
-    _require_opportunity(name)
+    # The archive is refused by name before the version (a stale page is told of the archive, not of the
+    # version); one committed after this read moves the version, which the lock refuses.
+    assert_opportunity_not_archived(_require_opportunity(name))
     doc = lock_document("CRM Opportunity", name, expected_modified, "NOT_FOUND")
     if not has_crm_permission(doc, user=frappe.session.user, permission_type="read"):
         raise CrmApiException("SCOPE_DENIED", "The Opportunity is outside the current user scope.")
@@ -1457,7 +1523,7 @@ def rollback_opportunity_stage(
     assert_capability("deal:rollback")
     target = validate_choice(target_stage, "targetStage", set(MILESTONE_STAGES))
     rollback_reason = required_text({"reason": reason}, "reason")
-    _require_opportunity(name)
+    assert_opportunity_not_archived(_require_opportunity(name))
     # Locks are taken RFQ -> Opportunity -> internal validation -> Booking. review_rfq locks the
     # RFQ before the Opportunity too, so a rollback cannot deadlock against an RFQ approval.
     rfq = frappe.db.sql(
@@ -1574,6 +1640,9 @@ def advance_opportunity_for_event(
     # A locking read: the committed row, not this transaction's older snapshot, since the owner may
     # have saved the amount (and moved the stage) while this workflow step waited for the lock.
     doc = frappe.get_doc("CRM Opportunity", opportunity_id, for_update=True)
+    # An archived Opportunity is not moved on by a workflow (a demo, an RFQ, a quotation) either; the step
+    # is refused, and taken again once the Opportunity is restored.
+    assert_opportunity_not_archived(doc)
     if doc.stage == LOST:
         if event == "demo_customer_review":
             # Customer feedback on a lost deal is still recorded; it does not reopen the deal.

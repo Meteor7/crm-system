@@ -9,14 +9,15 @@ import { useAppStore } from '@/stores/app'
 import type { OpportunityDocuments } from '@/features/opportunities/document-types'
 import OpportunityDocumentsPage from './OpportunityDocumentsPage.vue'
 
-async function setup(role: 'Manager' | 'Engineer' = 'Manager') {
+async function setup(role: 'Manager' | 'Engineer' = 'Manager', archived = false) {
   const api = createMockApi({ latency: 0, role })
   const bootstrap = await api.getBootstrap()
   const pinia = createPinia()
   useAppStore(pinia).bootstrap = bootstrap.data
   const data: OpportunityDocuments = { opportunityId: 'opp', title: 'Customer opportunity', modified: 'version1',
     links: { productScorecard: { url: '', state: 'missing' }, dealScorecard: { url: 'https://example.com/deal', state: 'ready' } },
-    groups: [{ kind: 'status', items: [{ id: 'file1', title: 'Requirements.txt', at: '2026-10-01', fileId: 'file1', sourceId: 'opp', recordId: 'status1' }] }, { kind: 'rfq', items: [] }] }
+    groups: [{ kind: 'status', items: [{ id: 'file1', title: 'Requirements.txt', at: '2026-10-01', fileId: 'file1', sourceId: 'opp', recordId: 'status1' }] }, { kind: 'rfq', items: [] }],
+    ...(archived ? { archived: true } : {}) }
   vi.spyOn(api, 'getOpportunityDocuments').mockResolvedValue({ ...bootstrap, data })
   const save = vi.spyOn(api, 'saveOpportunityDocumentLinks').mockResolvedValue({ ...bootstrap, data: { links: data.links, modified: 'version2' } })
   const download = vi.spyOn(api, 'getOpportunityStatusFile').mockRejectedValue(new Error('The file was removed.'))
@@ -82,6 +83,13 @@ describe('Opportunity document library', () => {
     expect(download).toHaveBeenCalledWith('opp', 'status1', 'file1')
     expect(wrapper.text()).toContain('The file was removed.')
     expect(wrapper.find('[data-testid="documents-status"]').exists()).toBe(true)
+    wrapper.unmount()
+  })
+  it('does not offer scorecard editing on an archived Opportunity, whose links and files are still read', async () => {
+    const { wrapper } = await setup('Manager', true)
+    expect(wrapper.findAll('button').some(button => button.text() === 'Edit links')).toBe(false)
+    expect(wrapper.find('a[href="https://example.com/deal"]').exists()).toBe(true)
+    expect(wrapper.text()).toContain('Requirements.txt')
     wrapper.unmount()
   })
   it('does not offer scorecard editing to Engineers', async () => {

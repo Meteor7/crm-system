@@ -126,10 +126,16 @@ def review_opportunity_loss(id: str, reviewId: str, input: Any, expectedModified
     return success_response(loss_review.review_loss(id, reviewId, as_payload(input), expectedModified))
 
 
-@frappe.whitelist(methods=["POST", "DELETE"])
+@frappe.whitelist(methods=["POST"])
 @api_endpoint
-def delete_strategy_opportunity(id: str) -> dict:
-    return success_response(opportunities.delete_strategy_opportunity(id))
+def archive_strategy_opportunity(id: str) -> dict:
+    return success_response(opportunities.archive_strategy_opportunity(id))
+
+
+@frappe.whitelist(methods=["POST"])
+@api_endpoint
+def unarchive_strategy_opportunity(id: str) -> dict:
+    return success_response(opportunities.unarchive_strategy_opportunity(id))
 
 
 @frappe.whitelist(methods=["POST"])

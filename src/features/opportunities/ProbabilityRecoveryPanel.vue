@@ -15,9 +15,10 @@ const emit = defineEmits<{ updated: [opportunity: StrategyOpportunityDto]; denie
 const app = useAppStore()
 const { locale, t } = useI18n()
 const copy = (english: string, chinese: string) => locale.value === 'en-US' ? english : chinese
-const canEdit = computed(() => app.can('deal:write')
+// An archived Opportunity (a Manager's archive, in place of a delete) takes no plan and no action until restored.
+const canEdit = computed(() => app.can('deal:write') && !props.opportunity.archived
   && (app.bootstrap?.user.role === 'Manager' || props.opportunity.owner === app.bootstrap?.user.id))
-const canRecord = computed(() => app.can('deal:write') && props.opportunity.owner === app.bootstrap?.user.id)
+const canRecord = computed(() => app.can('deal:write') && !props.opportunity.archived && props.opportunity.owner === app.bootstrap?.user.id)
 const mode = ref<'plan' | 'action'>('plan')
 const isAction = computed(() => mode.value === 'action')
 const entries = new Map<string, HTMLElement>()

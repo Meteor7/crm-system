@@ -12,7 +12,8 @@ const emit = defineEmits<{ updated: [opportunity: StrategyOpportunityDto]; denie
 const app = useAppStore()
 const { locale } = useI18n()
 const copy = (english: string, chinese: string) => locale.value === 'en-US' ? english : chinese
-const canEdit = computed(() => app.can('deal:write') && props.opportunity.redFlagRecords !== undefined)
+// An archived Opportunity is read-only: no red flag is edited and no suggestion confirmed until it is restored.
+const canEdit = computed(() => app.can('deal:write') && props.opportunity.redFlagRecords !== undefined && !props.opportunity.archived)
 const canAssess = computed(() => ['Manager', 'Sales'].includes(app.bootstrap?.user.role ?? '') && props.opportunity.redFlagRecords !== undefined)
 const records = computed(() => props.opportunity.redFlagRecords ?? props.opportunity.redFlags.map((text, i) => ({ id: String(i), text, severity: '' as const, status: 'Open' as const })))
 const editing = ref(false), busy = ref(false), stale = ref(false), version = ref('')
@@ -28,6 +29,18 @@ watch([() => props.opportunity.id, () => props.opportunity.owner, () => app.iden
 watch(() => props.opportunity.modified, value => {
   if (editing.value && value !== version.value || assessment.value && value !== assessment.value.opportunityModified) stale.value = true
 })
+// Archived (the page's archive): an editor open closes, as the page's own editors do, and its save still in flight is
+// answered to no one; the panel's error and stale mark go (a suggestion shown is announced as older again once the
+// restore moves the deal's version).
+watch(canEdit, value => {
+  if (value) return
+  if (editing.value) { operation++; editing.value = false; busy.value = false }
+  error.value = ''; stale.value = false
+})
+// Each change of the deal's archive flag is counted: a confirmation or a reload made before one is answered to no one,
+// its success (the deal from before it) as its failure (about that deal).
+let archiveTurns = 0
+watch(() => Boolean(props.opportunity.archived), () => { archiveTurns++ })
 const lowering = computed(() => !!assessment.value?.suggestedLevel && !!assessment.value.currentLevel
   && opportunityProbabilityLevelRank(assessment.value.suggestedLevel) < opportunityProbabilityLevelRank(assessment.value.currentLevel))
 const severityLabel = (severity: string) => ({ High: copy('High', '高'), Medium: copy('Medium', '中'), Low: copy('Low', '低') })[severity] ?? copy('Unclassified', '未分类')
@@ -55,13 +68,13 @@ async function save() {
 }
 async function reload() {
   if (busy.value) return
-  const request = ++operation
+  const request = ++operation, turns = archiveTurns
   busy.value = true; error.value = ''
   try {
     const response = await props.apiClient.getStrategyOpportunity(props.opportunity.id)
-    if (request !== operation) return
+    if (request !== operation || turns !== archiveTurns) return
     editing.value = false; stale.value = false; assessment.value = null; emit('updated', response.data)
-  } catch (cause) { if (request === operation) report(cause) }
+  } catch (cause) { if (request === operation && turns === archiveTurns) report(cause) }
   finally { if (request === operation) busy.value = false }
 }
 async function assess() {
@@ -77,17 +90,22 @@ async function assess() {
 }
 async function apply() {
   const current = assessment.value
-  if (!current || current.state !== 'suggested' || !current.canApply || busy.value || stale.value || editing.value) return
+  if (!current || current.state !== 'suggested' || !current.canApply || props.opportunity.archived || busy.value || stale.value || editing.value) return
   if (lowering.value && (!reason.value.trim() || !plan.value.trim())) return
-  const request = ++operation
+  const request = ++operation, turns = archiveTurns
   busy.value = true; error.value = ''
   try {
     const response = await props.apiClient.applyBlueSheetSuggestion(props.opportunity.id, {
       fingerprint: current.fingerprint, probabilityReason: reason.value.trim(), probabilityActionPlan: plan.value.trim(),
     }, current.opportunityModified)
     if (request !== operation) return
-    assessment.value = null; emit('updated', response.data)
-  } catch (cause) { if (request === operation) report(cause) }
+    // Confirmed, so before any archive or restore since took the deal's row (an archive refuses it after, as a restore's
+    // new version does): the suggestion goes. Answered to no one, so does the stale mark a restore set on it (the page
+    // keeps its own deal); handed back, the deal may be older than one the page took meanwhile, whose mark stays.
+    assessment.value = null
+    if (turns === archiveTurns) emit('updated', response.data)
+    else stale.value = false
+  } catch (cause) { if (request === operation && turns === archiveTurns) report(cause) }
   finally { if (request === operation) busy.value = false }
 }
 </script>
@@ -122,16 +140,17 @@ async function apply() {
         <p v-if="assessment.ruleVersion" class="note">{{ copy('Rule version', '规则版本') }}: {{ assessment.ruleVersion }}<template v-if="assessment.ruleId"> · {{ assessment.ruleId }}</template></p>
         <template v-if="assessment.state === 'suggested' && assessment.suggestedLevel">
           <strong data-blue-suggested>{{ opportunityProbabilityLevelLabel(assessment.suggestedLevel, locale) }}</strong><p>{{ assessment.reason }}</p>
-          <template v-if="assessment.canApply && assessment.currentLevel !== assessment.suggestedLevel">
+          <template v-if="assessment.canApply && !opportunity.archived && assessment.currentLevel !== assessment.suggestedLevel">
             <template v-if="lowering"><label>{{ copy('Reason for lowering the level', '降档原因') }}<textarea v-model="reason" maxlength="4000" :disabled="busy || stale" data-blue-reason /></label><label>{{ copy('Recovery action plan', '补救行动计划') }}<textarea v-model="plan" maxlength="4000" :disabled="busy || stale" data-blue-plan /></label></template>
             <button type="button" data-blue-apply :disabled="busy || stale || (lowering && (!reason.trim() || !plan.trim()))" @click="apply">{{ copy('Confirm suggested level', '确认采用建议档位') }}</button>
           </template>
-          <p v-else class="note">{{ assessment.currentLevel === assessment.suggestedLevel ? copy('The current level already matches.', '当前档位已一致。') : copy('Only the opportunity owner can confirm a new level.', '仅商机负责人可确认新档位。') }}</p>
+          <p v-else-if="opportunity.archived" class="note" data-blue-archived>{{ copy('This opportunity is archived: no level is confirmed until a Manager restores it.', '商机已归档：经理取消归档前不能确认新档位。') }}</p>
+          <p v-else-if="!stale" class="note">{{ assessment.currentLevel === assessment.suggestedLevel ? copy('The current level already matches.', '当前档位已一致。') : copy('Only the opportunity owner can confirm a new level.', '仅商机负责人可确认新档位。') }}</p>
         </template>
       </template>
     </section>
     <p v-if="error" role="alert">{{ error }}</p>
-    <p v-if="stale" role="alert">{{ copy('The record changed. Reload before editing or confirming.', '记录已变化，请重新加载后编辑或确认。') }}<button type="button" :disabled="busy" data-blue-reload @click="reload">{{ copy('Reload and discard draft', '重新加载并放弃草稿') }}</button></p>
+    <p v-if="stale && !opportunity.archived" role="alert">{{ copy('The record changed. Reload before editing or confirming.', '记录已变化，请重新加载后编辑或确认。') }}<button type="button" :disabled="busy" data-blue-reload @click="reload">{{ copy('Reload and discard draft', '重新加载并放弃草稿') }}</button></p>
   </section>
 </template>
 

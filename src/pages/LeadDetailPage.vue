@@ -309,7 +309,7 @@ onMounted(async () => {
         <div><strong>{{ locale === 'en-US' ? 'Conversion complete' : '转换已完成' }}</strong><p>{{ locale === 'en-US' ? 'This lead is now a formal business record. Re-submitting will not create duplicates.' : 'Lead 已从潜在线索转为正式业务记录，重复提交不会再次创建。' }}</p></div>
         <RouterLink :to="{ name: 'account-detail', params: { accountId: conversion.accountId } }">Account · {{ conversion.accountId }}</RouterLink>
         <RouterLink :to="{ name: 'contact-detail', params: { contactId: conversion.contactId } }">Contact · {{ conversion.contactId }}</RouterLink>
-        <RouterLink :to="{ name: 'opportunities', query: { opportunityId: conversion.opportunityId } }">Opportunity · {{ conversion.opportunityId }}</RouterLink>
+        <RouterLink :to="{ name: 'opportunity-detail', params: { opportunityId: conversion.opportunityId } }">Opportunity · {{ conversion.opportunityId }}</RouterLink>
       </section>
 
       <div class="detail-grid">

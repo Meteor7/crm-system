@@ -8,6 +8,7 @@ import type { QuotationDetailDto, QuotationDraftInput } from '@/features/quotati
 import { setLocale } from '@/i18n'
 import QuotationDetailPage from './QuotationDetailPage.vue'
 import QuotationEditor from '@/features/quotations/QuotationEditor.vue'
+import QuotationPlanningPanel from '@/features/quotations/QuotationPlanningPanel.vue'
 
 const downloadMocks = vi.hoisted(() => ({ downloadBlob: vi.fn() }))
 vi.mock('@/features/shared/download-blob', () => downloadMocks)
@@ -79,6 +80,67 @@ beforeEach(() => {
 })
 
 describe('QuotationDetailPage', () => {
+  it('shows a Quotation of an archived Opportunity read-only, with the notice and none of its writes', async () => {
+    const { client, save } = api()
+    const frozen = (shape: QuotationDetailDto, archived: boolean) => {
+      const copy = structuredClone(shape)
+      copy.quotation.opportunityArchived = archived
+      return copy
+    }
+    async function page(shape: QuotationDetailDto, manager = false) {
+      if (manager) {
+        client.getBootstrap = vi.fn(async () => ({ data: { user: { id: 'manager@example.com', name: 'Manager', initials: 'M', role: 'Manager', team: 'Sales' }, capabilities: ['quotation:view', 'quotation:write', 'quotation:approve', 'quotation:publish'], today: '2026-08-10', environment: 'Frappe' }, warnings: [] })) as unknown as CrmApi['getBootstrap']
+      }
+      vi.mocked(client.getQuotation).mockResolvedValue({ data: shape, warnings: [] })
+      return mountPage(client)
+    }
+
+    // The draft: edited, submitted and discarded while the Opportunity is active; none of it once it is archived.
+    const activeDraft = await page(frozen(detail, false))
+    expect(activeDraft.attributes('data-editable')).toBe('true')
+    for (const control of ['submit-quotation-approval', 'discard-quotation-draft']) expect(activeDraft.find(`[data-testid="${control}"]`).exists(), control).toBe(true)
+    expect(activeDraft.find('[data-testid="quotation-opportunity-archived"]').exists()).toBe(false)
+    expect(activeDraft.getComponent(QuotationPlanningPanel).props('canWrite')).toBe(true)
+    activeDraft.unmount()
+    const frozenDraft = await page(frozen(detail, true))
+    expect(frozenDraft.attributes('data-editable')).toBe('false')
+    expect(frozenDraft.getComponent(QuotationEditor).props('readonly')).toBe(true)
+    for (const control of ['submit-quotation-approval', 'discard-quotation-draft', 'publish-quotation']) expect(frozenDraft.find(`[data-testid="${control}"]`).exists(), control).toBe(false)
+    expect(frozenDraft.get('[data-testid="quotation-opportunity-archived"]').text()).toContain('所属商机已归档')
+    // Its send plan and its follow-ups are frozen with it.
+    expect(frozenDraft.getComponent(QuotationPlanningPanel).props('canWrite')).toBe(false)
+    frozenDraft.unmount()
+
+    // The published version: a new version and the customer's result, until the archive.
+    const published = structuredClone(detail)
+    published.version.status = 'Published'
+    published.quotation.currentPublishedVersionId = published.version.id
+    published.versions = [published.version]
+    const activePublished = await page(frozen(published, false))
+    expect(activePublished.find('[data-testid="create-quotation-version"]').exists()).toBe(true)
+    expect(activePublished.findAll('button').some((button) => button.text().includes('记录客户结果'))).toBe(true)
+    activePublished.unmount()
+    const frozenPublished = await page(frozen(published, true))
+    expect(frozenPublished.find('[data-testid="create-quotation-version"]').exists()).toBe(false)
+    expect(frozenPublished.getComponent(QuotationPlanningPanel).props('canWrite')).toBe(false)
+    expect(frozenPublished.findAll('button').some((button) => button.text().includes('记录客户结果'))).toBe(false)
+    frozenPublished.unmount()
+
+    // A version awaiting approval: a Manager approves or rejects it, until the archive.
+    const pending = structuredClone(detail)
+    pending.version.approvalStatus = 'Pending'
+    pending.quotation.approvalStatus = 'Pending'
+    pending.versions = [pending.version]
+    const activePending = await page(frozen(pending, false), true)
+    for (const control of ['approve-quotation', 'reject-quotation']) expect(activePending.find(`[data-testid="${control}"]`).exists(), control).toBe(true)
+    activePending.unmount()
+    const frozenPending = await page(frozen(pending, true), true)
+    for (const control of ['approve-quotation', 'reject-quotation']) expect(frozenPending.find(`[data-testid="${control}"]`).exists(), control).toBe(false)
+    expect(frozenPending.find('[data-testid="quotation-opportunity-archived"]').exists()).toBe(true)
+    frozenPending.unmount()
+    expect(save).not.toHaveBeenCalled()
+  })
+
   it('opens the formal version from a warning even when a newer draft exists', async () => {
     const { client, save } = api()
     const published = structuredClone(detail)

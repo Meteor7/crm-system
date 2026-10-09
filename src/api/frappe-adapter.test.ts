@@ -240,7 +240,8 @@ describe('Frappe method contract', () => {
       reviewInternalValidation: 'opportunities.review_internal_validation',
       confirmPo: 'opportunities.confirm_po',
       markOpportunityLost: 'opportunities.mark_opportunity_lost',
-      deleteStrategyOpportunity: 'opportunities.delete_strategy_opportunity',
+      archiveStrategyOpportunity: 'opportunities.archive_strategy_opportunity',
+      unarchiveStrategyOpportunity: 'opportunities.unarchive_strategy_opportunity',
       createOpportunityStakeholder: 'opportunities.create_opportunity_stakeholder',
       updateOpportunityStakeholder: 'opportunities.update_opportunity_stakeholder',
       deleteOpportunityStakeholder: 'opportunities.delete_opportunity_stakeholder',
@@ -283,20 +284,28 @@ describe('Frappe method contract', () => {
 })
 
 describe('Frappe JSON transport', () => {
-  it('posts stable ids to every Manager-only Sales delete endpoint', async () => {
+  it('posts stable ids to the Manager-only Account delete endpoint', async () => {
     const fetchMock = vi.fn().mockImplementation(() => Promise.resolve(success({ id: 'deleted', status: 'Deleted' })))
     const api = createFrappeApi({ fetchImpl: fetchMock })
 
     await api.deleteAccount('ACC-DEL')
-    await api.deleteStrategyOpportunity('OPP-DEL')
+
+    expect(fetchMock.mock.calls.map(([url]) => url)).toEqual(['/api/method/rayher_crm.api.v1.accounts.delete_account'])
+    expect(fetchMock.mock.calls.map(([, init]) => new URLSearchParams(String(init.body)).get('id'))).toEqual(['ACC-DEL'])
+  })
+
+  it('posts the Opportunity id to the archive and restore endpoints', async () => {
+    const fetchMock = vi.fn().mockImplementation(() => Promise.resolve(success({ id: 'OPP-ARC', archived: true })))
+    const api = createFrappeApi({ fetchImpl: fetchMock })
+
+    await api.archiveStrategyOpportunity('OPP-ARC')
+    await api.unarchiveStrategyOpportunity('OPP-ARC')
 
     expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([
-      '/api/method/rayher_crm.api.v1.accounts.delete_account',
-      '/api/method/rayher_crm.api.v1.opportunities.delete_strategy_opportunity',
+      '/api/method/rayher_crm.api.v1.opportunities.archive_strategy_opportunity',
+      '/api/method/rayher_crm.api.v1.opportunities.unarchive_strategy_opportunity',
     ])
-    expect(fetchMock.mock.calls.map(([, init]) => new URLSearchParams(String(init.body)).get('id'))).toEqual([
-      'ACC-DEL', 'OPP-DEL',
-    ])
+    expect(fetchMock.mock.calls.map(([, init]) => new URLSearchParams(String(init.body)).get('id'))).toEqual(['OPP-ARC', 'OPP-ARC'])
   })
 
   it('reads a Booking by id and posts the id to its archive and restore endpoints', async () => {

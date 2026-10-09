@@ -1,3 +1,4 @@
+import re
 from datetime import datetime
 from unittest.mock import patch
 
@@ -72,6 +73,48 @@ class TestEvents(FrappeTestCase):
             events.save_event(payload, row["id"], row["modified"])
         frappe.set_user(self.manager)
         self.assertEqual(events.get_event(row["id"])["id"], row["id"])
+
+    def test_an_archived_opportunity_takes_no_new_event_and_the_one_naming_it_is_kept_up(self):
+        from rayher_crm.services.opportunities import archive_strategy_opportunity, unarchive_strategy_opportunity
+        from rayher_crm.services.opportunity_archive import ARCHIVED_OPPORTUNITY_LINK
+        account, opportunity, _ = self._records(self.sales, "Event" + frappe.generate_hash(length=6))
+        linked = self.payload(accountId=account["id"], opportunityId=opportunity["id"])
+        kept = events.save_event(linked)
+        loose = events.save_event(self.payload(accountId=account["id"]))
+        frappe.set_user(self.manager)
+        archive_strategy_opportunity(opportunity["id"])
+        frappe.set_user(self.sales)
+        before = frappe.db.count(events.DOCTYPE)
+        real_sql = frappe.db.sql
+        statements: list[str] = []
+
+        def watch(query, *args, **kwargs):
+            statements.append(str(query))
+            return real_sql(query, *args, **kwargs)
+
+        # A new Event naming it, and an Event made to name it, are refused before anything is written, each reading the
+        # flag under the Opportunity's row lock, as committed: every statement on the Opportunity's table that reads
+        # the archive's columns or the whole row, as these paths write them, is a locking one without a subquery (which
+        # would read the snapshot's, without a lock), one of them FOR UPDATE (a read served from the cache is not seen).
+        for attempt in (lambda: events.save_event(linked), lambda: events.save_event(linked, loose["id"], loose["modified"])):
+            statements.clear()
+            with self.assertRaises(CrmApiException) as refused, patch.object(frappe.db, "sql", side_effect=watch):
+                attempt()
+            self.assertEqual((refused.exception.code, refused.exception.public_message), ("INVALID_TRANSITION", ARCHIVED_OPPORTUNITY_LINK))
+            reads = [text.upper() for text in statements if re.search(r"`tabCRM Opportunity`", text, re.I)
+                     and re.search(r"\barchived(?:_at|_by)?\b|(?:SELECT|,)\s*(?:`[^`]+`\.|\w+\.)?\*", text, re.I)]
+            self.assertTrue(any("FOR UPDATE" in text for text in reads), statements)
+            self.assertTrue(all(("FOR UPDATE" in text or "LOCK IN SHARE MODE" in text) and text.count("SELECT") == 1
+                                for text in reads), reads)
+        self.assertEqual(frappe.db.count(events.DOCTYPE), before)
+        self.assertFalse(frappe.db.get_value(events.DOCTYPE, loose["id"], "opportunity"))
+        # The Event naming it already is a record of its own, kept up as a Visit is.
+        done = events.save_event({**linked, "status": "Done"}, kept["id"], kept["modified"])
+        self.assertEqual((done["status"], done["opportunityId"]), ("Done", opportunity["id"]))
+        frappe.set_user(self.manager)
+        unarchive_strategy_opportunity(opportunity["id"])
+        frappe.set_user(self.sales)
+        self.assertEqual(events.save_event(linked, loose["id"], loose["modified"])["opportunityId"], opportunity["id"])
 
     def test_validation_pagination_and_manager_assignment(self):
         for invalid in ({"endDate": "2030-09-19"}, {"startDate": "not-a-date"}, {"status": "X"}, {"region": "not-registered"}, {"title": "a" * 141}, {"owner": self.other_sales}):

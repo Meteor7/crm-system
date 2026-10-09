@@ -389,6 +389,10 @@ export interface StrategyOpportunityDto {
   informationNeeded: string[]
   stakeholders: OpportunityStakeholderDto[]
   actions: OpportunityActionDto[]
+  /** Archived by a Manager (in place of a delete): out of every list, board, figure and warning, kept whole, read-only until restored. */
+  archived?: boolean
+  archivedAt?: string
+  archivedBy?: string
 }
 
 export interface LegacyOpportunityStakeholderDto extends Omit<OpportunityStakeholderDto, 'contactId'> {

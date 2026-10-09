@@ -112,12 +112,14 @@ def _lock_current_opportunities(names) -> set[str]:
 
 
 def _lock_current_opportunity(name: str) -> bool:
-    """Serialize a legacy parent-sourced notice with Opportunity deletion."""
+    """Serialize a legacy parent-sourced notice with the Opportunity's archive (and a deletion from the Desk):
+    a locking read, so a parent archived after warning_details' snapshot gets no notice."""
 
-    return bool(frappe.db.sql(
-        "SELECT `name` FROM `tabCRM Opportunity` WHERE `name` = %s FOR UPDATE",
+    rows = frappe.db.sql(
+        "SELECT `archived` FROM `tabCRM Opportunity` WHERE `name` = %s FOR UPDATE",
         (name,),
-    ))
+    )
+    return bool(rows) and not rows[0][0]
 
 
 def send_warning_notifications() -> int:

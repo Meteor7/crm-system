@@ -60,20 +60,28 @@ class TestProbabilityRecovery(FrappeTestCase):
         return {"source_doctype": "CRM Opportunity Probability History",
                 "route": ["like", f"/opportunities/{opportunity['id']}?probabilityEvent=%"]}
 
-    def test_manager_can_delete_an_unlinked_downgraded_opportunity_and_keep_inbox_history(self):
-        from rayher_crm.services.opportunities import delete_strategy_opportunity
+    def test_manager_can_archive_a_downgraded_opportunity_which_keeps_its_plan_and_inbox_history(self):
+        from rayher_crm.services.opportunities import archive_strategy_opportunity, unarchive_strategy_opportunity
+        from rayher_crm.services.opportunity_archive import ARCHIVED_OPPORTUNITY_EDIT
         from rayher_crm.services.notifications import list_notifications
         opportunity = self._lower()
         event = opportunity["probabilityHistory"][0]
         notifications = frappe.get_all("CRM Notification Event", filters=self._notice_filters(opportunity), pluck="name")
         self.assertTrue(notifications)
         frappe.set_user(self.manager)
-        delete_strategy_opportunity(opportunity["id"])
-        self.assertFalse(frappe.db.exists("CRM Opportunity", opportunity["id"]))
-        self.assertFalse(frappe.db.exists("CRM Probability Recovery", {"opportunity": opportunity["id"]}))
-        self.assertFalse(frappe.db.exists("CRM Probability Recovery Revision", {"opportunity": opportunity["id"]}))
+        archived = archive_strategy_opportunity(opportunity["id"])
+        self.assertTrue(frappe.db.exists("CRM Opportunity", opportunity["id"]))
+        self.assertTrue(frappe.db.exists("CRM Probability Recovery", {"opportunity": opportunity["id"]}))
         self.assertEqual(frappe.db.count("CRM Notification Event", {"name": ["in", notifications]}), len(notifications))
-        self.assertFalse(any(event["id"] in row["route"] for row in list_notifications(page_size=200)["items"]))
+        # The notices stay in the inbox: the record they lead to still opens, read-only.
+        self.assertTrue(any(event["id"] in row["route"] for row in list_notifications(page_size=200)["items"]))
+        # The plan takes no edit and no action while the Opportunity is archived.
+        for call in (lambda: self._save(archived, event, "Call the CFO"), lambda: self._act(archived, event)):
+            with self.assertRaises(CrmApiException) as refused:
+                call()
+            self.assertEqual((refused.exception.code, refused.exception.public_message), ("INVALID_TRANSITION", ARCHIVED_OPPORTUNITY_EDIT))
+        restored = unarchive_strategy_opportunity(opportunity["id"])
+        self.assertEqual(self._save(restored, event, "Call the CFO")["plan"], "Call the CFO")
 
     def test_plan_edit_stays_pending_and_only_owner_action_closes_this_event(self):
         opportunity = self._lower()

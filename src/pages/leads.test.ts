@@ -18,6 +18,7 @@ async function pageContext(role: 'Manager' | 'Manager' | 'Engineer' = 'Manager')
       { path: '/leads', name: 'leads', component: { template: '<div />' } },
       { path: '/leads/:leadId', name: 'lead-detail', component: { template: '<div />' } },
       { path: '/opportunities', name: 'opportunities', component: { template: '<div />' } },
+      { path: '/opportunities/:opportunityId', name: 'opportunity-detail', component: { template: '<div />' } },
       { path: '/leads-opportunities', name: 'leads-opportunities', component: { template: '<div />' } },
       { path: '/accounts', name: 'accounts', component: { template: '<div />' } },
       { path: '/accounts/:accountId', name: 'account-detail', component: { template: '<div />' } },
@@ -360,6 +361,8 @@ describe('Leads pages', () => {
     expect(convertLead).toHaveBeenCalledWith('LEAD-001', expect.objectContaining({ opportunityAmount: '', opportunityAmountCny: '', opportunityProbabilityLevel: 'pipeline', qualificationConfirmed: true }))
     expect(wrapper.find('[role="dialog"]').exists()).toBe(false)
     expect(wrapper.get('[data-testid="conversion-result"]').text()).toContain('Opportunity · OPP-BLANK')
+    // The Opportunity's own page, which opens it archived as well (the list leaves an archived one out).
+    expect(wrapper.get('[data-testid="conversion-result"]').findAll('a').map((link) => link.attributes('href'))).toContain('/opportunities/OPP-BLANK')
     expect(wrapper.find('[data-testid="convert-lead"]').exists()).toBe(false)
   })
 })

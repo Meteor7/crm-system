@@ -63,7 +63,7 @@ def get_documents(opportunity_id):
                               "version": artifact["version"], "at": artifact["createdAt"]})
         groups.append({"kind": "demo", "items": items})
     return {"opportunityId": doc.name, "title": doc.title, "modified": to_iso_timestamp(doc.modified),
-            "links": _links(doc), "groups": groups}
+            "archived": bool(doc.archived), "links": _links(doc), "groups": groups}
 
 
 def save_links(opportunity_id, payload, expected_modified):

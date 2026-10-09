@@ -24,6 +24,7 @@ from rayher_crm.services.file_security import (
     MAX_FILES_PER_REQUEST, MAX_REQUEST_BYTES, TIPRAY_HEADER, detect_mime, validate_and_scan,
 )
 from rayher_crm.services.opportunities import _require_opportunity
+from rayher_crm.services.opportunity_archive import assert_opportunity_not_archived
 
 DOCTYPE = "CRM Opportunity Status"
 ATTACHMENT_DOCTYPE = "CRM Status Attachment"
@@ -108,7 +109,7 @@ def _storage_name(part: dict) -> str:
 def _lock_write_scope(opportunity_id: str) -> None:
     # A locking join is a current read for BOTH ownership rows under REPEATABLE READ.
     rows = frappe.db.sql(
-        """SELECT opportunity.opportunity_owner, customer.name AS account,
+        """SELECT opportunity.opportunity_owner, opportunity.archived, customer.name AS account,
                   customer.custom_crm_owner, customer.custom_crm_visibility
              FROM `tabCRM Opportunity` opportunity
              LEFT JOIN `tabCustomer` customer ON customer.name = opportunity.account
@@ -118,6 +119,8 @@ def _lock_write_scope(opportunity_id: str) -> None:
     if not rows:
         raise CrmApiException("NOT_FOUND", "Opportunity was not found.")
     scope = rows[0]
+    # As committed now: an archived Opportunity takes no status record and no scorecard link.
+    assert_opportunity_not_archived(scope.archived)
     # Match the existing Sales policy: owned opportunity AND an owned/public account.
     if resolve_crm_role() == "Sales" and (
         scope.opportunity_owner != frappe.session.user or not scope.account

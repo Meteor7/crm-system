@@ -117,7 +117,7 @@ def install_stage5f_indexes() -> None:
     # An Engineer reads a Demo Request from its submission on: their every read asks the history for it.
     if frappe.db.table_exists("CRM Demo Request History"):
         frappe.db.add_index("CRM Demo Request History", ["demo_request", "to_status"], DEMO_REQUEST_SUBMISSION_INDEX)
-    # Review and Warnings read every handling's revisions; the Opportunity delete removes them per handling.
+    # Review and Warnings read every handling's revisions, per handling.
     if frappe.db.table_exists("CRM Warning Handling Revision"):
         frappe.db.add_index(
             "CRM Warning Handling Revision", ["handling", "recorded_at"], WARNING_HANDLING_REVISION_INDEX,

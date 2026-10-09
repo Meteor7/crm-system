@@ -72,7 +72,7 @@ def _assessment(doc, *, current=False):
     result = rules.assess(records, stakeholders, config)
     version = to_iso_timestamp(doc.modified)
     result.update(opportunityModified=version, currentLevel=doc.probability_level or "",
-                  canApply=doc.opportunity_owner == frappe.session.user and doc.stage not in CLOSED_STAGES,
+                  canApply=doc.opportunity_owner == frappe.session.user and doc.stage not in CLOSED_STAGES and not doc.get("archived"),
                   fingerprint=rules.fingerprint({"id": doc.name, "modified": version, "config": config,
                                                  "flags": records, "stakeholders": stakeholders}))
     if doc.stage in CLOSED_STAGES:

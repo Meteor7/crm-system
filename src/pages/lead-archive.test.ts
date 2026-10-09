@@ -20,6 +20,7 @@ async function context(role: UserRole) {
       { path: '/leads', name: 'leads', component: { template: '<div />' } },
       { path: '/leads/:leadId', name: 'lead-detail', component: { template: '<div />' } },
       { path: '/opportunities', name: 'opportunities', component: { template: '<div />' } },
+      { path: '/opportunities/:opportunityId', name: 'opportunity-detail', component: { template: '<div />' } },
       { path: '/accounts', name: 'accounts', component: { template: '<div />' } },
       { path: '/accounts/:accountId', name: 'account-detail', component: { template: '<div />' } },
       { path: '/contacts/:contactId', name: 'contact-detail', component: { template: '<div />' } },

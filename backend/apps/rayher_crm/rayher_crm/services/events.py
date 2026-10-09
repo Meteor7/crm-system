@@ -7,6 +7,7 @@ from frappe.permissions import has_user_permission
 from rayher_crm.services.common import (
     as_payload, normalize_expected_modified, normalize_pagination, optional_date, required_text, to_iso_timestamp,
 )
+from rayher_crm.services.opportunity_archive import ARCHIVED_OPPORTUNITY_LINK, assert_opportunity_not_archived
 
 DOCTYPE = "CRM Event"
 FIELDS = "name title event_owner start_date end_date status account opportunity region market equipment note completed_at completed_owner modified creation"
@@ -75,16 +76,20 @@ def locked_existing(name, expected):
     return doc
 
 
-def validate_links(owner, account, opportunity, *, assigning):
+def validate_links(owner, account, opportunity, *, assigning, linking=True):
     if assigning:
         enabled = frappe.db.get_value("User", owner, "enabled", for_update=True)
         roles = frappe.db.sql("SELECT role FROM `tabHas Role` WHERE parent=%s AND parenttype='User' FOR UPDATE", (owner,), pluck=True)
         if not enabled or {r for r in roles if r in CRM_ROLE_TO_PROFILE} != {"CRM Sales"}:
             raise CrmApiException("INVALID_OWNER", "Event owner must be an active CRM Sales user.")
     if opportunity:
-        opp = frappe.db.get_value("CRM Opportunity", opportunity, ["account", "opportunity_owner"], as_dict=True, for_update=True)
+        opp = frappe.db.get_value("CRM Opportunity", opportunity, ["account", "opportunity_owner", "archived"], as_dict=True, for_update=True)
         if not account or not opp or opp.account != account or opp.opportunity_owner != owner:
             raise CrmApiException("VALIDATION_ERROR", "Choose an opportunity on this account owned by the event owner.")
+        # An archived Opportunity takes no new Event (the flag as committed: the read above locks its row); an Event
+        # that names it already is a record of its own and is still kept up, as a Visit is.
+        if linking:
+            assert_opportunity_not_archived(opp.archived, ARCHIVED_OPPORTUNITY_LINK)
     if account:
         customer = frappe.db.get_value("Customer", account, ["custom_crm_owner", "custom_crm_visibility"], as_dict=True, for_update=True)
         if not customer or (customer.custom_crm_owner != owner and customer.custom_crm_visibility != "Public"):
@@ -116,7 +121,7 @@ def save_event(payload, name=None, expected_modified=None):
         raise CrmApiException("VERSION_CONFLICT", "A new event cannot have an existing version.")
     assigning = not name or owner != doc.event_owner
     changing_links = assigning or account != (doc.account or "") or opportunity != (doc.opportunity or "")
-    validate_links(owner, account, opportunity, assigning=assigning)
+    validate_links(owner, account, opportunity, assigning=assigning, linking=not name or opportunity != (doc.opportunity or ""))
     # Business rows precede catalogue locks, matching Opportunity saves. Use
     # current catalogue rows; equipment cleanup shares the same catalogue lock.
     if values["region"]:

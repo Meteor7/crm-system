@@ -48,7 +48,7 @@ SELECT `tabCRM Opportunity`.`name` AS `name`, `tabCRM Opportunity`.`title` AS `t
     CAST(`tabCRM Opportunity`.`amount_cny` AS CHAR) AS `amount_cny`
 FROM `tabCRM Opportunity`
 LEFT JOIN `tabCustomer` AS `crm_board_customer` ON `crm_board_customer`.`name` = `tabCRM Opportunity`.`account`
-WHERE ({scope})
+WHERE `tabCRM Opportunity`.`archived` = 0 AND ({scope})
 """
 _ACTIONS_SQL = """
 SELECT `crm_board_action`.`name` AS `name`, `crm_board_action`.`opportunity` AS `opportunity`,
@@ -56,7 +56,8 @@ SELECT `crm_board_action`.`name` AS `name`, `crm_board_action`.`opportunity` AS 
     `crm_board_action`.`status` AS `status`, `crm_board_action`.`archived` AS `archived`
 FROM `tabCRM Opportunity Action` AS `crm_board_action`
 INNER JOIN `tabCRM Opportunity` ON `tabCRM Opportunity`.`name` = `crm_board_action`.`opportunity`
-WHERE `crm_board_action`.`status` IN ('Open', 'In Progress', 'Blocked', 'Rescheduled') AND `crm_board_action`.`archived` = 0 AND ({scope})
+WHERE `crm_board_action`.`status` IN ('Open', 'In Progress', 'Blocked', 'Rescheduled') AND `crm_board_action`.`archived` = 0
+  AND `tabCRM Opportunity`.`archived` = 0 AND ({scope})
 """
 
 

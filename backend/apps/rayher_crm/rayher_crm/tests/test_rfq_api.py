@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from io import BytesIO
 from unittest.mock import patch
 
@@ -12,12 +13,15 @@ from pypdf import PdfWriter
 from rayher_crm.api.v1.errors import CrmApiException
 from rayher_crm.services.accounts import create_account
 from rayher_crm.services.opportunities import (
+    archive_strategy_opportunity,
     create_strategy_opportunity,
     get_strategy_opportunity,
     mark_opportunity_lost,
     rollback_opportunity_stage,
     update_strategy_opportunity,
 )
+from rayher_crm.services import rfqs as rfq_service
+from rayher_crm.services.opportunity_archive import ARCHIVED_OPPORTUNITY_LINK
 from rayher_crm.services.opportunity_stages import (
     CUSTOMER_BUDGET_APPROVED,
     DEMO_DONE,
@@ -102,6 +106,63 @@ class TestRfqApi(FrappeTestCase):
             "originalAmount": "100000.00", "amountCny": "100000.00", "paymentMilestones": [], "strengths": [],
             "redFlags": [], "informationNeeded": [], "qualificationConfirmed": True,
         })
+
+    def test_no_rfq_is_started_for_an_archived_opportunity(self):
+        opportunity = advance_opportunity_fixture(self._opportunity(), CUSTOMER_BUDGET_APPROVED)
+        frappe.set_user(self.manager)
+        archive_strategy_opportunity(opportunity["id"])
+        frappe.set_user(self.sales)
+        with self.assertRaises(CrmApiException) as refused:
+            create_rfq({"opportunityId": opportunity["id"], "engineerId": self.engineer}, pdf_part(), CleanScanner())
+        self.assertEqual((refused.exception.code, refused.exception.public_message), ("INVALID_TRANSITION", ARCHIVED_OPPORTUNITY_LINK))
+        self.assertFalse(frappe.db.exists("CRM RFQ", {"opportunity": opportunity["id"]}))
+
+    def test_an_rfq_started_as_its_opportunity_is_archived_is_refused_under_its_lock_and_undone(self):
+        opportunity = advance_opportunity_fixture(self._opportunity(), CUSTOMER_BUDGET_APPROVED)
+        frappe.set_user(self.manager)
+        archive_strategy_opportunity(opportunity["id"])
+        frappe.set_user(self.sales)
+        real_assert, real_read = rfq_service.assert_opportunity_not_archived, rfq_service.opportunity_archived
+        real_discard = rfq_service.discard_rolled_back_blob
+        seen: list[tuple[bool, bool]] = []
+        discarded: list[tuple[str, str]] = []
+
+        def first_read_misses(doc_or_flag, message=None):
+            # The first read, of the Opportunity loaded before any lock, misses the archive, as one committed after
+            # this request's snapshot would; the flag read under the lock is checked.
+            if isinstance(doc_or_flag, bool):
+                real_assert(doc_or_flag, message)
+
+        def locked_read(name, *, for_update=False):
+            seen.append((for_update, bool(frappe.db.exists("CRM RFQ", {"opportunity": name}))))
+            return real_read(name, for_update=for_update)
+
+        def discard(path, file_url, content_hash):
+            discarded.append((path, file_url))
+            return real_discard(path, file_url, content_hash)
+
+        # Bytes of this test alone, so that no other upload shares the file the refusal takes back out.
+        output = BytesIO()
+        writer = PdfWriter()
+        writer.add_blank_page(width=72, height=72)
+        writer.add_metadata({"/Title": f"Archived RFQ {frappe.generate_hash(length=12)}"})
+        writer.write(output)
+        part = {"file_name": "archived-customer-rfq.pdf", "mime_type": "application/pdf", "content": output.getvalue()}
+        with patch.object(rfq_service, "assert_opportunity_not_archived", side_effect=first_read_misses), \
+                patch.object(rfq_service, "opportunity_archived", side_effect=locked_read), \
+                patch.object(rfq_service, "discard_rolled_back_blob", side_effect=discard):
+            with self.assertRaises(CrmApiException) as refused:
+                create_rfq({"opportunityId": opportunity["id"], "engineerId": self.engineer}, part, CleanScanner())
+        self.assertEqual((refused.exception.code, refused.exception.public_message), ("INVALID_TRANSITION", ARCHIVED_OPPORTUNITY_LINK))
+        # The RFQ's row was there (its file scanned, converted and written) when the Opportunity's was read under its
+        # lock, the order the RFQ review and the stage rollback take them in; the refusal undid the rows and took the
+        # file's bytes back out of the disk.
+        self.assertEqual(seen, [(True, True)])
+        self.assertFalse(frappe.db.exists("CRM RFQ", {"opportunity": opportunity["id"]}))
+        self.assertTrue(discarded)
+        for path, file_url in discarded:
+            self.assertFalse(frappe.db.exists("File", {"file_url": file_url}), file_url)
+            self.assertFalse(os.path.exists(path), path)
 
     def test_complete_workflow_scope_revision_and_opportunity_gate(self):
         opportunity = self._opportunity()

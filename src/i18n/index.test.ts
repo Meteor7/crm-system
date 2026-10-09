@@ -48,18 +48,18 @@ describe('i18n', () => {
     setLocale('en-US')
     const { t } = useI18n()
     const title = "Acme $& $` $' $$ {title}"
-    expect(t('detail.confirmDeleteOpportunity', { title })).toBe(`Delete Opportunity ${title}?`)
+    expect(t('detail.notFoundBookingId', { id: title })).toBe(`Booking not found ${title}`)
     expect(t('common.page', { page: '{total}', total: 3 })).toBe('Page {total} of 3')
   })
 
   it('refreshes existing messages while preserving their original business values and raw server errors', () => {
     const notice = useLocaleMessage()
     const { message } = useI18n()
-    const params = { title: 'Original $& record' }
-    notice.value = message('detail.confirmDeleteOpportunity', params)
-    params.title = 'Another record'
+    const params = { id: 'Original $& record' }
+    notice.value = message('detail.notFoundBookingId', params)
+    params.id = 'Another record'
     setLocale('en-US')
-    expect(notice.value).toBe('Delete Opportunity Original $& record?')
+    expect(notice.value).toBe('Booking not found Original $& record')
     notice.value = localeMessage('Imported original.docx', '已导入 original.docx')
     setLocale('zh-CN')
     expect(notice.value).toBe('已导入 original.docx')

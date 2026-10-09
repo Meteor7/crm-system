@@ -574,23 +574,31 @@ class TestOpportunityStatus(FrappeTestCase):
                 self.save(files=[{"file_name": "legacy." + ext, "mime_type": mime,
                                   "content": bytes.fromhex("d0cf11e0a1b11ae1") + b"legacy"}])
 
-    def test_opportunity_with_status_records_cannot_be_deleted(self):
-        from rayher_crm.services.opportunities import delete_strategy_opportunity
+    def test_an_archived_opportunity_keeps_its_status_records_readable_and_takes_no_new_one(self):
+        from rayher_crm.services.opportunities import archive_strategy_opportunity, unarchive_strategy_opportunity
+        from rayher_crm.services.opportunity_archive import ARCHIVED_OPPORTUNITY_EDIT
 
         created = self.save(files=[self.upload()])
         frappe.set_user("Administrator")
-        manager = self._user("crm-status-delete-manager@example.invalid", "CRM Manager")
+        manager = self._user("crm-status-archive-manager@example.invalid", "CRM Manager")
         frappe.set_user(manager)
-        with self.assertRaises(CrmApiException) as blocked:
-            delete_strategy_opportunity(self.opportunity_id)
-        self.assertEqual(blocked.exception.code, "CONFLICT")
+        archive_strategy_opportunity(self.opportunity_id)
         self.assertTrue(frappe.db.exists("CRM Opportunity", self.opportunity_id))
         self.assertTrue(frappe.db.exists(service.DOCTYPE, created["id"]))
         frappe.set_user(self.sales)
+        self.assertEqual(service.list_records(self.opportunity_id)[0]["id"], created["id"])
         self.assertEqual(
             service.download_file(self.opportunity_id, created["id"], created["files"][0]["id"])["content"],
             b"Customer requirements confirmed",
         )
+        with self.assertRaises(CrmApiException) as refused:
+            self.save(text="Written while archived")
+        self.assertEqual((refused.exception.code, refused.exception.public_message), ("INVALID_TRANSITION", ARCHIVED_OPPORTUNITY_EDIT))
+        self.assertEqual(frappe.db.count(service.DOCTYPE, {"opportunity": self.opportunity_id}), 1)
+        frappe.set_user(manager)
+        unarchive_strategy_opportunity(self.opportunity_id)
+        frappe.set_user(self.sales)
+        self.assertEqual(self.save(text="Written after the restore")["text"], "Written after the restore")
 
     def test_download_audits_success_and_denials_and_commits_denied_get(self):
         from frappe.app import sync_database

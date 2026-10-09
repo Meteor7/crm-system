@@ -32,6 +32,7 @@ from rayher_crm.services.money import (
     optional_money_text,
     required_positive_money,
 )
+from rayher_crm.services.opportunity_archive import ARCHIVED_OPPORTUNITY_LINK, assert_opportunity_not_archived
 
 
 BOOKING_STATUSES = {"Confirmed", "Pending", "Completed", "Cancelled"}
@@ -200,8 +201,10 @@ def _validate_source(account_id: str, source: str, source_opportunity: str, book
         return None
     if not source_opportunity:
         raise CrmApiException("BOOKING_SOURCE_REQUIRED", "Opportunity Booking requires a source Opportunity.")
-    if frappe.db.get_value("CRM Opportunity", source_opportunity, "account") != account_id:
+    source = frappe.db.get_value("CRM Opportunity", source_opportunity, ["account", "archived"], as_dict=True)
+    if not source or source.account != account_id:
         raise CrmApiException("BOOKING_SOURCE_INVALID", "Source Opportunity must belong to the Account.")
+    assert_opportunity_not_archived(source.archived, ARCHIVED_OPPORTUNITY_LINK)
     duplicate = frappe.db.sql(
         """SELECT `name` FROM `tabCRM Booking`
         WHERE `source_opportunity` = %s AND `status` != 'Cancelled' AND (%s IS NULL OR `name` != %s)
@@ -317,10 +320,14 @@ def _lock_source_opportunity(booking) -> None:
     """
 
     if booking.source == "Opportunity" and booking.source_opportunity:
-        frappe.db.sql(
-            "SELECT `name` FROM `tabCRM Opportunity` WHERE `name` = %s FOR UPDATE",
+        rows = frappe.db.sql(
+            "SELECT `archived` FROM `tabCRM Opportunity` WHERE `name` = %s FOR UPDATE",
             (booking.source_opportunity,),
         )
+        # As committed now: the Booking of an archived Opportunity (its order) is part of what was archived
+        # and takes no change until the Opportunity is restored.
+        if rows:
+            assert_opportunity_not_archived(rows[0][0])
 
 
 def touch_source_opportunity(booking) -> None:

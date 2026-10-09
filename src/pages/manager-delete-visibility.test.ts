@@ -7,7 +7,6 @@ import { createMockApi } from '@/api/mock-adapter'
 import { useAppStore } from '@/stores/app'
 import type { UserRole } from '@/types/crm'
 import AccountsPage from './AccountsPage.vue'
-import OpportunityDetailPage from './OpportunityDetailPage.vue'
 import VisitsPage from './VisitsPage.vue'
 
 async function context(role: UserRole, path: string) {
@@ -60,27 +59,6 @@ describe('Manager-only Sales record deletion', () => {
     expect(salesWrapper.find('[data-delete-account]').exists()).toBe(false)
   })
 
-  it.each([
-    ['Opportunity', OpportunityDetailPage, 'deleteStrategyOpportunity', 'data-delete-opportunity', async (api: ReturnType<typeof createMockApi>): Promise<string> => (await api.listStrategyOpportunities({ pageSize: 1 })).data.items[0].id, (id: string) => `/opportunities/${id}`],
-  ] as const)('shows %s deletion only to Manager and invokes the API', async (_label, component, method, attribute, findId, pathFor) => {
-    vi.spyOn(window, 'confirm').mockReturnValue(true)
-    const manager = await context('Manager', '/')
-    const id = await findId(manager.api)
-    await manager.router.push(pathFor(id))
-    const deleteSpy = vi.spyOn(manager.api, method)
-    const wrapper = mount(component, { props: { apiClient: manager.api }, global: { plugins: [manager.pinia, manager.router] } })
-    await flushPromises()
-    await wrapper.get(`[${attribute}]`).trigger('click'); await flushPromises()
-    expect(deleteSpy).toHaveBeenCalledWith(id)
-
-    const sales = await context('Sales', '/')
-    const salesId = await findId(sales.api)
-    await sales.router.push(pathFor(salesId))
-    const salesWrapper = mount(component, { props: { apiClient: sales.api }, global: { plugins: [sales.pinia, sales.router] } })
-    await flushPromises()
-    expect(salesWrapper.find(`[${attribute}]`).exists()).toBe(false)
-  })
-
 
   it.each([
     ['Account', AccountsPage, 'deleteAccount', 'data-delete-account', 'data-account-id', async (api: ReturnType<typeof createMockApi>) => (await api.listAccounts({ pageSize: 1 })).data.items[0].id, (_id: string): string => '/accounts'],
@@ -105,28 +83,4 @@ describe('Manager-only Sales record deletion', () => {
     expect(button.attributes('disabled')).toBeUndefined()
   })
 
-  it.each([
-    ['Opportunity', OpportunityDetailPage, 'deleteStrategyOpportunity', 'data-delete-opportunity', async (api: ReturnType<typeof createMockApi>) => (await api.listStrategyOpportunities({ pageSize: 1 })).data.items[0].id, (id: string) => `/opportunities/${id}`],
-  ] as const)('keeps the %s detail and route when deletion fails', async (_label, component, method, attribute, findId, pathFor) => {
-    vi.spyOn(window, 'confirm').mockReturnValue(true)
-    const manager = await context('Manager', '/')
-    const id = await findId(manager.api)
-    const path = pathFor(id)
-    await manager.router.push(path)
-    const failure = vi.fn().mockRejectedValue(new CrmApiError('CONFLICT', 'Record is still in use', 'req-delete-detail'))
-    Object.assign(manager.api, { [method]: failure })
-    const wrapper = mount(component, { props: { apiClient: manager.api }, global: { plugins: [manager.pinia, manager.router] } })
-    await flushPromises()
-
-    const button = wrapper.get(`[${attribute}]`)
-    await button.trigger('click')
-    await flushPromises()
-
-    expect(failure).toHaveBeenCalledWith(id)
-    expect(manager.router.currentRoute.value.fullPath).toBe(path)
-    expect(wrapper.find(`[${attribute}]`).exists()).toBe(true)
-    expect(wrapper.get('[data-delete-error]').text()).toContain('Record is still in use')
-    expect(wrapper.get('[data-delete-error]').text()).toContain('req-delete-detail')
-    expect(button.attributes('disabled')).toBeUndefined()
-  })
 })

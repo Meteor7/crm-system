@@ -5,11 +5,13 @@ from rayher_crm.api.v1.errors import CrmApiException
 from rayher_crm.services.accounts import create_account
 from rayher_crm.services.loss_review import LOSS_REVIEW, LOSS_REVIEW_REVISION, backfill_loss_reviews, review_loss
 from rayher_crm.services.opportunities import (
+    archive_strategy_opportunity,
     create_strategy_opportunity,
     get_strategy_opportunity,
     mark_opportunity_lost,
     rollback_opportunity_stage,
 )
+from rayher_crm.services.opportunity_archive import ARCHIVED_OPPORTUNITY_EDIT
 from rayher_crm.services.sites import create_site
 
 
@@ -111,6 +113,15 @@ class TestLossReview(FrappeTestCase):
         reverted = self._review(changed, status="Pending", reason="Await buyer evidence")
         self.assertEqual((reverted["status"], reverted["reviewCategory"]), ("pending", "Other"))
         self.assertEqual(reverted["history"][0]["category"], "Other")
+
+    def test_a_post_mortem_of_an_archived_lost_deal_waits_for_the_restore(self):
+        review = self._lose()["lossReviews"][0]
+        frappe.set_user(self.manager)
+        archive_strategy_opportunity(self.opportunity["id"])
+        with self.assertRaises(CrmApiException) as refused:
+            self._review(review)
+        self.assertEqual((refused.exception.code, refused.exception.public_message), ("INVALID_TRANSITION", ARCHIVED_OPPORTUNITY_EDIT))
+        self.assertEqual(get_strategy_opportunity(self.opportunity["id"])["lossReviews"][0]["status"], "pending")
 
     def test_marking_lost_opens_a_pending_review_that_survives_reopening(self):
         lost = self._lose()

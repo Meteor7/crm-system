@@ -23,7 +23,7 @@ import { ownerFilterOptions } from '@/features/shared/owner-filter'
 import { sitesByAccountId } from '@/features/accounts/account-sites'
 import OpportunityEditorModal from './OpportunityEditorModal.vue'
 import { useAppStore } from '@/stores/app'
-import type { AccountSummaryDto, SiteDto } from '@/types/crm'
+import type { AccountSummaryDto, ArchiveState, SiteDto } from '@/types/crm'
 import type { CreateStrategyOpportunityInput, OpportunityProbabilityLevelFilter, OpportunityStageSummaryDto, StrategyOpportunityDto, StrategyOpportunityListQuery } from '@/types/workspaces'
 import { formatKnownTotals, formatMoney, formatSummedTotals } from '@/domain/money'
 import { EQUIPMENT_PRESETS } from '@/domain/equipment'
@@ -63,6 +63,9 @@ const wantedScope = computed(() => layout.value === 'board' ? 'all' : 'page')
 const stage = ref(normalizeStageFilter(route.query.status))
 const probabilityLevel = ref<OpportunityProbabilityLevelFilter>(normalizeOpportunityProbabilityLevelFilter(route.query.probabilityLevel))
 const owner = ref(typeof route.query.owner === 'string' ? route.query.owner : 'All')
+// Archived Opportunities (a Manager's archive, in place of a delete) are shown only when asked for.
+const normalizeArchive = (value: unknown): ArchiveState => value === 'archived' || value === 'all' ? value : 'active'
+const archiveState = ref<ArchiveState>(normalizeArchive(route.query.archive))
 let sequence = 0
 const canWrite = computed(() => app.can('deal:write'))
 const owners = computed(() => ownerFilterOptions(app.bootstrap?.user, rows.value.map((item) => item.owner), owner.value))
@@ -135,11 +138,12 @@ function resetFilters() {
   stage.value = 'All'
   probabilityLevel.value = 'All'
   owner.value = 'All'
+  archiveState.value = 'active'
   restoringRoute = false
   reloadFromFirstPage()
 }
 // `create` opened the editor once, when the page was reached; kept in the address it would open it again on every remount.
-function syncUrl() { if (!restoringRoute) void router.replace({ query: { ...route.query, create: undefined, page: String(page.value), pageSize: String(pageSize.value), status: stage.value === 'All' ? undefined : stage.value, probabilityLevel: probabilityLevel.value === 'All' ? undefined : probabilityLevel.value, owner: owner.value === 'All' ? undefined : owner.value, layout: layout.value === 'board' ? 'board' : undefined } }) }
+function syncUrl() { if (!restoringRoute) void router.replace({ query: { ...route.query, create: undefined, page: String(page.value), pageSize: String(pageSize.value), status: stage.value === 'All' ? undefined : stage.value, probabilityLevel: probabilityLevel.value === 'All' ? undefined : probabilityLevel.value, owner: owner.value === 'All' ? undefined : owner.value, archive: archiveState.value === 'active' ? undefined : archiveState.value, layout: layout.value === 'board' ? 'board' : undefined } }) }
 function goPage(target: number) { page.value = target; syncUrl(); void load() }
 function changePageSize(value: number) { pageSize.value = value; page.value = 1; syncUrl(); void load() }
 function reloadFromFirstPage() { if (restoringRoute) return; page.value = 1; resetBoardLimits(); syncUrl(); void load() }
@@ -152,7 +156,7 @@ async function load() {
   error.value = ''
   const scope = wantedScope.value
   const contactId = typeof route.query.contactId === 'string' ? route.query.contactId : ''
-  const filters = { status: stage.value, probabilityLevel: probabilityLevel.value, owner: owner.value, accountId: requestedAccountId.value, contactId, opportunityId: requestedOpportunityId.value }
+  const filters = { status: stage.value, probabilityLevel: probabilityLevel.value, owner: owner.value, archiveState: archiveState.value, accountId: requestedAccountId.value, contactId, opportunityId: requestedOpportunityId.value }
   try {
     const [opportunityResult, accountRows] = await Promise.all([
       scope === 'all'
@@ -209,16 +213,17 @@ onMounted(async () => {
   await load()
   if (route.query.create === '1' && canWrite.value) editorOpen.value = true
 })
-watch([stage, probabilityLevel, owner], reloadFromFirstPage, { flush: 'sync' })
+watch([stage, probabilityLevel, owner, archiveState], reloadFromFirstPage, { flush: 'sync' })
 watch(layout, changeLayout, { flush: 'sync' })
-watch(() => [route.query.page, route.query.pageSize, route.query.status, route.query.probabilityLevel, route.query.owner, route.query.layout], ([nextPage, nextSize, nextStage, nextLevel, nextOwner, nextLayout]) => {
+watch(() => [route.query.page, route.query.pageSize, route.query.status, route.query.probabilityLevel, route.query.owner, route.query.layout, route.query.archive], ([nextPage, nextSize, nextStage, nextLevel, nextOwner, nextLayout, nextArchive]) => {
   const restoredPage = typeof nextPage === 'string' && Number(nextPage) > 0 ? Number(nextPage) : 1
   const restoredSize = typeof nextSize === 'string' && [10, 12, 25, 50].includes(Number(nextSize)) ? Number(nextSize) : 12
   const values = [normalizeStageFilter(nextStage), typeof nextOwner === 'string' ? nextOwner : 'All']
   const restoredLevel = normalizeOpportunityProbabilityLevelFilter(nextLevel)
   const restoredLayout = normalizeLayout(nextLayout)
-  if (restoredPage === page.value && restoredSize === pageSize.value && values[0] === stage.value && restoredLevel === probabilityLevel.value && values[1] === owner.value && restoredLayout === layout.value) return
-  restoringRoute = true; page.value = restoredPage; pageSize.value = restoredSize; stage.value = values[0]!; probabilityLevel.value = restoredLevel; owner.value = values[1]!; layout.value = restoredLayout; restoringRoute = false; resetBoardLimits(); void load()
+  const restoredArchive = normalizeArchive(nextArchive)
+  if (restoredPage === page.value && restoredSize === pageSize.value && values[0] === stage.value && restoredLevel === probabilityLevel.value && values[1] === owner.value && restoredLayout === layout.value && restoredArchive === archiveState.value) return
+  restoringRoute = true; page.value = restoredPage; pageSize.value = restoredSize; stage.value = values[0]!; probabilityLevel.value = restoredLevel; owner.value = values[1]!; layout.value = restoredLayout; archiveState.value = restoredArchive; restoringRoute = false; resetBoardLimits(); void load()
 })
 </script>
 
@@ -239,6 +244,7 @@ watch(() => [route.query.page, route.query.pageSize, route.query.status, route.q
       <select v-model="stage" :aria-label="t('opportunities.allStages')"><option value="All">{{ t('opportunities.allStages') }}</option><option v-for="item in OPPORTUNITY_STAGES" :key="item" :value="item">{{ stageLabel(item) }}</option></select>
       <select v-model="probabilityLevel" :aria-label="t('opportunities.allProbabilityLevels')"><option value="All">{{ t('opportunities.allProbabilityLevels') }}</option><option v-for="level in OPPORTUNITY_PROBABILITY_LEVELS" :key="level" :value="level">{{ opportunityProbabilityLevelLabel(level, locale) }}</option><option :value="PENDING_PROBABILITY_LEVEL_FILTER">{{ opportunityProbabilityLevelLabel('', locale) }}</option></select>
       <select v-model="owner" :aria-label="t('opportunities.allOwners')"><option value="All">{{ t('opportunities.allOwners') }}</option><option v-for="item in owners" :key="item" :value="item">{{ personnelDisplayName(item) }}</option></select>
+      <select v-model="archiveState" :aria-label="t('opportunities.archiveState')"><option value="active">{{ t('opportunities.archiveActive') }}</option><option value="archived">{{ t('opportunities.archiveArchived') }}</option><option value="all">{{ t('opportunities.archiveAll') }}</option></select>
       <div class="opportunity-layout-switch" :aria-label="t('opportunities.viewMode')">
         <button type="button" data-opportunity-layout="list" :class="{ active: layout === 'list' }" :aria-label="t('opportunities.listView')" @click="layout = 'list'"><List :size="14" />{{ t('opportunities.list') }}</button>
         <button type="button" data-opportunity-layout="board" :class="{ active: layout === 'board' }" :aria-label="t('opportunities.boardView')" @click="layout = 'board'"><Kanban :size="14" />{{ t('opportunities.board') }}</button>
@@ -257,7 +263,7 @@ watch(() => [route.query.page, route.query.pageSize, route.query.status, route.q
           <thead><tr><th data-testid="opportunity-number-header">{{ t('opportunities.number') }}</th><th>{{ t('oppEditor.name') }}</th><th>{{ t('detail.account') }} / {{ t('detail.site') }}</th><th>{{ t('oppEditor.stage') }}</th><th>{{ t('detail.closeDate') }}</th><th>{{ t('detail.amount') }}</th><th>{{ t('oppEditor.probabilityLevel') }}</th><th>{{ t('opportunities.purchaseIntent') }}</th><th>{{ t('detail.owner') }}</th><th>{{ t('detail.updated') }}</th></tr></thead>
           <tbody>
             <tr v-for="item in visibleRows" :key="item.id" :data-opportunity-id="item.id">
-              <td class="opportunity-number" :data-opportunity-number="item.id">{{ item.id }}</td>
+              <td class="opportunity-number" :data-opportunity-number="item.id">{{ item.id }}<StatusBadge v-if="item.archived" :label="t('opportunities.archiveArchived')" tone="neutral" :data-opportunity-archived="item.id" /></td>
               <td><RouterLink class="record-link" :to="{ name: 'opportunity-detail', params: { opportunityId: item.id } }" :data-opportunity-link="item.id"><strong>{{ item.title }}</strong></RouterLink></td>
               <td><strong>{{ item.account }}</strong><small>{{ item.site }}</small></td>
               <td><strong>{{ stageLabel(item.stage) }}</strong><small v-if="item.pendingStageAdvance === 'demo_done' && item.stage === 'qualified_opportunity'" class="pending-stage-marker" :data-testid="`opportunity-pending-badge-${item.id}`" :title="t(item.currency === 'CNY' ? 'oppEditor.pendingDemoDone' : 'oppEditor.pendingDemoDoneForeign')">{{ t('oppEditor.pendingDemoDoneShort') }}</small></td>
@@ -280,7 +286,7 @@ watch(() => [route.query.page, route.query.pageSize, route.query.status, route.q
             </header>
             <div class="opportunity-board-cards">
               <article v-for="item in visibleBoardRows[stageName]" :key="item.id" class="opportunity-board-card" :data-opportunity-id="item.id">
-                <div class="board-card-topline"><span>{{ item.id }}</span><StatusBadge :label="opportunityProbabilityLevelLabel(item.probabilityLevel, locale)" :tone="opportunityProbabilityLevelTone(item.probabilityLevel)" data-opportunity-board-probability-level /></div>
+                <div class="board-card-topline"><span>{{ item.id }}</span><StatusBadge v-if="item.archived" :label="t('opportunities.archiveArchived')" tone="neutral" :data-opportunity-archived="item.id" /><StatusBadge :label="opportunityProbabilityLevelLabel(item.probabilityLevel, locale)" :tone="opportunityProbabilityLevelTone(item.probabilityLevel)" data-opportunity-board-probability-level /></div>
                 <RouterLink class="record-link" :to="{ name: 'opportunity-detail', params: { opportunityId: item.id } }" :data-opportunity-board-link="item.id">{{ item.title }}</RouterLink>
                 <small v-if="item.pendingStageAdvance === 'demo_done' && item.stage === 'qualified_opportunity'" class="pending-stage-marker board-pending-marker" :data-testid="`opportunity-board-pending-badge-${item.id}`" :title="t(item.currency === 'CNY' ? 'oppEditor.pendingDemoDone' : 'oppEditor.pendingDemoDoneForeign')">{{ t('oppEditor.pendingDemoDoneShort') }}</small>
                 <p>{{ item.account }}<small>{{ item.site }}</small></p>

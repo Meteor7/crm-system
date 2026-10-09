@@ -1155,8 +1155,8 @@ class TestCrmScope(FrappeTestCase):
             marker="foreign sensitive detail",
         )
 
-        # Stakeholders follow Opportunity reads but are deliberately not added to the
-        # physical-delete tuple used by delete_strategy_opportunity.
+        # Stakeholders follow Opportunity reads but are deliberately not added to the tuple the test
+        # fixtures use to remove a committed Opportunity (the product has no delete any more).
         self.assertNotIn("CRM Opportunity Stakeholder", OPPORTUNITY_CHILD_DOCTYPES)
         for doctype, (owned_name, field, owned_value) in owned.items():
             foreign_name, _, foreign_value = foreign[doctype]

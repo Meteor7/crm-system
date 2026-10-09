@@ -12,7 +12,7 @@ from rayher_crm.api.v1 import cockpit as cockpit_api
 from rayher_crm.api.v1.errors import CrmApiException
 from rayher_crm.services import opportunity_board
 from rayher_crm.services.accounts import create_account
-from rayher_crm.services.opportunities import create_opportunity_action, create_strategy_opportunity
+from rayher_crm.services.opportunities import archive_strategy_opportunity, create_opportunity_action, create_strategy_opportunity
 from rayher_crm.services.sites import create_site
 
 SAVED = opportunity_board.SAVED_QUERY
@@ -154,6 +154,13 @@ class TestOpportunityBoardApi(FrappeTestCase):
             frappe.set_user("Administrator")
             remove_user_permission("Customer", allowed, self.manager, ignore_permissions=True)
             frappe.clear_cache(user=self.manager)
+
+    def test_an_archived_opportunity_leaves_the_board_and_its_totals(self):
+        self._as(self.manager, lambda: archive_strategy_opportunity(self.theirs))
+        data, total, _page, _size = self._query(self.manager, scope={"sales": [self.sales, self.other_sales]})
+        self.assertEqual(({row["id"] for row in data["items"]}, total), ({self.mine, self.unpriced}, 2))
+        summary = data["summary"]
+        self.assertEqual((summary["count"], summary["knownAmountCny"], summary["missingAmountCount"]), (2, "100.00", 1))
 
     def test_totals_cover_every_match_on_every_page(self):
         scope = {"sales": [self.sales, self.other_sales]}

@@ -3792,17 +3792,14 @@ export function createMockApi(options: {
       return opportunityResponse(opportunity)
     },
 
-    async deleteStrategyOpportunity(id: string) {
+    // The archive is a server rule with no behaviour here; tests stub these (AGENTS.md).
+    async archiveStrategyOpportunity(id: string) {
       await wait()
-      assertManagerDelete()
-      const index = localStrategyOpportunities.findIndex((item) => item.id === id)
-      if (index < 0) throw new CrmApiError('OPPORTUNITY_NOT_FOUND', '未找到该 Opportunity', requestId(), false)
-      localStrategyOpportunities.splice(index, 1)
-      for (let position = localInternalValidations.length - 1; position >= 0; position -= 1) {
-        if (localInternalValidations[position].opportunityId === id) localInternalValidations.splice(position, 1)
-      }
-      salesRepository.save()
-      return response({ id, status: 'Deleted' as const })
+      throw new CrmApiError('INVALID_TRANSITION', `The mock API does not archive Opportunities (${id}).`, requestId(), false)
+    },
+    async unarchiveStrategyOpportunity(id: string) {
+      await wait()
+      throw new CrmApiError('INVALID_TRANSITION', `The mock API does not archive Opportunities (${id}).`, requestId(), false)
     },
 
     createOpportunityStakeholder: saveOpportunityStakeholderInternal,

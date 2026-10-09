@@ -11,6 +11,7 @@ from rayher_crm.api.v1.errors import CrmApiException
 from rayher_crm.permissions.roles import assert_capability, resolve_crm_role
 from rayher_crm.permissions.scope import conditions_for_doctype
 from rayher_crm.services.accounts import _require_account
+from rayher_crm.services.opportunity_archive import ARCHIVED_OPPORTUNITY_LINK, assert_opportunity_not_archived, opportunity_archived
 from rayher_crm.services.common import (
     delete_manager_scoped_document,
     ensure_server_generated_id,
@@ -93,11 +94,12 @@ def _validate_opportunity(opportunity_id: Any, account_id: str) -> str:
     normalized = str(opportunity_id or "").strip()
     if not normalized:
         return ""
-    opportunity_account = frappe.db.get_value("CRM Opportunity", normalized, "account")
-    if not opportunity_account:
+    opportunity = frappe.db.get_value("CRM Opportunity", normalized, ["account", "archived"], as_dict=True)
+    if not opportunity or not opportunity.account:
         raise CrmApiException("NOT_FOUND", "Opportunity was not found.")
-    if opportunity_account != account_id:
+    if opportunity.account != account_id:
         raise CrmApiException("CONFLICT", "The Opportunity belongs to another account.")
+    assert_opportunity_not_archived(opportunity.archived, ARCHIVED_OPPORTUNITY_LINK)
     return normalized
 
 
@@ -215,11 +217,16 @@ def create_visit(payload: dict[str, Any]) -> dict[str, Any]:
     ensure_server_generated_id(payload)
     account_id = required_text(payload, "accountId")
     _require_account(account_id)
+    opportunity = _validate_opportunity(payload.get("opportunityId"), account_id)
+    if opportunity:
+        # Read again under the Opportunity's lock before the insert: an archive committed since the read above
+        # is seen, and one in flight is waited for.
+        assert_opportunity_not_archived(opportunity_archived(opportunity, for_update=True), ARCHIVED_OPPORTUNITY_LINK)
     doc = frappe.get_doc({
         "doctype": "CRM Visit",
         "account": account_id,
         "primary_contact": _validate_contact(payload.get("primaryContactId"), account_id),
-        "opportunity": _validate_opportunity(payload.get("opportunityId"), account_id),
+        "opportunity": opportunity,
         "visit_owner": _visit_owner(payload.get("owner"), account_id),
         "subject": required_text(payload, "subject"),
         "visit_date": _required_date(payload.get("date"), "date"),

@@ -30,6 +30,8 @@ export interface QuotationSummaryDto {
   currentVersionId: string
   currentPublishedVersionId: string
   modified: string
+  /** Its Opportunity is archived: the Quotation is frozen with it, read-only until the Opportunity is restored. */
+  opportunityArchived?: boolean
 }
 
 export interface QuotationCatalogItemDto {

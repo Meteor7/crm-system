@@ -120,7 +120,7 @@ def _account_activity_metrics(account_id: str) -> dict[str, Any]:
     opportunity_scope = conditions_for_doctype("CRM Opportunity")
     opportunities = frappe.db.sql(
         f"SELECT `name`, `stage`, `currency`, `score`, CAST(`amount` AS CHAR) AS `amount` "
-        f"FROM `tabCRM Opportunity` WHERE ({opportunity_scope}) AND `account` = %s",
+        f"FROM `tabCRM Opportunity` WHERE ({opportunity_scope}) AND `account` = %s AND `archived` = 0",
         (account_id,),
         as_dict=True,
     )

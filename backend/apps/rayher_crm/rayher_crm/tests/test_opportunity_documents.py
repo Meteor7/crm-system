@@ -6,6 +6,7 @@ from frappe.tests.utils import FrappeTestCase
 
 from rayher_crm.api.v1.errors import CrmApiException
 from rayher_crm.services import opportunity_documents as service
+from rayher_crm.services.opportunities import archive_strategy_opportunity
 from rayher_crm.services.visits import create_visit
 from rayher_crm.tests.test_opportunity_relations import TestOpportunityRelations
 from rayher_crm.tests.test_opportunity_status import _delete_committed_opportunity
@@ -28,6 +29,13 @@ class TestOpportunityDocuments(FrappeTestCase):
         frappe.db.rollback()
         frappe.set_user(self.original_user)
         super().tearDown()
+
+    def test_the_library_says_when_its_opportunity_is_archived(self):
+        self.assertFalse(service.get_documents(self.opportunity)["archived"])
+        frappe.set_user("Administrator")
+        archive_strategy_opportunity(self.opportunity)
+        frappe.set_user(self.sales)
+        self.assertTrue(service.get_documents(self.opportunity)["archived"])
 
     def test_links_have_versions_audit_partial_updates_and_no_file_copies(self):
         before_count = frappe.db.count("File")

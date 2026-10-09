@@ -228,7 +228,9 @@ def quotation_expiry(data, query, reference, days=14, now=None):
             continue
         if query.get("equipment") and (not opportunity or equipment_key(opportunity.get("tool_type")) != equipment_key(query["equipment"])):
             continue
-        if opportunity and opportunity.get("stage") in {"po_received", "lost"}:
+        # A closed deal's quotation expires unwarned, and so does an archived deal's (a Manager's archive, in
+        # place of a delete): the deal is out of every warning.
+        if opportunity and (opportunity.get("stage") in {"po_received", "lost"} or opportunity.get("archived")):
             continue
         version_id = quote.get("current_published_version")
         if not version_id:

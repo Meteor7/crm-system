@@ -14,28 +14,38 @@ from rayher_crm.api.v1.opportunities import (
     mark_opportunity_lost as mark_opportunity_lost_endpoint,
     update_strategy_opportunity as update_strategy_opportunity_endpoint,
 )
-from rayher_crm.services.accounts import create_account, get_account_360
+from rayher_crm.services import cockpit, dashboard, visits as visit_service
+from rayher_crm.services.accounts import _account_activity_metrics, create_account, get_account_360
 from rayher_crm.services.common import to_iso_timestamp
 from rayher_crm.services.contacts import create_contact
 from rayher_crm.services.opportunities import (
     advance_opportunity_for_event,
+    archive_strategy_opportunity,
     confirm_budget_approved,
     create_opportunity_action,
     create_opportunity_stakeholder,
     create_strategy_opportunity,
     delete_opportunity_action,
-    delete_strategy_opportunity,
     get_strategy_opportunity,
     list_strategy_opportunities,
     mark_opportunity_lost,
     opportunity_stage_summary,
     request_internal_validation,
     rollback_opportunity_stage,
+    unarchive_strategy_opportunity,
     update_opportunity_stakeholder,
     update_opportunity_action,
     update_strategy_opportunity,
 )
+from rayher_crm.services.opportunity_archive import (
+    ARCHIVED_OPPORTUNITY_EDIT,
+    ARCHIVED_OPPORTUNITY_LINK,
+    OPPORTUNITY_WITH_BOOKING_ARCHIVE,
+)
+from rayher_crm.services.bookings import get_booking, update_booking
+from rayher_crm.services.pipeline import list_pipeline
 from rayher_crm.services.sites import create_site
+from rayher_crm.services.visits import create_visit
 from rayher_crm.tests._opportunity_fixtures import advance_opportunity_fixture
 
 
@@ -278,8 +288,8 @@ class TestOpportunityApi(FrappeTestCase):
             "Edited at Demo done",
         )
 
-    def test_a_waiting_opportunity_can_be_deleted_with_its_notice(self):
-        account, site = self._account_site(self.sales, "WaitingDelete")
+    def test_a_waiting_opportunity_is_archived_with_its_notice_kept_and_its_pending_advance_refused(self):
+        account, site = self._account_site(self.sales, "WaitingArchive")
         opportunity = create_strategy_opportunity(self._input(
             account, site, self.sales, amount="", originalAmount="", amountCny="",
         ))
@@ -287,18 +297,26 @@ class TestOpportunityApi(FrappeTestCase):
         self.assertEqual(waiting["pendingStageAdvance"], "demo_done")
         notice = {"source_doctype": "CRM Opportunity", "source_name": opportunity["id"]}
         self.assertEqual(frappe.db.count("CRM Notification Event", notice), 1)
-        # Another Opportunity's notice is not touched.
-        other = create_strategy_opportunity(self._input(
-            account, site, self.sales, title="Other waiting", amount="", originalAmount="", amountCny="",
-        ))
-        self._demo_done(other)
-        other_notice = {"source_doctype": "CRM Opportunity", "source_name": other["id"]}
 
         frappe.set_user("Administrator")
-        self.assertEqual(delete_strategy_opportunity(opportunity["id"]), {"id": opportunity["id"], "status": "Deleted"})
-        self.assertFalse(frappe.db.exists("CRM Opportunity", opportunity["id"]))
-        self.assertEqual(frappe.db.count("CRM Notification Event", notice), 0)
-        self.assertEqual(frappe.db.count("CRM Notification Event", other_notice), 1)
+        archived = archive_strategy_opportunity(opportunity["id"])
+        self.assertTrue(archived["archived"])
+        self.assertEqual(archived["pendingStageAdvance"], "demo_done")
+        # The notice is the owner's history and stays, and the Opportunity still opens for them.
+        self.assertEqual(frappe.db.count("CRM Notification Event", notice), 1)
+        frappe.set_user(self.sales)
+        self.assertTrue(get_strategy_opportunity(opportunity["id"])["archived"])
+        # A workflow step (a demo's customer review, an RFQ approval, a quotation) does not move it on.
+        with self.assertRaises(CrmApiException) as refused:
+            advance_opportunity_for_event(
+                opportunity["id"], "demo_customer_review", reference_doctype="CRM Evaluation", reference_name="CRM-EVAL-TEST",
+            )
+        self.assertEqual((refused.exception.code, refused.exception.public_message), ("INVALID_TRANSITION", ARCHIVED_OPPORTUNITY_EDIT))
+        # Nor does the amount it waits for, entered now, move it: the edit is refused.
+        with self.assertRaises(CrmApiException) as edit:
+            update_strategy_opportunity(opportunity["id"], {"amount": "100.00", "originalAmount": "100.00", "amountCny": "100.00"}, archived["modified"])
+        self.assertEqual(edit.exception.public_message, ARCHIVED_OPPORTUNITY_EDIT)
+        self.assertEqual(frappe.db.get_value("CRM Opportunity", opportunity["id"], "stage"), "qualified_opportunity")
 
     def test_a_cny_opportunity_takes_its_cny_amount_from_the_amount(self):
         # A CNY Opportunity has one amount (#87): whatever the form sends as the CNY amount, the amount wins.
@@ -997,62 +1015,241 @@ class TestOpportunityApi(FrappeTestCase):
             "source_doctype": "CRM Opportunity Action", "source_name": action["id"],
         }))
 
-    def test_only_manager_can_delete_strategy_opportunity(self):
-        account, site = self._account_site(self.other_sales, "Delete")
+    def test_only_a_manager_archives_an_opportunity_which_keeps_every_record_and_is_restored_whole(self):
+        account, site = self._account_site(self.other_sales, "Archive")
         opportunity = create_strategy_opportunity(
             self._input(account, site, self.other_sales, probabilityLevel="pipeline"),
         )
-        stage_rows = {"opportunity": opportunity["id"]}
-        self.assertEqual(self._probability_history_count(opportunity["id"]), 1)
-        self.assertEqual(frappe.db.count("CRM Opportunity Stage History", stage_rows), 1)
-        # Stakeholders and actions link to the Opportunity too, and their APIs only archive them.
+        rows = {"opportunity": opportunity["id"]}
         contact = create_contact({
-            "accountId": account["id"], "name": "Delete Contact", "title": "Director",
+            "accountId": account["id"], "name": "Archive Contact", "title": "Director",
             "department": "Engineering", "phone": "13800000002",
-            "email": "delete-contact@example.invalid", "relationship": "Developing",
+            "email": "archive-contact@example.invalid", "relationship": "Developing",
             "owner": self.other_sales, "status": "Active",
         })
-        create_opportunity_stakeholder(opportunity["id"], {
+        stakeholder = create_opportunity_stakeholder(opportunity["id"], {
             "contactId": contact["id"], "role": "Decision Maker", "influence": "High",
             "stance": "Support", "coverage": "Monthly", "isCoach": True,
             "winResult": "Budget approved", "opportunityNotes": "Confirm FAT attendees",
         })
-        action = create_opportunity_action(
-            opportunity["id"],
-            {"title": "Confirm scope", "owner": self.other_sales, "due": "2026-09-01", "status": "Open"},
+        gone = create_opportunity_action(
+            opportunity["id"], {"title": "Confirm scope", "owner": self.other_sales, "due": "2026-09-01", "status": "Open"},
         )
-        delete_opportunity_action(opportunity["id"], action["id"])
+        delete_opportunity_action(opportunity["id"], gone["id"])
+        action = create_opportunity_action(
+            opportunity["id"], {"title": "Send the proposal", "owner": self.other_sales, "due": "2026-09-08", "status": "Open"},
+        )
+        frappe.set_user("Administrator")
+        edited = update_strategy_opportunity(opportunity["id"], {"title": "Archive II"}, opportunity["modified"])
 
-        def relation_counts() -> tuple[int, int]:
+        def counts() -> tuple[int, int, int, int]:
             return (
-                frappe.db.count("CRM Opportunity Stakeholder", stage_rows),
-                frappe.db.count("CRM Opportunity Action", stage_rows),
+                frappe.db.count("CRM Opportunity Stakeholder", rows), frappe.db.count("CRM Opportunity Action", rows),
+                self._probability_history_count(opportunity["id"]), frappe.db.count("CRM Opportunity Stage History", rows),
             )
 
-        self.assertEqual(relation_counts(), (1, 1))
-        # An edit leaves a field-history row, which also links to the Opportunity.
-        frappe.set_user("Administrator")
-        update_strategy_opportunity(opportunity["id"], {"title": "Delete II"}, opportunity["modified"])
-        self.assertGreaterEqual(frappe.db.count("CRM Opportunity History", stage_rows), 1)
+        before = counts()
+        history_before = frappe.db.count("CRM Opportunity History", rows)
+        self.assertEqual(before[:2], (1, 2))
 
         frappe.set_user(self.sales)
         with self.assertRaises(frappe.PermissionError):
-            delete_strategy_opportunity(opportunity["id"])
-        self.assertTrue(frappe.db.exists("CRM Opportunity", opportunity["id"]))
-        self.assertEqual(self._probability_history_count(opportunity["id"]), 1)
-        self.assertEqual(frappe.db.count("CRM Opportunity Stage History", stage_rows), 1)
-        self.assertEqual(relation_counts(), (1, 1))
+            archive_strategy_opportunity(opportunity["id"])
+        self.assertEqual(frappe.db.get_value("CRM Opportunity", opportunity["id"], "archived"), 0)
 
-        frappe.set_user("Administrator")
+        frappe.set_user(self.manager)
+        with self.assertRaises(CrmApiException) as missing:
+            archive_strategy_opportunity("CRM-OPP-NOBODY")
+        self.assertEqual(missing.exception.code, "NOT_FOUND")
+        # Before the archive: in the cockpit's Review and Plan (with its open action) and in the Account's figures.
+        customers = [{"name": account["id"]}]
+
+        def in_cockpit() -> tuple[bool, bool, bool]:
+            plan = cockpit.load_plan_data(customers, [])
+            return (
+                opportunity["id"] in {row["name"] for row in cockpit.load_data(customers, [])["opportunities"]},
+                opportunity["id"] in {row["name"] for row in plan["opportunities"]},
+                action["id"] in {row["name"] for row in plan["actions"]},
+            )
+
+        # And on the dashboard, which reads the Opportunities (and their actions) itself.
+        def on_dashboard() -> tuple[bool, bool]:
+            deals, actions = dashboard._opportunities_and_actions({account["id"]})
+            return opportunity["id"] in {row["id"] for row in deals}, action["id"] in {row["id"] for row in actions}
+
+        self.assertEqual(in_cockpit(), (True, True, True))
+        self.assertEqual(on_dashboard(), (True, True))
+        self.assertEqual(_account_activity_metrics(account["id"])["nextAction"], "Send the proposal")
+        archived = archive_strategy_opportunity(opportunity["id"])
+        self.assertTrue(archived["archived"])
+        self.assertEqual(archived["archivedBy"], self.manager)
+        self.assertRegex(archived["archivedAt"], r"Z$")
+        self.assertEqual((archived["title"], archived["stage"]), ("Archive II", "qualified_opportunity"))
+        self.assertNotEqual(archived["modified"], edited["modified"])
+        # Archived again, nothing changes.
+        self.assertEqual(archive_strategy_opportunity(opportunity["id"])["archivedAt"], archived["archivedAt"])
+        # Every record of its own stays; the archive is in its history.
+        self.assertEqual(counts(), before)
+        self.assertEqual(frappe.db.count("CRM Opportunity History", rows), history_before + 1)
+        self.assertEqual([(row["from"], row["to"]) for row in archived["history"] if row["field"] == "archived"], [("0", "1")])
+
+        # Out of the list, the pipeline and the Account 360 unless the archive is asked for.
+        def listed(query: dict) -> set[str]:
+            return {item["id"] for item in list_strategy_opportunities({**query, "accountId": account["id"], "pageSize": 200})[0]}
+        self.assertEqual(listed({}), set())
+        self.assertEqual(listed({"archiveState": "active"}), set())
+        self.assertEqual(listed({"archiveState": "archived"}), {opportunity["id"]})
+        self.assertEqual(listed({"archiveState": "all"}), {opportunity["id"]})
+        with self.assertRaises(CrmApiException) as invalid:
+            list_strategy_opportunities({"archiveState": "deleted"})
+        self.assertEqual(invalid.exception.code, "VALIDATION_ERROR")
+        self.assertEqual({item["id"] for item in list_pipeline({"accountId": account["id"]})["opportunities"]}, set())
+        self.assertEqual({item["id"] for item in get_account_360(account["id"])["opportunities"]}, set())
+        # Out of the cockpit's Review and Plan, its open action with it, of the dashboard and of the Account's figures.
+        self.assertEqual(in_cockpit(), (False, False, False))
+        self.assertEqual(on_dashboard(), (False, False))
+        self.assertEqual(_account_activity_metrics(account["id"])["nextAction"], "")
+
+        # Its owner still reads it, with its records, and is refused every change: an edit (with the current
+        # version or the older one from before the archive), a stage action, a rollback, a stakeholder, an action.
+        frappe.set_user(self.other_sales)
+        detail = get_strategy_opportunity(opportunity["id"])
+        self.assertTrue(detail["archived"])
+        self.assertEqual(len(detail["stakeholders"]), 1)
+        self.assertEqual([item["title"] for item in detail["actions"]], ["Send the proposal"])
+
+        def refused(call) -> None:
+            with self.assertRaises(CrmApiException) as refusal:
+                call()
+            self.assertEqual((refusal.exception.code, refusal.exception.public_message), ("INVALID_TRANSITION", ARCHIVED_OPPORTUNITY_EDIT))
+
+        refused(lambda: update_strategy_opportunity(opportunity["id"], {"title": "Archive III"}, detail["modified"]))
+        refused(lambda: update_strategy_opportunity(opportunity["id"], {"title": "Archive III"}, edited["modified"]))
+        refused(lambda: mark_opportunity_lost(opportunity["id"], {"lostReason": "Archived"}, detail["modified"]))
+        refused(lambda: create_opportunity_stakeholder(opportunity["id"], {
+            "contactId": contact["id"], "role": "Coach", "influence": "Low", "stance": "Neutral", "coverage": "Monthly",
+        }))
+        refused(lambda: update_opportunity_stakeholder(opportunity["id"], stakeholder["id"], {"stance": "Against"}))
+        refused(lambda: create_opportunity_action(opportunity["id"], {"title": "x", "owner": self.other_sales, "due": "2026-09-09", "status": "Open"}))
+        refused(lambda: update_opportunity_action(opportunity["id"], action["id"], {"status": "Done"}))
+        refused(lambda: delete_opportunity_action(opportunity["id"], action["id"]))
+        # Nor does it take a new record naming it: a Visit here (Demo Requests, Quotations, RFQs and Bookings
+        # are refused the same way in their services).
+        with self.assertRaises(CrmApiException) as linked:
+            create_visit({
+                "accountId": account["id"], "primaryContactId": contact["id"], "opportunityId": opportunity["id"],
+                "subject": "Archived visit", "date": "2026-08-20", "type": "On-site", "owner": self.other_sales,
+                "objective": "Confirm evaluation criteria",
+            })
+        self.assertEqual((linked.exception.code, linked.exception.public_message), ("INVALID_TRANSITION", ARCHIVED_OPPORTUNITY_LINK))
+        self.assertEqual(counts(), before)
+        self.assertEqual(frappe.db.get_value("CRM Opportunity", opportunity["id"], "title"), "Archive II")
+        with self.assertRaises(frappe.PermissionError):
+            unarchive_strategy_opportunity(opportunity["id"])
+
+        frappe.set_user(self.manager)
+        rollback = self._code(lambda: rollback_opportunity_stage(opportunity["id"], "qualified_opportunity", "Archived", detail["modified"]))
+        self.assertEqual(rollback, ("INVALID_TRANSITION", ARCHIVED_OPPORTUNITY_EDIT))
+        restored = unarchive_strategy_opportunity(opportunity["id"])
+        self.assertFalse(restored["archived"])
+        self.assertEqual(in_cockpit(), (True, True, True))
+        self.assertEqual(on_dashboard(), (True, True))
+        self.assertNotIn("archivedAt", restored)
+        self.assertNotIn("archivedBy", restored)
         self.assertEqual(
-            delete_strategy_opportunity(opportunity["id"]),
-            {"id": opportunity["id"], "status": "Deleted"},
+            frappe.db.get_value("CRM Opportunity", opportunity["id"], ["archived", "archived_at", "archived_by"]), (0, None, None),
         )
-        self.assertFalse(frappe.db.exists("CRM Opportunity", opportunity["id"]))
-        self.assertEqual(self._probability_history_count(opportunity["id"]), 0)
-        self.assertEqual(frappe.db.count("CRM Opportunity Stage History", stage_rows), 0)
-        self.assertEqual(frappe.db.count("CRM Opportunity History", stage_rows), 0)
-        self.assertEqual(relation_counts(), (0, 0))
+        self.assertEqual(counts(), before)
+        self.assertEqual([(row["from"], row["to"]) for row in restored["history"] if row["field"] == "archived"], [("1", "0"), ("0", "1")])
+        self.assertEqual(listed({}), {opportunity["id"]})
+        self.assertEqual(unarchive_strategy_opportunity(opportunity["id"])["modified"], restored["modified"])
+        # Back as it was, the owner edits it again.
+        frappe.set_user(self.other_sales)
+        edited_again = update_strategy_opportunity(opportunity["id"], {"title": "Archive III"}, restored["modified"])
+        self.assertEqual(edited_again["title"], "Archive III")
+        # Archived again (the tests of this class share one transaction, and the scope test below counts what the
+        # other Sales user sees): out of the unpaginated list as well.
+        frappe.set_user(self.manager)
+        archive_strategy_opportunity(opportunity["id"])
+        self.assertNotIn(opportunity["id"], {row["id"] for row in list_strategy_opportunities()})
+
+    def _code(self, call):
+        with self.assertRaises(CrmApiException) as refusal:
+            call()
+        return refusal.exception.code, refusal.exception.public_message
+
+    def test_a_visit_naming_an_opportunity_archived_after_the_first_read_is_refused_under_its_lock(self):
+        account, site = self._account_site(self.sales, "ArchiveVisit")
+        contact = create_contact({
+            "accountId": account["id"], "name": "ArchiveVisit Contact", "title": "Director",
+            "department": "Engineering", "phone": "13800000002",
+            "email": "archive-visit@example.invalid", "relationship": "Developing",
+            "owner": self.sales, "status": "Active",
+        })
+        opportunity = create_strategy_opportunity(self._input(account, site, self.sales))
+        frappe.set_user(self.manager)
+        archive_strategy_opportunity(opportunity["id"])
+        frappe.set_user(self.sales)
+        # The first read misses the archive, as one committed after this request's snapshot would; the read under the
+        # Opportunity's lock sees it, before anything is inserted.
+        real_read = visit_service.opportunity_archived
+        reads: list[bool] = []
+
+        def locked_read(name, *, for_update=False):
+            reads.append(for_update)
+            return real_read(name, for_update=for_update)
+
+        with patch.object(visit_service, "_validate_opportunity", side_effect=lambda opportunity_id, account_id: str(opportunity_id or "").strip()), \
+                patch.object(visit_service, "opportunity_archived", side_effect=locked_read):
+            refusal = self._code(lambda: create_visit({
+                "accountId": account["id"], "primaryContactId": contact["id"], "opportunityId": opportunity["id"],
+                "subject": "Archived visit", "date": "2026-08-20", "type": "On-site", "owner": self.sales,
+                "objective": "Confirm evaluation criteria",
+            }))
+        self.assertEqual(refusal, ("INVALID_TRANSITION", ARCHIVED_OPPORTUNITY_LINK))
+        self.assertEqual(reads, [True])
+        self.assertEqual(frappe.db.count("CRM Visit", {"opportunity": opportunity["id"]}), 0)
+
+    def test_a_missing_opportunity_is_answered_with_its_own_not_found_alone(self):
+        frappe.set_user(self.manager)
+        frappe.clear_messages()
+        # The locking read of a writer (a stakeholder here) raises Frappe's "not found", whose message is dropped.
+        refusal = self._code(lambda: create_opportunity_stakeholder("CRM-OPP-NOBODY", {
+            "contactId": "CONTACT-NOBODY", "role": "Coach", "influence": "Low", "stance": "Neutral", "coverage": "Monthly",
+        }))
+        self.assertEqual(refusal, ("NOT_FOUND", "Opportunity was not found."))
+        self.assertEqual(frappe.local.message_log, [])
+
+    def test_an_opportunity_with_a_booking_not_cancelled_is_archived_only_once_it_is_cancelled(self):
+        account, site = self._account_site(self.sales, "ArchiveBooking")
+        contact = create_contact({
+            "accountId": account["id"], "name": "ArchiveBooking Contact", "title": "Director",
+            "department": "Engineering", "phone": "13800000002",
+            "email": "archive-booking@example.invalid", "relationship": "Developing",
+            "owner": self.sales, "status": "Active",
+        })
+        opportunity = create_strategy_opportunity(self._input(account, site, self.sales))
+        current = advance_opportunity_fixture(opportunity, "po_received", booking={
+            "primaryContactId": contact["id"], "equipment": "Inspection 3000", "quantity": 1,
+            "ddl": "2027-01-31", "amount": "200000.00", "currency": "CNY", "owner": self.sales, "note": "PO",
+        })
+        booking = get_booking(current["liveBooking"]["id"])
+        self.assertEqual(booking["status"], "Confirmed")
+
+        frappe.set_user(self.manager)
+        self.assertEqual(self._code(lambda: archive_strategy_opportunity(opportunity["id"])), ("INVALID_TRANSITION", OPPORTUNITY_WITH_BOOKING_ARCHIVE))
+        self.assertEqual(frappe.db.get_value("CRM Opportunity", opportunity["id"], "archived"), 0)
+
+        frappe.set_user(self.sales)
+        cancelled = update_booking(booking["id"], {"status": "Cancelled"}, booking["modified"])
+        self.assertEqual(cancelled["status"], "Cancelled")
+        frappe.set_user(self.manager)
+        archived = archive_strategy_opportunity(opportunity["id"])
+        self.assertTrue(archived["archived"])
+        # The Booking of an archived Opportunity is part of what was archived: it takes no change either.
+        frappe.set_user(self.sales)
+        self.assertEqual(self._code(lambda: update_booking(booking["id"], {"note": "Edited while archived"}, cancelled["modified"])), ("INVALID_TRANSITION", ARCHIVED_OPPORTUNITY_EDIT))
+        self.assertEqual(frappe.db.get_value("CRM Booking", booking["id"], "note"), "PO")
 
     def test_competitors_are_stored_per_row_and_validated(self):
         account, site = self._account_site(self.sales, "Competitors")

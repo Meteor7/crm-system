@@ -125,6 +125,33 @@ class TestBlueSheet(FrappeTestCase):
             self.assertEqual(updated["probabilityHistory"][0]["recovery"]["plan"], "Meet the economic buyer")
             self.assertEqual(len([row for row in updated["history"] if row["field"] == "blueSheetSuggestion"]), 2)
 
+    def test_an_archived_opportunity_takes_no_red_flag_and_no_suggestion_until_the_restore(self):
+        from rayher_crm.services.opportunity_archive import ARCHIVED_OPPORTUNITY_EDIT
+        with patch.dict(frappe.conf, {"crm_blue_sheet_probability_rules": sample_rules()}):
+            self.assertTrue(blue_sheet.get_assessment(self.name)["canApply"])
+            frappe.set_user(self.manager)
+            opportunities.archive_strategy_opportunity(self.name)
+            frappe.set_user(self.sales)
+            archived = self.current()
+            assessment = blue_sheet.get_assessment(self.name)
+            self.assertFalse(assessment["canApply"])
+            for attempt in (
+                lambda: self.save([{"text": "No budget evidence", "severity": "High", "status": "Open"}], archived["modified"]),
+                lambda: blue_sheet.apply_suggestion(self.name, {"fingerprint": assessment["fingerprint"]}, archived["modified"]),
+            ):
+                with self.assertRaises(CrmApiException) as refused:
+                    attempt()
+                self.assertEqual((refused.exception.code, refused.exception.public_message), ("INVALID_TRANSITION", ARCHIVED_OPPORTUNITY_EDIT))
+            current = self.current()
+            self.assertEqual(
+                (current["redFlagRecords"], current["probabilityLevel"], current["modified"]),
+                (archived["redFlagRecords"], archived["probabilityLevel"], archived["modified"]),
+            )
+            frappe.set_user(self.manager)
+            opportunities.unarchive_strategy_opportunity(self.name)
+            frappe.set_user(self.sales)
+            self.assertTrue(blue_sheet.get_assessment(self.name)["canApply"])
+
     def test_old_suggestion_rejects_changed_stakeholders_rules_and_owner(self):
         config = sample_rules()
         with patch.dict(frappe.conf, {"crm_blue_sheet_probability_rules": config}):

@@ -18,7 +18,18 @@ from rayher_crm.services.demo_requests import (
     transition_demo_request,
     update_demo_request,
 )
-from rayher_crm.services.opportunities import create_strategy_opportunity, mark_opportunity_lost
+from rayher_crm.services.opportunities import (
+    archive_strategy_opportunity,
+    create_strategy_opportunity,
+    mark_opportunity_lost,
+    unarchive_strategy_opportunity,
+)
+from rayher_crm.services.evaluations import terminate_evaluation
+from rayher_crm.services.opportunity_archive import (
+    ARCHIVED_OPPORTUNITY_LINK,
+    OPPORTUNITY_WITH_DEMO_REQUEST_ARCHIVE,
+    OPPORTUNITY_WITH_DEMO_TEST_ARCHIVE,
+)
 from rayher_crm.services.opportunity_stages import CUSTOMER_BUDGET_APPROVED, DEMO_DONE, QUALIFIED_OPPORTUNITY
 from rayher_crm.services.sites import create_site
 from rayher_crm.tests._opportunity_fixtures import advance_opportunity_fixture
@@ -580,6 +591,108 @@ class TestDemoRequestApi(FrappeTestCase):
             "resourceWindow": "Week 48", "estimatedCompletionDate": "2026-12-20",
             "technicalRisk": "Sample contamination", "comment": "Feasible",
         }
+
+    def test_an_opportunity_is_archived_only_once_its_demo_request_and_demo_test_have_ended(self):
+        opportunity_id = self.opportunity["id"]
+
+        def refused(message, call):
+            with self.assertRaises(CrmApiException) as raised:
+                call()
+            self.assertEqual((raised.exception.code, raised.exception.public_message), ("INVALID_TRANSITION", message))
+
+        def archive_refused(message):
+            frappe.set_user(self.manager)
+            before = frappe.db.get_value("CRM Opportunity", opportunity_id, "modified")
+            refused(message, lambda: archive_strategy_opportunity(opportunity_id))
+            self.assertEqual(frappe.db.get_value("CRM Opportunity", opportunity_id, ["archived", "modified"]), (0, before))
+
+        # A Demo Request in progress is work under way on the Opportunity (a draft, one in the Engineer's review, one
+        # waiting for the Manager): the archive waits for it.
+        frappe.set_user(self.sales)
+        request = create_demo_request(self._input())
+        archive_refused(OPPORTUNITY_WITH_DEMO_REQUEST_ARCHIVE)
+        frappe.set_user(self.sales)
+        transition_demo_request(request["id"], {"type": "submit"})
+        archive_refused(OPPORTUNITY_WITH_DEMO_REQUEST_ARCHIVE)
+        frappe.set_user(self.engineer)
+        transition_demo_request(request["id"], self._engineer_approval())
+        archive_refused(OPPORTUNITY_WITH_DEMO_REQUEST_ARCHIVE)
+        # Approved, the request has ended and its demo test runs: the archive waits for the test to end.
+        test = transition_demo_request(request["id"], {"type": "manager_approve"})["evaluation"]
+        archive_refused(OPPORTUNITY_WITH_DEMO_TEST_ARCHIVE)
+        frappe.set_user(self.engineer)
+        terminate_evaluation(test["id"], {"reason": "Customer withdrew"}, test["modified"])
+
+        # Nothing of it is in progress now. Archived, it takes no new Demo Request until the restore.
+        frappe.set_user(self.manager)
+        self.assertTrue(archive_strategy_opportunity(opportunity_id)["archived"])
+        frappe.set_user(self.sales)
+        refused(ARCHIVED_OPPORTUNITY_LINK, lambda: create_demo_request(self._input(requirementId="REQ-ARCHIVED")))
+        self.assertEqual(frappe.db.count("CRM Demo Request", {"opportunity": opportunity_id}), 1)
+        frappe.set_user(self.manager)
+        unarchive_strategy_opportunity(opportunity_id)
+        # A cancelled Demo Request has ended as well.
+        frappe.set_user(self.sales)
+        second = create_demo_request(self._input(requirementId="REQ-AFTER-RESTORE"))
+        archive_refused(OPPORTUNITY_WITH_DEMO_REQUEST_ARCHIVE)
+        frappe.set_user(self.sales)
+        transition_demo_request(second["id"], {"type": "cancel", "comment": "Dropped"})
+        frappe.set_user(self.manager)
+        self.assertTrue(archive_strategy_opportunity(opportunity_id)["archived"])
+
+    def test_the_archive_sees_a_demo_request_committed_after_its_snapshot(self):
+        self.assertTrue(frappe.local.site.endswith(".test"))
+        request_id = f"CRM-DR-ARCHIVE-{frappe.generate_hash(length=10)}"
+        connection = frappe.local.db._get_connection()
+        try:
+            # Another request starts a Demo Request for the Opportunity and commits it after this request's snapshot
+            # was taken: this request does not see it; the archive reads it as committed, on a connection of its own.
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    "INSERT INTO `tabCRM Demo Request` (`name`, `creation`, `modified`, `modified_by`, `owner`, "
+                    "`docstatus`, `idx`, `opportunity`, `status`) "
+                    "VALUES (%s, NOW(6), NOW(6), 'Administrator', 'Administrator', 0, 0, %s, 'Draft')",
+                    (request_id, self.opportunity["id"]),
+                )
+            connection.commit()
+            self.assertFalse(frappe.db.exists("CRM Demo Request", request_id))
+            frappe.set_user(self.manager)
+            with self.assertRaises(CrmApiException) as refused:
+                archive_strategy_opportunity(self.opportunity["id"])
+            self.assertEqual((refused.exception.code, refused.exception.public_message), ("INVALID_TRANSITION", OPPORTUNITY_WITH_DEMO_REQUEST_ARCHIVE))
+            self.assertEqual(frappe.db.get_value("CRM Opportunity", self.opportunity["id"], "archived"), 0)
+        finally:
+            with connection.cursor() as cursor:
+                cursor.execute("DELETE FROM `tabCRM Demo Request` WHERE `name` = %s", (request_id,))
+            connection.commit()
+            connection.close()
+
+    def test_a_demo_request_started_as_its_opportunity_is_archived_is_refused_under_its_lock(self):
+        from rayher_crm.services import demo_requests as demo_service
+
+        frappe.set_user(self.manager)
+        archive_strategy_opportunity(self.opportunity["id"])
+        frappe.set_user(self.sales)
+        # The first read misses the archive, as one committed after this request's snapshot would; the read under the
+        # Opportunity's lock, before the insert, sees it.
+        with patch.object(demo_service, "_validate_opportunity", side_effect=lambda opportunity_id, account_id: str(opportunity_id or "").strip()):
+            with patch.object(frappe.db, "sql", wraps=frappe.db.sql) as queries, self.assertRaises(CrmApiException) as refused:
+                create_demo_request(self._input(requirementId="REQ-ARCHIVED-RACE"))
+        self.assertEqual((refused.exception.code, refused.exception.public_message), ("INVALID_TRANSITION", ARCHIVED_OPPORTUNITY_LINK))
+        self.assertEqual(frappe.db.count("CRM Demo Request", {"opportunity": self.opportunity["id"]}), 0)
+        # A locking read (in one transaction, a snapshot read would see the archive too).
+        statements = [" ".join(str(call.args[0]).split()) for call in queries.call_args_list if call.args]
+        self.assertTrue(any(
+            "FROM `tabCRM Opportunity`" in statement and "`archived`" in statement and statement.endswith("FOR UPDATE")
+            for statement in statements
+        ))
+
+    def test_the_archive_reads_a_demo_request_and_a_demo_test_as_ended_in_their_own_final_statuses(self):
+        from rayher_crm.services import evaluations, opportunities
+        from rayher_crm.services.demo_requests import FINISHED_STATUSES
+
+        self.assertEqual(set(opportunities.DEMO_REQUEST_ENDED), set(FINISHED_STATUSES))
+        self.assertEqual(set(opportunities.DEMO_TEST_ENDED), set(evaluations.TERMINAL_STATUSES))
 
     def test_role_state_machine_reassignment_and_history_actor(self):
         frappe.set_user(self.sales)

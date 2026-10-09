@@ -128,7 +128,10 @@ def _source(payload) -> tuple[str, str, str, str | None]:
     today = frappe.utils.now_datetime().date()
 
     def stage(opportunity, lock=True):
-        return frappe.db.get_value("CRM Opportunity", opportunity, "stage", for_update=lock) if opportunity else None
+        # An archived Opportunity (a Manager's archive, in place of a delete) has no current warning: its
+        # stage reads as none, and the page showing the old warning is told to reload.
+        row = frappe.db.get_value("CRM Opportunity", opportunity, ["stage", "archived"], as_dict=True, for_update=lock) if opportunity else None
+        return row.stage if row and not row.archived else None
 
     if kind == "overdue":
         parent = frappe.db.get_value("CRM Opportunity Action", source_id, "opportunity")
@@ -141,9 +144,12 @@ def _source(payload) -> tuple[str, str, str, str | None]:
     if kind == "quotation_expiry":
         row = frappe.db.get_value("CRM Quotation", source_id, ["opportunity", "current_published_version"], as_dict=True, for_update=True)
         version = frappe.db.get_value("CRM Quotation Version", event, ["quotation", "status", "valid_until"], as_dict=True) if row else None
+        # The quotation of a closed deal, or of an archived one (its stage reads as none), is no warning. The stage is
+        # read under the Opportunity's lock, after the Quotation's: the order the Quotation's writers take them in.
+        parent_stage = stage(row.opportunity) if row and row.opportunity else ""
         if (not row or row.current_published_version != event or not version or version.quotation != source_id
                 or version.status != "Published" or not version.valid_until or str(version.valid_until)[:10] < today.isoformat()
-                or stage(row.opportunity, lock=False) in {"po_received", "lost"}):
+                or parent_stage is None or parent_stage in {"po_received", "lost"}):
             raise _gone()
         return kind, source_id, event, row.opportunity or None
     if kind == "close_date_slip":

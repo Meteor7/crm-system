@@ -544,6 +544,25 @@ class TestCockpitMetrics(unittest.TestCase):
         self.assertEqual([r["id"] for r in quotation_expiry(data, {"equipment": "Kibo"}, NOW, 14, NOW)["items"]], ["q-exp"])
         self.assertEqual(quotation_expiry(data, {"equipment": "Nansi"}, NOW, 14, NOW)["items"], [])
 
+    def test_quotation_expiry_leaves_an_archived_opportunitys_quotation_out_and_keeps_the_count_whole(self):
+        data = fixture()
+        data["quotes"] = [
+            {"name": name, "account": "c", "quotation_owner": "alice", "status": "Published", "opportunity": opportunity, "current_published_version": version}
+            for name, opportunity, version in (("q-live", "opp-live", "v-live"), ("q-gone", "opp-gone", "v-gone"))
+        ]
+        data["versions"] = [
+            {"name": version, "quotation": name, "version_no": 1, "published_at": "2026-09-01", "account": "c", "quotation_owner": "alice",
+             "status": "Published", "valid_until": "2026-09-20"}
+            for name, version in (("q-live", "v-live"), ("q-gone", "v-gone"))
+        ]
+        # The archived deal travels with its stage (cockpit.load_data reads both): its quotation is no warning,
+        # as a closed deal's is not, and the count stays a clean number.
+        data["quotation_opportunities"] = [{"name": "opp-live", "stage": "quotation_sent", "tool_type": "KIBO", "archived": 0},
+                                           {"name": "opp-gone", "stage": "quotation_sent", "tool_type": "KIBO", "archived": 1}]
+        result = quotation_expiry(data, {}, NOW, 14, NOW)
+        self.assertEqual([r["id"] for r in result["items"]], ["q-live"])
+        self.assertEqual(result["count"], {"value": 1, "state": "ready", "reason": None})
+
     def test_stage6_without_po_flags_deals_in_internal_validation_past_the_threshold(self):
         data = fixture()
         data["opportunities"][0]["stage"] = "internal_validation"

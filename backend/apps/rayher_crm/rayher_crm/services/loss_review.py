@@ -111,7 +111,8 @@ def review_loss(opportunity_id: str, review_id: str, payload: dict, expected_mod
     assert_capability("deal:write")
     if resolve_crm_role() != "Manager":
         raise CrmApiException("PERMISSION_DENIED", "Only a Manager can confirm a lost-deal post-mortem.")
-    # The Opportunity first, the order the delete and every other writer under it lock in; the review row next.
+    # The Opportunity first, the order its archive and every other writer under it lock in (an archived
+    # Opportunity is refused there); the review row next.
     _require_opportunity(opportunity_id, for_update=True)
     status = validate_choice(payload.get("status"), "status", set(REVIEW_STATUSES))
     # Marking done needs the conclusion. Reverting needs its own reason (FR-K9-02) and keeps the

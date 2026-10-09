@@ -35,6 +35,11 @@ const FIXED_MESSAGES: Partial<Record<string, Record<string, CopyPair>>> = {
     'An Opportunity Booking cannot be archived; cancel it instead.': ['An Opportunity Booking cannot be archived; cancel it instead.', '商机来源的 Booking 不能归档，请改为取消。'],
     'An archived Booking cannot be changed; a Manager can restore it from the archive.': ['This Booking is archived and cannot be changed; a Manager can restore it from the archive.', '该 Booking 已归档，不能修改；经理可取消归档。'],
     'A completed Booking is the record of a delivered order and cannot be archived.': ['A completed Booking is the record of a delivered order and cannot be archived.', '已完成的 Booking 是交付记录，不能归档。'],
+    'An archived Opportunity cannot be changed; a Manager can restore it from the archive.': ['This Opportunity is archived and cannot be changed; a Manager can restore it from the archive.', '该商机已归档，不能修改；经理可取消归档。'],
+    'An archived Opportunity takes no new record; a Manager can restore it from the archive.': ['This Opportunity is archived and takes no new record; a Manager can restore it from the archive.', '该商机已归档，不能新增关联记录；经理可取消归档。'],
+    'An Opportunity with a Booking that is not cancelled cannot be archived; cancel the Booking first.': ['An Opportunity with a Booking that is not cancelled cannot be archived. Cancel the Booking first.', '商机还有未取消的 Booking，不能归档；请先取消该 Booking。'],
+    'An Opportunity with a Demo Request in progress cannot be archived; cancel the Demo Request first.': ['An Opportunity with a Demo Request in progress cannot be archived. Cancel the Demo Request first; one under review is returned or rejected before that.', '商机还有进行中的 Demo Request，不能归档；请先取消该 Demo Request（审核中的需先退回或驳回）。'],
+    'An Opportunity with a demo test in progress cannot be archived; finish or terminate the demo test first.': ['An Opportunity with a demo test in progress cannot be archived. Finish or terminate the demo test first.', '商机还有进行中的 Demo 测试，不能归档；请先完成或终止该测试。'],
   },
   VALIDATION_ERROR: {
     'Invalid Review period or anchor.': ['This period cannot be shown. Choose another date.', '无法显示这个周期，请重新选择日期。'],

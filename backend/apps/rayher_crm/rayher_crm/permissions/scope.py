@@ -164,7 +164,8 @@ STAKEHOLDER_DOCPERMS = {
     "CRM Engineer": set(),
 }
 
-# Removed together with their Opportunity by delete_strategy_opportunity.
+# The Opportunity's own records: kept with it through its archive (a Manager archives an Opportunity instead of
+# deleting it); test fixtures that remove a committed Opportunity remove these first.
 OPPORTUNITY_CHILD_DOCTYPES = (
     "CRM Probability Recovery Revision", "CRM Probability Recovery",
     "CRM Opportunity Loss Review Revision", "CRM Opportunity Loss Review",

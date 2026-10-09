@@ -15,7 +15,7 @@ from rayher_crm.tests.test_cockpit_plan import fixture as plan_fixture
 class TestCockpitApi(FrappeTestCase):
     def test_activity_loader_follows_opportunity_links_after_customer_change(self):
         sources = {"CRM Visit": "visit", "CRM Demo Request": "request", "CRM Quotation": "quote"}
-        def records(doctype, fields, field, names):
+        def records(doctype, fields, field, names, **filters):
             if doctype == "CRM Opportunity":
                 return [{"name": "opp", "account": "new"}] if field == "account" else []
             if doctype in sources:
@@ -59,7 +59,7 @@ class TestCockpitApi(FrappeTestCase):
         for has_date in (False, True):
             with self.subTest(has_date=has_date):
                 meta = SimpleNamespace(has_field=lambda name: has_date)
-                def records(doctype, fields, field, names):
+                def records(doctype, fields, field, names, **filters):
                     if doctype == "CRM Opportunity":
                         return [{"name": "opp"}]
                     if doctype == "CRM Booking":

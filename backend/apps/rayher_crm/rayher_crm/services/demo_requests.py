@@ -12,6 +12,7 @@ import frappe
 from rayher_crm.api.v1.errors import CrmApiException
 from rayher_crm.permissions.roles import assert_capability, resolve_crm_role
 from rayher_crm.permissions.scope import conditions_for_doctype, has_crm_permission
+from rayher_crm.services.opportunity_archive import ARCHIVED_OPPORTUNITY_LINK, assert_opportunity_not_archived
 from rayher_crm.services.accounts import _require_account
 from rayher_crm.services.common import (
     ensure_server_generated_id,
@@ -94,9 +95,13 @@ def _validate_opportunity(opportunity_id: Any, account_id: str) -> str:
     if not isinstance(opportunity_id, str) or not opportunity_id.strip():
         raise CrmApiException("LINK_MISMATCH", "Opportunity must belong to the Demo Request Account.")
     opportunity_id = opportunity_id.strip()
-    if frappe.db.get_value("CRM Opportunity", opportunity_id, "account") != account_id:
+    opportunity = frappe.db.get_value("CRM Opportunity", opportunity_id, ["account", "stage", "archived"], as_dict=True)
+    if not opportunity or opportunity.account != account_id:
         raise CrmApiException("LINK_MISMATCH", "Opportunity must belong to the Demo Request Account.")
-    stage = frappe.db.get_value("CRM Opportunity", opportunity_id, "stage")
+    # No Demo Request is started for an archived Opportunity. One of its own has ended (the archive waits for every
+    # one to end), so none is edited either.
+    assert_opportunity_not_archived(opportunity.archived, ARCHIVED_OPPORTUNITY_LINK)
+    stage = opportunity.stage
     if stage not in DEMO_REQUEST_STAGES:
         raise CrmApiException(
             "INVALID_TRANSITION",
@@ -385,9 +390,11 @@ def create_demo_request(
             # Lock the Opportunity so two requests cannot both pass the active-request check,
             # and re-check its stage under that lock.
             locked = frappe.db.sql(
-                "SELECT `stage` FROM `tabCRM Opportunity` WHERE `name` = %s FOR UPDATE",
+                "SELECT `stage`, `archived` FROM `tabCRM Opportunity` WHERE `name` = %s FOR UPDATE",
                 (values["opportunity"],),
             )
+            if locked:
+                assert_opportunity_not_archived(locked[0][1], ARCHIVED_OPPORTUNITY_LINK)
             if not locked or locked[0][0] not in DEMO_REQUEST_STAGES:
                 raise CrmApiException(
                     "INVALID_TRANSITION",

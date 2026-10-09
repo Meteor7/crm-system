@@ -84,11 +84,12 @@ def _opportunities_and_actions(account_ids: set[str]) -> tuple[list[dict], list[
     assert_capability("deal:view")
     if not account_ids:
         return [], []
+    # An archived Opportunity leaves the dashboard as it leaves the pipeline, and its actions with it.
     rows = frappe.db.sql(
         f"""SELECT name, account, opportunity_owner, stage, currency,
                    CAST(amount AS CHAR) AS amount
             FROM `tabCRM Opportunity`
-            WHERE ({conditions_for_doctype('CRM Opportunity')}) AND account IN %(accounts)s
+            WHERE ({conditions_for_doctype('CRM Opportunity')}) AND account IN %(accounts)s AND archived = 0
             ORDER BY modified DESC, name DESC""",
         {"accounts": tuple(sorted(account_ids))}, as_dict=True,
     )

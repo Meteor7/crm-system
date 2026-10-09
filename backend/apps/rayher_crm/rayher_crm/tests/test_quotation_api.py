@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import os
+from contextlib import ExitStack
 from copy import deepcopy
 from datetime import datetime
 from html import unescape
@@ -13,7 +15,13 @@ from frappe.utils import random_string
 from rayher_crm.api.v1.errors import CrmApiException
 from rayher_crm.services.accounts import create_account, get_account_360
 from rayher_crm.services.contacts import create_contact
-from rayher_crm.services.opportunities import create_strategy_opportunity
+from rayher_crm.services import quotations as quotation_service
+from rayher_crm.services.opportunities import (
+    archive_strategy_opportunity,
+    create_strategy_opportunity,
+    unarchive_strategy_opportunity,
+)
+from rayher_crm.services.opportunity_archive import ARCHIVED_OPPORTUNITY_EDIT, ARCHIVED_OPPORTUNITY_LINK
 from rayher_crm.services.opportunity_stages import (
     CUSTOMER_BUDGET_APPROVED,
     QUALIFIED_OPPORTUNITY,
@@ -761,11 +769,14 @@ class TestQuotationApi(FrappeTestCase):
 
     def test_a_creation_that_another_beats_to_the_opportunity_is_told_it_has_its_quotation(self):
         opportunity = self._opportunity()
-        # The other request's Quotation was committed after this request's snapshot was taken: the check before
-        # the attempts does not see it. However an attempt then meets it (the insert tripping on the Opportunity's
-        # unique key, and the rollback that follows), the creation is told the Opportunity has its Quotation.
+        # The other Quotation was given the Opportunity some other way, not under its lock (a creation and a link look
+        # for it under that lock, and are told), and committed after this request's snapshot and its first look:
+        # neither the check before the attempts nor that look sees it. The attempt then meets it (the insert tripping
+        # on the Opportunity's unique key, and the rollback that follows), and the next attempt's look tells the
+        # creation the Opportunity has its Quotation.
         other = create_quotation({"opportunityId": opportunity["id"]})
         exists, unseen = frappe.db.exists, []
+        look, missed = quotation_service._assert_opportunity_has_no_quotation, []
 
         def before_the_other(doctype, filters=None, *args, **kwargs):
             if doctype == "CRM Quotation" and filters == {"opportunity": opportunity["id"]} and not unseen:
@@ -773,9 +784,17 @@ class TestQuotationApi(FrappeTestCase):
                 return None
             return exists(doctype, filters, *args, **kwargs)
 
+        def first_look_misses(name, linking=""):
+            if not missed:
+                missed.append(name)
+                return None
+            return look(name, linking)
+
         messages = len(frappe.local.message_log)
-        rolled_back, _ = self._request_rollbacks()
-        with rolled_back, patch.object(frappe.db, "exists", side_effect=before_the_other):
+        rolled_back, rollbacks = self._request_rollbacks()
+        with rolled_back, patch.object(frappe.db, "exists", side_effect=before_the_other), patch.object(
+            quotation_service, "_assert_opportunity_has_no_quotation", side_effect=first_look_misses
+        ):
             with self.assertRaises(CrmApiException) as refused:
                 create_quotation({"opportunityId": opportunity["id"]})
 
@@ -783,6 +802,7 @@ class TestQuotationApi(FrappeTestCase):
             (refused.exception.code, refused.exception.public_message),
             ("CONFLICT", "This Opportunity already has a Quotation."),
         )
+        self.assertEqual((missed, len(rollbacks)), ([opportunity["id"]], 1))
         # Frappe's "must be unique" for a refused insert is not left behind for the answer to carry.
         self.assertEqual(len(frappe.local.message_log), messages)
         self.assertEqual(
@@ -1328,6 +1348,284 @@ class TestQuotationApi(FrappeTestCase):
         self.assertEqual(version.status, "Accepted")
         self.assertEqual(master.status, "Accepted")
 
+    def test_a_quotation_of_an_archived_opportunity_is_frozen_with_it_and_none_is_started_or_linked(self):
+        saved, _ = self._ready_quotation()
+        other = self._opportunity()
+        unlinked = create_quotation({"accountId": other["accountId"]})
+        frappe.set_user(self.manager)
+        for name in (saved["quotation"]["opportunityId"], other["id"]):
+            archive_strategy_opportunity(name)
+
+        frappe.set_user(self.sales)
+        for message, call in (
+            (ARCHIVED_OPPORTUNITY_EDIT, lambda: submit_for_approval(saved["quotation"]["id"], saved["version"]["modified"])),
+            (ARCHIVED_OPPORTUNITY_LINK, lambda: create_quotation({"opportunityId": other["id"]})),
+            (ARCHIVED_OPPORTUNITY_LINK, lambda: link_quotation_opportunity(unlinked["quotation"]["id"], other["id"], unlinked["version"]["modified"])),
+        ):
+            with self.assertRaises(CrmApiException) as refused:
+                call()
+            self.assertEqual((refused.exception.code, refused.exception.public_message), ("INVALID_TRANSITION", message))
+        self.assertEqual(frappe.db.get_value("CRM Quotation Version", saved["version"]["id"], "approval_status"), "Not Submitted")
+        self.assertFalse(frappe.db.get_value("CRM Quotation", unlinked["quotation"]["id"], "opportunity"))
+        self.assertEqual(frappe.db.count("CRM Quotation", {"opportunity": other["id"]}), 0)
+
+    def test_every_write_of_a_quotation_of_an_archived_opportunity_waits_for_the_restore(self):
+        def refused(call):
+            with self.assertRaises(CrmApiException) as raised:
+                call()
+            self.assertEqual((raised.exception.code, raised.exception.public_message), ("INVALID_TRANSITION", ARCHIVED_OPPORTUNITY_EDIT))
+
+        draft, payload = self._ready_quotation()
+        pending, _ = self._ready_quotation()
+        pending = submit_for_approval(pending["quotation"]["id"], pending["version"]["modified"])
+        published, _ = self._ready_quotation()
+        published = self._publish(published["quotation"]["id"], published["version"]["modified"])
+        shapes = (draft, pending, published)
+        draft_id, pending_id, published_id = (shape["quotation"]["id"] for shape in shapes)
+        self.assertEqual([get_quotation(name)["quotation"]["opportunityArchived"] for name in (draft_id, pending_id, published_id)], [False] * 3)
+        frappe.set_user(self.manager)
+        for shape in shapes:
+            archive_strategy_opportunity(shape["quotation"]["opportunityId"])
+
+        # Frozen with its Opportunity, and said so: no draft saved or discarded, no submission, no new version, no
+        # customer decision, no approval either way, no publication.
+        frappe.set_user(self.sales)
+        self.assertEqual([get_quotation(name)["quotation"]["opportunityArchived"] for name in (draft_id, pending_id, published_id)], [True] * 3)
+        refused(lambda: save_draft(draft_id, payload, draft["version"]["modified"]))
+        refused(lambda: discard_draft(draft_id, draft["version"]["modified"]))
+        refused(lambda: submit_for_approval(draft_id, draft["version"]["modified"]))
+        refused(lambda: create_version(published_id))
+        refused(lambda: record_decision(published_id, "Accepted", "2026-10-01", "Signed", published["version"]["modified"]))
+        frappe.set_user(self.manager)
+        refused(lambda: review_approval(pending_id, "Rejected", "Too expensive", pending["version"]["modified"]))
+        refused(lambda: review_approval(pending_id, "Approved", "", pending["version"]["modified"]))
+        refused(lambda: publish_version(draft_id, draft["version"]["modified"]))
+        self.assertTrue(frappe.db.exists("CRM Quotation", draft_id))
+        self.assertEqual(frappe.db.get_value("CRM Quotation Version", draft["version"]["id"], ["status", "approval_status"]), ("Draft", "Not Submitted"))
+        self.assertEqual(frappe.db.get_value("CRM Quotation Version", pending["version"]["id"], "approval_status"), "Pending")
+        self.assertEqual(frappe.db.get_value("CRM Quotation", published_id, ["latest_version_no", "status"]), (1, "Published"))
+
+        # Restored, the Quotation takes its writes again.
+        unarchive_strategy_opportunity(draft["quotation"]["opportunityId"])
+        frappe.set_user(self.sales)
+        self.assertFalse(get_quotation(draft_id)["quotation"]["opportunityArchived"])
+        self.assertEqual(save_draft(draft_id, payload, draft["version"]["modified"])["version"]["status"], "Draft")
+
+    def test_a_quotation_started_or_linked_as_its_opportunity_is_archived_is_refused_under_its_lock(self):
+        target = self._opportunity()
+        unlinked = create_quotation({"accountId": target["accountId"]})
+        frappe.set_user(self.manager)
+        archive_strategy_opportunity(target["id"])
+        frappe.set_user(self.sales)
+
+        def stale(name, archived_message=ARCHIVED_OPPORTUNITY_LINK):
+            # The first read misses the archive, as one committed after this request's snapshot would.
+            doc = frappe.get_doc("CRM Opportunity", name)
+            doc.archived = 0
+            return doc
+
+        prefix = f"PK{frappe.utils.getdate(frappe.utils.today()).strftime('%Y%m%d')}-A"
+        counter = frappe.db.sql("SELECT `current` FROM `tabSeries` WHERE `name` = %s", (prefix,))
+        with patch.object(quotation_service, "_require_opportunity", side_effect=stale):
+            for call in (
+                lambda: create_quotation({"opportunityId": target["id"]}),
+                lambda: link_quotation_opportunity(unlinked["quotation"]["id"], target["id"], unlinked["version"]["modified"]),
+            ):
+                with self.assertRaises(CrmApiException) as refused:
+                    call()
+                self.assertEqual((refused.exception.code, refused.exception.public_message), ("INVALID_TRANSITION", ARCHIVED_OPPORTUNITY_LINK))
+        # The read under the Opportunity's lock saw it, before anything was written: no Quotation, no reference counted
+        # for the day, the other not linked.
+        self.assertEqual(frappe.db.count("CRM Quotation", {"opportunity": target["id"]}), 0)
+        self.assertEqual(frappe.db.sql("SELECT `current` FROM `tabSeries` WHERE `name` = %s", (prefix,)), counter)
+        self.assertEqual(frappe.db.count("CRM Quotation Version", {"opportunity": target["id"]}), 0)
+        self.assertFalse(frappe.db.get_value("CRM Quotation", unlinked["quotation"]["id"], "opportunity"))
+
+    def test_a_quotation_takes_its_opportunitys_row_before_writing_its_own_and_so_does_a_link(self):
+        opportunity = self._opportunity()
+        real_read, real_look, real_lock = (
+            quotation_service.opportunity_archived,
+            quotation_service._assert_opportunity_has_no_quotation,
+            quotation_service._lock_quotation,
+        )
+        events: list[tuple] = []
+
+        def locked_read(name, *, for_update=False):
+            # And whether the Opportunity has a Quotation's row yet, as this request sees it.
+            events.append(("opportunity", for_update, bool(frappe.db.exists("CRM Quotation", {"opportunity": name}))))
+            return real_read(name, for_update=for_update)
+
+        def look(name, linking=""):
+            events.append(("its quotation looked for",))
+            return real_look(name, linking)
+
+        def lock_quotation(name):
+            events.append(("quotation",))
+            return real_lock(name)
+
+        real_sql = frappe.db.sql
+        statements: list[str] = []
+
+        def sql(query, *args, **kwargs):
+            statements.append(" ".join(str(query).split()))
+            return real_sql(query, *args, **kwargs)
+
+        def watched():
+            stack = ExitStack()
+            stack.enter_context(patch.object(quotation_service, "opportunity_archived", side_effect=locked_read))
+            stack.enter_context(patch.object(quotation_service, "_assert_opportunity_has_no_quotation", side_effect=look))
+            stack.enter_context(patch.object(quotation_service, "_lock_quotation", side_effect=lock_quotation))
+            stack.enter_context(patch.object(frappe.db, "sql", side_effect=sql))
+            return stack
+
+        def unlocked_looks():
+            # The unique `opportunity` is never read with a lock (it would take the gap that the Opportunities
+            # without a Quotation share): the look, and every other statement of the two paths.
+            looks = [statement for statement in statements if "`tabCRM Quotation`" in statement and "`opportunity` =" in statement]
+            self.assertTrue(looks)
+            self.assertFalse([statement for statement in looks if "FOR UPDATE" in statement or "LOCK IN SHARE MODE" in statement], looks)
+
+        # The creation: the Opportunity's row, read under its lock, and its Quotation looked for before the
+        # Quotation's row is written.
+        with watched():
+            create_quotation({"opportunityId": opportunity["id"]})
+        self.assertEqual(events, [("opportunity", True, False), ("its quotation looked for",)])
+        self.assertEqual(frappe.db.count("CRM Quotation", {"opportunity": opportunity["id"]}), 1)
+        unlocked_looks()
+
+        # The link: the Opportunity's row and its Quotation looked for before the Quotation's row, the order the
+        # creation takes them in, so a link and a creation of one Opportunity never wait on each other over it.
+        other = self._opportunity()
+        unlinked = create_quotation({"accountId": other["accountId"]})
+        events.clear()
+        statements.clear()
+        with watched():
+            link_quotation_opportunity(unlinked["quotation"]["id"], other["id"], unlinked["version"]["modified"])
+        self.assertEqual(events[:3], [("opportunity", True, False), ("its quotation looked for",), ("quotation",)])
+        unlocked_looks()
+
+        # The second link to the Opportunity is told it has its Quotation, before the Quotation's row is waited for.
+        second = create_quotation({"accountId": other["accountId"]})
+        events.clear()
+        with watched(), self.assertRaises(CrmApiException) as taken:
+            link_quotation_opportunity(second["quotation"]["id"], other["id"], second["version"]["modified"])
+        self.assertEqual((taken.exception.code, taken.exception.public_message), ("CONFLICT", "This Opportunity already has a Quotation."))
+        self.assertNotIn(("quotation",), events)
+        self.assertFalse(frappe.db.get_value("CRM Quotation", second["quotation"]["id"], "opportunity"))
+
+        # A Quotation linked to the Opportunity already (a stale page) is told so, before its row is waited for (its
+        # writers take it, then the Opportunity's).
+        linked_modified = get_quotation(unlinked["quotation"]["id"])["version"]["modified"]
+        events.clear()
+        with watched(), self.assertRaises(CrmApiException) as linked:
+            link_quotation_opportunity(unlinked["quotation"]["id"], other["id"], linked_modified)
+        self.assertEqual(linked.exception.public_message, "This Quotation is already linked to an Opportunity.")
+        self.assertNotIn(("quotation",), events)
+
+    def test_a_quotations_creation_takes_its_opportunitys_row_and_looks_again_on_each_attempt(self):
+        opportunity = self._opportunity()
+        taken = create_quotation({"accountId": opportunity["accountId"]})["quotation"]["refNo"]
+        real_read, real_look, real_ref = (
+            quotation_service.opportunity_archived,
+            quotation_service._assert_opportunity_has_no_quotation,
+            quotation_service._next_ref_no,
+        )
+        events: list[str] = []
+        refs = [taken]  # the first attempt takes a reference another Quotation has
+
+        def locked_read(name, *, for_update=False):
+            events.append("opportunity locked" if for_update else "opportunity read")
+            return real_read(name, for_update=for_update)
+
+        def look(name, linking=""):
+            events.append("its quotation looked for")
+            return real_look(name, linking)
+
+        def next_ref(quote_date):
+            return refs.pop() if refs else real_ref(quote_date)
+
+        # The retry rolls the whole transaction back, the locks with it, so each attempt takes them again; here the
+        # rollback keeps this test's records (its own transaction), and the order of the reads shows the retry.
+        stack = ExitStack()
+        stack.enter_context(patch.object(quotation_service, "opportunity_archived", side_effect=locked_read))
+        stack.enter_context(patch.object(quotation_service, "_assert_opportunity_has_no_quotation", side_effect=look))
+        stack.enter_context(patch.object(quotation_service, "_next_ref_no", side_effect=next_ref))
+        rollback = stack.enter_context(patch.object(frappe.db, "rollback"))
+        with stack:
+            created = create_quotation({"opportunityId": opportunity["id"]})
+        self.assertEqual(events, ["opportunity locked", "its quotation looked for"] * 2)
+        rollback.assert_called_once_with()
+        self.assertNotEqual(created["quotation"]["refNo"], taken)
+        self.assertEqual(frappe.db.count("CRM Quotation", {"opportunity": opportunity["id"]}), 1)
+
+    def test_a_quotation_writer_reads_its_opportunity_under_its_lock(self):
+        saved, payload = self._ready_quotation()
+        opportunity_id = saved["quotation"]["opportunityId"]
+        real = quotation_service.opportunity_archived
+        reads: list[tuple[str, bool]] = []
+
+        def locked_read(name, *, for_update=False):
+            reads.append((name, for_update))
+            return real(name, for_update=for_update)
+
+        with patch.object(quotation_service, "opportunity_archived", side_effect=locked_read):
+            saved = save_draft(saved["quotation"]["id"], payload, saved["version"]["modified"])
+            self.assertEqual(reads, [(opportunity_id, True)])
+            reads.clear()
+            submitted = submit_for_approval(saved["quotation"]["id"], saved["version"]["modified"])
+            self.assertEqual(reads, [(opportunity_id, True)])
+            reads.clear()
+            frappe.set_user(self.manager)
+            review_approval(saved["quotation"]["id"], "Rejected", "Too expensive", submitted["version"]["modified"])
+            self.assertEqual(reads, [(opportunity_id, True)])
+
+    def test_a_publication_reads_the_archive_under_the_opportunitys_lock_after_its_pdf_and_takes_the_pdf_back(self):
+        from rayher_crm.services import opportunities as opportunity_service
+
+        real_advance = opportunity_service.advance_opportunity_for_event
+
+        def stale(name, archived_message=ARCHIVED_OPPORTUNITY_EDIT):
+            # The first read misses the archive, as one committed after this request's snapshot would.
+            doc = frappe.get_doc("CRM Opportunity", name)
+            doc.archived = 0
+            return doc
+
+        for path in ("publication", "approval"):
+            with self.subTest(path=path):
+                saved, _ = self._ready_quotation()
+                quotation_id, version_id, modified = saved["quotation"]["id"], saved["version"]["id"], saved["version"]["modified"]
+                if path == "approval":
+                    modified = submit_for_approval(quotation_id, modified)["version"]["modified"]
+                frappe.set_user(self.manager)
+                archive_strategy_opportunity(saved["quotation"]["opportunityId"])
+                pdfs: list[str] = []
+
+                def advance(name, *args, **kwargs):
+                    # The Opportunity read under its lock as it moves on: the PDF is written by now (its content lock
+                    # taken before the Opportunity's row), and its path kept, to show it leaves the disk.
+                    pdf = frappe.db.get_value("File", {"attached_to_doctype": "CRM Quotation Version", "attached_to_name": version_id}, "name")
+                    pdfs.append(frappe.get_doc("File", pdf).get_full_path())
+                    return real_advance(name, *args, **kwargs)
+
+                stack = ExitStack()
+                stack.enter_context(patch.object(quotation_service, "_require_opportunity", side_effect=stale))
+                stack.enter_context(patch.object(opportunity_service, "advance_opportunity_for_event", side_effect=advance))
+                with stack, self.assertRaises(CrmApiException) as refused:
+                    if path == "approval":
+                        review_approval(quotation_id, "Approved", "", modified)
+                    else:
+                        publish_version(quotation_id, modified)
+                self.assertEqual((refused.exception.code, refused.exception.public_message), ("INVALID_TRANSITION", ARCHIVED_OPPORTUNITY_EDIT))
+                self.assertEqual(len(pdfs), 1)
+                self.assertFalse(os.path.exists(pdfs[0]))
+                version = frappe.db.get_value("CRM Quotation Version", version_id, ["status", "approval_status", "pdf_file"], as_dict=True)
+                self.assertEqual(
+                    (version.status, version.approval_status, version.pdf_file),
+                    ("Draft", "Pending" if path == "approval" else "Not Submitted", None),
+                )
+                self.assertEqual(frappe.db.count("File", {"attached_to_doctype": "CRM Quotation Version", "attached_to_name": version_id}), 0)
+                frappe.set_user(self.sales)
+
     def test_a_published_quotation_past_its_validity_is_expired_before_the_daily_job_records_it(self):
         saved, _ = self._ready_quotation()
         published = self._publish(saved["quotation"]["id"], saved["version"]["modified"])
@@ -1376,3 +1674,64 @@ class TestQuotationApi(FrappeTestCase):
         self.assertEqual(plan_reference_updates(rows), {
             "Q-1": "PK20260810-A1", "Q-2": "PK20260810-A2", "Q-3": "PK20260811-A1",
         })
+
+class TestQuotationOpportunityConcurrency(FrappeTestCase):
+    INSERT = (
+        "INSERT INTO `tabCRM Quotation` (name, opportunity, ref_no, creation, modified)"
+        " VALUES (%s, %s, %s, NOW(6), NOW(6))"
+    )
+
+    def test_looking_for_an_opportunitys_quotation_leaves_its_index_gap_open(self):
+        """The deadlock was a gap lock: a locking read of an Opportunity's Quotation, not there yet, took the gap of
+        the unique `opportunity` it would go in, which the newest Opportunities without one share; the Quotation of
+        another Opportunity in that gap could not be written until the request ended, so two creations (or links) of
+        different Opportunities waited on each other."""
+
+        prefix = "zz-quotation-gap-" + random_string(8).lower()  # sorts after every Opportunity's name
+        looked_for, neighbour = prefix + "-a", prefix + "-b"
+        connection = None
+        try:
+            # Nothing of this test's transaction is held: any lock the second connection meets is the read's own.
+            frappe.db.commit()
+            connection = frappe.db._get_connection()
+            quotation_service._assert_opportunity_has_no_quotation(looked_for)
+            with connection.cursor() as cursor:
+                cursor.execute("SET SESSION innodb_lock_wait_timeout = 1")
+                try:
+                    # Its `opportunity` index entry lands in the gap the one looked for would go in.
+                    cursor.execute(self.INSERT, ("CRM-QTN-GAP-" + random_string(8), neighbour, "zz-gap-" + random_string(8)))
+                except Exception as error:
+                    self.fail(f"looking for an Opportunity's Quotation locked its index gap: {error}")
+        finally:
+            if connection:
+                connection.rollback()
+                connection.close()
+            frappe.db.rollback()
+
+    def test_an_opportunitys_quotation_committed_after_this_requests_snapshot_is_seen(self):
+        opportunity = "zz-quotation-committed-" + random_string(8).lower()
+        quotation = "CRM-QTN-COMMITTED-" + random_string(8)
+        connection = None
+        try:
+            frappe.db.commit()
+            # This request's snapshot, taken before another request commits the Opportunity's Quotation.
+            frappe.db.sql("SELECT COUNT(*) FROM `tabCRM Quotation`")
+            connection = frappe.db._get_connection()
+            with connection.cursor() as cursor:
+                cursor.execute(self.INSERT, (quotation, opportunity, "zz-committed-" + random_string(8)))
+            connection.commit()
+            self.assertFalse(frappe.db.exists("CRM Quotation", quotation))
+            with self.assertRaises(CrmApiException) as refused:
+                quotation_service._assert_opportunity_has_no_quotation(opportunity)
+            self.assertEqual((refused.exception.code, refused.exception.public_message), ("CONFLICT", "This Opportunity already has a Quotation."))
+            # A link of that very Quotation (a stale page) is told it is linked.
+            with self.assertRaises(CrmApiException) as linked:
+                quotation_service._assert_opportunity_has_no_quotation(opportunity, linking=quotation)
+            self.assertEqual(linked.exception.public_message, "This Quotation is already linked to an Opportunity.")
+        finally:
+            if connection:
+                with connection.cursor() as cursor:
+                    cursor.execute("DELETE FROM `tabCRM Quotation` WHERE `name` = %s", (quotation,))
+                connection.commit()
+                connection.close()
+            frappe.db.rollback()

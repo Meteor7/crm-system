@@ -97,7 +97,9 @@ const rollbackModal = ref(false)
 const rollbackReason = ref('')
 const rollbackTarget = ref<OpportunityMilestoneStage | ''>('')
 const rollbackErrors = ref<Record<string, string>>({})
-const deleting = ref(false), deleteError = useLocaleMessage(), deleteRequestId = ref('')
+// Archived (by a Manager, in place of a delete): out of every list, board, figure and warning, read-only here until restored.
+const isArchived = computed(() => selected.value?.archived === true)
+const archiveOpen = ref(false), archiving = ref(false), archiveError = useLocaleMessage(), archiveRequestId = ref('')
 const editingStakeholder = ref<OpportunityStakeholderDto | null>(null)
 const editingAction = ref<OpportunityActionDto | null>(null)
 const selectedContactId = ref('')
@@ -105,9 +107,21 @@ const bookingContactId = ref('')
 const contactAccountId = ref('')
 const contactContext = ref<'stakeholder' | 'booking'>('stakeholder')
 const currentUserId = computed(() => app.bootstrap?.user.id ?? '')
-const canWrite = computed(() => app.can('deal:write'))
+// Every write on the Opportunity and its records waits for the restore of an archived one.
+const canWrite = computed(() => app.can('deal:write') && !isArchived.value)
 const canMutateOpportunity = computed(() => canWrite.value && !selected.value?.siteRestricted)
-const canDelete = computed(() => app.bootstrap?.user.role === 'Manager')
+const isManager = computed(() => app.bootstrap?.user.role === 'Manager')
+const canArchive = computed(() => isManager.value && !isArchived.value)
+const canUnarchive = computed(() => isManager.value && isArchived.value)
+// The notice says how the Opportunity comes back: a Manager restores it here, anyone else asks a Manager.
+const archivedNotice = computed(() => !selected.value ? '' : t(isManager.value ? 'detail.archivedOpportunityNotice' : 'detail.archivedOpportunityNoticeReadOnly', {
+  by: personnelDisplayName(selected.value.archivedBy ?? ''), at: formatDisplayDateTime(selected.value.archivedAt),
+}))
+function resetArchiveState() {
+  archiveOpen.value = false
+  archiveError.value = ''
+  archiveRequestId.value = ''
+}
 const stage = computed(() => selected.value?.stage ?? '')
 const liveBooking = computed(() => selected.value?.liveBooking ?? null)
 const internalValidation = computed(() => selected.value?.internalValidation ?? null)
@@ -124,26 +138,39 @@ const canReplaceBooking = computed(() => canMutateOpportunity.value && stage.val
 const canMarkLost = computed(() => canMutateOpportunity.value && isOpenOpportunityStage(stage.value))
 const stageRollbackTargets = computed(() => selected.value ? opportunityRollbackTargets(selected.value.stage, selected.value.lostAtStage) : [])
 const rollbackOptions = computed(() => selected.value ? opportunityRollbackOptions(selected.value) : { targets: [], blocker: null })
-const canRollback = computed(() => app.can('deal:rollback') && stageRollbackTargets.value.length > 0)
-const canReviewValidation = computed(() => app.can('deal:internal_validation_approve'))
+const canRollback = computed(() => app.can('deal:rollback') && !isArchived.value && stageRollbackTargets.value.length > 0)
+const canReviewValidation = computed(() => app.can('deal:internal_validation_approve') && !isArchived.value)
 // A Sales user can only assign a Booking to themselves.
 const lockedBookingOwner = computed(() => app.bootstrap?.user.role === 'Sales' ? currentUserId.value : '')
 const defaultBookingOwner = computed(() => lockedBookingOwner.value || selected.value?.owner || currentUserId.value)
 const siteDisplay = computed(() => selected.value?.siteRestricted ? t('contacts.ownerOnly') : (selected.value?.site || t('detail.notSpecified')))
-async function deleteOpportunity() {
-  if (!selected.value || deleting.value || !window.confirm(t('detail.confirmDeleteOpportunity', { title: selected.value.title }))) return
-  deleting.value = true
-  deleteError.value = ''
-  deleteRequestId.value = ''
+async function setArchived(archived: boolean) {
+  if (!selected.value || archiving.value) return
+  const id = selected.value.id
+  archiving.value = true
+  archiveError.value = ''
+  archiveRequestId.value = ''
   try {
-    await props.apiClient.deleteStrategyOpportunity(selected.value.id)
-    await router.push({ name: 'opportunities' })
+    const result = await (archived ? props.apiClient.archiveStrategyOpportunity(id) : props.apiClient.unarchiveStrategyOpportunity(id))
+    // Answered for the Opportunity shown: a page moved on to another one meanwhile keeps that one.
+    if (selected.value?.id !== id) return
+    selected.value = result.data
+    archiveOpen.value = false
+    if (archived) {
+      // What was being edited is read-only now.
+      opportunityModal.value = false
+      actionModal.value = false
+      stakeholderModal.value = false
+      lostModal.value = false
+      rollbackModal.value = false
+    }
   } catch (reason) {
+    if (selected.value?.id !== id) return
     const mapped = mapRequestError(reason)
-    deleteError.value = mapped.localizedMessage ?? mapped.message
-    deleteRequestId.value = mapped.requestId
+    archiveError.value = mapped.localizedMessage ?? mapped.message
+    archiveRequestId.value = mapped.requestId
   } finally {
-    deleting.value = false
+    archiving.value = false
   }
 }
 const routeOpportunityId = computed(() => typeof route.params.opportunityId === 'string' ? route.params.opportunityId : '')
@@ -191,6 +218,7 @@ async function loadOpportunity() {
   denied.value = false
   notFound.value = false
   selected.value = null
+  resetArchiveState()
   try {
     const result = await props.apiClient.getStrategyOpportunity(routeOpportunityId.value)
     if (currentRequest !== opportunityRequest) return
@@ -475,15 +503,21 @@ onMounted(async () => {
           <RouterLink v-if="quotationId" class="secondary-button" data-testid="opportunity-quotation-link" :to="{ name: 'quotation-detail', params: { quotationId } }"><FileText :size="14" />{{ t('detail.viewQuotation') }}</RouterLink>
           <RouterLink v-else-if="app.can('quotation:write') && canMutateOpportunity && canWorkQuotationAt(selected.stage)" class="secondary-button" data-testid="create-quotation-from-opportunity" :to="{ name: 'quotations', query: { opportunityId: selected.id } }"><FileText :size="14" />{{ t('detail.newQuotation') }}</RouterLink>
           <RouterLink v-if="rfqId" class="secondary-button" data-testid="opportunity-rfq-link" :to="{ name: 'rfq-detail', params: { rfqId } }"><FileText :size="14" />RFQ · {{ salesEnumLabel(rfqStatus, locale) }}</RouterLink>
-          <RouterLink v-else-if="app.can('rfq:view') && canCreateRfqAt(selected.stage)" class="secondary-button" data-testid="opportunity-rfq-center-link" :to="{ name: 'rfqs', query: { opportunityId: selected.id } }"><FileText :size="14" />{{ t('detail.rfqNotCreated') }}</RouterLink>
+          <RouterLink v-else-if="app.can('rfq:view') && !isArchived && canCreateRfqAt(selected.stage)" class="secondary-button" data-testid="opportunity-rfq-center-link" :to="{ name: 'rfqs', query: { opportunityId: selected.id } }"><FileText :size="14" />{{ t('detail.rfqNotCreated') }}</RouterLink>
           <RouterLink v-if="liveBooking" class="secondary-button" data-testid="opportunity-booking-link" :to="{ name: 'booking-detail', params: { bookingId: liveBooking.id } }"><PackageCheck :size="14" />Booking · {{ liveBooking.id }} · {{ salesEnumLabel(liveBooking.status, locale) }}</RouterLink>
           <button v-if="canWrite" class="secondary-button" type="button" data-testid="new-opportunity-action" @click="openAction()"><Plus :size="14" />{{ t('detail.newAction') }}</button>
           <button v-if="canMutateOpportunity" class="primary-button" type="button" data-testid="edit-opportunity" @click="opportunityModal = true"><Pencil :size="14" />{{ t('detail.edit') }}</button>
           <button v-if="canMarkLost" class="secondary-button lost-action-button" type="button" data-testid="mark-opportunity-lost" @click="openLostModal">{{ t('detail.markLost') }}</button>
-          <button v-if="canDelete" class="secondary-button" type="button" data-delete-opportunity :disabled="deleting" @click="deleteOpportunity">{{ t('detail.delete') }}</button>
+          <button v-if="canArchive" class="secondary-button lost-action-button" type="button" data-archive-opportunity :disabled="archiving" @click="archiveError = ''; archiveOpen = true">{{ t('detail.archiveOpportunity') }}</button>
+          <button v-if="canUnarchive" class="secondary-button" type="button" data-unarchive-opportunity :disabled="archiving" @click="setArchived(false)">{{ t('detail.unarchiveOpportunity') }}</button>
         </div>
       </header>
-      <p v-if="deleteError" class="inline-error" data-delete-error>{{ deleteError }}<small v-if="deleteRequestId">{{ locale === 'en-US' ? 'Request ID' : '请求编号' }} {{ deleteRequestId }}</small></p>
+      <p v-if="archiveError && !archiveOpen" class="inline-error" data-archive-error>{{ archiveError }} <small v-if="archiveRequestId">{{ locale === 'en-US' ? 'Request ID' : '请求编号' }} {{ archiveRequestId }}</small></p>
+      <p v-if="isArchived" class="archived-notice" data-archived-notice>{{ archivedNotice }}</p>
+      <ModalShell v-if="archiveOpen" :title="t('detail.archiveOpportunity')" eyebrow="ARCHIVE" :busy="archiving" :submit-label="t('detail.archiveOpportunityAction')" danger @close="resetArchiveState" @submit="setArchived(true)">
+        <p class="archive-note">{{ t('detail.archiveOpportunityWarning', { title: selected.title }) }}</p>
+        <p v-if="archiveError" class="inline-error" data-archive-error>{{ archiveError }} <small v-if="archiveRequestId">{{ locale === 'en-US' ? 'Request ID' : '请求编号' }} {{ archiveRequestId }}</small></p>
+      </ModalShell>
 
       <section class="opportunity-path" :aria-label="t('detail.stagePath')">
         <div class="path-scroll"><OpportunityMilestoneBar :opportunity="selected" /></div>
@@ -691,6 +725,7 @@ onMounted(async () => {
 </template>
 
 <style scoped>
+.archived-notice{margin:0 0 12px;padding:10px 12px;color:#5c4a16;background:#fff5df;border:1px solid #f0dda9;border-radius:9px;font-size:10px;line-height:1.6}.archive-note{margin:0 0 10px;color:var(--crm-text);font-size:11px;line-height:1.6}
 .competitor-list{display:grid;padding:8px}.competitor-list article{display:grid;gap:4px;padding:8px 10px;border-bottom:1px solid var(--crm-line)}.competitor-list article:last-child{border-bottom:0}.competitor-list strong{color:var(--crm-text);font-size:10px;overflow-wrap:anywhere}.competitor-list p{margin:0;color:var(--crm-text);font-size:9px;line-height:1.5;white-space:pre-wrap;overflow-wrap:anywhere}.competitor-list small{display:block;color:var(--crm-text-muted);font-size:8px}
 .objective-text{white-space:pre-wrap;overflow-wrap:anywhere}
 .action-remark{margin:7px 0 0;color:var(--crm-text-muted);font-size:9px;line-height:1.6;white-space:pre-wrap;overflow-wrap:anywhere}

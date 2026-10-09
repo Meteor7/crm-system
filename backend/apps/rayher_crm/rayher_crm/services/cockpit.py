@@ -35,8 +35,8 @@ def read(doctype, fields, filters=None):
     return [dict(row) for row in frappe.get_all(doctype, fields=fields.split(), filters=filters or {}, limit_page_length=0)]
 
 
-def linked(doctype, fields, field, names):
-    return read(doctype, fields, {field: ["in", list(names)]}) if names else []
+def linked(doctype, fields, field, names, **filters):
+    return read(doctype, fields, {field: ["in", list(names)], **filters}) if names else []
 
 
 def options():
@@ -66,7 +66,9 @@ def load_data(customers, people):
     cny_amount_ready = bool(frappe.get_meta("CRM Opportunity").has_field("amount_cny"))
     if cny_amount_ready:
         opportunity_fields += " amount_cny"
-    opps = linked("CRM Opportunity", opportunity_fields, "account", ids)
+    # An archived Opportunity (a Manager's archive, in place of a delete) is out of every figure and warning,
+    # with its bookings, stages, actions and plans, which are all keyed on these ids.
+    opps = linked("CRM Opportunity", opportunity_fields, "account", ids, archived=0)
     opp_ids = {r["name"] for r in opps}
 
     def activity_sources(doctype, fields):
@@ -87,8 +89,10 @@ def load_data(customers, people):
     # Fetch linked stage only, even outside the customer filter; do not widen the
     # opportunity set used by any other Review metric.
     quote_opp_ids = {r["opportunity"] for r in quotes if r.get("opportunity")}
-    quotation_opportunities = [{"name": r["name"], "stage": r.get("stage"), "tool_type": r.get("tool_type")} for r in opps if r["name"] in quote_opp_ids]
-    quotation_opportunities += linked("CRM Opportunity", "name stage tool_type", "name", quote_opp_ids - opp_ids)
+    quotation_opportunities = [{"name": r["name"], "stage": r.get("stage"), "tool_type": r.get("tool_type"), "archived": 0} for r in opps if r["name"] in quote_opp_ids]
+    # The archive flag travels with the stage: a quotation of an archived Opportunity is no expiry warning
+    # (quotation_expiry leaves it out, as it leaves a closed deal's out), and the KPI stays whole.
+    quotation_opportunities += linked("CRM Opportunity", "name stage tool_type archived", "name", quote_opp_ids - opp_ids)
     probability_fields = "name opportunity from_level to_level changed_at actor"
     if frappe.get_meta("CRM Opportunity Probability History").has_field("reason"):
         probability_fields += " reason"
@@ -297,7 +301,7 @@ def load_plan_data(customers, people, equipment=False):
     cny_amount_ready = bool(frappe.get_meta("CRM Opportunity").has_field("amount_cny"))
     if cny_amount_ready:
         opportunity_fields += " amount_cny"
-    opps = [r for r in linked("CRM Opportunity", opportunity_fields, "account", ids) if r["stage"] in OPEN_STAGES]
+    opps = [r for r in linked("CRM Opportunity", opportunity_fields, "account", ids, archived=0) if r["stage"] in OPEN_STAGES]
     evaluations = linked("CRM Evaluation",
                          "name account demo_request title status test_run_deadline "
                          "wafer_preparation_status test_preparation_status", "account", ids)
@@ -311,7 +315,9 @@ def load_plan_data(customers, people, equipment=False):
     requests = linked("CRM Demo Request", "name account sales_owner opportunity status", "account", ids)
     quotes = linked("CRM Quotation", "name ref_no account opportunity quotation_owner status current_version current_published_version planned_send_date", "account", ids)
     quote_ids = {r["name"] for r in quotes}
-    quotation_opportunities = linked("CRM Opportunity", "name stage tool_type", "name", {r["opportunity"] for r in quotes if r.get("opportunity")})
+    # A Quotation of an archived Opportunity is frozen with it (no send, no follow-up): read without its deal, it
+    # leaves Plan as a closed deal's does.
+    quotation_opportunities = linked("CRM Opportunity", "name stage tool_type", "name", {r["opportunity"] for r in quotes if r.get("opportunity")}, archived=0)
     versions = linked("CRM Quotation Version", "name quotation status currency total", "quotation", quote_ids)
     followups = linked("CRM Quotation Follow Up", "name parent creation title due status completed_at completed_owner completed_version", "parent", quote_ids)
     events = event_rows(ids)

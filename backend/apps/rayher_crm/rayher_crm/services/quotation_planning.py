@@ -4,6 +4,7 @@ import frappe
 from rayher_crm.api.v1.errors import CrmApiException
 from rayher_crm.permissions.roles import assert_capability, resolve_crm_role
 from rayher_crm.services.common import as_payload, normalize_expected_modified, optional_date, required_text, to_iso_timestamp
+from rayher_crm.services.opportunity_archive import assert_opportunity_not_archived
 from rayher_crm.services.opportunity_stages import OPEN_STAGES
 from rayher_crm.services.quotations import _require_quotation
 
@@ -29,7 +30,7 @@ def locked(quotation_id, expected_modified):
     rows = frappe.db.sql(
         """SELECT q.quotation_owner, q.modified, q.current_version, q.current_published_version,
                   c.name AS account, c.custom_crm_owner, c.custom_crm_visibility,
-                  q.opportunity, o.stage
+                  q.opportunity, o.stage, o.archived AS opportunity_archived
              FROM `tabCRM Quotation` q
              LEFT JOIN `tabCustomer` c ON c.name=q.account
              LEFT JOIN `tabCRM Opportunity` o ON o.name=q.opportunity
@@ -43,6 +44,9 @@ def locked(quotation_id, expected_modified):
         or (row.custom_crm_owner != frappe.session.user and row.custom_crm_visibility != "Public")
     ):
         raise CrmApiException("SCOPE_DENIED", "Quotation is outside the current user scope.")
+    # A Quotation of an archived Opportunity is frozen with it, its send plan and its follow-ups too: the flag as
+    # committed, the Opportunity's row read under its lock by the join above, after the Quotation's and its Account's.
+    assert_opportunity_not_archived(row.opportunity_archived)
     if normalize_expected_modified(expected_modified) != to_iso_timestamp(row.modified):
         raise CrmApiException("VERSION_CONFLICT", "Quotation changed; reload before saving its plan.")
     return frappe.get_doc("CRM Quotation", quotation_id, for_update=True), row

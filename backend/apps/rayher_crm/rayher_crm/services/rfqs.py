@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import os
+from contextlib import suppress
 import subprocess
 import tempfile
 from collections.abc import Mapping
@@ -12,11 +13,12 @@ from typing import Any
 
 import frappe
 from frappe.utils import now_datetime
-from rayher_crm.services.private_file_lifecycle import save_private_file as save_file
+from rayher_crm.services.private_file_lifecycle import discard_rolled_back_blob, save_private_file as save_file
 
 from rayher_crm.api.v1.errors import CrmApiException
 from rayher_crm.permissions.roles import resolve_crm_role
 from rayher_crm.permissions.scope import has_crm_permission
+from rayher_crm.services.opportunity_archive import ARCHIVED_OPPORTUNITY_LINK, assert_opportunity_not_archived, opportunity_archived
 from rayher_crm.services.common import normalize_pagination, paginate_items, required_text, to_iso_timestamp
 from rayher_crm.services.concurrency import lock_document
 from rayher_crm.services.file_security import (
@@ -297,7 +299,10 @@ def _attach(file_id: str, version_id: str, fieldname: str) -> None:
     }, update_modified=False)
 
 
-def _create_version(master, part: Mapping[str, Any], scanner: MalwareScanner | None = None):
+def _create_version(master, part: Mapping[str, Any], scanner: MalwareScanner | None = None, written: list | None = None):
+    """A new version of the RFQ with its file (and its PDF preview); the bytes each File wrote are added to `written`
+    when given, so that a caller whose request is refused afterwards can take them back out."""
+
     file_name, mime_type, content = _file_part(part, scanner)
     preview_result = _preview(file_name, mime_type, content)
     storage_name = (
@@ -306,6 +311,8 @@ def _create_version(master, part: Mapping[str, Any], scanner: MalwareScanner | N
         else file_name
     )
     original = save_file(storage_name, content, "CRM RFQ", master.name, is_private=1)
+    if written is not None:
+        written.append((original.get_full_path(), original.file_url, original.content_hash))
     if preview_result is None:
         preview_name, preview_mime, preview_content, preview = file_name, mime_type, content, original
     else:
@@ -313,6 +320,8 @@ def _create_version(master, part: Mapping[str, Any], scanner: MalwareScanner | N
         preview = original if preview_content == content and preview_mime == mime_type else save_file(
             preview_name, preview_content, "CRM RFQ", master.name, is_private=1,
         )
+        if written is not None and preview.name != original.name:
+            written.append((preview.get_full_path(), preview.file_url, preview.content_hash))
     number = int(master.latest_version_no or 0) + 1
     version = frappe.get_doc({
         "doctype": "CRM RFQ Version", "rfq": master.name, "version_no": number,
@@ -335,6 +344,24 @@ def _create_version(master, part: Mapping[str, Any], scanner: MalwareScanner | N
     return version
 
 
+def _undo_creation(savepoint: str, written: list) -> None:
+    """Take a refused or failed RFQ back out: its rows to the savepoint, then the bytes its Files wrote, which belong to
+    nobody once their rows are gone (the API answers a refusal and commits, and a savepoint rollback runs none of
+    Frappe's own File cleanup). opportunity_status and visit_meetings discard theirs the same way. The content locks
+    were taken when the files were written, before the Opportunity's row, and are held to the end of the request:
+    discarding waits for none while that row is held. `discard_rolled_back_blob` never raises."""
+
+    try:
+        frappe.db.rollback(save_point=savepoint)
+    except Exception:
+        # A deadlock rolls the whole transaction back, savepoint included; the `ROLLBACK TO SAVEPOINT` would then
+        # raise and hide the error that explains the failure. The request edge still rolls back in full.
+        with suppress(Exception):
+            frappe.logger("rayher_crm").error("RFQ creation could not roll back to its savepoint", exc_info=True)
+    for blob in written:
+        discard_rolled_back_blob(*blob)
+
+
 def create_rfq(payload: Mapping[str, Any], part: Mapping[str, Any], scanner: MalwareScanner | None = None) -> dict[str, Any]:
     _require_rfq_uploader()
     opportunity_id = required_text(payload, "opportunityId")
@@ -343,12 +370,14 @@ def create_rfq(payload: Mapping[str, Any], part: Mapping[str, Any], scanner: Mal
     opportunity = frappe.get_doc("CRM Opportunity", opportunity_id)
     if not has_crm_permission(opportunity, user=frappe.session.user, permission_type="read"):
         raise CrmApiException("SCOPE_DENIED", "Opportunity is outside the current user scope.")
+    assert_opportunity_not_archived(opportunity, ARCHIVED_OPPORTUNITY_LINK)
     if opportunity.stage != CUSTOMER_BUDGET_APPROVED:
         raise CrmApiException(
             "INVALID_TRANSITION", "RFQ can only be created when the Opportunity is at customer_budget_approved.",
         )
     engineer = _active_engineer(payload.get("engineerId"))
     savepoint = f"crm_rfq_create_{frappe.generate_hash(length=8)}"
+    written: list[tuple[str, str, str]] = []
     frappe.db.savepoint(savepoint)
     try:
         if frappe.db.exists("CRM RFQ", {"opportunity": opportunity_id}):
@@ -359,16 +388,21 @@ def create_rfq(payload: Mapping[str, Any], part: Mapping[str, Any], scanner: Mal
             "status": "Engineer Review", "latest_version_no": 0,
             "note": str(payload.get("note") or "").strip(),
         }).insert(ignore_permissions=True)
-        _create_version(master, part, scanner)
+        _create_version(master, part, scanner, written)
+        # Read again under the Opportunity's lock, the RFQ's row held already (the order the RFQ review and the stage
+        # rollback take them in) and its files written (their content locks taken before the Opportunity's row, as
+        # private_file_lifecycle asks): an archive committed since the read above is seen and undoes the RFQ, its
+        # files' bytes with it; one in flight is waited for, and finds the RFQ there first.
+        assert_opportunity_not_archived(opportunity_archived(opportunity_id, for_update=True), ARCHIVED_OPPORTUNITY_LINK)
         _notify(
             {engineer}, master, "RFQ requires Engineer review",
             f"{opportunity.title}: a new RFQ is ready for your technical comment.",
         )
     except (frappe.UniqueValidationError, frappe.DuplicateEntryError) as exc:
-        frappe.db.rollback(save_point=savepoint)
+        _undo_creation(savepoint, written)
         raise CrmApiException("CONFLICT", "This Opportunity already has an RFQ.") from exc
     except Exception:
-        frappe.db.rollback(save_point=savepoint)
+        _undo_creation(savepoint, written)
         raise
     master.reload()
     return _serialize_detail(master)

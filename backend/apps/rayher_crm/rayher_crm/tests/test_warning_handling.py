@@ -8,7 +8,7 @@ from frappe.tests.utils import FrappeTestCase
 from rayher_crm.api.v1.errors import CrmApiException
 from rayher_crm.services import cockpit, cockpit_settings, warning_handling, warning_notifications
 from rayher_crm.services.accounts import create_account
-from rayher_crm.services.opportunities import create_strategy_opportunity
+from rayher_crm.services.opportunities import archive_strategy_opportunity, create_strategy_opportunity
 from rayher_crm.services.sites import create_site
 from rayher_crm.services.warning_notifications import send_warning_notifications
 from rayher_crm.setup import indexes
@@ -315,25 +315,29 @@ class TestWarningHandling(FrappeTestCase):
         send_warning_notifications()
         self.assertEqual(len(self._notices(self.sales, next_event)), 1)
 
-    def test_delete_removes_slip_notices_atomically_with_the_history_source(self):
-        from rayher_crm.services.opportunities import delete_strategy_opportunity
+    def test_an_archive_keeps_the_slip_notices_and_their_source_and_the_job_announces_no_more(self):
+        from rayher_crm.services.opportunities import archive_strategy_opportunity, unarchive_strategy_opportunity
         event = self._postpone("2031-01-01")
         frappe.set_user("Administrator")
         send_warning_notifications()
         source = {"source_doctype": "CRM Opportunity History", "source_name": event}
         count = frappe.db.count("CRM Notification Event", source)
         self.assertGreater(count, 0)
-        # A failed delete restores the notices and their source in the same savepoint.
         frappe.set_user(self.sales)
         with self.assertRaises(frappe.PermissionError):
-            delete_strategy_opportunity(self.opportunity["id"])
-        self.assertEqual(frappe.db.count("CRM Notification Event", source), count)
-        self.assertTrue(frappe.db.exists("CRM Opportunity History", event))
+            archive_strategy_opportunity(self.opportunity["id"])
         frappe.set_user(self.manager)
-        delete_strategy_opportunity(self.opportunity["id"])
-        self.assertFalse(frappe.db.exists("CRM Opportunity", self.opportunity["id"]))
-        self.assertFalse(frappe.db.exists("CRM Opportunity History", event))
-        self.assertEqual(frappe.db.count("CRM Notification Event", source), 0)
+        archive_strategy_opportunity(self.opportunity["id"])
+        self.assertTrue(frappe.db.exists("CRM Opportunity History", event))
+        self.assertEqual(frappe.db.count("CRM Notification Event", source), count)
+        # The archived deal is out of the warnings: a later postponement would be a new slip, and the job
+        # announces nothing about it; the page showing the old warning is told it is gone.
+        self.assertEqual([row["id"] for row in warning_notifications.warning_details(NOW)["close_date_slip"] if row["id"] == self.opportunity["id"]], [])
+        self.assertEqual(self._code(lambda: warning_handling.save_plan({"warningType": "close_date_slip", "sourceId": self.opportunity["id"], "sourceEvent": event, "nextStep": "Call"}, None)), "INVALID_TRANSITION")
+        frappe.set_user("Administrator")
+        self.assertEqual(send_warning_notifications(), 0)
+        unarchive_strategy_opportunity(self.opportunity["id"])
+        self.assertEqual([row["id"] for row in warning_notifications.warning_details(NOW)["close_date_slip"]], [self.opportunity["id"]])
 
     def test_each_warning_notifies_once_and_a_new_instance_notifies_again(self):
         frappe.set_user("Administrator")
@@ -408,8 +412,8 @@ class TestWarningHandling(FrappeTestCase):
             [("预警：第 6 阶段超期无 PO", "CRM Opportunity", self.opportunity["id"])],
         )
 
-    def test_deleting_the_opportunity_removes_its_before_history_stage6_notices(self):
-        from rayher_crm.services.opportunities import delete_strategy_opportunity
+    def test_archiving_the_opportunity_keeps_its_before_history_stage6_notices_and_stops_new_ones(self):
+        from rayher_crm.services.opportunities import archive_strategy_opportunity
 
         stage = frappe.db.get_value("CRM Opportunity", self.opportunity["id"], "stage")
         self.addCleanup(frappe.db.set_value, "CRM Opportunity", self.opportunity["id"], "stage", stage, update_modified=False)
@@ -421,11 +425,15 @@ class TestWarningHandling(FrappeTestCase):
         filters = {"source_doctype": "CRM Opportunity", "source_name": self.opportunity["id"]}
         notices = frappe.get_all("CRM Notification Event", filters=filters, pluck="name")
         self.assertTrue(notices)
-        # The inbox copy is a Dynamic Link to its source, which would otherwise refuse the delete.
         frappe.set_user(self.manager)
-        delete_strategy_opportunity(self.opportunity["id"])
-        self.assertFalse(frappe.db.exists("CRM Opportunity", self.opportunity["id"]))
-        self.assertEqual(frappe.db.count("CRM Notification Event", {"name": ["in", notices]}), 0)
+        archive_strategy_opportunity(self.opportunity["id"])
+        self.assertTrue(frappe.db.exists("CRM Opportunity", self.opportunity["id"]))
+        self.assertEqual(frappe.db.count("CRM Notification Event", {"name": ["in", notices]}), len(notices))
+        # Announced again at a raised threshold before; not for an archived deal.
+        frappe.set_user("Administrator")
+        with patch.dict(frappe.conf, {"crm_cockpit_history_complete_from": {**coverage, "stage": "2030-02-11"}, "crm_cockpit_stage6_no_po_days": 20}):
+            self.assertEqual(send_warning_notifications(), 0)
+        self.assertEqual(frappe.db.count("CRM Notification Event", filters), len(notices))
 
     def test_a_bad_source_is_rejected_even_for_a_recipient_who_would_be_skipped(self):
         from rayher_crm.services.notifications import notify_if_reachable
@@ -486,7 +494,7 @@ class TestWarningHandling(FrappeTestCase):
         self.assertEqual(self._mine(self._warnings()["overdue"])[0]["handling"]["nextStep"], "Call")
 
     def test_handling_revisions_are_indexed_by_handling(self):
-        # Review and Warnings read every handling's revisions; the Opportunity delete removes them per handling.
+        # Review and Warnings read every handling's revisions, per handling.
         self.assertTrue(frappe.db.has_index("tabCRM Warning Handling Revision", indexes.WARNING_HANDLING_REVISION_INDEX))
 
     def test_slip_history_lock_uses_opportunity_field_index(self):
@@ -532,6 +540,28 @@ class TestWarningHandling(FrappeTestCase):
             notices = self._notices(user, version_id)
             self.assertEqual([(n.title, n.route, n.category) for n in notices], [("预警：报价即将到期", f"/quotations/{quote_id}", "Quotation")])
 
+    def test_an_archived_opportunitys_expiring_quotation_is_no_warning_takes_no_step_and_sends_no_notice(self):
+        frappe.set_user(self.sales)
+        saved, _ = self._ready_quotation()
+        published = self._publish(saved["quotation"]["id"], saved["version"]["modified"])
+        quote_id, version_id = published["quotation"]["id"], published["version"]["id"]
+        frappe.db.set_value("CRM Quotation Version", version_id, {"published_at": "2030-03-01 10:00:00", "valid_until": "2030-03-25"}, update_modified=False)
+        frappe.set_user(self.manager)
+        row = next(r for r in self._warnings()["quotationExpiryItems"] if r["id"] == quote_id)
+        source = {k: row["handling"][k] for k in ("warningType", "sourceId", "sourceEvent")}
+        archive_strategy_opportunity(frappe.db.get_value("CRM Quotation", quote_id, "opportunity"))
+
+        # Out of the Warnings page and its count (which stays a clean number), no next step, no notice.
+        warnings = self._warnings()
+        self.assertNotIn(quote_id, {r["id"] for r in warnings["quotationExpiryItems"]})
+        self.assertEqual(next(w["count"]["state"] for w in warnings["warnings"] if w["key"] == "quotation_expiry"), "ready")
+        self.assertEqual(self._code(lambda: warning_handling.save_plan({**source, "nextStep": "Renew with the customer"}, None)), "INVALID_TRANSITION")
+        self.assertFalse(frappe.db.exists("CRM Warning Handling", {"source_id": quote_id}))
+        frappe.set_user("Administrator")
+        send_warning_notifications()
+        for user in {self.manager, frappe.db.get_value("CRM Quotation", quote_id, "quotation_owner")}:
+            self.assertEqual(self._notices(user, version_id), [])
+
     def test_a_past_week_keys_a_stage6_deal_by_its_current_entry(self):
         first = self._to_stage6(45)
         # Rolled back and re-approved this week: last week's row is the same deal, now on its new entry.
@@ -555,15 +585,21 @@ class TestWarningHandling(FrappeTestCase):
         self.assertEqual(cockpit.get_review({"period": "week"})["period"]["start"], "2030-03-04")
         self.assertEqual(cockpit.get_warnings({"period": "week", "anchor": "2030-03-04"})["period"]["start"], "2030-03-04")
 
-    def test_deleting_the_opportunity_removes_its_handling_rows(self):
-        from rayher_crm.services.opportunities import delete_strategy_opportunity
+    def test_archiving_the_opportunity_keeps_its_handling_rows_and_takes_no_more(self):
+        from rayher_crm.services.opportunities import archive_strategy_opportunity, unarchive_strategy_opportunity
 
         action = self._action("2030-03-01")
-        saved = warning_handling.save_plan({"warningType": "overdue", "sourceId": action, "sourceEvent": "2030-03-01", "nextStep": "Call"}, None)
+        source = {"warningType": "overdue", "sourceId": action, "sourceEvent": "2030-03-01"}
+        saved = warning_handling.save_plan({**source, "nextStep": "Call"}, None)
         self.assertTrue(frappe.db.exists("CRM Warning Handling", saved["id"]))
-        delete_strategy_opportunity(self.opportunity["id"])
-        self.assertFalse(frappe.db.exists("CRM Warning Handling", saved["id"]))
-        self.assertEqual(frappe.db.count("CRM Warning Handling Revision", {"handling": saved["id"]}), 0)
+        archive_strategy_opportunity(self.opportunity["id"])
+        self.assertTrue(frappe.db.exists("CRM Warning Handling", saved["id"]))
+        self.assertEqual(frappe.db.count("CRM Warning Handling Revision", {"handling": saved["id"]}), 1)
+        # The overdue action of an archived deal is no warning: a next step for it is refused as gone.
+        self.assertEqual(self._code(lambda: warning_handling.save_plan({**source, "nextStep": "Call again"}, saved["modified"])), "INVALID_TRANSITION")
+        self.assertEqual([row["id"] for row in warning_notifications.warning_details(NOW)["overdue"] if row["id"] == action], [])
+        unarchive_strategy_opportunity(self.opportunity["id"])
+        self.assertEqual(warning_handling.save_plan({**source, "nextStep": "Call again"}, saved["modified"])["nextStep"], "Call again")
 
     def test_a_cleared_warning_takes_no_next_step_and_follow_up_reaches_a_year(self):
         action = self._action("2030-03-01")
@@ -615,6 +651,40 @@ class TestWarningNotificationDeletionLock(FrappeTestCase):
             details = {"lost": [], "overdue": [], "quotation_expiry": [], "stage6_no_po": [], "close_date_slip": [{
                 "id": opportunity_id, "eventId": "deleted-history", "at": NOW.isoformat(),
                 "title": "Deleted", "customer": "Scope", "previousPoDate": "2030-03-01", "postponedPoDate": "2030-04-01",
+            }]}
+            with (patch.object(warning_notifications, "warning_details", return_value=details),
+                  patch.object(warning_notifications, "active_crm_users", return_value={"manager"}),
+                  patch.object(warning_notifications, "_can_read", return_value=True),
+                  patch.object(warning_notifications, "_notify") as notify):
+                warning_notifications.send_warning_notifications()
+            notify.assert_not_called()
+        finally:
+            if connection is not None:
+                connection.rollback()
+                connection.close()
+            frappe.local.db = primary
+            primary.rollback()
+            frappe.db.sql("DELETE FROM `tabCRM Opportunity` WHERE name=%s", (opportunity_id,))
+            primary.commit()
+
+    def test_slip_job_skips_a_parent_archived_after_its_snapshot(self):
+        self.assertTrue(frappe.local.site.endswith(".test"))
+        opportunity_id = f"CRM-OPP-SLIP-ARCHIVE-{frappe.generate_hash(length=10)}"
+        primary = frappe.local.db
+        connection = None
+        try:
+            frappe.db.sql("INSERT INTO `tabCRM Opportunity` (`name`, `creation`, `modified`, `modified_by`, `owner`, `docstatus`, `idx`) VALUES (%s, NOW(6), NOW(6), 'Administrator', 'Administrator', 0, 0)", (opportunity_id,))
+            primary.commit()
+            self.assertEqual(frappe.db.get_value("CRM Opportunity", opportunity_id, "archived"), 0)
+            connection = primary._get_connection()
+            with connection.cursor() as cursor:
+                cursor.execute("UPDATE `tabCRM Opportunity` SET `archived` = 1 WHERE name=%s", (opportunity_id,))
+            connection.commit()
+            # Ordinary reads still see the parent as active in this transaction; the locking read does not.
+            self.assertEqual(frappe.db.get_value("CRM Opportunity", opportunity_id, "archived"), 0)
+            details = {"lost": [], "overdue": [], "quotation_expiry": [], "stage6_no_po": [], "close_date_slip": [{
+                "id": opportunity_id, "eventId": "archived-history", "at": NOW.isoformat(),
+                "title": "Archived", "customer": "Scope", "previousPoDate": "2030-03-01", "postponedPoDate": "2030-04-01",
             }]}
             with (patch.object(warning_notifications, "warning_details", return_value=details),
                   patch.object(warning_notifications, "active_crm_users", return_value={"manager"}),

@@ -75,7 +75,7 @@ async function download(kind: OpportunityDocumentKind, item: OpportunityDocument
     <p v-if="error" role="alert">{{ error }} <button :disabled="editing" @click="load">{{ copy('Reload documents', '重新加载资料') }}</button></p>
     <p v-if="loading">{{ copy('Loading…', '正在加载…') }}</p>
     <template v-else-if="data">
-      <section class="scorecards"><header><h2>{{ copy('Scorecards', '评分卡') }}</h2><button v-if="app.can('deal:write') && !editing" @click="edit">{{ copy('Edit links', '编辑链接') }}</button></header>
+      <section class="scorecards"><header><h2>{{ copy('Scorecards', '评分卡') }}</h2><button v-if="app.can('deal:write') && !data.archived && !editing" @click="edit">{{ copy('Edit links', '编辑链接') }}</button></header>
         <form v-if="editing" @submit.prevent="save">
           <label v-for="key in keys" :key="key">{{ label(key) }}<input v-model="draft[key]" type="url" maxlength="2048" :disabled="busy" :data-testid="key" placeholder="https://" /></label>
           <p>{{ copy('Leave a field blank to remove its link.', '清空字段可移除对应链接。') }}</p>

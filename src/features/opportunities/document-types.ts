@@ -11,5 +11,7 @@ export interface OpportunityDocumentItem {
 }
 export interface OpportunityDocuments extends OpportunityDocumentLinks {
   opportunityId: string; title: string
+  /** An archived Opportunity (a Manager's archive, in place of a delete) takes no new link. */
+  archived?: boolean
   groups: { kind: OpportunityDocumentKind; items: OpportunityDocumentItem[] }[]
 }

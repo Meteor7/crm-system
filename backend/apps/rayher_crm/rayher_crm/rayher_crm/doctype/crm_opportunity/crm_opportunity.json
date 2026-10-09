@@ -5,7 +5,7 @@
   "creation": "2026-08-04 00:00:00.000000",
   "doctype": "DocType",
   "engine": "InnoDB",
-  "field_order": ["account", "site", "source_lead", "title", "amount", "currency", "original_amount", "amount_cny", "po_date", "shipment_date", "fat_date", "opportunity_owner", "tool_type", "stage", "stage_changed_at", "pending_stage_advance", "budget_approved_on", "probability_level", "forecast", "probability", "score", "sale_type", "sub_region", "payment_milestones", "competition", "competitors", "single_sales_objective", "win_reason", "lost_reason", "lost_at_stage", "lost_at", "lost_by", "strengths", "red_flags", "red_flag_records", "information_needed", "product_scorecard_url", "deal_scorecard_url", "legacy_stage"],
+  "field_order": ["account", "site", "source_lead", "title", "amount", "currency", "original_amount", "amount_cny", "po_date", "shipment_date", "fat_date", "opportunity_owner", "tool_type", "stage", "stage_changed_at", "pending_stage_advance", "budget_approved_on", "probability_level", "forecast", "probability", "score", "sale_type", "sub_region", "payment_milestones", "competition", "competitors", "single_sales_objective", "win_reason", "lost_reason", "lost_at_stage", "lost_at", "lost_by", "strengths", "red_flags", "red_flag_records", "information_needed", "product_scorecard_url", "deal_scorecard_url", "legacy_stage", "archived", "archived_at", "archived_by"],
   "fields": [
     {"fieldname": "account", "fieldtype": "Link", "in_list_view": 1, "label": "Account", "options": "Customer", "reqd": 1},
     {"fieldname": "site", "fieldtype": "Link", "in_list_view": 1, "label": "Site", "options": "Address", "reqd": 1},
@@ -45,7 +45,10 @@
     {"fieldname": "information_needed", "fieldtype": "JSON", "label": "Information Needed"},
     {"fieldname": "product_scorecard_url", "fieldtype": "Small Text", "label": "Product Scorecard URL", "read_only": 1},
     {"fieldname": "deal_scorecard_url", "fieldtype": "Small Text", "label": "Deal Scorecard URL", "read_only": 1},
-    {"fieldname": "legacy_stage", "fieldtype": "Data", "hidden": 1, "label": "Legacy Stage", "read_only": 1}
+    {"fieldname": "legacy_stage", "fieldtype": "Data", "hidden": 1, "label": "Legacy Stage", "read_only": 1},
+    {"default": "0", "fieldname": "archived", "fieldtype": "Check", "label": "Archived", "read_only": 1},
+    {"fieldname": "archived_at", "fieldtype": "Datetime", "label": "Archived At", "read_only": 1},
+    {"fieldname": "archived_by", "fieldtype": "Link", "label": "Archived By", "options": "User", "read_only": 1}
   ],
   "index_web_pages_for_search": 0,
   "is_submittable": 0,
