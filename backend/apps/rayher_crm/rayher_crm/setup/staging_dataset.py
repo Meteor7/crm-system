@@ -283,6 +283,10 @@ class Seeder:
     def modified_of(self, doctype: str, name: str) -> str:
         return to_iso_timestamp(frappe.db.get_value(doctype, name, "modified"))
 
+    def pending_booking_token(self, opp_id: str) -> dict[str, Any]:
+        booking = opportunities.live_booking(opp_id)
+        return {} if booking is None else {"expectedBookingModified": to_iso_timestamp(booking.modified)}
+
     def person(self) -> str:
         for _ in range(100):
             name = self.rng.choice(SURNAMES) + self.rng.choice(GIVEN)
@@ -658,7 +662,8 @@ class Seeder:
                 po_day = ending["date"]
                 draft = self.booking_draft(spec, po_day)
                 confirmed = self.at(po_day + timedelta(days=self.rng.randint(0, 2)), owner, lambda: opportunities.confirm_po(
-                    opp_id, {"booking": draft, "actualPoDate": po_day.isoformat()}, self.modified_of("CRM Opportunity", opp_id)))
+                    opp_id, {"booking": draft, "actualPoDate": po_day.isoformat(), **self.pending_booking_token(opp_id)},
+                    self.modified_of("CRM Opportunity", opp_id)))
                 booking_id = confirmed["liveBooking"]["id"]
                 if ending.get("missing"):
                     frappe.db.set_value("CRM Booking", booking_id, {"actual_po_date": None, "actual_po_date_source": ""}, update_modified=False)
