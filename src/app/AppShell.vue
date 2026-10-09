@@ -475,15 +475,15 @@ onBeforeUnmount(() => {
 .session-expired { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin: 12px 24px 0; padding: 10px 14px; color: #7a2e0e; background: #fff4e5; border: 1px solid #f5c98b; border-radius: 10px; font-size: 13px; font-weight: 600; }
 .session-expired .primary-button { flex: 0 0 auto; }
 .semicrm-app { position: relative; display: flex; min-height: 100dvh; overflow-x: hidden; isolation: isolate; }
-.app-sidebar { position: fixed; inset: 0 auto 0 0; z-index: 30; display: flex; width: 260px; flex-direction: column; padding: 22px 16px 18px; color: rgba(255,255,255,.88); background: var(--crm-navy-strong); border-right: 1px solid rgba(255,255,255,.08); transition: transform .22s ease; }
-.brand-block { display: flex; min-height: 52px; align-items: center; padding: 0 6px 14px; }
-.brand-logo { display: block; width: auto; max-width: calc(100% - 42px); height: 52px; object-fit: contain; object-position: left center; }
+.app-sidebar { position: fixed; inset: 0 auto 0 0; z-index: 30; display: flex; width: 260px; flex-direction: column; padding: 18px 16px 14px; color: rgba(255,255,255,.88); background: var(--crm-navy-strong); border-right: 1px solid rgba(255,255,255,.08); transition: transform .22s ease; }
+.brand-block { display: flex; min-height: 46px; align-items: center; padding: 0 6px 10px; }
+.brand-logo { display: block; width: auto; max-width: calc(100% - 42px); height: 46px; object-fit: contain; object-position: left center; }
 .sidebar-collapse-button { display: grid; width: 32px; height: 32px; margin-left: auto; flex: 0 0 auto; place-items: center; color: rgba(255,255,255,.58); background: rgba(255,255,255,.05); border: 1px solid rgba(255,255,255,.08); border-radius: 8px; cursor: pointer; transition: .18s ease; }
 .sidebar-collapse-button:hover { color: #fff; background: rgba(255,255,255,.1); }
 .sidebar-close { display: none; margin-left: auto; padding: 7px; color: #fff; background: transparent; border: 0; border-radius: 8px; }
-.primary-nav { display: grid; min-height: 0; flex: 1; align-content: start; gap: 20px; overflow-y: auto; }
-.nav-section > p { margin: 0 10px 7px; color: rgba(255,255,255,.42); font-size: 12px; font-weight: 800; letter-spacing: .1em; text-transform: uppercase; }
-.nav-link { display: flex; width: 100%; align-items: center; gap: 12px; min-height: 42px; padding: 0 12px; color: rgba(255,255,255,.68); background: transparent; border: 0; border-radius: 10px; cursor: pointer; text-align: left; transition: .18s ease; }
+.primary-nav { display: grid; min-height: 0; flex: 1; align-content: start; gap: 14px; overflow-y: auto; }
+.nav-section > p { margin: 0 10px 5px; color: rgba(255,255,255,.42); font-size: 11px; font-weight: 800; letter-spacing: .1em; text-transform: uppercase; }
+.nav-link { display: flex; width: 100%; align-items: center; gap: 11px; min-height: 38px; padding: 0 12px; color: rgba(255,255,255,.68); background: transparent; border: 0; border-radius: 10px; cursor: pointer; text-align: left; transition: .18s ease; }
 .nav-link span { flex: 1; font-size: 10px; font-weight: 600; }
 .nav-link b { min-width: 22px; padding: 2px 6px; color: rgba(255,255,255,.52); background: rgba(255,255,255,.07); border-radius: 999px; font-size: 10px; text-align: center; }
 .nav-link:hover { color: #fff; background: rgba(255,255,255,.06); }
