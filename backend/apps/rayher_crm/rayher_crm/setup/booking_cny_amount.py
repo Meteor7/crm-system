@@ -21,7 +21,7 @@ import frappe
 
 MISSING = (
     "UPPER(COALESCE(`currency`, 'CNY')) != 'CNY' AND COALESCE(`amount_cny`, 0) = 0 "
-    "AND `status` IN ('Confirmed', 'Completed')"
+    "AND `status` IN ('Confirmed', 'Completed') AND `archived` = 0"
 )
 REPORT_COLUMNS = ("booking", "account", "owner", "status", "source", "opportunity", "currency", "amount", "actual_po_date")
 

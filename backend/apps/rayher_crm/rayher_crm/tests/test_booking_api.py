@@ -1,24 +1,38 @@
 from __future__ import annotations
 
+from decimal import Decimal
 from unittest.mock import patch
 
 import frappe
+from frappe.model.delete_doc import get_dynamic_linked_docs, get_linked_docs
+from frappe.model.document import Document
 from frappe.tests.utils import FrappeTestCase
+
+from rayher_crm.services import bookings as booking_service
 
 from rayher_crm.api.v1.bookings import list_bookings as list_bookings_endpoint
 from rayher_crm.api.v1.errors import CrmApiException
-from rayher_crm.services.accounts import create_account
+from rayher_crm.services.accounts import create_account, get_account_360
 from rayher_crm.services.bookings import (
+    ARCHIVED_BOOKING_EDIT,
+    COMPLETED_BOOKING_ARCHIVE,
+    OPPORTUNITY_BOOKING_ARCHIVE,
+    archive_booking,
     booking_summary,
     complete_service_booking,
     create_booking,
-    delete_booking,
     get_booking,
     list_bookings,
+    set_booking_actual_po_date,
+    set_booking_amount_cny,
+    unarchive_booking,
     update_booking,
 )
-from rayher_crm.services.contacts import create_contact
+from rayher_crm.services.contacts import create_contact, get_contact
+from rayher_crm.services.dashboard import get_dashboard
+from rayher_crm.services.installed_tools import convert_booking_to_installed_tool
 from rayher_crm.services.opportunities import confirm_po, create_strategy_opportunity, get_strategy_opportunity
+from rayher_crm.services.pipeline import list_pipeline
 from rayher_crm.services.opportunity_stages import PO_RECEIVED, QUALIFIED_OPPORTUNITY
 from rayher_crm.services.sites import create_site
 from rayher_crm.tests._opportunity_fixtures import advance_opportunity_fixture
@@ -250,29 +264,181 @@ class TestBookingApi(FrappeTestCase):
         self.assertEqual(locked.exception.code, "CONFLICT")
         self.assertTrue(foreign_account["id"])
 
-    def test_only_manager_can_delete_booking(self):
-        account, _, contact, opportunity = self._records(self.other_sales, "Delete")
+    def test_only_a_manager_archives_an_upsell_booking_and_the_archive_is_reversible(self):
+        account, _, contact, opportunity = self._records(self.other_sales, "Archive")
         po_booking = get_booking(opportunity["liveBooking"]["id"])
         frappe.set_user(self.other_sales)
-        upsell = create_booking(self._input(account, contact, None, self.other_sales))
+        # Three amounts apart, so the dashboard's sum tells which of them it counts.
+        upsell = create_booking(self._input(account, contact, None, self.other_sales, amount="150000.00"))
+        service = create_booking(self._input(account, contact, None, self.other_sales, amount="30000.00", bookingType="Service", equipment="Service plan"))
 
         frappe.set_user(self.sales)
         for booking_id in (upsell["id"], po_booking["id"]):
             with self.assertRaises(frappe.PermissionError):
-                delete_booking(booking_id)
-            self.assertTrue(frappe.db.exists("CRM Booking", booking_id))
+                archive_booking(booking_id)
+            self.assertEqual(frappe.db.get_value("CRM Booking", booking_id, "archived"), 0)
 
         frappe.set_user("Administrator")
-        # The PO record behind a po_received Opportunity can only be cancelled, never deleted.
-        with self.assertRaises(CrmApiException) as protected:
-            delete_booking(po_booking["id"])
-        # BOOKING_SOURCE_INVALID is published as the INVALID_TRANSITION contract code.
-        self.assertEqual(protected.exception.code, "INVALID_TRANSITION")
-        self.assertTrue(frappe.db.exists("CRM Booking", po_booking["id"]))
-        self.assertEqual(get_strategy_opportunity(opportunity["id"])["liveBooking"]["id"], po_booking["id"])
+        # The dashboard reads the Booking list itself (#215), the Account's confirmed orders summed per currency.
+        def dashboard_booking() -> Decimal:
+            rows = get_dashboard({"range": "quarter"})["topAccounts"]
+            return sum((Decimal(row["booking"]) for row in rows if row["accountId"] == account["id"] and row["currency"] == "CNY"), Decimal("0"))
+        before = dashboard_booking()
+        self.assertEqual(before, sum((Decimal(item["amount"]) for item in (po_booking, upsell, service)), Decimal("0")))
 
-        self.assertEqual(delete_booking(upsell["id"]), {"id": upsell["id"], "status": "Deleted"})
-        self.assertFalse(frappe.db.exists("CRM Booking", upsell["id"]))
+        # And the Contact 360, which reads the list by the Contact.
+        def on_contact() -> set[str]:
+            return {item["id"] for item in get_contact(contact["id"])["bookings"]} & {upsell["id"], service["id"]}
+
+        self.assertEqual(on_contact(), {upsell["id"], service["id"]})
+        # The PO record behind a po_received Opportunity is only ever cancelled, never archived.
+        with self.assertRaises(CrmApiException) as protected:
+            archive_booking(po_booking["id"])
+        # BOOKING_SOURCE_INVALID is published as the INVALID_TRANSITION contract code.
+        self.assertEqual((protected.exception.code, protected.exception.public_message), ("INVALID_TRANSITION", OPPORTUNITY_BOOKING_ARCHIVE))
+        self.assertEqual(frappe.db.get_value("CRM Booking", po_booking["id"], "archived"), 0)
+        self.assertEqual(get_strategy_opportunity(opportunity["id"])["liveBooking"]["id"], po_booking["id"])
+        with self.assertRaises(CrmApiException) as missing:
+            archive_booking("CRM-BKG-NOBODY")
+        self.assertEqual(missing.exception.code, "NOT_FOUND")
+
+        # The archive writes its columns alone: no save of the Booking (the test runner writes no Version row for
+        # any save, so a Version count would show nothing; a save is refused here outright). The comment is inserted.
+        with patch.object(Document, "save", side_effect=AssertionError("the archive saves no document")):
+            archived = archive_booking(upsell["id"])
+        self.assertTrue(archived["archived"])
+        self.assertEqual(archived["archivedBy"], "Administrator")
+        self.assertRegex(archived["archivedAt"], r"Z$")
+        self.assertEqual(archived["status"], "Confirmed")
+        self.assertTrue(frappe.db.exists("CRM Booking", upsell["id"]))
+        # The archive moved the Booking's version: a page opened before holds an older one.
+        self.assertNotEqual(archived["modified"], upsell["modified"])
+        comments = {"reference_doctype": "CRM Booking", "reference_name": upsell["id"], "comment_type": "Info"}
+        self.assertEqual(frappe.get_all("Comment", filters=comments, pluck="content"), ["Archived"])
+        # Archived again, nothing changes.
+        self.assertEqual(archive_booking(upsell["id"])["archivedAt"], archived["archivedAt"])
+        archive_booking(service["id"])
+
+        # Out of the list, its summary, the pipeline, the Account 360 and the dashboard unless the archive is asked for.
+        def listed(query: dict) -> set[str]:
+            return {item["id"] for item in list_bookings({**query, "accountId": account["id"], "pageSize": 200})[0]}
+        self.assertEqual(listed({}), {po_booking["id"]})
+        self.assertEqual(listed({"archiveState": "active"}), {po_booking["id"]})
+        self.assertEqual(listed({"archiveState": "archived"}), {upsell["id"], service["id"]})
+        self.assertEqual(listed({"archiveState": "all"}), {po_booking["id"], upsell["id"], service["id"]})
+        with self.assertRaises(CrmApiException) as invalid:
+            list_bookings({"archiveState": "deleted"})
+        self.assertEqual(invalid.exception.code, "VALIDATION_ERROR")
+        self.assertEqual(booking_summary({"accountId": account["id"]})["count"], 1)
+        self.assertEqual(booking_summary({"accountId": account["id"], "archiveState": "archived"})["count"], 2)
+        self.assertEqual({item["id"] for item in list_pipeline({"accountId": account["id"]})["bookings"]}, {po_booking["id"]})
+        self.assertEqual({item["id"] for item in get_account_360(account["id"])["bookings"]}, {po_booking["id"]})
+        self.assertEqual(dashboard_booking(), Decimal(po_booking["amount"]))
+        self.assertEqual(on_contact(), set())
+
+        # Its owner still reads it, is refused every change, and does not restore it.
+        frappe.set_user(self.other_sales)
+        self.assertTrue(get_booking(upsell["id"])["archived"])
+        self.assertEqual(listed({"archiveState": "archived"}), {upsell["id"], service["id"]})
+        # Refused for the archive whichever version the edit carries: the current one or the older one from before.
+        for version in (archived["modified"], upsell["modified"]):
+            with self.assertRaises(CrmApiException) as edit:
+                update_booking(upsell["id"], {"note": "Changed while archived"}, version)
+            self.assertEqual((edit.exception.code, edit.exception.public_message), ("INVALID_TRANSITION", ARCHIVED_BOOKING_EDIT))
+        with self.assertRaises(CrmApiException) as completion:
+            complete_service_booking(service["id"], get_booking(service["id"])["modified"])
+        self.assertEqual((completion.exception.code, completion.exception.public_message), ("INVALID_TRANSITION", ARCHIVED_BOOKING_EDIT))
+        self.assertEqual(frappe.db.get_value("CRM Booking", service["id"], "status"), "Confirmed")
+        with self.assertRaises(frappe.PermissionError):
+            unarchive_booking(upsell["id"])
+
+        frappe.set_user("Administrator")
+        with patch.object(Document, "save", side_effect=AssertionError("the restore saves no document")):
+            restored = unarchive_booking(upsell["id"])
+        self.assertFalse(restored["archived"])
+        self.assertNotIn("archivedAt", restored)
+        self.assertNotIn("archivedBy", restored)
+        self.assertEqual(
+            frappe.db.get_value("CRM Booking", upsell["id"], ["archived", "archived_at", "archived_by"]), (0, None, None),
+        )
+        self.assertEqual(listed({}), {po_booking["id"], upsell["id"]})
+        self.assertEqual(dashboard_booking(), before - Decimal(service["amount"]))
+        self.assertEqual(on_contact(), {upsell["id"]})
+        self.assertEqual(frappe.get_all("Comment", filters=comments, pluck="content", order_by="creation asc"), ["Archived", "Restored from the archive"])
+        self.assertEqual(unarchive_booking(upsell["id"])["modified"], restored["modified"])
+        # Back as it was, the Booking is edited again.
+        frappe.set_user(self.other_sales)
+        self.assertEqual(update_booking(upsell["id"], {"note": "Changed while archived"}, restored["modified"])["note"], "Changed while archived")
+
+    def test_the_check_under_the_lock_catches_a_stale_first_read_whose_version_is_current(self):
+        """The re-check under the Booking's lock is reached only by a request whose first read predates the archive
+        while the version it sends is the archive's: staged here by handing the edit the snapshot from before."""
+
+        account, _, contact, _ = self._records(self.other_sales, "StaleRead")
+        upsell = create_booking(self._input(account, contact, None, self.other_sales))
+        frappe.set_user("Administrator")
+        archived = archive_booking(upsell["id"])
+
+        before = frappe.get_doc("CRM Booking", upsell["id"])
+        before.archived = 0
+        with patch.object(booking_service, "_require_booking", return_value=before):
+            # The owner's edit, and a Manager's correction of the PO date, each with the current version.
+            for user, call in (
+                (self.other_sales, lambda: update_booking(upsell["id"], {"note": "Late edit"}, archived["modified"])),
+                ("Administrator", lambda: set_booking_actual_po_date(upsell["id"], {"actualPoDate": "2026-10-01", "reason": "Late"}, archived["modified"])),
+            ):
+                frappe.set_user(user)
+                with self.assertRaises(CrmApiException) as refused:
+                    call()
+                self.assertEqual((refused.exception.code, refused.exception.public_message), ("INVALID_TRANSITION", ARCHIVED_BOOKING_EDIT))
+        self.assertEqual(frappe.db.get_value("CRM Booking", upsell["id"], "note"), "Priority delivery")
+        self.assertNotEqual(str(frappe.db.get_value("CRM Booking", upsell["id"], "actual_po_date") or ""), "2026-10-01")
+
+    def test_an_archived_order_takes_no_correction_and_no_conversion_and_a_completed_one_is_not_archived(self):
+        account, site, contact, _ = self._records(self.other_sales, "ArchiveOrder")
+        frappe.set_user("Administrator")
+        engineer = self._user("crm-booking-engineer@example.invalid", "CRM Engineer")
+        frappe.set_user(self.other_sales)
+        # A confirmed equipment order in USD: every Manager correction and the conversion apply to it.
+        order = create_booking(self._input(account, contact, None, self.other_sales, currency="USD", amount="20000.00", amountCny="140000.00"))
+        frappe.set_user("Administrator")
+        archived = archive_booking(order["id"])
+        self.assertTrue(archived["archived"])
+
+        def refused(call) -> None:
+            with self.assertRaises(CrmApiException) as refusal:
+                call()
+            self.assertEqual((refusal.exception.code, refusal.exception.public_message), ("INVALID_TRANSITION", ARCHIVED_BOOKING_EDIT))
+
+        refused(lambda: set_booking_actual_po_date(order["id"], {"actualPoDate": frappe.utils.today()}, archived["modified"]))
+        refused(lambda: set_booking_amount_cny(order["id"], {"amountCny": "150000.00", "reason": "Rate"}, archived["modified"]))
+        refused(lambda: convert_booking_to_installed_tool(order["id"], {
+            "siteId": site["id"], "engineerOwner": engineer, "serial": f"ARCHIVED-{frappe.generate_hash(length=6)}",
+            "model": "Model X", "location": "Fab 1", "salesOrder": "SO-REF", "contract": "CT-REF",
+            "software": "1.0", "firmware": "2.0", "configuration": "Standard",
+        }, archived["modified"]))
+        row = frappe.db.get_value("CRM Booking", order["id"], ["status", "actual_po_date", "installed_tool"], as_dict=True)
+        self.assertEqual((row.status, row.actual_po_date, row.installed_tool), ("Confirmed", None, None))
+        self.assertEqual(frappe.db.sql("SELECT CAST(`amount_cny` AS CHAR) FROM `tabCRM Booking` WHERE `name` = %s", (order["id"],))[0][0], "140000.00")
+        self.assertEqual(frappe.db.count("CRM Installed Tool", {"source_booking": order["id"]}), 0)
+
+        # A completed Booking is the record of a delivered order: it is not archived (the delete would have taken this
+        # one, which no Installed Tool or notice names; the archive refuses it all the same).
+        frappe.set_user(self.other_sales)
+        service = create_booking(self._input(account, contact, None, self.other_sales, bookingType="Service", equipment="Service plan"))
+        completed = complete_service_booking(service["id"], service["modified"])
+        self.assertEqual(completed["status"], "Completed")
+        self.assertEqual(frappe.db.count("CRM Installed Tool", {"source_booking": service["id"]}), 0)
+        self.assertEqual(frappe.db.count("CRM Notification Event", {
+            "source_doctype": "CRM Booking", "source_name": service["id"],
+        }), 0)
+        named = frappe.get_doc("CRM Booking", service["id"])
+        self.assertEqual(get_linked_docs(named) + get_dynamic_linked_docs(named), [])
+        frappe.set_user("Administrator")
+        with self.assertRaises(CrmApiException) as kept:
+            archive_booking(service["id"])
+        self.assertEqual((kept.exception.code, kept.exception.public_message), ("INVALID_TRANSITION", COMPLETED_BOOKING_ARCHIVE))
+        self.assertEqual(frappe.db.get_value("CRM Booking", service["id"], "archived"), 0)
 
     def test_assignment_notification_failure_rolls_back_create_and_reassignment(self):
         account, _, contact, _ = self._records(self.sales, "NotifyRollback", stage=QUALIFIED_OPPORTUNITY)

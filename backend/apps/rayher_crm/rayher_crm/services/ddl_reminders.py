@@ -105,7 +105,8 @@ def send_ddl_reminders() -> int:
 
     for booking in frappe.get_all(
         "CRM Booking",
-        filters={"status": ["not in", ["Cancelled", "Completed"]]},
+        # An archived Booking (a Manager's archive, in place of a delete) has no deadline to remind of.
+        filters={"status": ["not in", ["Cancelled", "Completed"]], "archived": 0},
         fields=["name", "ddl", "booking_owner", "account", "source_opportunity"],
     ):
         recipients = _related_users(

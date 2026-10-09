@@ -15,6 +15,8 @@ from rayher_crm.permissions.scope import conditions_for_doctype, has_crm_permiss
 from rayher_crm.services.bookings import (
     _lock_source_opportunity,
     _require_booking,
+    assert_booking_not_archived,
+    assert_booking_not_archived_now,
     serialize_booking,
     touch_source_opportunity,
 )
@@ -348,6 +350,7 @@ def convert_booking_to_installed_tool(
 ) -> dict[str, Any]:
     assert_capability("deal:write")
     current = _require_booking(booking_id)
+    assert_booking_not_archived(current)
     if current.installed_tool or current.status == "Completed":
         raise CrmApiException("BOOKING_ALREADY_CONVERTED", "Booking was already converted.")
     if current.status != "Confirmed":
@@ -357,6 +360,7 @@ def convert_booking_to_installed_tool(
     booking = lock_document("CRM Booking", booking_id, expected_modified, "NOT_FOUND")
     if not frappe.has_permission("CRM Booking", "read", doc=booking, user=frappe.session.user):
         raise CrmApiException("SCOPE_DENIED", "The Booking is outside the current user scope.")
+    assert_booking_not_archived_now(booking.name)
     if booking.installed_tool or booking.status == "Completed":
         raise CrmApiException("BOOKING_ALREADY_CONVERTED", "Booking was already converted.")
     if booking.status != "Confirmed":

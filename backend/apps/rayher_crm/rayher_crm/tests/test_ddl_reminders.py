@@ -8,6 +8,7 @@ from frappe.utils import add_days, today
 
 from rayher_crm.services import ddl_reminders
 from rayher_crm.services.accounts import create_account
+from rayher_crm.services.bookings import archive_booking
 from rayher_crm.services.contacts import create_contact
 from rayher_crm.services.ddl_reminders import send_ddl_reminders
 from rayher_crm.services.sites import create_site
@@ -98,6 +99,14 @@ class TestDdlReminders(FrappeTestCase):
         first_count = frappe.db.count("CRM Notification Event", {"source_name": booking.name})
         send_ddl_reminders()
         self.assertEqual(frappe.db.count("CRM Notification Event", {"source_name": booking.name}), first_count)
+
+        # An archived Booking (a Manager's archive, in place of a delete) has no deadline to remind of.
+        archived = frappe.copy_doc(booking)
+        archived.equipment = "Archived Inspection Tool"
+        archived.insert(ignore_permissions=True)
+        archive_booking(archived.name)
+        send_ddl_reminders()
+        self.assertEqual(frappe.db.count("CRM Notification Event", {"source_name": archived.name}), 0)
 
         frappe.db.set_value("CRM Booking", booking.name, "ddl", add_days(today(), 7))
         send_ddl_reminders()

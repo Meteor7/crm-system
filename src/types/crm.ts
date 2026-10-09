@@ -410,6 +410,10 @@ export interface BookingDto {
   installedToolConvertedAt?: string
   note: string
   modified?: string
+  /** Archived by a Manager (in place of a delete): out of the list, the pipeline and the figures, kept whole, read-only until restored. */
+  archived?: boolean
+  archivedAt?: string
+  archivedBy?: string
 }
 
 export interface UpsertBookingInput {

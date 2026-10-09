@@ -32,6 +32,9 @@ const FIXED_MESSAGES: Partial<Record<string, Record<string, CopyPair>>> = {
     'An archived Lead cannot be edited; a Manager can restore it from the archive.': ['This Lead is archived and cannot be edited; a Manager can restore it from the archive.', '该 Lead 已归档，不能编辑；经理可取消归档。'],
     'An archived Lead cannot be converted; a Manager can restore it from the archive.': ['This Lead is archived and cannot be converted; a Manager can restore it from the archive.', '该 Lead 已归档，不能转换；经理可取消归档。'],
     "A converted Lead is part of its Account's history and cannot be archived.": ["A converted Lead is part of its Account's history and cannot be archived.", '已转换的 Lead 是客户的历史记录，不能归档。'],
+    'An Opportunity Booking cannot be archived; cancel it instead.': ['An Opportunity Booking cannot be archived; cancel it instead.', '商机来源的 Booking 不能归档，请改为取消。'],
+    'An archived Booking cannot be changed; a Manager can restore it from the archive.': ['This Booking is archived and cannot be changed; a Manager can restore it from the archive.', '该 Booking 已归档，不能修改；经理可取消归档。'],
+    'A completed Booking is the record of a delivered order and cannot be archived.': ['A completed Booking is the record of a delivered order and cannot be archived.', '已完成的 Booking 是交付记录，不能归档。'],
   },
   VALIDATION_ERROR: {
     'Invalid Review period or anchor.': ['This period cannot be shown. Choose another date.', '无法显示这个周期，请重新选择日期。'],

@@ -2563,14 +2563,20 @@ export function createMockApi(options: {
       return response(localBookings[index])
     },
 
-    async deleteBooking(id: string) {
+    // Server reads and rules with no behaviour here; tests stub these (AGENTS.md).
+    async getBooking(id: string) {
       await wait()
-      assertManagerDelete()
-      const index = localBookings.findIndex((item) => item.id === id)
-      if (index < 0) throw new CrmApiError('BOOKING_NOT_FOUND', '未找到该 Booking', requestId(), false)
-      localBookings.splice(index, 1)
-      salesRepository.save()
-      return response({ id, status: 'Deleted' as const })
+      throw new CrmApiError('BOOKING_NOT_FOUND', `The mock API does not read a Booking by id (${id}).`, requestId(), false)
+    },
+
+    async archiveBooking(id: string) {
+      await wait()
+      throw new CrmApiError('INVALID_TRANSITION', `The mock API does not archive Bookings (${id}).`, requestId(), false)
+    },
+
+    async unarchiveBooking(id: string) {
+      await wait()
+      throw new CrmApiError('INVALID_TRANSITION', `The mock API does not archive Bookings (${id}).`, requestId(), false)
     },
 
     async convertBookingToInstalledTool(id: string, input: ConvertBookingToInstalledToolInput, expectedModified?: string) {

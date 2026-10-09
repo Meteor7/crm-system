@@ -1,6 +1,6 @@
 {
   "actions": [], "autoname": "format:CRM-BKG-{#####}", "creation": "2026-08-04 00:00:00.000000", "doctype": "DocType", "engine": "InnoDB",
-  "field_order": ["account", "primary_contact", "booking_type", "equipment", "quantity", "ddl", "amount", "currency", "amount_cny", "status", "booking_date", "actual_po_date", "actual_po_date_source", "actual_po_date_note", "amount_cny_note", "booking_owner", "source", "source_opportunity", "live_source_opportunity", "installed_tool", "installed_tool_converted_at", "note"],
+  "field_order": ["account", "primary_contact", "booking_type", "equipment", "quantity", "ddl", "amount", "currency", "amount_cny", "status", "booking_date", "actual_po_date", "actual_po_date_source", "actual_po_date_note", "amount_cny_note", "booking_owner", "source", "source_opportunity", "live_source_opportunity", "installed_tool", "installed_tool_converted_at", "note", "archived", "archived_at", "archived_by"],
   "fields": [
     {"fieldname": "account", "fieldtype": "Link", "label": "Account", "options": "Customer", "reqd": 1},
     {"fieldname": "primary_contact", "fieldtype": "Link", "label": "Primary Contact", "options": "Contact", "reqd": 1},
@@ -23,9 +23,12 @@
     {"fieldname": "live_source_opportunity", "fieldtype": "Data", "hidden": 1, "label": "Live Source Opportunity", "read_only": 1, "unique": 1},
     {"fieldname": "installed_tool", "fieldtype": "Link", "label": "Installed Tool", "options": "CRM Installed Tool", "read_only": 1},
     {"fieldname": "installed_tool_converted_at", "fieldtype": "Datetime", "label": "Installed Tool Converted At", "read_only": 1},
-    {"fieldname": "note", "fieldtype": "Small Text", "label": "Note"}
+    {"fieldname": "note", "fieldtype": "Small Text", "label": "Note"},
+    {"default": "0", "fieldname": "archived", "fieldtype": "Check", "label": "Archived", "read_only": 1},
+    {"fieldname": "archived_at", "fieldtype": "Datetime", "label": "Archived At", "read_only": 1},
+    {"fieldname": "archived_by", "fieldtype": "Link", "label": "Archived By", "options": "User", "read_only": 1}
   ],
-  "index_web_pages_for_search": 0, "modified": "2026-09-18 20:00:00.000000", "modified_by": "Administrator", "module": "Rayher CRM", "name": "CRM Booking", "naming_rule": "Expression", "owner": "Administrator",
+  "index_web_pages_for_search": 0, "modified": "2026-10-07 20:00:00.000000", "modified_by": "Administrator", "module": "Rayher CRM", "name": "CRM Booking", "naming_rule": "Expression", "owner": "Administrator",
   "permissions": [
     {"read": 1, "role": "CRM Manager"},
     {"read": 1, "role": "CRM Sales"},

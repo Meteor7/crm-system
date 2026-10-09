@@ -176,7 +176,9 @@ describe('Frappe method contract', () => {
       listBookings: 'bookings.list_bookings',
       createBooking: 'bookings.create_booking',
       updateBooking: 'bookings.update_booking',
-      deleteBooking: 'bookings.delete_booking',
+      getBooking: 'bookings.get_booking',
+      archiveBooking: 'bookings.archive_booking',
+      unarchiveBooking: 'bookings.unarchive_booking',
       completeServiceBooking: 'bookings.complete_service_booking',
       setBookingActualPoDate: 'bookings.set_actual_po_date',
       setBookingAmountCny: 'bookings.set_amount_cny',
@@ -287,16 +289,30 @@ describe('Frappe JSON transport', () => {
 
     await api.deleteAccount('ACC-DEL')
     await api.deleteStrategyOpportunity('OPP-DEL')
-    await api.deleteBooking('BOOK-DEL')
 
     expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([
       '/api/method/rayher_crm.api.v1.accounts.delete_account',
       '/api/method/rayher_crm.api.v1.opportunities.delete_strategy_opportunity',
-      '/api/method/rayher_crm.api.v1.bookings.delete_booking',
     ])
     expect(fetchMock.mock.calls.map(([, init]) => new URLSearchParams(String(init.body)).get('id'))).toEqual([
-      'ACC-DEL', 'OPP-DEL', 'BOOK-DEL',
+      'ACC-DEL', 'OPP-DEL',
     ])
+  })
+
+  it('reads a Booking by id and posts the id to its archive and restore endpoints', async () => {
+    const fetchMock = vi.fn().mockImplementation(() => Promise.resolve(success({ id: 'BKG-ARC', archived: true })))
+    const api = createFrappeApi({ fetchImpl: fetchMock })
+
+    await api.getBooking('BKG-ARC')
+    await api.archiveBooking('BKG-ARC')
+    await api.unarchiveBooking('BKG-ARC')
+
+    expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([
+      '/api/method/rayher_crm.api.v1.bookings.get_booking?id=BKG-ARC',
+      '/api/method/rayher_crm.api.v1.bookings.archive_booking',
+      '/api/method/rayher_crm.api.v1.bookings.unarchive_booking',
+    ])
+    expect(fetchMock.mock.calls.slice(1).map(([, init]) => new URLSearchParams(String(init.body)).get('id'))).toEqual(['BKG-ARC', 'BKG-ARC'])
   })
 
   it('posts the Lead id to the archive and restore endpoints', async () => {

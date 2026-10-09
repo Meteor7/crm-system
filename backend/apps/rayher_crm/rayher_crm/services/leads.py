@@ -15,6 +15,7 @@ from rayher_crm.api.v1.errors import CrmApiException, _raising_frame_locals
 from rayher_crm.permissions.roles import assert_capability, resolve_crm_role
 from rayher_crm.permissions.scope import conditions_for_doctype
 from rayher_crm.services.common import (
+    archive_state,
     ensure_server_generated_id,
     normalize_pagination,
     optional_date,
@@ -37,25 +38,12 @@ MAX_OPPORTUNITY_AMOUNT = Decimal("999999999999999999.99")
 MAX_ACTIVITIES = 200
 # The latest arrangement is written to custom_crm_next_action as well, a Data field of Frappe 15: 140 characters.
 MAX_ACTIVITY_ACTION = 140
-# What a list shows of the archive: the active records (the default), the archived ones, or both.
-ARCHIVE_STATES = ("active", "archived", "all")
 ARCHIVED_LEAD_EDIT = "An archived Lead cannot be edited; a Manager can restore it from the archive."
 ARCHIVED_LEAD_CONVERT = "An archived Lead cannot be converted; a Manager can restore it from the archive."
 CONVERTED_LEAD_ARCHIVE = "A converted Lead is part of its Account's history and cannot be archived."
 # ERPNext keeps a Lead's email unique (CRM Settings, allow_lead_duplication_based_on_emails off), archived Leads
 # included: its refusal on save is answered as a conflict that names the field, not as a server failure.
 DUPLICATE_LEAD_EMAIL = "Another Lead already uses this email address."
-
-
-def archive_state(query: dict[str, Any]) -> str:
-    """The archive filter of a list query: `archiveState`, "active" when absent."""
-
-    state = str(query.get("archiveState") or "active")
-    if state not in ARCHIVE_STATES:
-        raise CrmApiException(
-            "VALIDATION_ERROR", "archiveState must be active, archived or all.", field_errors={"archiveState": "Invalid value"},
-        )
-    return state
 
 
 def _set_archived(doc, archived: bool) -> None:

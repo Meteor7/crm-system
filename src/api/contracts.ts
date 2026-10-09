@@ -269,7 +269,11 @@ export interface CrmApi {
   listBookings(query: ListQuery): Promise<ApiResponse<BookingPageData>>
   createBooking(input: UpsertBookingInput): Promise<ApiResponse<BookingDto>>
   updateBooking(id: string, input: UpsertBookingInput, expectedModified?: string): Promise<ApiResponse<BookingDto>>
-  deleteBooking(id: string): Promise<ApiResponse<{ id: string; status: 'Deleted' }>>
+  getBooking(id: string): Promise<ApiResponse<BookingDto>>
+  /** Manager only. An Upsell Booking leaves the list, the pipeline, the figures and the reminders and keeps all it holds; an Opportunity Booking (cancel it instead) and a completed one (a delivered order) are refused. */
+  archiveBooking(id: string): Promise<ApiResponse<BookingDto>>
+  /** Manager only. The Booking is back as it was. */
+  unarchiveBooking(id: string): Promise<ApiResponse<BookingDto>>
   listDemoRequests(query: ListQuery): Promise<ApiResponse<PageData<DemoRequestDto>>>
   importDemoRequestForm(file: MultipartFilePart): Promise<ApiResponse<DemoRequestImportResult>>
   createDemoRequest(input: CreateDemoRequestInput): Promise<ApiResponse<DemoRequestDto>>

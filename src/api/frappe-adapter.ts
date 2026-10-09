@@ -94,7 +94,9 @@ export const FRAPPE_METHODS = {
   listBookings: 'bookings.list_bookings',
   createBooking: 'bookings.create_booking',
   updateBooking: 'bookings.update_booking',
-  deleteBooking: 'bookings.delete_booking',
+  getBooking: 'bookings.get_booking',
+  archiveBooking: 'bookings.archive_booking',
+  unarchiveBooking: 'bookings.unarchive_booking',
   listDemoRequests: 'demo_requests.list_demo_requests',
   importDemoRequestForm: 'demo_requests.import_form',
   createDemoRequest: 'demo_requests.create_demo_request',
@@ -575,7 +577,9 @@ export function createFrappeApi(options: FrappeApiOptions = {}): CrmApi {
     listBookings: (query) => get('listBookings', query as RequestValues),
     createBooking: (input) => post('createBooking', { input }),
     updateBooking: (id, input, expectedModified) => post('updateBooking', { id, input, expectedModified }),
-    deleteBooking: (id) => post('deleteBooking', { id }),
+    getBooking: (id) => get('getBooking', { id }),
+    archiveBooking: (id) => post('archiveBooking', { id }),
+    unarchiveBooking: (id) => post('unarchiveBooking', { id }),
     listDemoRequests: (query) => get('listDemoRequests', query as RequestValues),
     async importDemoRequestForm(file) {
       const content = await file.blob.arrayBuffer()

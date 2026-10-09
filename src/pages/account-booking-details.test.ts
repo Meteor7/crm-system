@@ -3,18 +3,30 @@ import { createPinia } from 'pinia'
 import { flushPromises, mount } from '@vue/test-utils'
 import { createMemoryHistory, createRouter } from 'vue-router'
 import { describe, expect, it, vi } from 'vitest'
-import type { CrmApi } from '@/api'
+import { CrmApiError, type CrmApi } from '@/api'
 import { createMockApi } from '@/api/mock-adapter'
 import { createMemorySalesRepository } from '@/demo/sales-repository'
 import { useAppStore } from '@/stores/app'
 import AccountDetailPage from './AccountDetailPage.vue'
 import BookingDetailPage from './BookingDetailPage.vue'
 
+// The Booking page reads its record by id, which the mock does not do: the read is served from the mock's pipeline
+// unless the test gave it a reading of its own.
+function readBookingFromPipeline(apiClient: CrmApi) {
+  if (vi.isMockFunction(apiClient.getBooking)) return
+  vi.spyOn(apiClient, 'getBooking').mockImplementation(async (id) => {
+    const booking = (await apiClient.listPipeline({})).data.bookings.find((item) => item.id === id)
+    if (!booking) throw new CrmApiError('BOOKING_NOT_FOUND', 'Booking was not found.', 'req-booking-read', false)
+    return { data: booking, warnings: [] }
+  })
+}
+
 async function mountRoute(
   path: string,
   component: typeof AccountDetailPage | typeof BookingDetailPage,
   apiClient: CrmApi = createMockApi({ latency: 0 }),
 ) {
+  readBookingFromPipeline(apiClient)
   const router = createRouter({
     history: createMemoryHistory(),
     routes: [
@@ -39,6 +51,7 @@ async function mountRoute(
 
 // Mounts the BKG-001 detail with the viewer's bootstrap, so role-gated actions render.
 async function mountBookingAs(apiClient: CrmApi) {
+  readBookingFromPipeline(apiClient)
   const pinia = createPinia()
   useAppStore(pinia).bootstrap = (await apiClient.getBootstrap()).data
   const router = createRouter({
@@ -240,8 +253,8 @@ describe('Account and Booking details', () => {
     const pipeline = await apiClient.listPipeline({})
     const toolSummary = (await apiClient.listInstalledTools({ page: 1, pageSize: 1 })).data.items[0]
     const tool = await apiClient.getInstalledTool(toolSummary.id)
-    pipeline.data.bookings[0]!.installedToolId = tool.data.id
-    vi.spyOn(apiClient, 'listPipeline').mockResolvedValue(pipeline)
+    // The page reads the Booking by its id (an archived one is not in the pipeline).
+    vi.spyOn(apiClient, 'getBooking').mockResolvedValue({ data: { ...pipeline.data.bookings[0]!, installedToolId: tool.data.id }, warnings: [] })
     vi.spyOn(apiClient, 'listInstalledTools').mockResolvedValue({
       data: { items: [] }, meta: { requestId: 'req-tools-page', total: 201, page: 1, pageSize: 200 }, warnings: [],
     })

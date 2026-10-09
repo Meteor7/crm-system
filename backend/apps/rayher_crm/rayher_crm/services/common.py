@@ -15,6 +15,19 @@ from rayher_crm.permissions.roles import assert_capability, resolve_crm_role
 
 SHANGHAI_TIMEZONE = ZoneInfo("Asia/Shanghai")
 MAX_PAGE_SIZE = 200
+# What a list shows of the archive: the active records (the default), the archived ones, or both.
+ARCHIVE_STATES = ("active", "archived", "all")
+
+
+def archive_state(query: Mapping[str, Any]) -> str:
+    """The archive filter of a list query: `archiveState`, "active" when absent."""
+
+    state = str(query.get("archiveState") or "active")
+    if state not in ARCHIVE_STATES:
+        raise CrmApiException(
+            "VALIDATION_ERROR", "archiveState must be active, archived or all.", field_errors={"archiveState": "Invalid value"},
+        )
+    return state
 
 
 def _positive_integer(value: Any, default: int, fieldname: str) -> int:

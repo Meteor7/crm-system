@@ -12,10 +12,11 @@ from rayher_crm.permissions.roles import assert_capability, resolve_crm_role
 from rayher_crm.permissions.scope import conditions_for_doctype
 from rayher_crm.services.accounts import _require_account
 from rayher_crm.services.common import (
-    delete_manager_scoped_document,
+    archive_state,
     ensure_server_generated_id,
     normalize_pagination,
     optional_date,
+    require_manager_scoped_document,
     required_text,
     resolve_write_owner,
     to_iso_timestamp,
@@ -86,17 +87,76 @@ def cny_amount_text(currency: Any, amount: Any, amount_cny: Any) -> str:
     return optional_money_text(amount_cny)
 
 
-def delete_booking(name: str) -> dict[str, str]:
-    assert_capability("deal:write")
-    if resolve_crm_role() != "Manager":
-        raise frappe.PermissionError("CRM Manager role is required.")
-    if frappe.db.get_value("CRM Booking", name, "source") == "Opportunity":
-        # The Booking is the PO record behind a po_received Opportunity; the stage rules (live
-        # booking, rollback, loss) rely on it, so it can only be cancelled, never deleted.
-        raise CrmApiException(
-            "BOOKING_SOURCE_INVALID", "An Opportunity Booking cannot be deleted; cancel it instead.",
-        )
-    return delete_manager_scoped_document("CRM Booking", name, "deal:write", "BOOKING_NOT_FOUND")
+ARCHIVED_BOOKING_EDIT = "An archived Booking cannot be changed; a Manager can restore it from the archive."
+OPPORTUNITY_BOOKING_ARCHIVE = "An Opportunity Booking cannot be archived; cancel it instead."
+COMPLETED_BOOKING_ARCHIVE = "A completed Booking is the record of a delivered order and cannot be archived."
+
+
+def assert_booking_not_archived(doc) -> None:
+    """A Booking archived (by a Manager, in place of a delete) takes no change until it is restored. Run on the
+    record as first read (this transaction's snapshot), before its payload and its version are looked at, so the
+    refusal names the archive whatever the client sent and whichever version it holds."""
+
+    if doc.archived:
+        raise CrmApiException("INVALID_TRANSITION", ARCHIVED_BOOKING_EDIT)
+
+
+def assert_booking_not_archived_now(name: str) -> None:
+    """The same, as committed now: a locking read of the flag, run after the Booking's row is held. Defence in
+    depth: an archive committed after the first read moved the version, which the lock refuses already, so this
+    is reached only by a caller whose version is current and whose first read was stale (a test shows the
+    case); it reads the flag itself rather than relying on the version."""
+
+    if frappe.db.get_value("CRM Booking", name, "archived", for_update=True):
+        raise CrmApiException("INVALID_TRANSITION", ARCHIVED_BOOKING_EDIT)
+
+
+def _set_archived(doc, archived: bool) -> None:
+    """Write the three archive columns of the Booking, read under its row lock, and nothing else (no full save
+    for a flag flip, and so no Version row). `modified` moves with it, so an edit, a correction, a completion
+    or a conversion prepared on the record before is refused rather than written over the archive: by the
+    archive check each runs on its first read, or, when the archive lands between that read and its lock, by
+    its version check (`lock_document`). The archive and the restore each leave a comment on the Booking (who,
+    when), which outlives the restore."""
+
+    frappe.db.set_value("CRM Booking", doc.name, {
+        "archived": 1 if archived else 0,
+        "archived_at": frappe.utils.now_datetime() if archived else None,
+        "archived_by": frappe.session.user if archived else None,
+    })
+    frappe.get_doc({
+        "doctype": "Comment", "comment_type": "Info", "reference_doctype": "CRM Booking", "reference_name": doc.name,
+        "content": "Archived" if archived else "Restored from the archive",
+    }).insert(ignore_permissions=True)
+    doc.reload()
+
+
+def archive_booking(name: str) -> dict[str, Any]:
+    """Archive an Upsell Booking, a Manager's action (the delete it replaces was one): the Booking leaves the list,
+    the pipeline, the figures and the reminders, keeps all it holds, and is brought back by unarchive_booking.
+    An Opportunity Booking is the PO record behind its Opportunity (the live booking, rollback and loss rules rely
+    on it) and is only ever cancelled; a completed Booking (a service delivered, an order converted to an Installed
+    Tool, which names it) is the record of a delivered order and stays (the delete refused the first, and most
+    completed ones: those an Installed Tool or a notice names). Archiving a Booking archived already changes nothing."""
+
+    doc = require_manager_scoped_document("CRM Booking", name, "deal:write", "BOOKING_NOT_FOUND", for_update=True)
+    if doc.source == "Opportunity":
+        raise CrmApiException("BOOKING_SOURCE_INVALID", OPPORTUNITY_BOOKING_ARCHIVE)
+    if doc.installed_tool or doc.status == "Completed":
+        raise CrmApiException("INVALID_TRANSITION", COMPLETED_BOOKING_ARCHIVE)
+    if not doc.archived:
+        _set_archived(doc, True)
+    return serialize_booking(doc)
+
+
+def unarchive_booking(name: str) -> dict[str, Any]:
+    """Bring an archived Booking back: every field as it was, its version moved on. A Booking not archived is left
+    as it is."""
+
+    doc = require_manager_scoped_document("CRM Booking", name, "deal:write", "BOOKING_NOT_FOUND", for_update=True)
+    if doc.archived:
+        _set_archived(doc, False)
+    return serialize_booking(doc)
 
 
 def _nonnegative_money(value: Any):
@@ -228,7 +288,11 @@ def serialize_booking(doc) -> dict[str, Any]:
         "sourceOpportunityId": doc.source_opportunity or "",
         "note": doc.note or "",
         "modified": to_iso_timestamp(doc.modified),
+        "archived": bool(doc.archived),
     }
+    if doc.archived:
+        result["archivedAt"] = to_iso_timestamp(doc.archived_at) if doc.archived_at else ""
+        result["archivedBy"] = doc.archived_by or ""
     if doc.installed_tool:
         result["installedToolId"] = doc.installed_tool
     if doc.installed_tool_converted_at:
@@ -283,6 +347,10 @@ def _list_filters(query: dict[str, Any]) -> tuple[str, list[Any]]:
 
     where_parts = [f"({conditions_for_doctype('CRM Booking')})"]
     values: list[Any] = []
+    state = archive_state(query)
+    if state != "all":
+        where_parts.append("`archived` = %s")
+        values.append(1 if state == "archived" else 0)
     search = str(query.get("search") or "").strip()
     if search:
         pattern = f"%{search}%"
@@ -313,7 +381,8 @@ def _list_filters(query: dict[str, Any]) -> tuple[str, list[Any]]:
 def list_bookings(query: dict[str, Any] | None = None):
     assert_capability("deal:view")
     if query is None:
-        where = f"({conditions_for_doctype('CRM Booking')})"
+        # Every Booking in scope but the archived ones, as a list query without archiveState gives it.
+        where = f"({conditions_for_doctype('CRM Booking')}) AND `archived` = 0"
         rows = frappe.db.sql(
             f"SELECT `name` FROM `tabCRM Booking` WHERE {where} ORDER BY `modified` DESC, `name` DESC",
             as_dict=True,
@@ -487,12 +556,14 @@ def _assert_amount_cny_edit(doc, recorded: str, merged: dict[str, Any]) -> None:
 def update_booking(name: str, payload: dict[str, Any], expected_modified: Any) -> dict[str, Any]:
     assert_capability("deal:write")
     current = _require_booking(name)
+    assert_booking_not_archived(current)
     if current.installed_tool or current.status == "Completed":
         raise CrmApiException("BOOKING_LOCKED", "Converted Booking cannot be edited.")
     _lock_source_opportunity(current)
     doc = lock_document("CRM Booking", name, expected_modified, "NOT_FOUND")
     if not frappe.has_permission("CRM Booking", "read", doc=doc, user=frappe.session.user):
         raise CrmApiException("SCOPE_DENIED", "The Booking is outside the current user scope.")
+    assert_booking_not_archived_now(doc.name)
     if doc.installed_tool or doc.status == "Completed":
         raise CrmApiException("BOOKING_LOCKED", "Converted Booking cannot be edited.")
     merged = _current_input(doc)
@@ -543,10 +614,12 @@ def set_booking_actual_po_date(name: str, payload: dict[str, Any], expected_modi
     if resolve_crm_role() != "Manager":
         raise CrmApiException("PERMISSION_DENIED", "Only a Manager can fill in or correct the actual PO date.")
     current = _require_booking(name)
+    assert_booking_not_archived(current)
     _lock_source_opportunity(current)
     doc = lock_document("CRM Booking", name, expected_modified, "NOT_FOUND")
     if not frappe.has_permission("CRM Booking", "read", doc=doc, user=frappe.session.user):
         raise CrmApiException("SCOPE_DENIED", "The Booking is outside the current user scope.")
+    assert_booking_not_archived_now(doc.name)
     # Completed orders count too: converting to an Installed Tool locks every other edit.
     if doc.status not in ("Confirmed", "Completed"):
         raise CrmApiException(
@@ -597,10 +670,12 @@ def set_booking_amount_cny(name: str, payload: dict[str, Any], expected_modified
     if resolve_crm_role() != "Manager":
         raise CrmApiException("PERMISSION_DENIED", "Only a Manager can fill in or correct the CNY amount.")
     current = _require_booking(name)
+    assert_booking_not_archived(current)
     _lock_source_opportunity(current)
     doc = lock_document("CRM Booking", name, expected_modified, "NOT_FOUND")
     if not frappe.has_permission("CRM Booking", "read", doc=doc, user=frappe.session.user):
         raise CrmApiException("SCOPE_DENIED", "The Booking is outside the current user scope.")
+    assert_booking_not_archived_now(doc.name)
     if doc.status not in ("Confirmed", "Completed"):
         raise CrmApiException(
             "BOOKING_STATUS_INVALID", "Only a Confirmed or Completed Booking has a CNY amount to record.",
@@ -644,6 +719,7 @@ def set_booking_amount_cny(name: str, payload: dict[str, Any], expected_modified
 def complete_service_booking(name: str, expected_modified: Any) -> dict[str, Any]:
     assert_capability("deal:write")
     current = _require_booking(name)
+    assert_booking_not_archived(current)
     if (current.booking_type or "Equipment") != "Service":
         raise CrmApiException("BOOKING_TYPE_INVALID", "Only Service Booking can be completed as a service.")
     if current.installed_tool or current.status == "Completed":
@@ -655,6 +731,7 @@ def complete_service_booking(name: str, expected_modified: Any) -> dict[str, Any
     doc = lock_document("CRM Booking", name, expected_modified, "NOT_FOUND")
     if not frappe.has_permission("CRM Booking", "read", doc=doc, user=frappe.session.user):
         raise CrmApiException("SCOPE_DENIED", "The Booking is outside the current user scope.")
+    assert_booking_not_archived_now(doc.name)
     if (doc.booking_type or "Equipment") != "Service":
         raise CrmApiException("BOOKING_TYPE_INVALID", "Only Service Booking can be completed as a service.")
     if doc.installed_tool or doc.status == "Completed":

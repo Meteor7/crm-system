@@ -5,7 +5,7 @@ from frappe.tests.utils import FrappeTestCase
 
 from rayher_crm.api.v1.errors import CrmApiException
 from rayher_crm.services.accounts import create_account
-from rayher_crm.services.bookings import create_booking, get_booking, set_booking_amount_cny, update_booking
+from rayher_crm.services.bookings import archive_booking, create_booking, get_booking, set_booking_amount_cny, update_booking
 from rayher_crm.services.contacts import create_contact
 from rayher_crm.services.opportunities import (
     confirm_po,
@@ -329,14 +329,19 @@ class TestBookingCnyAmount(FrappeTestCase):
             "booking": self._draft(contact, amountCny="852000"), "actualPoDate": self.po_date,
         }, opportunity["modified"])
         filled = create_booking(self._upsell(account, contact, amountCny="355000"))
+        # A foreign order without its CNY amount, archived by a Manager: no longer anyone's to fill in.
+        shelved = create_booking(self._upsell(account, contact, equipment="Shelved kit", amountCny="355000"))
         frappe.db.set_value("CRM Booking", confirmed["liveBooking"]["id"], "amount_cny", 0, update_modified=False)
+        frappe.db.set_value("CRM Booking", shelved["id"], "amount_cny", 0, update_modified=False)
 
         frappe.set_user("Administrator")
+        archive_booking(shelved["id"])
         missing = booking_cny_amount.list_missing()
 
         names = {row["name"] for row in missing["bookings"]}
         self.assertIn(confirmed["liveBooking"]["id"], names)
         self.assertNotIn(filled["id"], names)
+        self.assertNotIn(shelved["id"], names)
         self.assertEqual(
             next(row for row in missing["bookings"] if row["name"] == confirmed["liveBooking"]["id"])["currency"], "USD",
         )

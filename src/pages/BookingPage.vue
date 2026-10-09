@@ -7,7 +7,7 @@ import { RouterLink, useRoute, useRouter } from 'vue-router'
 import { api as defaultApi, type CrmApi } from '@/api'
 import { mapRequestError } from '@/api/request-state'
 import { useAppStore } from '@/stores/app'
-import type { AccountSummaryDto, BookingDto, BookingSource, BookingSummaryDto, ContactSummaryDto, CreateContactInput, OpportunityDto, SiteDto, UpsertBookingInput } from '@/types/crm'
+import type { AccountSummaryDto, ArchiveState, BookingDto, BookingSource, BookingSummaryDto, ContactSummaryDto, CreateContactInput, OpportunityDto, SiteDto, UpsertBookingInput } from '@/types/crm'
 import type { ConvertBookingToInstalledToolInput } from '@/types/workspaces'
 import PageHeader from '@/design-system/PageHeader.vue'
 import DataState from '@/design-system/DataState.vue'
@@ -46,6 +46,8 @@ const referenceWarning = computed(() => referencesUnavailable.value
 const status = ref<BookingDto['status'] | 'All'>(typeof route.query.status === 'string' ? route.query.status as BookingDto['status'] | 'All' : 'All')
 const bookingSource = ref<BookingSource | 'All'>(typeof route.query.source === 'string' ? route.query.source as BookingSource | 'All' : 'All')
 const poDateFilter = ref<'All' | 'missing'>(route.query.actualPoDate === 'missing' ? 'missing' : 'All')
+// Archived Bookings (a Manager's archive, in place of a delete) are shown only when asked for.
+const archiveState = ref<ArchiveState>(route.query.archive === 'archived' || route.query.archive === 'all' ? route.query.archive : 'active')
 const modalOpen = ref(false)
 const editing = ref<BookingDto | null>(null)
 const contactModal = ref(false)
@@ -98,7 +100,7 @@ async function load() {
     const contactId = typeof route.query.contactId === 'string' ? route.query.contactId : ''
     const accountId = typeof route.query.accountId === 'string' ? route.query.accountId : ''
     const result = await props.apiClient.listBookings({
-      contactId, accountId, status: status.value, source: bookingSource.value,
+      contactId, accountId, status: status.value, source: bookingSource.value, archiveState: archiveState.value,
       ...(poDateFilter.value === 'missing' ? { actualPoDateMissing: '1' } : {}),
       page: page.value, pageSize: pageSize.value, summary: true,
     })
@@ -209,19 +211,20 @@ async function completeService(booking: BookingDto) {
 }
 
 let restoringRoute = false
-function syncUrl() { if (!restoringRoute) void router.replace({ query: { ...route.query, page: String(page.value), pageSize: String(pageSize.value), status: status.value === 'All' ? undefined : status.value, source: bookingSource.value === 'All' ? undefined : bookingSource.value, actualPoDate: poDateFilter.value === 'missing' ? 'missing' : undefined } }) }
+function syncUrl() { if (!restoringRoute) void router.replace({ query: { ...route.query, page: String(page.value), pageSize: String(pageSize.value), status: status.value === 'All' ? undefined : status.value, source: bookingSource.value === 'All' ? undefined : bookingSource.value, actualPoDate: poDateFilter.value === 'missing' ? 'missing' : undefined, archive: archiveState.value === 'active' ? undefined : archiveState.value } }) }
 function reloadFromFirstPage() { if (restoringRoute) return; page.value = 1; syncUrl(); void load() }
 function goPage(value: number) { page.value = value; syncUrl(); void load() }
 function changePageSize(value: number) { pageSize.value = value; page.value = 1; syncUrl(); void load() }
-watch([status, bookingSource, poDateFilter], reloadFromFirstPage, { flush: 'sync' })
-watch(() => [route.query.page, route.query.pageSize, route.query.status, route.query.source, route.query.actualPoDate], ([nextPage, nextSize, nextStatus, nextSource, nextPoDate]) => {
+watch([status, bookingSource, poDateFilter, archiveState], reloadFromFirstPage, { flush: 'sync' })
+watch(() => [route.query.page, route.query.pageSize, route.query.status, route.query.source, route.query.actualPoDate, route.query.archive], ([nextPage, nextSize, nextStatus, nextSource, nextPoDate, nextArchive]) => {
   const restoredPage = typeof nextPage === 'string' && Number(nextPage) > 0 ? Number(nextPage) : 1
   const restoredSize = typeof nextSize === 'string' && [10, 25, 50].includes(Number(nextSize)) ? Number(nextSize) : 10
   const restoredStatus = typeof nextStatus === 'string' ? nextStatus as BookingDto['status'] : 'All'
   const restoredSource = typeof nextSource === 'string' ? nextSource as BookingSource : 'All'
   const restoredPoDate = nextPoDate === 'missing' ? 'missing' : 'All'
-  if (restoredPage === page.value && restoredSize === pageSize.value && restoredStatus === status.value && restoredSource === bookingSource.value && restoredPoDate === poDateFilter.value) return
-  restoringRoute = true; page.value = restoredPage; pageSize.value = restoredSize; status.value = restoredStatus; bookingSource.value = restoredSource; poDateFilter.value = restoredPoDate; restoringRoute = false; void load()
+  const restoredArchive: ArchiveState = nextArchive === 'archived' || nextArchive === 'all' ? nextArchive : 'active'
+  if (restoredPage === page.value && restoredSize === pageSize.value && restoredStatus === status.value && restoredSource === bookingSource.value && restoredPoDate === poDateFilter.value && restoredArchive === archiveState.value) return
+  restoringRoute = true; page.value = restoredPage; pageSize.value = restoredSize; status.value = restoredStatus; bookingSource.value = restoredSource; poDateFilter.value = restoredPoDate; archiveState.value = restoredArchive; restoringRoute = false; void load()
 })
 
 onMounted(async () => {
@@ -255,6 +258,7 @@ onMounted(async () => {
           <select v-model="bookingSource" :aria-label="t('booking.source')"><option value="All">{{ t('booking.allSources') }}</option><option v-for="item in ['Opportunity', 'Upsell']" :key="item" :value="item">{{ salesEnumLabel(item, locale) }}</option></select>
           <select v-model="status" :aria-label="t('booking.status')"><option value="All">{{ t('booking.allStatuses') }}</option><option v-for="item in ['Pending', 'Confirmed', 'Completed', 'Cancelled']" :key="item" :value="item">{{ salesEnumLabel(item, locale) }}</option></select>
           <select v-model="poDateFilter" :aria-label="t('actualPoDate.label')" data-testid="actual-po-date-filter"><option value="All">{{ t('actualPoDate.filterAll') }}</option><option value="missing">{{ t('actualPoDate.filterMissing') }}</option></select>
+          <select v-model="archiveState" :aria-label="t('booking.archiveState')"><option value="active">{{ t('booking.archiveActive') }}</option><option value="archived">{{ t('booking.archiveArchived') }}</option><option value="all">{{ t('booking.archiveAll') }}</option></select>
         </div>
       </header>
       <DataState v-if="loading && !rows.length" type="loading" />
@@ -270,14 +274,14 @@ onMounted(async () => {
               <td><StatusBadge :label="salesEnumLabel(item.source ?? '', locale)" :tone="item.source === 'Opportunity' ? 'info' : 'neutral'" /><RouterLink v-if="item.sourceOpportunityId" :data-booking-source="item.sourceOpportunityId" :to="{ name: 'opportunity-detail', params: { opportunityId: item.sourceOpportunityId } }">{{ item.sourceOpportunityId }}</RouterLink><small v-else>{{ salesEnumLabel('Existing Customer Upsell', locale) }}</small></td>
               <td><strong>{{ item.equipment }}</strong><small>{{ salesEnumLabel(item.bookingType ?? '', locale) }} · {{ item.quantity }} {{ salesUnits(locale) }}</small><small v-if="item.installedToolId" class="installed-tool-link">{{ locale === 'en-US' ? 'Installed tool' : '已安装设备' }} · {{ item.installedToolId }}</small></td>
               <td><strong>{{ formatDisplayDate(item.ddl) }}</strong><small>{{ t('booking.entered') }} {{ formatDisplayDate(item.bookingDate) }}</small><small v-if="item.actualPoDate || item.status === 'Confirmed' || item.status === 'Completed'" :data-booking-actual-po-date="item.id">{{ t('actualPoDate.label') }} {{ item.actualPoDate ? formatDisplayDate(item.actualPoDate) : t('actualPoDate.missing') }}</small></td>
-              <td><strong>{{ formatMoney(item.amount, item.currency) }}</strong><small v-if="item.currency !== 'CNY'" :data-booking-amount-cny="item.id">{{ item.amountCny ? `${t('bookingEditor.amountCny')} ${formatMoney(item.amountCny, 'CNY')}` : t('booking.amountCnyPending') }}</small><StatusBadge :label="salesEnumLabel(item.status, locale)" :tone="item.status === 'Confirmed' || item.status === 'Completed' ? 'positive' : item.status === 'Cancelled' ? 'danger' : 'warning'" /></td>
+              <td><strong>{{ formatMoney(item.amount, item.currency) }}</strong><small v-if="item.currency !== 'CNY'" :data-booking-amount-cny="item.id">{{ item.amountCny ? `${t('bookingEditor.amountCny')} ${formatMoney(item.amountCny, 'CNY')}` : t('booking.amountCnyPending') }}</small><span class="status-badges"><StatusBadge :label="salesEnumLabel(item.status, locale)" :tone="item.status === 'Confirmed' || item.status === 'Completed' ? 'positive' : item.status === 'Cancelled' ? 'danger' : 'warning'" /><StatusBadge v-if="item.archived" :label="salesEnumLabel('Archived', locale)" tone="neutral" :data-booking-archived="item.id" /></span></td>
               <td>{{ personnelDisplayName(item.owner) }}</td>
               <td>{{ item.note || '—' }}</td>
               <td v-if="canWrite">
                 <div class="booking-actions">
-                  <button v-if="item.status !== 'Completed'" class="edit-button" type="button" :aria-label="t('booking.edit')" :disabled="!referencesReady" @click="openEdit(item)"><Pencil :size="13" /></button>
-                  <button v-if="item.status === 'Confirmed' && !item.installedToolId && item.bookingType === 'Equipment'" class="convert-button" type="button" :data-testid="`convert-${item.id}`" @click="openTransfer(item)"><ArrowRight :size="13" />{{ t('booking.convertTool') }}</button>
-                  <button v-if="item.status === 'Confirmed' && !item.installedToolId && item.bookingType === 'Service'" class="convert-button" type="button" :data-testid="`complete-service-${item.id}`" :disabled="busy" @click="completeService(item)"><CheckCircle2 :size="13" />{{ t('booking.serviceComplete') }}</button>
+                  <button v-if="item.status !== 'Completed' && !item.archived" class="edit-button" type="button" :aria-label="t('booking.edit')" :disabled="!referencesReady" @click="openEdit(item)"><Pencil :size="13" /></button>
+                  <button v-if="item.status === 'Confirmed' && !item.installedToolId && item.bookingType === 'Equipment' && !item.archived" class="convert-button" type="button" :data-testid="`convert-${item.id}`" @click="openTransfer(item)"><ArrowRight :size="13" />{{ t('booking.convertTool') }}</button>
+                  <button v-if="item.status === 'Confirmed' && !item.installedToolId && item.bookingType === 'Service' && !item.archived" class="convert-button" type="button" :data-testid="`complete-service-${item.id}`" :disabled="busy" @click="completeService(item)"><CheckCircle2 :size="13" />{{ t('booking.serviceComplete') }}</button>
                 </div>
               </td>
             </tr>
@@ -326,6 +330,7 @@ onMounted(async () => {
 </template>
 
 <style scoped>
+.booking-table td>.status-badges{display:flex;flex-wrap:wrap;gap:4px;margin-top:3px}
 .booking-page{display:grid;gap:14px}.booking-page :deep(.page-header){margin-bottom:0}.booking-page .primary-button{display:flex;align-items:center;gap:6px}.booking-page .primary-button:disabled{opacity:.55;cursor:not-allowed}.booking-metrics{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}.booking-metrics article{display:flex;align-items:center;gap:11px;padding:14px 15px;background:#fff;border:1px solid var(--crm-line);border-radius:12px}.booking-metrics article>span{display:grid;width:38px;height:38px;place-items:center;color:var(--crm-brand-ink);background:var(--crm-teal-soft);border-radius:10px}.booking-metrics article>div{display:grid;gap:2px}.booking-metrics small,.booking-metrics p{margin:0;color:var(--crm-text-muted);font-size:8px}.booking-metrics strong{color:var(--crm-navy);font-size:16px}.reference-warning{margin:0;padding:10px 12px;color:#7b5c15;background:#fff8e8;border:1px solid #ead49f;border-radius:9px;font-size:10px}.booking-card{overflow:hidden;background:#fff;border:1px solid var(--crm-line);border-radius:12px}.booking-toolbar{display:flex;align-items:center;justify-content:space-between;gap:15px;padding:14px 16px;border-bottom:1px solid var(--crm-line)}.booking-toolbar>div:first-child{display:grid;gap:3px}.booking-toolbar strong{color:var(--crm-navy);font-size:13px}.booking-toolbar small{color:var(--crm-text-muted);font-size:8px}.booking-filters{display:flex;gap:7px}.booking-filters select{height:38px;padding:0 10px;background:#fff;border:1px solid var(--crm-line);border-radius:10px;font:inherit;font-size:9px}.booking-table{min-width:1180px}.booking-table td>strong,.booking-table td>small,.booking-table td>a,.booking-table td>span{display:block;margin-top:3px}.booking-table td>a,.installed-tool-link{color:var(--crm-link)!important;font-size:9px}.booking-table td>small,.booking-table td>span:not(.status-badge){color:var(--crm-text-muted);font-size:8px;line-height:1.5}.booking-actions{display:flex;align-items:center;gap:6px}.edit-button{display:grid;width:29px;height:29px;place-items:center;color:var(--crm-teal);background:#fff;border:1px solid var(--crm-line);border-radius:7px;cursor:pointer}.convert-button{display:inline-flex;align-items:center;gap:5px;min-height:29px;padding:0 9px;color:#fff;background:var(--crm-teal);border:0;border-radius:7px;font-size:8px;font-weight:800;white-space:nowrap;cursor:pointer}.edit-button:disabled{opacity:.45;cursor:not-allowed}@media(max-width:900px){.booking-toolbar{align-items:stretch;flex-direction:column}.booking-filters{flex-wrap:wrap}.booking-metrics{grid-template-columns:1fr}}@media(max-width:560px){.booking-filters{display:grid}.booking-filters label{min-width:0}}
 .booking-link{display:flex;min-width:180px;align-items:center;gap:8px;padding:0;color:inherit;background:transparent;border:0;font:inherit;text-align:left;cursor:pointer}.booking-link>span{display:grid;width:30px;height:30px;place-items:center;color:var(--crm-brand-ink);background:var(--crm-teal-soft);border-radius:9px}.booking-link>div{display:grid;gap:3px}.booking-link strong{color:var(--crm-link);font-size:12px}.booking-link small{color:var(--crm-text-muted);font-size:9px}.booking-link:hover strong{color:var(--crm-link-hover);text-decoration:none}
 </style>

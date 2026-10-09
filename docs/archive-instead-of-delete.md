@@ -9,7 +9,7 @@ No Sales record is removed from the database by a user (once each record's PR is
 - **Concurrency.** The archive and the restore read the record under its row lock (a locking read); every write on the record checks its version (`lock_document`, or Frappe's own `check_if_latest`, which the API answers as `VERSION_CONFLICT`), so an archive committed after a client read is never written over.
 - **Nothing new under an archived record.** An archived record cannot be edited, converted or moved on, and no new record is created under it.
 - **The list filter.** Each list has a "归档状态 / Archive state" filter: active (the default), archived, or all. Pages read the filter as `archiveState=active|archived|all`.
-- **Native lists.** The lists and pickers above are the CRM's own. Frappe's own (the Desk's list and report views, its REST list, its link search) are left as they were: they put no condition on the archive and show an archived record to whoever may read it, as they show an archived Contact (a list, a report or the REST list shows it unless one filters on its archive field, CRM Archived on a Lead). Leaving archived records out of them (a condition on their list hook, which the record's own page does not read) is a product decision for later.
+- **Native lists.** The lists and pickers above are the CRM's own. Frappe's own (the Desk's list and report views, its REST list, its link search) are left as they were: they put no condition on the archive and show an archived record to whoever may read it, as they show an archived Contact (a list, a report or the REST list shows it unless one filters on its archive field, CRM Archived on a Lead, Archived on a Booking). Leaving archived records out of them (a condition on their list hook, which the record's own page does not read) is a product decision for later.
 - **Nothing cascades except what is said below.** Records that name an archived one keep naming it.
 
 ## Per record
@@ -17,7 +17,7 @@ No Sales record is removed from the database by a user (once each record's PR is
 | Record | Archive refused when | Archived with it | State |
 | --- | --- | --- | --- |
 | Lead | it is converted (it is its Account's history) | — | done |
-| Booking | its source is an Opportunity (cancel it instead, as the delete had it) | — | next |
+| Booking | its source is an Opportunity (cancel it instead), or it is completed (a service delivered, an order converted to an Installed Tool): the delete refused the first, and most of the second (those an Installed Tool or a notice names) | — | done |
 | Opportunity | — | — (its own stakeholders, actions and history stay on it) | next |
 | Account | it has open Opportunities, live Bookings or planned Visits | its active Contacts, restored with it | next |
 | Contact | — (archived through its own page, as before) | — | as before |
@@ -30,3 +30,11 @@ No Sales record is removed from the database by a user (once each record's PR is
 - Every figure and warning reads a Lead only through its conversion (its column naming a deal, or the deal's stage history), which an archived Lead has none of: Review's new qualified leads (and the targets counted on them), the board's last activity of a deal and the warnings' stagnation (a deal's last activity). Plan reads no Lead (its lead commitments are a Manager's numbers); no reminder reads a Lead.
 - ERPNext keeps a Lead's email unique over every Lead (CRM Settings `allow_lead_duplication_based_on_emails` is off), archived ones included: a new Lead with the email of an archived one is refused (`CONFLICT`, "Another Lead already uses this email address."); a Manager restores the archived Lead or the user picks another email. The Lead's owner is not told of an archive (the delete did not tell them either).
 - Data: custom fields `custom_crm_archived` (Check), `custom_crm_archived_at` (Datetime) and `custom_crm_archived_by` (Link User) on Lead, installed by the custom-field sync on migrate.
+
+## Booking
+
+- API: `bookings.archive_booking(id)` and `bookings.unarchive_booking(id)` (POST, Manager); `bookings.list_bookings` and its summary take `archiveState`; `bookings.get_booking(id)` reads one (the Booking page reads by id, since an archived Booking is not in the pipeline); the Booking carries `archived`, and `archivedAt` and `archivedBy` while archived.
+- Only an Upsell Booking that is not completed is archived. An Opportunity Booking is the PO record behind its Opportunity (the live booking, rollback and loss rules rely on it) and is only ever cancelled; a completed Booking (a service delivered, an order converted to an Installed Tool, which names it) is the record of a delivered order (`INVALID_TRANSITION` for both; the delete refused the first, and most completed ones: those an Installed Tool or a notice names).
+- The Booking page reads its record by id; a Booking the reader cannot see is "not found" to them, as it was when it was not in their pipeline.
+- An archived Booking is refused every change (`INVALID_TRANSITION`, "a Manager can restore it from the archive"): an edit, the actual PO date and the CNY amount, a service completion, a conversion to an Installed Tool. It is out of the Booking list and summary (active by default; the pipeline, the dashboard and the Contact 360 read the list), the Account 360 (which reads the list unpaginated, active ones alone), the deadline reminders and the CNY backfill report. Review counts only an Opportunity's own Bookings, which are never archived.
+- Data: fields `archived` (Check), `archived_at` (Datetime) and `archived_by` (Link User) on CRM Booking, installed by the doctype sync on migrate.

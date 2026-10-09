@@ -8,7 +8,6 @@ import { useAppStore } from '@/stores/app'
 import type { UserRole } from '@/types/crm'
 import AccountsPage from './AccountsPage.vue'
 import OpportunityDetailPage from './OpportunityDetailPage.vue'
-import BookingDetailPage from './BookingDetailPage.vue'
 import VisitsPage from './VisitsPage.vue'
 
 async function context(role: UserRole, path: string) {
@@ -63,7 +62,6 @@ describe('Manager-only Sales record deletion', () => {
 
   it.each([
     ['Opportunity', OpportunityDetailPage, 'deleteStrategyOpportunity', 'data-delete-opportunity', async (api: ReturnType<typeof createMockApi>): Promise<string> => (await api.listStrategyOpportunities({ pageSize: 1 })).data.items[0].id, (id: string) => `/opportunities/${id}`],
-    ['Booking', BookingDetailPage, 'deleteBooking', 'data-delete-booking', async (_api: ReturnType<typeof createMockApi>): Promise<string> => 'BKG-001', (id: string) => `/booking/${id}`],
   ] as const)('shows %s deletion only to Manager and invokes the API', async (_label, component, method, attribute, findId, pathFor) => {
     vi.spyOn(window, 'confirm').mockReturnValue(true)
     const manager = await context('Manager', '/')
@@ -109,7 +107,6 @@ describe('Manager-only Sales record deletion', () => {
 
   it.each([
     ['Opportunity', OpportunityDetailPage, 'deleteStrategyOpportunity', 'data-delete-opportunity', async (api: ReturnType<typeof createMockApi>) => (await api.listStrategyOpportunities({ pageSize: 1 })).data.items[0].id, (id: string) => `/opportunities/${id}`],
-    ['Booking', BookingDetailPage, 'deleteBooking', 'data-delete-booking', async (api: ReturnType<typeof createMockApi>) => (await api.listPipeline({})).data.bookings[0].id, (id: string) => `/booking/${id}`],
   ] as const)('keeps the %s detail and route when deletion fails', async (_label, component, method, attribute, findId, pathFor) => {
     vi.spyOn(window, 'confirm').mockReturnValue(true)
     const manager = await context('Manager', '/')

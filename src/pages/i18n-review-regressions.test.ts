@@ -2,6 +2,7 @@ import { flushPromises, mount } from '@vue/test-utils'
 import { createPinia } from 'pinia'
 import { createMemoryHistory, createRouter } from 'vue-router'
 import { describe, expect, it, vi } from 'vitest'
+import { CrmApiError } from '@/api'
 import { createMockApi } from '@/api/mock-adapter'
 import { createAppRouter } from '@/app/router'
 import PageHeader from '@/design-system/PageHeader.vue'
@@ -74,7 +75,8 @@ describe('PR4 review regressions', () => {
 
   it('translates an existing missing-Booking error without requesting data again', async () => {
     const api = createMockApi({ latency: 0 })
-    const read = vi.spyOn(api, 'listPipeline')
+    // The page reads the Booking by id; the mock does not, so the read is the test's.
+    const read = vi.spyOn(api, 'getBooking').mockRejectedValue(new CrmApiError('BOOKING_NOT_FOUND', 'Booking was not found.', 'req-missing-booking', false))
     const router = createAppRouter()
     await router.push('/booking/MISSING-BOOKING')
     const wrapper = mount(BookingDetailPage, { props: { apiClient: api }, global: { plugins: [createPinia(), router] } })
