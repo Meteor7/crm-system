@@ -61,6 +61,7 @@ const commentError = useLocaleMessage()
 const commentOutcome = ref<'archive' | 'retest'>('archive')
 
 const canWrite = computed(() => app.can('evaluation:write'))
+const canCustomerReview = computed(() => app.can('evaluation:customer_review'))
 const canReport = computed(() => app.can('evaluation:view'))
 const focusedEvaluationId = computed(() => typeof route?.query?.focus === 'string' ? route.query.focus : '')
 const focusedEvaluation = computed(() => rows.value.find((item) => item.id === focusedEvaluationId.value))
@@ -483,6 +484,7 @@ onMounted(async () => {
       :selected-id="selectedId"
       :processing="processing"
       :can-write="canWrite"
+      :can-customer-review="canCustomerReview"
       :can-report="canReport"
       @select="selectedId = $event"
       @open-detail="openDetail"

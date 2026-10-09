@@ -272,6 +272,29 @@ describe('Evaluation page planned test-run actions', () => {
     expect(wrapper.find('[data-run-action]').exists()).toBe(false)
   })
 
+  it('lets an in-scope Sales user close Customer Review with a comment and nothing more', async () => {
+    const page = await context({
+      role: 'Sales',
+      prepare: evaluation => { evaluation.status = 'Customer Review'; evaluation.reportStatus = 'Ready' },
+    })
+    const { wrapper, api, current } = page
+    expect(wrapper.find('[data-customer-report-action="EVAL-103"]').exists()).toBe(true)
+    expect(wrapper.find('[data-retest-evaluation="EVAL-103"]').exists()).toBe(true)
+    expect(wrapper.find('[data-add-run="EVAL-103"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="terminate-evaluation-EVAL-103"]').exists()).toBe(false)
+
+    // The server decides whether Sales may close the review; the page only has to send the comment.
+    const archived = await preparedEvaluation(current, evaluation => { evaluation.status = 'Accepted' })
+    const spy = vi.spyOn(api, 'updateEvaluationStatus').mockImplementation(async () => persistPreparedEvaluation(page, archived))
+    await wrapper.get('[data-advance-status="Accepted"]').trigger('click')
+    await wrapper.get('[data-customer-comment-body]').setValue('客户确认检出率达标')
+    await wrapper.get('[data-submit-customer-comment]').trigger('click')
+    await flushPromises()
+    expect(spy).toHaveBeenCalledWith('EVAL-103', { status: 'Accepted', customerComment: '客户确认检出率达标' }, expect.any(String))
+    expect(wrapper.find('[role="dialog"]').exists()).toBe(false)
+    expect((await current()).status).toBe('Accepted')
+  })
+
   it.each(['PERMISSION_DENIED', 'SCOPE_DENIED'])('clears the dialog and all visible records on %s', async code => {
     const { wrapper, api } = await context()
     vi.spyOn(api, 'cancelEvaluationRun').mockRejectedValue(new CrmApiError(code, 'Access revoked', 'req-run-denied'))

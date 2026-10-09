@@ -16,7 +16,7 @@ export type Capability =
   | 'visit:view' | 'visit:create' | 'visit:write' | 'visit:review'
   | 'event:view' | 'event:write'
   | 'demo_request:view' | 'demo_request:create' | 'demo_request:engineering_review' | 'demo_request:manager_approve'
-  | 'evaluation:view' | 'evaluation:write'
+  | 'evaluation:view' | 'evaluation:write' | 'evaluation:customer_review'
   | 'installed_tool:write'
   | 'service:view'
   | 'contract:view'

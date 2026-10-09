@@ -236,7 +236,7 @@ def upload_customer_report(
     Customer Reports are append-only like Test Reports: a retest opens a new round
     rather than replacing what an earlier round produced.
     """
-    assert_capability("evaluation:write")
+    assert_capability("evaluation:customer_review")
     _require_evaluation(evaluation_id)
     file_name, claimed_mime, content = _part(file)
     actual_mime = validate_and_scan(file_name, claimed_mime, content, scanner)

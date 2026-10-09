@@ -15,7 +15,7 @@ export const ALL_CAPABILITIES: Capability[] = [
   'contact:view', 'contact:write', 'contact:merge', 'contact:delete',
   'visit:view', 'visit:create', 'visit:write', 'visit:review', 'event:view', 'event:write', 'demo_request:view', 'demo_request:create',
   'demo_request:engineering_review', 'demo_request:manager_approve',
-  'evaluation:view', 'evaluation:write',
+  'evaluation:view', 'evaluation:write', 'evaluation:customer_review',
   'installed_tool:write',
   'service:view', 'contract:view',
   'quotation:view', 'quotation:write', 'quotation:submit', 'quotation:approve', 'quotation:publish',
@@ -26,14 +26,14 @@ const SALES_CAPABILITIES: Capability[] = [
   'dashboard:view', 'account:view', 'account:write', 'stakeholder:view', 'stakeholder:write',
   'contact:view', 'contact:write',
   'requirement:view', 'deal:view', 'deal:write', 'visit:view', 'visit:create', 'visit:write', 'event:view', 'event:write',
-  'demo_request:view', 'demo_request:create', 'evaluation:view', 'service:view', 'contract:view',
+  'demo_request:view', 'demo_request:create', 'evaluation:view', 'evaluation:customer_review', 'service:view', 'contract:view',
   'quotation:view', 'quotation:write', 'quotation:submit',
   'rfq:view', 'rfq:create',
 ]
 
 const ENGINEERING_CAPABILITIES: Capability[] = [
   'dashboard:view', 'account:view', 'requirement:view', 'deal:view', 'demo_request:view',
-  'demo_request:engineering_review', 'evaluation:view', 'evaluation:write', 'service:view',
+  'demo_request:engineering_review', 'evaluation:view', 'evaluation:write', 'evaluation:customer_review', 'service:view',
   'installed_tool:write',
   'rfq:view', 'rfq:engineer_comment',
 ]

@@ -19,11 +19,13 @@ const props = withDefaults(defineProps<{
   selectedId?: string
   processing?: string
   canWrite?: boolean
+  canCustomerReview?: boolean
   canReport?: boolean
 }>(), {
   selectedId: '',
   processing: '',
   canWrite: false,
+  canCustomerReview: false,
   canReport: false,
 })
 const { locale, t } = useI18n()
@@ -100,6 +102,9 @@ const internalReviewHint = computed(() => {
 const inCustomerReview = computed(() => selected.value?.status === 'Customer Review'
   && (props.view === 'overview' || props.view === 'customer'))
 const roundLabel = (round: number) => copy(`Round ${round}`, `第 ${round} 轮`)
+// Customer Review closes with a comment (archive or retest); a reviewer without
+// evaluation:write may take that one step, the other transitions stay with canWrite.
+const canCloseCustomerReview = computed(() => props.canCustomerReview && selected.value?.status === 'Customer Review')
 const showAdvance = computed(() => {
   if (!selected.value || !nextStatus.value) return false
   if (selected.value.status === 'Scheduled') return preparationComplete.value
@@ -283,7 +288,7 @@ watch(accountId, () => emit('customer-change'))
           <Plus :size="14" />{{ locale === 'en-US' ? 'New Test Run' : '新增 Test Run' }}
         </button>
         <button
-          v-if="canWrite && showAdvance"
+          v-if="(canWrite || canCloseCustomerReview) && showAdvance"
           type="button"
           class="primary-button"
           :data-advance-status="nextStatus"
@@ -296,7 +301,7 @@ watch(accountId, () => emit('customer-change'))
           <div v-if="selected.customerReportArtifact" class="report-file"><b>{{ selected.customerReportArtifact.fileName }}</b><small>v{{ selected.customerReportArtifact.version }} · {{ personnelDisplayName(selected.customerReportArtifact.createdBy) }} · {{ formatDisplayDate(selected.customerReportArtifact.createdAt) }}</small></div>
           <p v-else>{{ copy('No customer report uploaded for this round yet.', '本轮尚未上传 Customer 报告。') }}</p>
           <button
-            v-if="canWrite"
+            v-if="canCloseCustomerReview"
             type="button"
             class="secondary-button"
             :data-customer-report-action="selected.id"
@@ -307,7 +312,7 @@ watch(accountId, () => emit('customer-change'))
           </button>
         </section>
         <button
-          v-if="canWrite && inCustomerReview && canRetestEvaluation(selected.status)"
+          v-if="canCloseCustomerReview && inCustomerReview && canRetestEvaluation(selected.status)"
           type="button"
           class="secondary-button"
           :data-retest-evaluation="selected.id"

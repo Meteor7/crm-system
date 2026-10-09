@@ -222,6 +222,97 @@ class TestDemoReportApi(FrappeTestCase):
         stored = frappe.get_doc("File", frappe.db.get_value("CRM Demo Artifact", artifact["id"], "private_file"))
         self.assertTrue(stored.is_private)
 
+    def test_sales_closes_customer_review_in_scope_and_nothing_else(self):
+        class CleanScanner:
+            def scan(self, content: bytes) -> bool:
+                return True
+
+        payload = {"file_name": "feedback.txt", "mime_type": "text/plain", "content": b"customer feedback"}
+        current = self._ready_for_upload(self.evaluation.name)
+
+        # Testing is Engineer work: the status step is refused outright, and the
+        # Customer Report is refused by stage, not by scope or capability.
+        frappe.set_user(self.sales)
+        with self.assertRaises(frappe.PermissionError):
+            update_evaluation_status(self.evaluation.name, {"status": "Internal Review"}, current["modified"])
+        with self.assertRaises(CrmApiException) as too_early:
+            upload_customer_report(self.evaluation.name, payload, scanner=CleanScanner(), expected_round=1)
+        self.assertEqual(too_early.exception.code, "INVALID_TRANSITION")
+
+        evaluation = self._reach_customer_review(self.evaluation.name)
+
+        # Another Sales user's scope does not reach this Demo at all.
+        frappe.set_user(self.other_sales)
+        with self.assertRaises(CrmApiException) as foreign_upload:
+            upload_customer_report(self.evaluation.name, payload, scanner=CleanScanner(), expected_round=1)
+        self.assertEqual(foreign_upload.exception.code, "SCOPE_DENIED")
+        with self.assertRaises(CrmApiException) as foreign_status:
+            update_evaluation_status(
+                self.evaluation.name, {"status": "Accepted", "customerComment": "Signed off"}, evaluation["modified"],
+            )
+        self.assertEqual(foreign_status.exception.code, "SCOPE_DENIED")
+
+        # The owning Sales user uploads the Customer Report and closes the review with a retest.
+        frappe.set_user(self.sales)
+        uploaded = upload_customer_report(self.evaluation.name, payload, scanner=CleanScanner(), expected_round=1)
+        self.assertEqual((uploaded["round"], uploaded["version"]), (1, 1))
+        self.assertEqual(
+            frappe.db.get_value("CRM Demo Artifact", uploaded["artifact"]["id"], "created_by_user"), self.sales,
+        )
+        evaluation = get_evaluation(self.evaluation.name)
+        retested = update_evaluation_status(
+            self.evaluation.name,
+            {"status": "Testing", "customerComment": "Capture rate is still below target"},
+            evaluation["modified"],
+        )
+        self.assertEqual((retested["status"], retested["testRound"]), ("Testing", 2))
+        self.assertEqual(frappe.db.count("CRM Evaluation Customer Review", {
+            "evaluation": self.evaluation.name, "author": self.sales, "test_round": 1,
+        }), 1)
+        # The Applied Engineer has to run the new round, so the retest reaches them.
+        self.assertTrue(frappe.db.exists("CRM Notification Event", {
+            "source_doctype": "CRM Evaluation", "source_name": self.evaluation.name,
+            "recipient_user": self.engineer, "title": "Demo Test moved to Testing",
+        }))
+
+        # Back in Testing the new round is Engineer work again.
+        with self.assertRaises(frappe.PermissionError):
+            update_evaluation_status(self.evaluation.name, {"status": "Internal Review"}, retested["modified"])
+
+    def test_sales_archives_customer_review_with_a_comment(self):
+        evaluation = self._reach_customer_review(self.evaluation.name)
+        frappe.set_user(self.sales)
+        unchanged = update_evaluation_status(
+            self.evaluation.name, {"status": "Customer Review"}, evaluation["modified"],
+        )
+        self.assertEqual(unchanged["status"], "Customer Review")
+        archived = update_evaluation_status(
+            self.evaluation.name, {"status": "Accepted", "customerComment": "Customer signed off"}, unchanged["modified"],
+        )
+        self.assertEqual((archived["status"], archived["testRound"]), ("Accepted", 1))
+        self.assertEqual(frappe.db.get_value("CRM Evaluation Customer Review", {
+            "evaluation": self.evaluation.name, "test_round": 1,
+        }, "author"), self.sales)
+        self.assertTrue(frappe.db.exists("CRM Notification Event", {
+            "source_doctype": "CRM Evaluation", "source_name": self.evaluation.name, "recipient_user": self.engineer,
+        }))
+
+    def test_sales_stale_customer_review_close_is_a_version_conflict(self):
+        evaluation = self._reach_customer_review(self.evaluation.name)
+        stale = evaluation["modified"]
+        frappe.set_user(self.engineer)
+        update_evaluation_status(
+            self.evaluation.name, {"status": "Testing", "customerComment": "Engineer asked for another round"}, stale,
+        )
+        # Sales still looks at the Customer Review view: a conflict, not a permission refusal,
+        # so the page keeps its records instead of treating the user as locked out.
+        frappe.set_user(self.sales)
+        with self.assertRaises(CrmApiException) as conflict:
+            update_evaluation_status(
+                self.evaluation.name, {"status": "Accepted", "customerComment": "Signed off"}, stale,
+            )
+        self.assertEqual(conflict.exception.code, "VERSION_CONFLICT")
+
     def test_report_upload_archive_and_retest_skip_unreachable_recipients(self):
         from rayher_crm.tests.test_contact_file_api import Scanner
 

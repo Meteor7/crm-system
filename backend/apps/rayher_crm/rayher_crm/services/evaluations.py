@@ -9,11 +9,11 @@ from typing import Any
 import frappe
 
 from rayher_crm.api.v1.errors import CrmApiException
-from rayher_crm.permissions.roles import assert_capability
+from rayher_crm.permissions.roles import assert_capability, capabilities_for_user
 from rayher_crm.rayher_crm.doctype.crm_evaluation.crm_evaluation import OPEN_RETEST_ROUND_FLAG
 from rayher_crm.permissions.scope import conditions_for_doctype
 from rayher_crm.services.common import normalize_pagination, optional_date, required_text, to_iso_timestamp
-from rayher_crm.services.concurrency import lock_document
+from rayher_crm.services.concurrency import lock_document, normalize_expected_modified
 from rayher_crm.services.demo_health import calendar_day, derive_demo_health
 from rayher_crm.services.opportunities import advance_opportunity_for_event
 from rayher_crm.services.notifications import active_crm_users, notify_if_reachable
@@ -275,6 +275,9 @@ def _notify_status_change(doc, request, previous_status: str) -> None:
         recipients.update(active_crm_users("Manager"))
     if doc.status in TERMINAL_STATUSES:
         recipients.add(doc.evaluation_owner)
+    if previous_status == "Customer Review" and doc.status == "Testing":
+        # A retest opens a round the Applied Engineer has to run; Sales may request it now.
+        recipients.add(doc.evaluation_owner)
     if doc.status == "Rejected" and doc.get("termination_reason"):
         # A termination ends the process; it is not a customer rejection.
         title = "Demo Test terminated"
@@ -296,12 +299,27 @@ def _notify_status_change(doc, request, previous_status: str) -> None:
 
 
 def update_evaluation_status(name: str, command: dict[str, Any], expected_modified: Any) -> dict[str, Any]:
-    assert_capability("evaluation:write")
-    _require_evaluation(name)
+    # Closing Customer Review (the comment, then archive or retest) is the one step a
+    # reviewer without evaluation:write may take; every other transition keeps
+    # requiring evaluation:write.
+    capabilities = capabilities_for_user()
+    review_only = "evaluation:write" not in capabilities
+    if review_only and "evaluation:customer_review" not in capabilities:
+        raise frappe.PermissionError("CRM capability required: evaluation:customer_review")
+    unlocked = _require_evaluation(name)
+    # Refuse before taking the catalogue and row locks; the locked row is re-checked below.
+    if review_only and unlocked.status != "Customer Review":
+        # A view that showed Customer Review a moment ago is stale, not unauthorised: the
+        # page keeps its rows on a version conflict but empties them on a permission refusal.
+        if normalize_expected_modified(expected_modified) != to_iso_timestamp(unlocked.modified):
+            raise CrmApiException("VERSION_CONFLICT", "The record was changed by another request.")
+        raise frappe.PermissionError("CRM capability required: evaluation:write")
     next_status = command.get("status") if isinstance(command, Mapping) else None
     doc = _lock_status_change(name, expected_modified)
     if not frappe.has_permission("CRM Evaluation", "read", doc=doc, user=frappe.session.user):
         raise CrmApiException("SCOPE_DENIED", "The Evaluation is outside the current user scope.")
+    if review_only and doc.status != "Customer Review":
+        raise frappe.PermissionError("CRM capability required: evaluation:write")
     if next_status == "Testing" and not all(
         _preparation_status(doc, branch) == "Completed" for branch in ("wafer", "test")
     ):

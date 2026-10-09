@@ -194,6 +194,31 @@ describe('EvaluationWorkspace', () => {
     ])
   })
 
+  it('lets a reviewer without write access close Customer Review and nothing else', async () => {
+    const base = evaluations.find((item) => item.id === 'EVAL-103')!
+    const reviewing: EvaluationDto = { ...base, id: 'EVAL-CR', status: 'Customer Review', reportStatus: 'Ready' }
+    const testing: EvaluationDto = { ...base, id: 'EVAL-TS', status: 'Testing' }
+    const wrapper = mount(EvaluationWorkspace, {
+      props: { view: 'overview', evaluations: [reviewing, testing], selectedId: 'EVAL-CR', canWrite: false, canCustomerReview: true },
+    })
+
+    expect(wrapper.find('[data-customer-report-action="EVAL-CR"]').exists()).toBe(true)
+    expect(wrapper.find('[data-retest-evaluation="EVAL-CR"]').exists()).toBe(true)
+    expect(wrapper.find('[data-advance-status="Accepted"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="terminate-evaluation-EVAL-CR"]').exists()).toBe(false)
+
+    await wrapper.setProps({ selectedId: 'EVAL-TS' })
+    expect(wrapper.find('[data-advance-status]').exists()).toBe(false)
+    expect(wrapper.find('[data-report-action="EVAL-TS"]').exists()).toBe(false)
+    expect(wrapper.find('[data-add-run="EVAL-TS"]').exists()).toBe(false)
+    expect(wrapper.find('[data-set-ddl="EVAL-TS"]').exists()).toBe(false)
+
+    // Engineers and Managers keep every action: the new flag only widens Customer Review.
+    await wrapper.setProps({ selectedId: 'EVAL-CR', canWrite: true })
+    expect(wrapper.find('[data-testid="terminate-evaluation-EVAL-CR"]').exists()).toBe(true)
+    expect(wrapper.find('[data-retest-evaluation="EVAL-CR"]').exists()).toBe(true)
+  })
+
   it('keeps stage-specific actions available and exposes Internal Review', async () => {
     const active = evaluations
       .filter((item) => !['Accepted', 'Rejected'].includes(item.status))
