@@ -74,7 +74,69 @@ CONFIRM_RESTORE=e37f782c-main-20261011 /home/plancksemicon/apps/rayher-crm-stage
 
 ## 后续
 
-- 附件恢复：按 #246 的顺序；#245 合并后需单独发布并重建 `clamav`。恢复前重跑上传、审批、下载与权限冒烟。关闭开关是 site_config 变更加 `clear-cache`，不是部署副作用。
 - `launch-guard-20261011`、`launch-guard-p1-20261011` 目录保留作记录，不再参与部署。
-- 待补记：run 38121037483 的 backend job 结果。
-- 发布脚本与演练记录在两台主机的 `releases/` 目录及 `upgrade-*.log`、`restore-*.log`；staging rehearsal 保留在升级后状态。
+- run 38121037483（main `e37f782c`）的 backend job 首次因 runner 上 CI 产物下载未落盘而失败（"Artifact commit does not match checkout"），非代码问题；同一棵树在 #247 与 #248 的运行中后端测试均通过。已重跑该任务。
+- 发布脚本与演练记录在两台主机的 `releases/` 目录及 `upgrade-*.log`、`restore-*.log`。
+
+---
+
+# 第二次发布 f4a4384d-main-20261011（#245：上传截止时间、扫描超限拒绝、大型 Office 附件）与附件开放
+
+## 结果
+
+2026-10-11 08:57:17–08:59:33 UTC（16:57–16:59 Asia/Shanghai），生产从 `e37f782c` 升级到 main `f4a4384d`（合入 PR #245）。写入冻结 08:57:20–08:57:55 UTC，约 35 秒。无新补丁、无 DocType 变更。
+
+- 08:59:55 UTC 关闭 `crm_attachment_uploads_paused`（`set-config False --parse` + `clear-cache`）。附件上传自此开放。
+- 升级后 19 项 HTTPS 上传冒烟通过，临时数据清理后快照一致，File 总数回到 4；升级后 Error Log 为 0，队列为空。
+- 决策记录：按负责人选择"先上 #245 再开附件"执行。#220（Desk 直接上传的普通私有附件在客户移交后原负责人仍可读）未修，当前生产该类文件为 0；#58（RFQ 超过 1000 条的搜索分页）未修，当前 RFQ 为 0。
+
+## 变更内容
+
+- backend 以 `rayher_crm.wsgi:application` 启动 Gunicorn（release compose 的 `command`），在 Frappe 解析 multipart 之前记录请求入口时间；CRM API 的 multipart 请求（路径以 `/api/method/rayher_crm.` 开头）共用 90 秒准备预算、105 秒事务截止，超时回滚并返回 422。原生 Desk 上传（`/api/method/upload_file`）不在这一截止时间范围内，只受附件门控与扫描器策略约束。
+- `before_request` 钩子顺序：`upload_deadline.begin_upload_request`、`attachment_gate.reject_upload_request`；`before_write_file` 保留门控。
+- Office 部件上限 500 → 5,000；超限按文件名拒绝。
+- `clamav` 服务由 release compose 重建：启动时安装 `backend/clamav/clamd.conf`（`AlertExceedsMax yes`、`MaxFiles 10000`、`MaxRecursion 17`、`MaxScanTime 55000`、`MaxScanSize 200M`、`MaxFileSize 100M`、`StreamMaxLength 100M`）。扫不完的文件按"未通过病毒扫描"拒绝。
+
+## 发布包与脚本
+
+主机目录 `releases/f4a4384d-main-20261011/`：归档 `rayher_crm.zip` sha256 `d03e9bac…`（run 38126526000 package job，与 PR #245 run 38122214386 / 38125109009 产物字节一致）、提交的 `compose.yaml`、`backend/clamav/clamd.conf`（纳入 MANIFEST）、自 3088723 改编的脚本（单镜像形态）。
+
+脚本改编点：`verify-release` 校验归档内门控、截止时间模块与 WSGI 入口，校验 release 内 clamd 配置与 compose 的挂载/启动命令；`verify-migration` 校验前两次发布的 14 个补丁与列/表/索引；`start-backend` 核对容器命令与 `/proc` 中的 Gunicorn 进程确实使用新入口；API 验收核对两处 `before_request` 钩子、`before_write_file`、WSGI 模块可导入；新增 `scanner-policy` 阶段：canonicalize 之后重建 `clamav`、核对容器内配置、用后端自身的扫描客户端跑 `test_clamav_limits` 的三个用例（3,090 部件干净文件通过；内嵌 10,020 文件与 22 层嵌套均拒绝）。
+
+## 演练
+
+staging rehearsal（当时为 5bef99a8 单镜像）以 release `aae47bc8-pr245-20261011`（归档、compose、clamd.conf 与生产发布字节一致）演练三次：前两次分别因脚本自身问题在 `start-backend` 停止（镜像内无 `pgrep`；`grep -q` 提前关管道触发 pipefail），均用 `restore.sh` 恢复；第三次全部通过，含 `scanner-policy`。随后在 rehearsal 关闭开关，上传冒烟 19 项通过（第一次清理因 `CRM Contact File` 元数据只允许软删除而失败，改为 `ignore_on_trash` 后重跑通过）。
+
+## 生产验证
+
+| 阶段 | 结果 |
+| --- | --- |
+| 预检 08:56:50 | 归档与 release 校验通过；六个服务均为 `e37f782c` 镜像；CNY {0,0,0} |
+| 备份 | `backups/pre-update-f4a4384d-main-20261011-20261011-085717/backup/` |
+| 迁移 | 9 秒，0 个补丁 |
+| verify-migration | 14 个历史补丁在册；列/表/索引齐全；territories 8；CNY {0,0,0} |
+| start-backend | `backend_entry=rayher_crm.wsgi:application`（容器命令与进程均核对） |
+| 数据/API 验收 | 与冻结快照一致；钩子 deadline/before_request/before_write_file 生效；uploads_paused 当时仍为 True |
+| HTTP 验收 | ping 200；/crm 301→200；guest 经理 API 401；5 个资源 200；guest 上传 403 带门控文案 |
+| scanner-policy | clamav 重建后 healthy，配置已安装；探测 largeCleanDeck/nestedFileCount/nestedDepth 均符合预期 |
+| 开放上传后冒烟 | `UPLOAD-SMOKE-20261011085957c51f`：小文件上传/列表/下载字节一致；3,092 部件 PPTX 上传成功；5,001 部件按名拒绝；扫描器扫不完的嵌套包拒绝；EICAR 拒绝；API 删除；清理后快照一致。结果存于运行目录 `post-upgrade-upload-smoke-result.json` |
+| 外部核对 | ping 200，`sid` Secure/HttpOnly，HSTS，HTTP 308；guest 上传 403（Frappe 自身的 guest 规则，门控文案不再出现） |
+
+## 回退
+
+恢复到 `e37f782c` 单镜像状态（会丢失备份之后写入的数据；扫描器保留新策略，无害）：
+
+```bash
+CONFIRM_RESTORE=f4a4384d-main-20261011 /home/plancksemicon/apps/rayher-crm-stage1-production/releases/f4a4384d-main-20261011/restore.sh /home/plancksemicon/apps/rayher-crm-stage1-production/releases/f4a4384d-main-20261011/targets/production.env /home/plancksemicon/apps/rayher-crm-stage1-production/backups/pre-update-f4a4384d-main-20261011-20261011-085717
+```
+
+回退脚本会把 `crm_attachment_uploads_paused` 一并恢复到备份时的值（True）。如需只关闭上传而不回退，在生产主机上执行（Bench 运行在 Compose 的 backend 容器内）：
+
+```bash
+docker exec rayher-crm-stage1-production-backend-1 bench --site 203.0.113.32 set-config crm_attachment_uploads_paused True --parse && docker exec rayher-crm-stage1-production-backend-1 bench --site 203.0.113.32 clear-cache
+```
+
+## 后续
+
+- #246 中的恢复条件已满足"#243/#244/#245 完成并在生产验证"这一项；#220、#58、DocumentCenter 文案与 #186 仍开放。
+- `rayher-crm-rehearsal` 保留在 `aae47bc8-pr245-20261011` 升级后、开关关闭的状态。
