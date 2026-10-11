@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import os
 from io import BytesIO
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import frappe
 from frappe.permissions import add_user_permission, remove_user_permission
@@ -97,6 +97,7 @@ class TestRfqApi(FrappeTestCase):
             "name": f"RFQ Site {suffix}", "city": "Shanghai", "type": "Fab",
             "process": "Frontend", "status": "\u91cf\u4ea7",
         })
+        self.last_account, self.last_site = account["id"], site["id"]
         return create_strategy_opportunity({
             "probabilityLevel": "pipeline",
             "accountId": account["id"], "siteId": site["id"], "title": f"RFQ Project {suffix}",
@@ -163,6 +164,33 @@ class TestRfqApi(FrappeTestCase):
         for path, file_url in discarded:
             self.assertFalse(frappe.db.exists("File", {"file_url": file_url}), file_url)
             self.assertFalse(os.path.exists(path), path)
+
+    def test_revision_with_a_stale_version_is_refused_before_its_file_is_scanned(self):
+        # The version is checked before the scan and the conversion, and before the status: a page that missed
+        # another user's revision is told so, as it was before the scan moved ahead of the lock.
+        # Named to run after test_complete_workflow..., whose list assertions see every RFQ this class leaves in
+        # the shared transaction, as the other tests that keep an RFQ are.
+        opportunity = advance_opportunity_fixture(self._opportunity(), CUSTOMER_BUDGET_APPROVED)
+        created = create_rfq({"opportunityId": opportunity["id"], "engineerId": self.engineer}, pdf_part(), CleanScanner())
+        frappe.set_user(self.engineer)
+        commented = submit_engineer_comment(created["id"], "Specification is feasible.", created["modified"])
+        frappe.set_user(self.manager)
+        returned = review_rfq(created["id"], "Returned", "Please use revision two.", commented["modified"])
+        frappe.set_user(self.sales)
+        revise_rfq(created["id"], pdf_part("customer-rfq-r2.pdf"), returned["modified"], CleanScanner())
+        for token, code, message in (
+            (returned["modified"], "VERSION_CONFLICT", "The record was changed by another request."),
+            (None, "VALIDATION_ERROR", "expectedModified is required."),
+        ):
+            with self.subTest(token=token):
+                scanner = Mock()
+                scanner.scan.return_value = True
+                with patch.object(rfq_service, "_office_preview", side_effect=AssertionError("must not convert")):
+                    with self.assertRaises(CrmApiException) as refused:
+                        revise_rfq(created["id"], pdf_part("stale.pdf"), token, scanner)
+                self.assertEqual((refused.exception.code, refused.exception.public_message), (code, message))
+                scanner.scan.assert_not_called()
+        self.assertEqual(len(get_rfq(created["id"])["versions"]), 2)
 
     def test_complete_workflow_scope_revision_and_opportunity_gate(self):
         opportunity = self._opportunity()

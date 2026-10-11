@@ -97,6 +97,15 @@ const FIXED_MESSAGES: Partial<Record<string, Record<string, CopyPair>>> = {
     'A value is too long.': ['One of the values is too long. Shorten it and try again.', '有一项内容过长，请缩短后重试。'],
     'The PDF file could not be read.': ['The PDF file could not be read. It may be damaged: export it again and retry.', 'PDF 文件无法读取，可能已损坏，请重新导出后再上传。'],
     'The PDF contains scripts and cannot be uploaded.': ['The PDF contains scripts and cannot be uploaded.', 'PDF 中含有脚本，不能上传。'],
+    // The upload checks of services/file_security.py.
+    'File type is not allowed or does not match its magic bytes.': ['The file type is not allowed, or the file content does not match its extension (a CSV or TXT file must be UTF-8).', '文件类型不支持，或文件内容与扩展名不符（CSV、TXT 须为 UTF-8 编码）。'],
+    'File content is required.': ['The file is empty.', '文件内容为空。'],
+    'File exceeds the 100 MiB limit.': ['The file exceeds the 100 MiB limit.', '文件超过 100 MiB 上限。'],
+    'File name is invalid.': ['The file name is invalid.', '文件名无效。'],
+    'File extension or MIME does not match its content.': ['The file extension does not match its content.', '文件扩展名与文件内容不符。'],
+    'File failed malware screening.': ['The file failed malware screening.', '文件未通过病毒扫描。'],
+    'These files take too long to scan in one upload. Upload fewer at a time.': ['These files take too long to scan in one upload. Upload fewer at a time.', '这些文件一次上传扫描耗时过长，请分批上传。'],
+    'The upload could not finish in time. Nothing was saved. Please try again with fewer files.': ['The upload could not finish in time. Nothing was saved. Please try again with fewer files.', '本次上传处理超时，未保存任何内容。请减少文件数量后重试。'],
     "A Contact cannot be added to this Account: the Account's name is too long.": ["A Contact cannot be added to this Account: the Account's name is too long.", '无法在这个客户下新建联系人：客户名称过长。'],
     'Confirmed order currency is fixed': ['The currency of a confirmed order is fixed.', '已确认订单的币种不可修改。'],
     'Opportunity Booking requires a source Opportunity.': ['An Opportunity Booking requires a source Opportunity.', '商机来源的 Booking 必须关联来源商机。'],
@@ -196,10 +205,15 @@ const FIXED_MESSAGES: Partial<Record<string, Record<string, CopyPair>>> = {
   VERSION_CONFLICT: {
     // The shared check of every versioned write (services/concurrency.py), and the Demo resource services' own.
     'The record was changed by another request.': ['This record was changed by another user. Refresh and try again.', '记录已被其他用户修改，请刷新后重试。'],
+    // A Visit's meeting record (services/visit_meetings.py): the version offered is old, or none was offered for a record another user added.
+    'Meeting record was changed by another user.': ['The meeting record was changed by another user. Refresh and try again.', '会议记录已被其他用户修改，请刷新后重试。'],
     'Record changed; reload before saving.': ['This record changed meanwhile. Reload it before saving.', '记录已被修改，请刷新后再保存。'],
     'Someone else already saved this warning. Reload before editing.': ['Someone else already saved this warning. Reload before editing.', '这条预警已被他人保存，请刷新后再编辑。'],
     'Someone else saved this warning at the same time. Reload.': ['Someone else saved this warning at the same time. Reload.', '这条预警刚被他人同时保存，请刷新。'],
     "This warning's handling is no longer there. Reload before editing.": ["This warning's handling is no longer there. Reload before editing.", '这条预警的处理记录已不存在，请刷新后再编辑。'],
+  },
+  INTERNAL_ERROR: {
+    'File security scanner is unavailable.': ['The file security scanner is unavailable. Try again later.', '文件安全扫描暂不可用，请稍后重试。'],
   },
 }
 
@@ -260,6 +274,21 @@ export function generatedErrorMessage(code: string, message: string) {
     }
   }
   if (code === 'VALIDATION_ERROR') {
+    // An Office file over a limit of services/file_security.py, named so the user knows which attachment to change.
+    const officeParts = /^"(.+)" has more than ([0-9]+) internal parts[.] Save it as PDF, or split it, and upload again[.]$/s.exec(message)
+    if (officeParts) {
+      return localeMessage(
+        `"${officeParts[1]}" has more than ${officeParts[2]} internal parts. Save it as PDF, or split it, and upload again.`,
+        `“${officeParts[1]}”内部文件数超过 ${officeParts[2]} 个，请另存为 PDF 或拆分后重新上传。`,
+      )
+    }
+    const officeSize = /^"(.+)" is larger than ([0-9]+) MiB once decompressed[.] Compress its images or save it as PDF, and upload again[.]$/s.exec(message)
+    if (officeSize) {
+      return localeMessage(
+        `"${officeSize[1]}" is larger than ${officeSize[2]} MiB once decompressed. Compress its images or save it as PDF, and upload again.`,
+        `“${officeSize[1]}”解压后超过 ${officeSize[2]} MiB，请压缩其中的图片或另存为 PDF 后重新上传。`,
+      )
+    }
     const contactName = /^name is too long: at most (\d+) characters for a Contact of this Account\.$/.exec(message)
     if (contactName) {
       return localeMessage(

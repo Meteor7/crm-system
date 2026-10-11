@@ -738,6 +738,34 @@ describe('Frappe multipart and binary transport', () => {
     expect((init.body as FormData).getAll('files')).toHaveLength(2)
   })
 
+  it('waits past the proxy for an upload, which the server scans before answering, while ordinary posts still time out at 30 seconds', async () => {
+    vi.useFakeTimers()
+    try {
+      const signals = new Map<string, AbortSignal>()
+      const fetchMock = vi.fn((url: string, init?: RequestInit) => new Promise<Response>((_resolve, reject) => {
+        signals.set(url, init!.signal!)
+        init!.signal!.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')))
+      }))
+      const api = createFrappeApi({ fetchImpl: fetchMock as typeof fetch })
+      const upload = api.uploadContactFiles('CON-1', [
+        { blob: new Blob(['a'], { type: 'text/plain' }), fileName: 'deck.pptx', mimeType: 'text/plain', size: 1 },
+      ]).then(() => null, error => error as CrmApiError)
+      const post = api.deleteContactFile('FILE-1').then(() => null, error => error as CrmApiError)
+      const uploadSignal = signals.get('/api/method/rayher_crm.api.v1.contact_files.upload_files')!
+      const postSignal = signals.get('/api/method/rayher_crm.api.v1.contact_files.delete_file')!
+      await vi.advanceTimersByTimeAsync(30_000)
+      expect(postSignal.aborted).toBe(true)
+      expect(uploadSignal.aborted).toBe(false)
+      await vi.advanceTimersByTimeAsync(269_999)
+      expect(uploadSignal.aborted).toBe(false)
+      await vi.advanceTimersByTimeAsync(1)
+      expect(uploadSignal.aborted).toBe(true)
+      await expect(upload).resolves.toMatchObject({ code: 'NETWORK_ERROR', retryable: true })
+      await expect(post).resolves.toMatchObject({ code: 'NETWORK_ERROR' })
+      expect(vi.getTimerCount()).toBe(0)
+    } finally { vi.useRealTimers() }
+  })
+
   it('uploads one Demo artifact with separate metadata fields', async () => {
     const fetchMock = vi.fn().mockResolvedValue(success({ id: 'ART-1' }))
     const api = createFrappeApi({ fetchImpl: fetchMock })

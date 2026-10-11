@@ -5,6 +5,7 @@ import hashlib
 import mimetypes
 from collections.abc import Iterable
 from contextlib import suppress
+from functools import partial
 from pathlib import Path
 
 import frappe
@@ -49,6 +50,9 @@ def _lock_content(content_hash: str, *, required: bool = True) -> bool:
     held = cached[1]
     if key in held:
         return True
+    # Ordinary deletion must wait for a brief competing upload to finish, or it
+    # can delete the File row while leaving its independent blob behind. Expired
+    # upload cleanup runs after the response, so its bounded wait is safe too.
     if frappe.db.sql("SELECT GET_LOCK(%s, 5)", (key,))[0][0] != 1:
         if required:
             frappe.throw("This attachment is being updated. Please retry.")
@@ -273,6 +277,10 @@ def discard_rolled_back_blob(path: str | None, file_url: str | None, content_has
     leaked blob is a much smaller problem than a replaced exception or a deleted
     attachment that belongs to somebody else.
     """
+    from rayher_crm.services.upload_deadline import defer_upload_cleanup
+
+    if defer_upload_cleanup(partial(discard_rolled_back_blob, path, file_url, content_hash)):
+        return
     if not path:
         return
     if not file_url or not content_hash:
@@ -342,6 +350,10 @@ def protect_private_upload(doc, method=None) -> None:
 
 
 def delete_file_content(doc, only_thumbnail=False) -> None:
+    from rayher_crm.services.upload_deadline import defer_upload_cleanup
+
+    if defer_upload_cleanup(partial(delete_file_content, doc, only_thumbnail=only_thumbnail)):
+        return
     # Also covers Frappe's new-file rollback callback when its File row is gone.
     if not doc.is_private or doc.is_folder or doc.is_remote_file or not doc.content_hash:
         doc.delete_file_from_filesystem(only_thumbnail=only_thumbnail)
@@ -412,4 +424,7 @@ def save_private_file(file_name, content, doctype, name, is_private=1, *, attach
         "is_private": is_private,
     })
     authorize_service_upload(doc, upload_content, file_name)
-    return doc.insert(ignore_permissions=True)
+    doc.insert(ignore_permissions=True)
+    from rayher_crm.services.upload_deadline import track_file
+    track_file(doc)
+    return doc

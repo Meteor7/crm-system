@@ -11,6 +11,9 @@ const DEFAULT_TIMEOUT_MS = 30_000
 // Full-set exports share one server snapshot and may take longer than page reads.
 // Match the 120-second Gunicorn/proxy budget in backend/compose.yaml.
 const EXPORT_TIMEOUT_MS = 120_000
+// The server scans an upload before it answers (a 30 MB deck takes about 25 s). The proxy's 120 s start once it
+// has the whole upload. Leave room for transfer as well; server deadlines still govern whether it can save.
+const UPLOAD_TIMEOUT_MS = 300_000
 let redirectingToLogin = false
 
 export const FRAPPE_METHODS = {
@@ -211,6 +214,8 @@ export interface FrappeApiOptions {
   timeoutMs?: number
   /** Export response wait; defaults to timeoutMs when supplied, otherwise 120s. */
   exportTimeoutMs?: number
+  /** Multipart upload wait; defaults to timeoutMs when supplied, otherwise 300s. */
+  uploadTimeoutMs?: number
   csrfToken?: () => string | undefined
 }
 function isRecord(value: unknown): value is JsonRecord {
@@ -402,6 +407,7 @@ function splitOutsideQuotes(text: string, separator: string): string[] {
 export function createFrappeApi(options: FrappeApiOptions = {}): CrmApi {
   const fetchImpl = options.fetchImpl ?? globalThis.fetch
   const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS
+  const uploadTimeoutMs = options.uploadTimeoutMs ?? options.timeoutMs ?? UPLOAD_TIMEOUT_MS
   const csrfToken = options.csrfToken ?? defaultCsrfToken
 
   // The requests out at the moment, so that the sign-out can wait for them: Frappe writes a session back to its
@@ -469,7 +475,7 @@ export function createFrappeApi(options: FrappeApiOptions = {}): CrmApi {
           : undefined,
         warnings: Array.isArray(envelope.warnings) ? envelope.warnings.filter((item): item is string => typeof item === 'string') : [],
       }
-    }, requestTimeoutMs)
+    }, requestTimeoutMs ?? (multipart ? uploadTimeoutMs : undefined))
   }
 
   async function requestBinary(method: string, values: RequestValues, fallbackName: string): Promise<BinaryDownload> {

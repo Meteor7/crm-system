@@ -199,7 +199,9 @@ def api_endpoint(function):
     @wraps(function)
     def wrapped(*args, **kwargs):
         try:
-            return function(*args, **kwargs)
+            from rayher_crm.services.upload_deadline import upload_transaction
+            with upload_transaction():
+                return function(*args, **kwargs)
         except CrmApiException as error:
             frappe.local.response["http_status_code"] = HTTP_STATUS_BY_CODE.get(
                 error.code,

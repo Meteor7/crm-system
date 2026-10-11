@@ -18,7 +18,7 @@ from rayher_crm.services.private_file_lifecycle import save_private_file as save
 from rayher_crm.api.v1.errors import CrmApiException
 from rayher_crm.permissions.roles import assert_capability
 from rayher_crm.services.common import normalize_expected_modified, to_iso_timestamp
-from rayher_crm.services.file_security import ClamdScanner, MAX_FILE_BYTES, MalwareScanner, validate_and_scan
+from rayher_crm.services.file_security import MAX_FILE_BYTES, MalwareScanner, scan_content, validate_and_scan
 
 LABELS = {
     "meeting time": "meeting_time", "meeting purpose": "purpose", "attendees": "attendees",
@@ -170,7 +170,9 @@ def _validate_archive(file_name: str, mime_type: str, content: bytes, scanner: M
     if file_name != os.path.basename(file_name) or suffix in EXECUTABLE_EXTENSIONS or content.startswith((b"MZ", b"\x7fELF", b"#!")):
         raise CrmApiException("VALIDATION_ERROR", "Executable files cannot be archived as meeting records.")
     try:
-        clean = (scanner or ClamdScanner()).scan(content)
+        clean = scan_content(content, scanner)
+    except CrmApiException:
+        raise
     except Exception as error:
         raise CrmApiException("INTERNAL_ERROR", "File security scanner is unavailable.", retryable=True) from error
     if not clean:
@@ -197,13 +199,19 @@ def list_attachments(visit_id: str) -> list[dict[str, Any]]:
     return [{"id": row.name, "visitId": visit_id, "fileName": row.file_name, "mimeType": mimetypes.guess_type(row.file_name)[0] or "application/octet-stream", "size": int(row.file_size or 0), "uploadedAt": to_iso_timestamp(row.creation), "uploadedBy": row.owner} for row in rows]
 
 
-def _lock_editable_visit(visit_id: str):
+def _lock_editable_visit(visit_id: str, for_update: bool = True):
+    """The Visit, not reviewed yet, that this user may change.
+
+    Under its row lock when `for_update`, and then read as committed rather than as this transaction's snapshot has
+    it: the lock is taken after the file's scan, and a reassignment or an edit committed meanwhile is seen.
+    """
+
     rows = frappe.db.sql(
-        """
+        f"""
         SELECT name, status
         FROM `tabCRM Visit`
         WHERE name = %s
-        FOR UPDATE
+        {"FOR UPDATE" if for_update else ""}
         """,
         (visit_id,),
         as_dict=True,
@@ -212,30 +220,77 @@ def _lock_editable_visit(visit_id: str):
         raise CrmApiException("NOT_FOUND", "Visit was not found.")
     if rows[0].status == "Manager Reviewed":
         raise CrmApiException("INVALID_TRANSITION", "Manager-reviewed Visit records cannot be changed.")
-    from rayher_crm.services.visits import _require_visit, assert_can_change_visit
-    visit = _require_visit(visit_id)
+    from rayher_crm.services.visits import assert_can_change_visit
+    visit = frappe.get_doc("CRM Visit", visit_id, for_update=for_update)
+    if not frappe.has_permission("CRM Visit", "read", doc=visit, user=frappe.session.user):
+        raise CrmApiException("SCOPE_DENIED", "The Visit is outside the current user scope.")
     # The record belongs to the visit: an action owner who can read the visit still
     # may not write its record, because a complete record submits it for review.
     assert_can_change_visit(visit)
     return visit
 
 
+RECORD_DOCTYPE = "CRM Visit Meeting Record"
+RECORD_CHANGED = "Meeting record was changed by another user."
+
+
+def _locked_record(visit_id: str):
+    """The Visit's meeting record under its own row lock (taken after the Visit's), read as committed, or None.
+
+    The record is found without a lock: a locking read that finds no row locks the gap around it in the unique
+    index, and two first records for neighbouring Visits would deadlock on their inserts. A row that is found
+    is then locked by its name, which locks that row alone.
+    """
+
+    existing = frappe.db.get_value(RECORD_DOCTYPE, {"visit": visit_id}, "name")
+    return frappe.get_doc(RECORD_DOCTYPE, existing, for_update=True) if existing else None
+
+
+def _write_record(visit_id: str, values: dict[str, Any], *, locked=None, replace_added: bool):
+    """Write the Visit's meeting record: the one found, under its lock, or a new one.
+
+    A record that another request added since this transaction's snapshot (it held the Visit's lock before this
+    one did) is not found, and the insert is refused on the unique key. The record is then read under its lock,
+    which a row that exists takes without a gap, and written over when `replace_added` (an upload replaces the
+    record whenever it comes) or reported as changed (a typed record has no version of it to offer).
+    """
+
+    doc = locked or _locked_record(visit_id)
+    if doc is None:
+        doc = frappe.new_doc(RECORD_DOCTYPE)
+        doc.update({"visit": visit_id, **values})
+        # Frappe prints a message before raising for the unique key; it would ride along on this response.
+        logged = len(getattr(frappe.local, "message_log", ()))
+        try:
+            return doc.insert(ignore_permissions=True)
+        except (frappe.UniqueValidationError, frappe.DuplicateEntryError):
+            del frappe.local.message_log[logged:]
+            existing = frappe.db.get_value(RECORD_DOCTYPE, {"visit": visit_id}, "name", for_update=True)
+            if not existing:
+                raise
+            if not replace_added:
+                raise CrmApiException("VERSION_CONFLICT", RECORD_CHANGED)
+            doc = frappe.get_doc(RECORD_DOCTYPE, existing, for_update=True)
+    doc.update({"visit": visit_id, **values})
+    return doc.save(ignore_permissions=True)
+
+
 def upload(visit_id: str, file_name: str, mime_type: str, content: bytes, scanner: MalwareScanner | None = None) -> None:
     assert_capability("visit:write")
-    _lock_editable_visit(visit_id)
+    # Checked first without the lock, so that a refused upload is not scanned; then again under the Visit's row,
+    # which the scan (up to a minute) must not hold.
+    _lock_editable_visit(visit_id, for_update=False)
     _validate_archive(file_name, mime_type, content, scanner)
+    visit = _lock_editable_visit(visit_id)
     savepoint = f"crm_visit_meeting_upload_{frappe.generate_hash(length=8)}"
     frappe.db.savepoint(savepoint)
     created_file = None
     try:
         created_file = save_file(file_name, content, "CRM Visit", visit_id, is_private=1)
         parsed, status, message = parse_meeting_file(file_name, content)
-        existing = frappe.db.get_value("CRM Visit Meeting Record", {"visit": visit_id}, "name")
-        doc = frappe.get_doc("CRM Visit Meeting Record", existing) if existing else frappe.new_doc("CRM Visit Meeting Record")
         meeting_start, meeting_end = _meeting_range(parsed.get("meeting_time", ""))
-        doc.update({"visit": visit_id, "meeting_start": meeting_start, "meeting_end": meeting_end, "purpose": parsed.get("purpose", ""), "attendees": parsed.get("attendees", ""), "agenda": parsed.get("agenda", ""), "summary": parsed.get("summary", ""), "conclusion": parsed.get("conclusion", ""), "followup": parsed.get("followup", ""), "parse_status": status, "parse_message": message, "parsed_at": now_datetime(), "manually_corrected": 0})
-        doc.save(ignore_permissions=True) if existing else doc.insert(ignore_permissions=True)
-        _mark_record_submitted(visit_id)
+        doc = _write_record(visit_id, {"meeting_start": meeting_start, "meeting_end": meeting_end, "purpose": parsed.get("purpose", ""), "attendees": parsed.get("attendees", ""), "agenda": parsed.get("agenda", ""), "summary": parsed.get("summary", ""), "conclusion": parsed.get("conclusion", ""), "followup": parsed.get("followup", ""), "parse_status": status, "parse_message": message, "parsed_at": now_datetime(), "manually_corrected": 0}, replace_added=True)
+        _mark_record_submitted(visit)
     except Exception:
         frappe.db.rollback(save_point=savepoint)
         if created_file:
@@ -253,19 +308,17 @@ def upload(visit_id: str, file_name: str, mime_type: str, content: bytes, scanne
 
 def update_record(visit_id: str, payload: dict[str, Any], expected_modified: Any = None) -> dict[str, Any]:
     assert_capability("visit:write")
-    _lock_editable_visit(visit_id)
-    existing = frappe.db.get_value("CRM Visit Meeting Record", {"visit": visit_id}, "name")
-    doc = frappe.get_doc("CRM Visit Meeting Record", existing) if existing else frappe.new_doc("CRM Visit Meeting Record")
-    if existing:
+    visit = _lock_editable_visit(visit_id)
+    doc = _locked_record(visit_id)
+    if doc is not None:
         expected = normalize_expected_modified(expected_modified)
         if to_iso_timestamp(doc.modified) != expected:
-            raise CrmApiException("VERSION_CONFLICT", "Meeting record was changed by another user.")
+            raise CrmApiException("VERSION_CONFLICT", RECORD_CHANGED)
     savepoint = f"crm_visit_meeting_update_{frappe.generate_hash(length=8)}"
     frappe.db.savepoint(savepoint)
     try:
-        doc.update({"visit": visit_id, "meeting_start": _clean(payload.get("meetingStart")), "meeting_end": _clean(payload.get("meetingEnd")), "purpose": _clean(payload.get("purpose")), "attendees": _clean(payload.get("attendees")), "agenda": _clean(payload.get("agenda")), "summary": _clean(payload.get("summary")), "conclusion": _clean(payload.get("conclusion")), "followup": _clean(payload.get("followup")), "parse_status": "Parsed", "parse_message": "会议记录已人工确认。", "parsed_at": doc.parsed_at or now_datetime(), "manually_corrected": 1})
-        doc.save(ignore_permissions=True) if existing else doc.insert(ignore_permissions=True)
-        _mark_record_submitted(visit_id)
+        doc = _write_record(visit_id, {"meeting_start": _clean(payload.get("meetingStart")), "meeting_end": _clean(payload.get("meetingEnd")), "purpose": _clean(payload.get("purpose")), "attendees": _clean(payload.get("attendees")), "agenda": _clean(payload.get("agenda")), "summary": _clean(payload.get("summary")), "conclusion": _clean(payload.get("conclusion")), "followup": _clean(payload.get("followup")), "parse_status": "Parsed", "parse_message": "会议记录已人工确认。", "parsed_at": (doc.parsed_at if doc is not None else None) or now_datetime(), "manually_corrected": 1}, locked=doc, replace_added=False)
+        _mark_record_submitted(visit)
     except Exception:
         frappe.db.rollback(save_point=savepoint)
         raise
@@ -299,7 +352,7 @@ def outcome_from_conclusion(conclusion: Any) -> str:
     return str(conclusion or "").strip()[:OUTCOME_MAX_LENGTH]
 
 
-def _mark_record_submitted(visit_id: str) -> None:
+def _mark_record_submitted(visit) -> None:
     """Saving a complete visit record submits the visit for Manager review.
 
     A new visit waits at Planned. Once its record is uploaded or entered with every
@@ -307,13 +360,15 @@ def _mark_record_submitted(visit_id: str) -> None:
     completes it. An upload that leaves fields empty keeps the visit Planned until
     the record is completed, because review_visit refuses an incomplete record.
     Visited remains only for visits advanced through the API before this flow.
+
+    `visit` is the document read under its row lock: saving any other copy would write the snapshot's values
+    over an edit committed during the scan.
     """
-    visit = frappe.get_doc("CRM Visit", visit_id)
     if visit.status == "Manager Reviewed":
         raise CrmApiException("INVALID_TRANSITION", "Manager-reviewed Visit records cannot be changed.")
     if visit.status not in {"Planned", "Visited"}:
         return
-    record = get_record(visit_id)
+    record = get_record(visit.name)
     if not record or not all(str(record.get(field) or "").strip() for field in RECORD_REQUIRED_FIELDS):
         return
     # Advancing through the API refuses to leave Planned without an outcome

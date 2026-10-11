@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import os
+import signal
 from contextlib import suppress
 import subprocess
 import tempfile
@@ -19,7 +20,9 @@ from rayher_crm.api.v1.errors import CrmApiException
 from rayher_crm.permissions.roles import resolve_crm_role
 from rayher_crm.permissions.scope import has_crm_permission
 from rayher_crm.services.opportunity_archive import ARCHIVED_OPPORTUNITY_LINK, assert_opportunity_not_archived, opportunity_archived
-from rayher_crm.services.common import normalize_pagination, paginate_items, required_text, to_iso_timestamp
+from rayher_crm.services.common import (
+    normalize_expected_modified, normalize_pagination, paginate_items, required_text, to_iso_timestamp,
+)
 from rayher_crm.services.concurrency import lock_document
 from rayher_crm.services.file_security import (
     DOCX_MIME,
@@ -35,6 +38,7 @@ from rayher_crm.services.file_security import (
 )
 from rayher_crm.services.notifications import active_crm_users, create_notification, notify_if_reachable
 from rayher_crm.services.opportunity_stages import CUSTOMER_BUDGET_APPROVED
+from rayher_crm.services.upload_deadline import check_preparation, preparation_timeout
 from rayher_crm.services.sites import can_read_site_data
 
 ALLOWED_MIME_TYPES = {PDF_MIME, PNG_MIME, JPEG_MIME, DOCX_MIME, XLSX_MIME, PPTX_MIME}
@@ -265,17 +269,29 @@ def _office_preview(file_name: str, content: bytes) -> tuple[str, str, bytes]:
         source.write_bytes(content)
         profile = root / "profile"
         try:
-            result = subprocess.run(
+            timeout = preparation_timeout(CONVERSION_TIMEOUT_SECONDS)
+            process = subprocess.Popen(
                 [
                     "soffice", "--headless", "--nologo", "--nodefault", "--nolockcheck", "--norestore",
                     f"-env:UserInstallation={profile.as_uri()}", "--convert-to", "pdf", "--outdir", str(root), str(source),
                 ],
-                check=False, capture_output=True, timeout=CONVERSION_TIMEOUT_SECONDS,
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True,
             )
+            try:
+                process.wait(timeout=timeout)
+            except BaseException:
+                # soffice launches soffice.bin. Terminate the whole Linux process
+                # group before deleting its profile and temporary source files.
+                with suppress(ProcessLookupError):
+                    os.killpg(process.pid, signal.SIGKILL)
+                process.wait()
+                raise
         except (OSError, subprocess.TimeoutExpired) as exc:
+            check_preparation()
             raise CrmApiException("INTERNAL_ERROR", "RFQ Office preview conversion is unavailable.", retryable=True) from exc
+        check_preparation()
         target = root / f"{source.stem}.pdf"
-        if result.returncode != 0 or not target.exists():
+        if process.returncode != 0 or not target.exists():
             raise CrmApiException("VALIDATION_ERROR", "RFQ Office file could not be converted to PDF.")
         preview = target.read_bytes()
         if not preview.startswith(b"%PDF-") or len(preview) > MAX_FILE_BYTES:
@@ -299,12 +315,21 @@ def _attach(file_id: str, version_id: str, fieldname: str) -> None:
     }, update_modified=False)
 
 
-def _create_version(master, part: Mapping[str, Any], scanner: MalwareScanner | None = None, written: list | None = None):
-    """A new version of the RFQ with its file (and its PDF preview); the bytes each File wrote are added to `written`
-    when given, so that a caller whose request is refused afterwards can take them back out."""
+def _prepare_version(part: Mapping[str, Any], scanner: MalwareScanner | None = None):
+    """The checked file of a new version and its PDF preview. The scan and the conversion take up to minutes, so
+    they run before the RFQ's row is written or locked."""
 
     file_name, mime_type, content = _file_part(part, scanner)
-    preview_result = _preview(file_name, mime_type, content)
+    preview = _preview(file_name, mime_type, content)
+    check_preparation()
+    return file_name, mime_type, content, preview
+
+
+def _create_version(master, prepared: tuple, written: list | None = None):
+    """A new version of the RFQ with its prepared file (and its PDF preview); the bytes each File wrote are added to
+    `written` when given, so that a caller whose request is refused afterwards can take them back out."""
+
+    file_name, mime_type, content, preview_result = prepared
     storage_name = (
         f"tipray-{frappe.generate_hash(length=20)}.bin"
         if content.startswith(TIPRAY_HEADER)
@@ -344,6 +369,13 @@ def _create_version(master, part: Mapping[str, Any], scanner: MalwareScanner | N
     return version
 
 
+def _assert_budget_approved(stage: Any) -> None:
+    if stage != CUSTOMER_BUDGET_APPROVED:
+        raise CrmApiException(
+            "INVALID_TRANSITION", "RFQ can only be created when the Opportunity is at customer_budget_approved.",
+        )
+
+
 def _undo_creation(savepoint: str, written: list) -> None:
     """Take a refused or failed RFQ back out: its rows to the savepoint, then the bytes its Files wrote, which belong to
     nobody once their rows are gone (the API answers a refusal and commits, and a savepoint rollback runs none of
@@ -371,11 +403,12 @@ def create_rfq(payload: Mapping[str, Any], part: Mapping[str, Any], scanner: Mal
     if not has_crm_permission(opportunity, user=frappe.session.user, permission_type="read"):
         raise CrmApiException("SCOPE_DENIED", "Opportunity is outside the current user scope.")
     assert_opportunity_not_archived(opportunity, ARCHIVED_OPPORTUNITY_LINK)
-    if opportunity.stage != CUSTOMER_BUDGET_APPROVED:
-        raise CrmApiException(
-            "INVALID_TRANSITION", "RFQ can only be created when the Opportunity is at customer_budget_approved.",
-        )
+    _assert_budget_approved(opportunity.stage)
     engineer = _active_engineer(payload.get("engineerId"))
+    # Checked again under the savepoint; here so that a repeated request is refused before its scan and conversion.
+    if frappe.db.exists("CRM RFQ", {"opportunity": opportunity_id}):
+        raise CrmApiException("CONFLICT", "This Opportunity already has an RFQ.")
+    prepared = _prepare_version(part, scanner)
     savepoint = f"crm_rfq_create_{frappe.generate_hash(length=8)}"
     written: list[tuple[str, str, str]] = []
     frappe.db.savepoint(savepoint)
@@ -388,12 +421,21 @@ def create_rfq(payload: Mapping[str, Any], part: Mapping[str, Any], scanner: Mal
             "status": "Engineer Review", "latest_version_no": 0,
             "note": str(payload.get("note") or "").strip(),
         }).insert(ignore_permissions=True)
-        _create_version(master, part, scanner, written)
+        _create_version(master, prepared, written)
         # Read again under the Opportunity's lock, the RFQ's row held already (the order the RFQ review and the stage
         # rollback take them in) and its files written (their content locks taken before the Opportunity's row, as
         # private_file_lifecycle asks): an archive committed since the read above is seen and undoes the RFQ, its
         # files' bytes with it; one in flight is waited for, and finds the RFQ there first.
         assert_opportunity_not_archived(opportunity_archived(opportunity_id, for_update=True), ARCHIVED_OPPORTUNITY_LINK)
+        # The stage, the owner and the Account as committed, too: a rollback or a reassignment that ran during the
+        # scan and the conversion found no RFQ row to wait for, while the Opportunity read before them still
+        # showed the stage that allows an RFQ and the owner and Account the RFQ was written with.
+        committed = frappe.db.get_value(
+            "CRM Opportunity", opportunity_id, ["stage", "opportunity_owner", "account"], as_dict=True, for_update=True,
+        )
+        _assert_budget_approved(committed.stage)
+        if (committed.opportunity_owner, committed.account) != (master.sales_owner, master.account):
+            raise CrmApiException("VERSION_CONFLICT", "The record was changed by another request.")
         _notify(
             {engineer}, master, "RFQ requires Engineer review",
             f"{opportunity.title}: a new RFQ is ready for your technical comment.",
@@ -408,18 +450,28 @@ def create_rfq(payload: Mapping[str, Any], part: Mapping[str, Any], scanner: Mal
     return _serialize_detail(master)
 
 
+def _assert_revisable(rfq) -> None:
+    if resolve_crm_role() == "Sales" and rfq.sales_owner != frappe.session.user:
+        raise CrmApiException("SCOPE_DENIED", "Only the RFQ Sales owner or a Manager can upload a revision.")
+    if rfq.status != "Sales Revision":
+        raise CrmApiException("INVALID_TRANSITION", "Only a returned RFQ can be revised.")
+
+
 def revise_rfq(name: Any, part: Mapping[str, Any], expected_modified: Any, scanner: MalwareScanner | None = None) -> dict[str, Any]:
     _require_rfq_uploader()
     current = _require_rfq(name)
+    # The version first, the order lock_document keeps under the lock: a page that missed another user's revision
+    # is told so before the scan and the conversion, and before a status it could not have seen.
+    if to_iso_timestamp(current.modified) != normalize_expected_modified(expected_modified):
+        raise CrmApiException("VERSION_CONFLICT", "The record was changed by another request.")
+    _assert_revisable(current)
+    prepared = _prepare_version(part, scanner)
     master = lock_document("CRM RFQ", current.name, expected_modified, "NOT_FOUND")
-    if resolve_crm_role() == "Sales" and master.sales_owner != frappe.session.user:
-        raise CrmApiException("SCOPE_DENIED", "Only the RFQ Sales owner or a Manager can upload a revision.")
-    if master.status != "Sales Revision":
-        raise CrmApiException("INVALID_TRANSITION", "Only a returned RFQ can be revised.")
+    _assert_revisable(master)
     savepoint = f"crm_rfq_revise_{frappe.generate_hash(length=8)}"
     frappe.db.savepoint(savepoint)
     try:
-        _create_version(master, part, scanner)
+        _create_version(master, prepared)
         _notify(
             {master.engineer_owner}, master, "RFQ revision requires Engineer review",
             f"{master.name}: Sales uploaded a revised RFQ version.", informational=True,

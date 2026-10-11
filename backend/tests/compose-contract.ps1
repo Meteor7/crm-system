@@ -99,7 +99,17 @@ finally {
 }
 
 $localRendered = $localRenderedJson | ConvertFrom-Json
+$clamConfig = Get-Content -LiteralPath (Join-Path (Split-Path -Parent $ComposeFile) 'clamav/clamd.conf') -Raw
+foreach ($setting in @('AlertExceedsMax yes', 'MaxFiles 10000', 'MaxRecursion 17', 'MaxScanTime 55000', 'MaxScanSize 200M', 'MaxFileSize 100M', 'StreamMaxLength 100M')) {
+    Assert-Contract ($clamConfig -match "(?m)^$([regex]::Escape($setting))\r?$") "ClamAV must explicitly configure $setting"
+}
+$clamMount = @($localRendered.services.clamav.volumes | Where-Object { $_.target -eq '/run/crm-clamd.conf' })
+Assert-Contract ($clamMount.Count -eq 1 -and $clamMount[0].read_only -and $clamMount[0].type -eq 'bind') 'official and offline ClamAV images must use the same read-only scanner configuration'
+$clamEntry = $localRendered.services.clamav.entrypoint -join "`n"
+Assert-Contract ($clamEntry.Contains('cp /run/crm-clamd.conf /etc/clamav/clamd.conf') -and $clamEntry.Contains('chmod 0644 /etc/clamav/clamd.conf') -and $clamEntry.Contains('exec /init')) 'ClamAV must install a readable config before starting its official entry point, even with restrictive rootless checkout permissions'
+Assert-Contract ($clamConfig -notmatch '(?m)^TCPAddr\s') 'ClamAV must listen on both localhost address families for the official health check'
 Assert-Contract ($localRendered.name -eq 'rayher-crm-stage1-local') 'rendered project name is not isolated'
+Assert-Contract (($localRendered.services.backend.command -join ' ') -match 'rayher_crm\.wsgi:application') 'Gunicorn must capture upload entry time before Frappe parses multipart bodies'
 Assert-Contract ($null -eq $localRendered.services.db.ports) 'MariaDB must not publish host ports'
 Assert-Contract ($null -eq $localRendered.services.'redis-cache'.ports) 'Redis cache must not publish host ports'
 Assert-Contract ($null -eq $localRendered.services.'redis-queue'.ports) 'Redis queue must not publish host ports'

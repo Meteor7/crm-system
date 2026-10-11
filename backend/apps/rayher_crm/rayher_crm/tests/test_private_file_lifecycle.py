@@ -1,5 +1,7 @@
 """Shared-blob reference counting for private attachments."""
 from pathlib import Path
+from threading import Event, Thread
+import time
 from unittest.mock import patch
 from uuid import uuid4
 
@@ -349,6 +351,55 @@ class TestPrivateFileLifecycle(FrappeTestCase):
         frappe.delete_doc("File", file.name, ignore_permissions=True)
         self.assertFalse(frappe.db.exists("File", file.name))
         self.assertFalse(path.exists())
+
+    def test_deletion_waits_for_a_brief_competing_content_lock(self):
+        file = self.private_file()
+        path = Path(file.get_full_path())
+        frappe.db.commit()
+        self.committed.append(file.name)
+        key = "crm-private:" + lifecycle.hashlib.sha256(
+            f"{frappe.local.site}:{file.content_hash}".encode()
+        ).hexdigest()[:48]
+        connection = frappe.db._get_connection()
+        attempted = Event()
+        errors = []
+        real_sql = frappe.db.sql
+
+        def finish_competing_upload():
+            try:
+                if not attempted.wait(5):
+                    raise AssertionError("Deletion never attempted the content lock")
+                time.sleep(0.2)
+                with connection.cursor() as cursor:
+                    cursor.execute("SELECT RELEASE_LOCK(%s)", (key,))
+            except Exception as error:
+                errors.append(error)
+
+        def observe_lock(query, *args, **kwargs):
+            if "GET_LOCK" in str(query):
+                attempted.set()
+            return real_sql(query, *args, **kwargs)
+
+        worker = None
+        try:
+            with connection.cursor() as cursor:
+                cursor.execute("SELECT GET_LOCK(%s, 0)", (key,))
+                self.assertEqual(cursor.fetchone()[0], 1)
+            worker = Thread(target=finish_competing_upload)
+            worker.start()
+            with patch.object(frappe.db, "sql", side_effect=observe_lock):
+                frappe.delete_doc("File", file.name, ignore_permissions=True)
+            worker.join(6)
+            self.assertFalse(worker.is_alive())
+            self.assertEqual(errors, [])
+            self.assertFalse(frappe.db.exists("File", file.name))
+            self.assertFalse(path.exists())
+            frappe.db.commit()
+        finally:
+            attempted.set()
+            if worker is not None:
+                worker.join(6)
+            connection.close()
 
     def test_shared_private_blob_survives_deleting_one_of_its_rows(self):
         kept = self.ordinary_private_file()

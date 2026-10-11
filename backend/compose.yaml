@@ -121,8 +121,19 @@ services:
     image: ${CLAMAV_IMAGE:-clamav/clamav:1.4.5@sha256:8f98c34d605b96fd1c2715bef37768a8748b83d9e6f9e7647d8bf2b7b0bbe4ce}
     pull_policy: missing
     restart: unless-stopped
+    # Rootless runner checkouts can be 0600. clamd starts as root, but freshclam
+    # reads this config as clamav when it notifies clamd after a database update.
+    # Copy the read-only source into the container with explicit readable mode.
+    entrypoint:
+      - /bin/sh
+      - -ec
+      - |
+        cp /run/crm-clamd.conf /etc/clamav/clamd.conf
+        chmod 0644 /etc/clamav/clamd.conf
+        exec /init
     volumes:
       - clamav-data:/var/lib/clamav
+      - ./clamav/clamd.conf:/run/crm-clamd.conf:ro
     networks:
       - crm-backend
 
@@ -262,6 +273,15 @@ services:
 
   backend:
     <<: *frappe-service
+    command:
+      - /bin/bash
+      - -c
+      - >
+        exec /home/frappe/frappe-bench/env/bin/gunicorn
+        --chdir=/home/frappe/frappe-bench/sites --bind=0.0.0.0:8000
+        --threads="$${GUNICORN_THREADS}" --workers="$${GUNICORN_WORKERS}"
+        --worker-class=gthread --worker-tmp-dir=/dev/shm
+        --timeout="$${GUNICORN_TIMEOUT}" --preload rayher_crm.wsgi:application
     depends_on:
       migrate:
         condition: service_completed_successfully

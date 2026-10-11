@@ -52,6 +52,10 @@ it.each([
   ['VALIDATION_ERROR', 'A value is too long.', 'One of the values is too long.', '有一项内容过长'],
   ['VALIDATION_ERROR', 'The PDF file could not be read.', 'It may be damaged', 'PDF 文件无法读取'],
   ['VALIDATION_ERROR', 'The PDF contains scripts and cannot be uploaded.', 'contains scripts', 'PDF 中含有脚本'],
+  ['VALIDATION_ERROR', 'File type is not allowed or does not match its magic bytes.', 'does not match its extension', '文件内容与扩展名不符'],
+  ['VALIDATION_ERROR', 'These files take too long to scan in one upload. Upload fewer at a time.', 'Upload fewer at a time.', '请分批上传'],
+  ['VALIDATION_ERROR', 'The upload could not finish in time. Nothing was saved. Please try again with fewer files.', 'Nothing was saved.', '未保存任何内容'],
+  ['VERSION_CONFLICT', 'Meeting record was changed by another user.', 'Refresh and try again.', '会议记录已被其他用户修改'],
   ['VALIDATION_ERROR', 'Customer Name is too long: at most 140 characters.', 'The customer name is too long: at most 140 characters.', '客户全称过长：最多 140 个字符。'],
   ['VALIDATION_ERROR', 'CRM Short Name is too long: at most 140 characters.', 'The short name is too long: at most 140 characters.', '客户简称过长：最多 140 个字符。'],
   ['VALIDATION_ERROR', 'Designation is too long: at most 140 characters.', 'The title is too long: at most 140 characters.', '职位过长：最多 140 个字符。'],
@@ -208,6 +212,7 @@ it.each([
   ['backend/apps/rayher_crm/rayher_crm/services/document_access.py', FIXED_MESSAGE],
   ['backend/apps/rayher_crm/rayher_crm/services/warning_handling.py', FIXED_MESSAGE],
   ['backend/apps/rayher_crm/rayher_crm/services/opportunity_documents.py', FIXED_MESSAGE],
+  ['backend/apps/rayher_crm/rayher_crm/services/file_security.py', FIXED_MESSAGE],
   // Its ValueError texts are answered as VALIDATION_ERROR by opportunity_documents.py.
   ['backend/apps/rayher_crm/rayher_crm/services/document_links.py', /raise (ValueError)\("([^"]+)"\)/g],
 ])('has a translation for every fixed message of %s', (file, pattern) => {
@@ -232,4 +237,24 @@ it('keeps the limits written into the fixed messages in step with the services\'
     `activities may hold at most ${cap} entries.`,
     `The Lead holds ${cap} arrangements, the most it can; remove one before adding another.`,
   ]) expect(mapRequestError(new CrmApiError('VALIDATION_ERROR', message, 'req_constant', false)).localizedMessage, message).toBeDefined()
+})
+
+it('names the Office file that is over a limit of the upload check, in the words the server writes', () => {
+  const source = readFileSync(resolve('backend/apps/rayher_crm/rayher_crm/services/file_security.py'), 'utf8').replace(/\r/g, '')
+  const template = (name: string) => new RegExp(`^${name} = '(.+)'$`, 'm').exec(source)![1]!
+  const parts = /^MAX_DOCX_ENTRIES = ([0-9_]+)$/m.exec(source)![1]!.replaceAll('_', '')
+  // A line or paragraph separator is a legal file name character, and `.` alone does not match it.
+  for (const name of ['Nansi "0610".pptx', `deck${String.fromCharCode(0x2028)}draft.pptx`]) {
+    const fill = (text: string, limit: string) => text.replace('{file_name}', name).replace('{limit}', limit)
+    for (const [message, chinese] of [
+      [fill(template('OFFICE_TOO_MANY_PARTS_MESSAGE'), parts), `“${name}”内部文件数超过 ${parts} 个，请另存为 PDF 或拆分后重新上传。`],
+      [fill(template('OFFICE_TOO_LARGE_MESSAGE'), '50'), `“${name}”解压后超过 50 MiB，请压缩其中的图片或另存为 PDF 后重新上传。`],
+    ] as const) {
+      const error = new CrmApiError('VALIDATION_ERROR', message, 'req_office', false)
+      setLocale('zh-CN')
+      expect(resolveLocaleMessage(mapRequestError(error).localizedMessage!)).toBe(chinese)
+      setLocale('en-US')
+      expect(resolveLocaleMessage(mapRequestError(error).localizedMessage!)).toBe(message)
+    }
+  }
 })

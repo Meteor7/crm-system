@@ -19,6 +19,7 @@ auth_hooks = [
 ]
 
 before_request = [
+    "rayher_crm.services.upload_deadline.begin_upload_request",
     "rayher_crm.security.attachment_gate.reject_upload_request",
 ]
 
