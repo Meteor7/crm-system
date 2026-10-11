@@ -16,6 +16,8 @@ from rayher_crm.services.managed_file_access import (
 
 class ManagedFile(File):
     def before_insert(self):
+        from rayher_crm.security.attachment_gate import reject_new_file
+        reject_new_file()
         # A doc_event runs after File.before_insert, when reference-only copies
         # already have content. Preserve the distinction at the controller edge.
         protect_file_insert(self)
