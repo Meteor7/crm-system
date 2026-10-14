@@ -9,7 +9,7 @@ import { metricText } from './presentation'
 import type { CommitmentMetric, PlanCommitment, PlanDto } from './plan-types'
 
 const props = defineProps<{ data: PlanDto; apiClient: CrmApi }>()
-const emit = defineEmits<{ saved: []; reload: []; details: [sales: string, metric: CommitmentMetric] }>()
+const emit = defineEmits<{ saved: []; reload: [] }>()
 const { locale } = useI18n()
 const copy = (english: string, chinese: string) => locale.value === 'en-US' ? english : chinese
 const metrics: CommitmentMetric[] = ['visits', 'leads', 'tests', 'quotes', 'followups', 'actions', 'events']
@@ -63,7 +63,7 @@ const records = (row: typeof rows.value[number]) => row.item.commitment.conflict
     <div class="table-scroll"><table><thead><tr><th>{{ copy('Sales', '销售') }}</th><th>{{ copy('Scheduled', '已安排') }}</th><th>{{ copy('Committed', '承诺') }}</th><th>{{ copy('Period target', '本期目标') }}</th><th>{{ copy('Record', '记录') }}</th></tr></thead><tbody>
       <tr v-if="team" data-commitment-team><th>{{ copy('Selected team', '当前范围合计') }}</th><td>{{ metricText(team.scheduled, locale) }}</td><td>{{ metricText(team.commitment, locale) }}<small v-if="team.commitment.missing?.length">{{ copy('Missing', '缺少') }} {{ team.commitment.missing.length }}</small></td><td>{{ metricText(team.target, locale) }}</td><td>—</td></tr>
       <tr v-for="row in rows" :key="row.id" :data-commitment-owner="row.id">
-        <th>{{ row.name }}</th><td><button v-if="selected !== 'leads' && data.filters.sales.some(person => person.id === row.id)" :disabled="saving" @click="emit('details', row.id, selected)">{{ metricText(row.item.scheduled, locale) }}</button><span v-else>{{ metricText(row.item.scheduled, locale) }}</span></td>
+        <th>{{ row.name }}</th><td>{{ metricText(row.item.scheduled, locale) }}</td>
         <td>{{ metricText(row.item.commitment, locale) }}</td><td>{{ metricText(row.item.target, locale) }}</td>
         <td>
           <p v-if="row.item.commitment.conflicts?.length" data-commitment-conflict>{{ copy('Multiple records were preserved after a user merge. Ask an administrator to reconcile the records below before editing; the total remains unknown.', '用户合并后保留了多条承诺。请管理员核对下列记录后再编辑；合计暂时无法确定。') }}</p>

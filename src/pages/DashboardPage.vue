@@ -8,6 +8,7 @@ import type { EChartsOption } from 'echarts'
 import { api as defaultApi, type CrmApi } from '@/api'
 import { useAppStore } from '@/stores/app'
 import { useDashboardStore } from '@/stores/dashboard'
+import ApprovalWorkspaceNav from '@/features/approvals/ApprovalWorkspaceNav.vue'
 import PageHeader from '@/design-system/PageHeader.vue'
 import KpiCard from '@/design-system/KpiCard.vue'
 import SectionCard from '@/design-system/SectionCard.vue'
@@ -511,6 +512,7 @@ onMounted(async () => {
       <StatusBadge v-if="managementView" :label="t('dashboard.managerBadge')" tone="info" />
       <StatusBadge v-else :label="t('dashboard.reminderBadge')" tone="neutral" />
     </PageHeader>
+    <ApprovalWorkspaceNav v-if="!managementView" />
 
     <DataState v-if="store.loading && !store.data" type="loading" />
     <DataState v-else-if="store.denied" type="denied" :message="store.error" :request-id="store.requestId" />

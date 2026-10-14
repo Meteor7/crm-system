@@ -159,6 +159,7 @@ POLICIES = (
     _child("User Email", "Native User row scope", "User.user_emails", standard=True),
     _child("User Social Login", "Native User row scope", "User.social_logins", standard=True),
     _child("Block Module", "Native User or Module Profile row scope", "block_modules", standard=True),
+    Policy("CRM Approval View", "service_only", "Current authenticated user and actionable pending submission only", ("approvals",)),
     Policy("CRM Opportunity Saved Query", "service_only", "Author writes; explicit recipients read definitions through the service", ("opportunity_board",)),
     _child("CRM Query Recipient", "Service-only Saved Query parent", "CRM Opportunity Saved Query.recipients"),
     Policy("CRM Opportunity Status", "service_only", "Current Opportunity; service projection", ("opportunity_status",), "CRM Opportunity"),

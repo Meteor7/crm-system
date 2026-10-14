@@ -35,6 +35,26 @@ async function mountPage(
 }
 
 describe('Demo detail page', () => {
+  it.each([
+    ['2026-10-09T14:35:38.339927Z', '2026-10-09'],
+    ['2026-10-09T18:35:38.339927Z', '2026-10-10'],
+  ])('shows ISO creation date %s as a Shanghai calendar date', async (date, expected) => {
+    const seedApi = createMockApi({ latency: 0, role: 'Manager' })
+    const project = (await seedApi.listDemoWorkflows({ page: 1, pageSize: 1 })).data.items[0]
+    const router = createAppRouter()
+    await router.push('/demo-workflow/DR-DATE')
+    await router.isReady()
+    const apiClient = Object.assign(seedApi, {
+      getDemoWorkflow: vi.fn().mockResolvedValue({
+        data: { ...project, id: 'DR-DATE', projectTimeline: project.projectTimeline?.map((step) => ({ ...step, date: step.key === 'sales-preparation' ? date : step.date })) }, warnings: [],
+      }),
+    })
+    const wrapper = mount(DemoDetailPage, { props: { apiClient }, global: { plugins: [createPinia(), router] } })
+    await flushPromises()
+    expect(wrapper.get('.created-date').text()).toBe(expected)
+    wrapper.unmount()
+  })
+
   it('loads the routed project by exact id instead of searching a capped list', async () => {
     const router = createAppRouter()
     await router.push('/demo-workflow/DR-201')

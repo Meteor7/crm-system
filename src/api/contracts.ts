@@ -22,6 +22,7 @@ import type { DemoResource, DemoResourceInput, DemoResourceCatalogue, DemoUnavai
  *  合规门(Go/No-Go Checklist)必须全绿后才可作为 Stage/Production 后端验收依据。
  * ============================================================================
  */
+import type { ApprovalItem } from '@/features/approvals/approval-queue'
 import type { PlanDto, PlanQuery, PlanDetails, PlanDetailQuery, PlanCommitment, PlanCommitmentInput } from '@/features/cockpit/plan-types'
 import type { EventDto, EventInput } from '@/features/events/types'
 import type { CockpitSettings, CockpitSettingsInput, ReviewDto, ReviewQuery, ReviewDetails, Target, TargetInput, WarningActionInput, WarningHandling, WarningPlanInput, WarningsDto } from '@/features/cockpit/types'
@@ -212,6 +213,8 @@ export interface CrmApi {
   changeCurrentUserPassword(input: { currentPassword: string; newPassword: string }): Promise<ApiResponse<{ updated: true }>>
   /** Ends the signed-in session on the server (Frappe's own `logout`); the page then goes to the login page. */
   signOut(): Promise<void>
+  listPendingApprovals(): Promise<ApiResponse<{ items: ApprovalItem[] }>>
+  markApprovalViewed(id: string): Promise<ApiResponse<{ id: string; viewedAt: string }>>
   listNotifications(query?: NotificationListQuery): Promise<ApiResponse<PageData<NotificationDto>>>
   markNotificationRead(id: string): Promise<ApiResponse<{ id: string; read: true; readAt: string }>>
   markAllNotificationsRead(): Promise<ApiResponse<{ updated: number; readAt: string }>>

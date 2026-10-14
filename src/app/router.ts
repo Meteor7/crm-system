@@ -29,6 +29,7 @@ function retiredLeadsOpportunitiesRedirect(to: RouteLocationGeneric): RouteLocat
 export const routes: RouteRecordRaw[] = [
   { path: '/', redirect: '/dashboard' },
   { path: '/dashboard', name: 'dashboard', component: () => import('@/pages/DashboardHomePage.vue') },
+  { path: '/approvals', name: 'pending-approvals', component: () => import('@/pages/PendingApprovalsPage.vue'), meta: { navigationPath: '/dashboard' } },
   { path: '/territories', name: 'territories', component: () => import('@/pages/TerritoriesPage.vue') },
   { path: '/plan', name: 'plan', component: () => import('@/pages/PlanPage.vue'), meta: { navigationPath: '/dashboard' } },
   { path: '/warnings', name: 'warnings', component: () => import('@/pages/WarningsPage.vue'), meta: { navigationPath: '/dashboard' } },

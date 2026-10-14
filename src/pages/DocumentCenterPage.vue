@@ -151,7 +151,7 @@ const selected = computed(() =>
 )
 const selectedRequest = computed(() =>
   approvalRequests.value.find((request) => request.id === selectedRequestId.value)
-  ?? approvalRequests.value[0],
+  ?? (route?.query?.request ? undefined : approvalRequests.value[0]),
 )
 const approvalDocument = computed(() =>
   controlledDocuments.value.find((document) => document.id === selectedRequest.value?.documentId),
@@ -540,7 +540,8 @@ async function loadApprovalQueues() {
     uploadApprovalError.value = requestErrorMessage(uploadResult.reason, localeMessage('Upload approval queue failed to load.', '上传审批队列加载失败'))
   }
   approvalRequests.value = [...requests, ...uploads].sort((left, right) => right.submittedAt.localeCompare(left.submittedAt))
-  selectedRequestId.value = approvalRequests.value[0]?.id ?? ''
+  const linkedRequest = typeof route?.query?.request === 'string' ? route.query.request : ''
+  selectedRequestId.value = linkedRequest || approvalRequests.value[0]?.id || ''
   approvalLoading.value = false
 }
 
@@ -561,6 +562,9 @@ onMounted(async () => {
 })
 
 watch(() => route?.query?.workspace, applyWorkspaceQuery)
+watch(() => route?.query?.request, value => {
+  if (role.value === 'Manager') selectedRequestId.value = typeof value === 'string' ? value : approvalRequests.value[0]?.id ?? ''
+})
 
 // The preview is the selected document's at the version shown, as far as the user may see it: another document,
 // the same one at another version, or one the user may preview since (the library read anew after a download,

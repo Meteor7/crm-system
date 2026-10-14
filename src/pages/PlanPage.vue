@@ -42,7 +42,7 @@ const error = useLocaleMessage(), itemError = useLocaleMessage()
 // A request the server refused as invalid is about the period asked for, not about a server without Plan.
 const errorIsInvalidRequest = ref(false)
 const metric = ref<Exclude<PlanMetric, 'overdue'>>('all'), groupBy = ref<'day' | 'sales' | 'market'>('day')
-const page = ref(1), equipmentGroup = ref<string | undefined>()
+const page = ref(1)
 const agendaRoot = ref<HTMLElement | null>(null)
 let cardObserver: ResizeObserver | undefined
 watch([items, groupBy, locale], () => {
@@ -107,13 +107,12 @@ async function loadItems() {
   if (!manager.value || !data.value) return
   itemLoading.value = true
   try {
-    const response = await props.apiClient.getPlanDetails({ ...query, anchor: data.value.period.start, metric: metric.value, page: page.value, pageSize: 50, includeOverdue: false, ...(equipmentGroup.value ? { equipmentGroup: equipmentGroup.value } : {}) })
+    const response = await props.apiClient.getPlanDetails({ ...query, anchor: data.value.period.start, metric: metric.value, page: page.value, pageSize: 50, includeOverdue: false })
     if (id === detailRevision && manager.value) items.value = response.data
   } catch (reason) { if (id === detailRevision) itemError.value = requestErrorMessage(reason) }
   finally { if (id === detailRevision) itemLoading.value = false }
 }
 async function load() {
-  equipmentGroup.value = undefined
   const id = ++revision
   detailRevision++; data.value = null; items.value = null; error.value = ''; errorIsInvalidRequest.value = false; itemError.value = ''; itemLoading.value = false
   if (!manager.value) { loading.value = false; return }
@@ -148,9 +147,7 @@ const dateDraft = ref<string | null>(null)
 // The period before the earliest one the cockpit shows (the one that reaches into 2000) cannot be asked for.
 const atEarliestPeriod = computed(() => Boolean(data.value) && data.value!.period.start <= EARLIEST_COCKPIT_DATE)
 function resetFilters() { query.region = ''; query.sales = ''; query.market = ''; query.equipment = '' }
-function selectEquipmentGroup(id: string, kind: 'scheduled_activities' | 'po') { equipmentGroup.value = id; metric.value = kind; page.value = 1; void loadItems() }
-function commitmentDetails(sales: string, key: import('@/features/cockpit/plan-types').CommitmentMetric) { if (key === 'leads') return; equipmentGroup.value = undefined; metric.value = key; page.value = 1; if (query.sales === sales) void loadItems(); else query.sales = sales }
-function selectMetric(value: Exclude<PlanMetric, 'overdue'>) { equipmentGroup.value = undefined; metric.value = value; page.value = 1; void loadItems() }
+function selectMetric(value: Exclude<PlanMetric, 'overdue'>) { metric.value = value; page.value = 1; void loadItems() }
 function changePage(value: number) { page.value = value; void loadItems() }
 watch(() => [app.bootstrap?.user.role, app.identityRevision, query.period, query.anchor, query.sales, query.region, query.market, query.equipment], () => {
   if (app.bootstrap && !manager.value) {
@@ -172,13 +169,15 @@ onBeforeUnmount(() => { revision++; detailRevision++; cardObserver?.disconnect()
       <p class="heading-note">{{ copy('Period activities and active Demo tests', '所选周期活动与当前计划测试') }}<small>{{ copy('Only dated Demos in this period count as scheduled; other ongoing Demos are listed separately', '只有日期在本期的 Demo 计入安排数；其他进行中 Demo 单独列出') }}</small></p>
     </header>
     <nav class="plan-controls" :aria-label="copy('Plan filters', '计划筛选')">
-      <div class="view-tabs"><RouterLink :to="reviewRoute">Review</RouterLink><strong aria-current="page">Plan</strong><RouterLink :to="warningsRoute">Warnings</RouterLink><RouterLink :to="boardRoute">Opportunities</RouterLink></div>
+      <div class="view-tabs cockpit-tabs"><RouterLink :to="reviewRoute">Review</RouterLink><strong aria-current="page">Plan</strong><RouterLink :to="warningsRoute">Warnings</RouterLink><RouterLink :to="boardRoute">Opportunities</RouterLink><RouterLink to="/approvals">{{ copy('Pending approvals', '待审批') }}</RouterLink></div>
+      <div class="cockpit-control-row">
+      <div class="period-controls"><div class="segmented"><button v-for="period in periods" :key="period" :aria-pressed="query.period === period" @click="selectPeriod(period)">{{ label(period) }}</button></div><button :disabled="!data || loading || atEarliestPeriod" :aria-label="copy('Previous period', '上一周期')" @click="query.anchor = data!.period.previousAnchor"><ChevronLeft :size="15" /></button><input :value="dateDraft ?? query.anchor" :min="EARLIEST_COCKPIT_DATE" :max="LATEST_PLAN_DATE" type="date" :aria-label="copy('Period date', '周期日期')" @focus="dateDraft = ($event.target as HTMLInputElement).value" @input="dateDraft = ($event.target as HTMLInputElement).value" @change="pickAnchor" @blur="showAnchor" /><button :disabled="!data || loading" :aria-label="copy('Next period', '下一周期')" @click="query.anchor = data!.period.nextAnchor"><ChevronRight :size="15" /></button><button :disabled="loading" :aria-label="copy('Refresh', '刷新')" @click="load"><RefreshCw :size="14" /></button></div>
       <label><span class="filter-name">{{ copy('Region', '区域') }}</span><RegionSelect v-model="query.region" :regions="filters.regions" :parents="filters.regionParents" :disabled="!filters.regionReady" :all-label="copy('All regions', '全部区域')" /></label>
       <label><span class="filter-name">{{ copy('Sales', '销售') }}</span><select v-model="query.sales" aria-label="Sales"><option value="">{{ copy('All sales reps', '全部销售') }}</option><option v-for="person in filters.sales" :key="person.id" :value="person.id">{{ person.name }}</option></select></label>
       <label><span class="filter-name">{{ copy('Market', '市场') }}</span><select v-model="query.market" aria-label="Market"><option value="">{{ copy('All markets', '全部市场') }}</option><option v-for="market in filters.markets" :key="market" :value="market">{{ market }}</option></select></label>
       <label><span class="filter-name">{{ copy('Equipment', '设备') }}</span><select v-model="query.equipment" aria-label="Equipment"><option value="">{{ copy('All equipment', '全部设备') }}</option><option v-for="equipment in filters.equipment ?? []" :key="equipment" :value="equipment">{{ equipment }}</option></select></label>
       <button type="button" class="filter-reset" data-testid="plan-filter-reset" :disabled="!query.region && !query.sales && !query.market && !query.equipment" @click="resetFilters">{{ copy('Reset filters', '重置筛选') }}</button>
-      <div class="period-controls"><div class="segmented"><button v-for="period in periods" :key="period" :aria-pressed="query.period === period" @click="selectPeriod(period)">{{ label(period) }}</button></div><button :disabled="!data || loading || atEarliestPeriod" :aria-label="copy('Previous period', '上一周期')" @click="query.anchor = data!.period.previousAnchor"><ChevronLeft :size="15" /></button><input :value="dateDraft ?? query.anchor" :min="EARLIEST_COCKPIT_DATE" :max="LATEST_PLAN_DATE" type="date" :aria-label="copy('Period date', '周期日期')" @focus="dateDraft = ($event.target as HTMLInputElement).value" @input="dateDraft = ($event.target as HTMLInputElement).value" @change="pickAnchor" @blur="showAnchor" /><button :disabled="!data || loading" :aria-label="copy('Next period', '下一周期')" @click="query.anchor = data!.period.nextAnchor"><ChevronRight :size="15" /></button><button :disabled="loading" :aria-label="copy('Refresh', '刷新')" @click="load"><RefreshCw :size="14" /></button></div>
+      </div>
     </nav>
     </div>
     <div v-if="error" class="error-banner" role="alert"><strong>{{ copy('Plan could not be loaded', '暂时无法读取计划') }}</strong><p>{{ error }}</p><p v-if="!errorIsInvalidRequest">{{ copy('If Plan has not been enabled on this server, its business APIs need to be deployed first.', '若当前服务器尚未启用 Plan，需要先部署对应业务接口。') }}</p><button @click="load">{{ copy('Retry', '重试') }}</button></div>
@@ -189,9 +188,8 @@ onBeforeUnmount(() => { revision++; detailRevision++; cardObserver?.disconnect()
         <small v-if="kind === 'visits'">{{ copy('Visits with a planned date', '按已安排的拜访日期') }}</small><small v-else-if="kind === 'tests'">{{ copy('Preparation complete, before Internal Review', '两项准备完成，尚未进入内部审核') }}</small><small v-else-if="kind === 'actions'">{{ copy('Incomplete actions due in this period', '本期到期且尚未完成的行动') }}</small><small v-else-if="kind === 'quotes'">{{ data?.quoteAmounts ? moneyText(data.quoteAmounts, !!data.quoteAmountIncomplete) : copy('Draft quotation amounts', '草稿报价金额') }}</small><small v-else-if="kind === 'followups'">{{ copy('Open quotation follow-ups due in this period', '本期到期的未完成报价跟进') }}</small><small v-else-if="kind === 'events'">{{ copy('Events overlapping this period, counted once each', '与本期相交的活动，每项计一次') }}</small><small v-else>{{ data ? moneyText(data.poAmounts, data.poAmountIncomplete) : copy('Opportunity estimates', '商机预计金额') }}</small>
       </button>
     </section>
-    <PlanCommitmentsPanel v-if="data?.commitments" :data="data" :api-client="apiClient" @saved="load" @reload="load" @details="commitmentDetails" />
-    <section v-if="data?.equipmentGroups" class="panel equipment-summary" data-equipment-summary><header class="panel-heading"><div><h2>{{ copy('Plans by equipment', '按设备汇总计划') }}</h2><p>{{ copy('Current-period scheduled activities and expected PO only; carryover and unscheduled Demos remain in their own lists.', '仅本期已安排活动和预计 PO；结转事项与未排期 Demo 保留在各自列表。') }}</p></div></header><div class="table-scroll"><table><thead><tr><th>{{ copy('Equipment', '设备') }}</th><th>{{ copy('Scheduled activities', '已安排活动') }}</th><th>{{ copy('Expected PO', '预计 PO') }}</th><th>{{ copy('Expected CNY amount', '预计人民币金额') }}</th></tr></thead><tbody><tr v-for="row in data.equipmentGroups" :key="row.id"><th>{{ row.name || copy('Unclassified', '未分类') }}</th><td><button @click="selectEquipmentGroup(row.id, 'scheduled_activities')">{{ fmt(row.activities) }}</button></td><td><button @click="selectEquipmentGroup(row.id, 'po')">{{ fmt(row.po) }}</button></td><td>{{ moneyText(row.poAmounts, row.poAmountIncomplete) }}</td></tr></tbody></table><p v-if="!data.equipmentGroups.length" class="empty-state">{{ copy('No scheduled records in this period.', '本期没有已安排记录。') }}</p></div></section>
-    <p v-if="equipmentGroup" data-equipment-group-filter>{{ copy('Agenda equipment group', '日程设备分组') }}: {{ data?.equipmentGroups?.find(row => row.id === equipmentGroup)?.name || copy('Unclassified', '未分类') }} <button @click="equipmentGroup = undefined; loadItems()">{{ copy('Clear group', '清除分组') }}</button></p>
+    <PlanCommitmentsPanel v-if="data?.commitments" :data="data" :api-client="apiClient" @saved="load" @reload="load" />
+    <section v-if="data?.equipmentGroups" class="panel equipment-summary" data-equipment-summary><header class="panel-heading"><div><h2>{{ copy('Plans by equipment', '按设备汇总计划') }}</h2><p>{{ copy('Current-period scheduled activities and expected PO only; carryover and unscheduled Demos remain in their own lists.', '仅本期已安排活动和预计 PO；结转事项与未排期 Demo 保留在各自列表。') }}</p></div></header><div class="table-scroll"><table><thead><tr><th>{{ copy('Equipment', '设备') }}</th><th>{{ copy('Scheduled activities', '已安排活动') }}</th><th>{{ copy('Expected PO', '预计 PO') }}</th><th>{{ copy('Expected CNY amount', '预计人民币金额') }}</th></tr></thead><tbody><tr v-for="row in data.equipmentGroups" :key="row.id"><th>{{ row.name || copy('Unclassified', '未分类') }}</th><td>{{ fmt(row.activities) }}</td><td>{{ fmt(row.po) }}</td><td>{{ moneyText(row.poAmounts, row.poAmountIncomplete) }}</td></tr></tbody></table><p v-if="!data.equipmentGroups.length" class="empty-state">{{ copy('No scheduled records in this period.', '本期没有已安排记录。') }}</p></div></section>
     <div class="plan-grid">
       <div class="plan-brand-art" aria-hidden="true"><img :src="brandIconUrl" alt="" width="512" height="512" draggable="false" /></div>
       <section class="panel agenda-panel" :aria-busy="itemLoading">
@@ -217,3 +215,7 @@ onBeforeUnmount(() => { revision++; detailRevision++; cardObserver?.disconnect()
 </style>
 
 <style scoped src="@/features/cockpit/sales-table.css"></style>
+
+<style scoped src="@/features/cockpit/control-row.css"></style>
+
+<style scoped src="@/features/cockpit/workspace-tabs.css"></style>

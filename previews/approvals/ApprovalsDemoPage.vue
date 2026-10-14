@@ -1,0 +1,60 @@
+<script setup lang="ts">
+import { computed, reactive, ref, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
+import { ArrowUpRight, Bell, ChevronLeft, ChevronRight, RefreshCw } from '@lucide/vue'
+import ApprovalInbox from '@/features/approvals/ApprovalInbox.vue'
+import { approvalTarget, type ApprovalItem } from '@/features/approvals/approval-queue'
+import { nextPeriodAfter, previousPeriodBefore } from '@/features/cockpit/scope'
+import { useAppStore } from '@/stores/app'
+import type { UserRole } from '@/types/crm'
+import type { PeriodKind } from '@/features/cockpit/types'
+import { DEMO_NOW, demoViewer } from './demo-fixtures'
+import { markPreviewViewed, previewApprovalItems } from './demo-state'
+
+const app = useAppStore(), route = useRoute(), router = useRouter()
+const initialRole = route.query.role ?? app.bootstrap?.user.role
+const role = ref<UserRole>(initialRole === 'Sales' || initialRole === 'Engineer' ? initialRole : 'Manager')
+const viewer = computed(() => demoViewer(role.value))
+const view = ref('approvals'), period = ref<PeriodKind>('month'), anchor = ref('2026-10-14'), notice = ref('')
+const scope = reactive({ region: '', sales: '', market: '', equipment: '' })
+const scopeFields = [{ key: 'region', label: '区域', all: '全部区域' }, { key: 'sales', label: '销售', all: '全部销售' }, { key: 'market', label: '市场', all: '全部市场' }, { key: 'equipment', label: '设备', all: '全部设备' }] as const
+const ownItems = computed(() => previewApprovalItems(viewer.value))
+const filters = computed(() => ({ region: [...new Set(ownItems.value.map(item => item.region))], sales: [...new Set(ownItems.value.map(item => item.sales))], market: [...new Set(ownItems.value.map(item => item.market))], equipment: [...new Set(ownItems.value.map(item => item.equipment))] }))
+const tabs = computed(() => role.value === 'Manager'
+  ? [{ key: 'review', label: 'Review' }, { key: 'plan', label: 'Plan' }, { key: 'warnings', label: 'Warnings' }, { key: 'opportunities', label: 'Opportunities' }, { key: 'approvals', label: '待审批' }]
+  : [{ key: 'overview', label: '信息概览' }, { key: 'approvals', label: '待审批' }])
+const hasScope = computed(() => Object.values(scope).some(Boolean))
+function resetScope() { scope.region = ''; scope.sales = ''; scope.market = ''; scope.equipment = '' }
+async function openSource(item: ApprovalItem) {
+  const currentViewer = viewer.value
+  if (!ownItems.value.some(candidate => candidate.id === item.id)) return
+  const target = approvalTarget(item)
+  const failure = await router.push({ ...target, query: { ...target.query, role: currentViewer.role, approval: item.id } })
+  if (!failure) markPreviewViewed(currentViewer, item.id)
+}
+watch(role, () => {
+  resetScope(); view.value = 'approvals'; notice.value = ''
+  if (app.bootstrap) app.bootstrap = { ...app.bootstrap, user: { ...app.bootstrap.user, id: viewer.value.id, name: viewer.value.name, initials: viewer.value.name.slice(0, 1), role: viewer.value.role }, capabilities: [...viewer.value.capabilities] }
+}, { immediate: true })
+</script>
+
+<template>
+  <main class="approvals-demo">
+    <header class="demo-heading"><div><span class="demo-eyebrow">{{ role === 'Manager' ? 'SALES WORKSPACE' : 'MY WORKSPACE' }}</span><h1>{{ role === 'Manager' ? '销售经营看板' : '信息中心' }}</h1><p>{{ role === 'Manager' ? '经营数据、业务计划与审批事项，一处查看。' : '关注与你有关的业务消息，处理当前交给你的事项。' }}</p></div><label class="demo-role-control">前端演示<select v-model="role" aria-label="预览角色"><option value="Manager">Manager · 经理</option><option value="Sales">Sales · 销售</option><option value="Engineer">Engineer · 工程师</option></select></label></header>
+    <nav class="workspace-tabs" :aria-label="role === 'Manager' ? '销售经营看板内页' : '信息中心内页'"><button v-for="tab in tabs" :key="tab.key" type="button" :class="{ active: view === tab.key }" :aria-current="view === tab.key ? 'page' : undefined" @click="view = tab.key; notice = ''">{{ tab.label }}<span v-if="tab.key === 'approvals'" class="nav-count">{{ ownItems.length }}</span></button></nav>
+    <div v-if="role === 'Manager' && view !== 'approvals'" class="scope-control-row" data-demo-filter-row>
+      <div class="demo-period-controls"><div class="demo-segmented"><button v-for="entry in [{ key: 'week', label: '周' }, { key: 'month', label: '月' }, { key: 'quarter', label: '季度' }, { key: 'year', label: '年' }]" :key="entry.key" type="button" :aria-pressed="period === entry.key" :class="{ active: period === entry.key }" @click="period = entry.key as PeriodKind">{{ entry.label }}</button></div><button type="button" aria-label="上一周期" @click="anchor = previousPeriodBefore(period, anchor)"><ChevronLeft :size="15" /></button><input v-model="anchor" type="date" aria-label="周期日期" /><button type="button" aria-label="下一周期" @click="anchor = nextPeriodAfter(period, anchor)"><ChevronRight :size="15" /></button><button type="button" aria-label="刷新预览" @click="notice = '演示数据已更新。'"><RefreshCw :size="14" /></button></div>
+      <div v-if="role === 'Manager'" class="demo-scope-controls"><label v-for="filter in scopeFields" :key="filter.key"><span>{{ filter.label }}</span><select v-model="scope[filter.key]" :aria-label="filter.label"><option value="">{{ filter.all }}</option><option v-for="value in filters[filter.key]" :key="value" :value="value">{{ value }}</option></select></label><button v-if="hasScope" type="button" class="scope-reset" @click="resetScope">重置</button></div>
+      <span v-else class="personal-scope"><span />{{ viewer.name }}的工作范围</span>
+    </div>
+    <ApprovalInbox v-if="view === 'approvals'" :items="ownItems" :viewer="viewer" :now="DEMO_NOW" @open-source="openSource" />
+    <section v-else class="overview-preview"><header><h2>{{ tabs.find(tab => tab.key === view)?.label }}</h2><p>当前演示重点是新增待审批工作台。你可以切回待审批，查看列表并前往对应审批页面。</p></header><div class="overview-links"><article><Bell :size="20" /><strong>业务消息</strong><p>与当前账号相关的业务变化和提醒。</p><button type="button" @click="view = 'approvals'">查看待处理事项<ArrowUpRight :size="15" /></button></article><article><span class="overview-number">{{ ownItems.length }}</span><strong>需要你处理</strong><p>只包含当前处理人有权限处理的事项。</p><button type="button" @click="view = 'approvals'">进入待审批<ArrowUpRight :size="15" /></button></article></div></section>
+    <p class="demo-footnote">前端演示 · 隔离示例数据</p>
+    <div v-if="notice" class="preview-notice" role="status"><span>{{ notice }}</span><button type="button" aria-label="关闭提示" @click="notice = ''">关闭</button></div>
+  </main>
+</template>
+
+<style scoped>
+:global(.route-content:has(.approvals-demo)){max-width:1840px;padding:24px 30px}.approvals-demo{min-width:0;color:var(--crm-text);font-family:var(--crm-font-sans)}.demo-heading{display:flex;justify-content:space-between;align-items:center;gap:20px;padding:0 0 22px}.demo-eyebrow{font-size:9px;font-weight:650;letter-spacing:.13em;color:var(--crm-link)}.demo-heading h1{margin:6px 0 7px;font-size:28px;font-weight:650;letter-spacing:-.035em}.demo-heading p{margin:0;font-size:12px!important;line-height:1.6;color:var(--crm-text-muted)}.demo-role-control{display:flex;gap:8px;align-items:center;color:var(--crm-text-muted);font-size:10px!important;white-space:nowrap}.demo-role-control select{height:32px;padding:0 8px;background:#fff;border:1px solid var(--crm-line);border-radius:7px;font-size:11px!important;color:var(--crm-text)}.workspace-tabs{display:flex;gap:22px;align-items:center;border-bottom:1px solid var(--crm-line);margin-bottom:18px;overflow:auto}.workspace-tabs button{position:relative;display:inline-flex;align-items:center;gap:7px;flex:0 0 auto;height:42px;padding:0 2px;color:var(--crm-text-muted);background:transparent;border:0;font-size:13px!important;font-weight:500;white-space:nowrap;cursor:pointer}.workspace-tabs button.active{color:var(--crm-navy);font-weight:650}.workspace-tabs button.active:after{position:absolute;content:'';height:2px;left:0;right:0;bottom:0;border-radius:2px;background:var(--crm-brand)}.nav-count{min-width:19px;padding:2px 5px;border-radius:5px;background:var(--crm-brand-soft);color:var(--crm-link);text-align:center;font-size:10px}.scope-control-row{display:grid;grid-template-columns:auto minmax(0,1fr);align-items:center;gap:14px;padding:0 0 22px;border-bottom:1px solid var(--crm-line);margin-bottom:18px}.demo-period-controls{display:flex;align-items:center;gap:5px;min-width:0}.demo-period-controls>button{display:grid;place-items:center;width:30px;height:36px;padding:0;border:1px solid var(--crm-line);border-radius:7px;background:white;color:var(--crm-text-muted);cursor:pointer}.demo-period-controls input{width:122px;height:36px;padding:0 7px;background:#fff;border:1px solid var(--crm-line);border-radius:7px;color:var(--crm-text);font-size:12px!important}.demo-segmented{display:flex;height:36px;padding:3px;border:1px solid var(--crm-line);border-radius:8px;background:white}.demo-segmented button{padding:0 9px;border:0;border-radius:5px;background:transparent;font-size:11px!important;color:var(--crm-text-muted);cursor:pointer}.demo-segmented button.active{color:var(--crm-navy);background:var(--crm-surface);font-weight:650}.demo-scope-controls{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:7px;align-items:center;min-width:0}.demo-scope-controls label{display:flex;align-items:center;gap:7px;min-width:0;height:36px;padding:0 9px;border:1px solid var(--crm-line);border-radius:7px;background:white;color:var(--crm-text-muted);font-size:10px!important}.demo-scope-controls label>span{flex:0 0 auto;white-space:nowrap}.demo-scope-controls select{flex:1;width:auto;min-width:0;border:0;background:transparent;color:var(--crm-text);font-weight:500;font-size:12px!important;outline:0}.demo-scope-controls:has(.scope-reset){grid-template-columns:repeat(4,minmax(0,1fr)) auto}.scope-reset{padding:0;background:transparent;border:0;color:var(--crm-link);font-size:11px!important;cursor:pointer}.personal-scope{display:flex;align-items:center;justify-content:flex-end;gap:7px;color:var(--crm-text-muted);font-size:11px}.personal-scope>span{width:5px;height:5px;background:#7f9e88;border-radius:50%}.demo-footnote{margin:15px 0 0;color:#989c9f;font-size:10px!important}.overview-preview{padding:20px 0}.overview-preview h2{margin:0;font-size:25px}.overview-preview header p{color:var(--crm-text-muted);font-size:12px!important}.overview-links{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:24px}.overview-links article{display:grid;align-content:start;justify-items:start;gap:12px;padding:26px;background:#fff;border:1px solid var(--crm-line);border-radius:14px}.overview-links strong{font-size:18px}.overview-links p{margin:0;color:var(--crm-text-muted);font-size:12px!important}.overview-links button{display:flex;gap:6px;align-items:center;padding:0;color:var(--crm-link);border:0;background:transparent;font-size:12px!important;cursor:pointer}.overview-number{font-size:28px;font-weight:600}.preview-notice{position:fixed;z-index:1200;left:50%;bottom:24px;transform:translateX(-50%);display:flex;align-items:center;gap:20px;max-width:calc(100% - 32px);padding:13px 16px;background:#24272d;color:white;border-radius:10px;box-shadow:0 8px 25px #0002;font-size:12px}.preview-notice button{border:0;background:transparent;color:#ffb554;font-size:11px;white-space:nowrap;cursor:pointer}.approvals-demo button:focus-visible,.approvals-demo input:focus-visible,.approvals-demo select:focus-visible{outline:2px solid var(--crm-brand);outline-offset:3px}
+@media(max-width:1160px){.scope-control-row{grid-template-columns:1fr}.demo-scope-controls{grid-template-columns:repeat(4,minmax(0,1fr))}.personal-scope{justify-content:flex-start}.scope-control-row{gap:9px}.demo-heading{align-items:start}.workspace-tabs{gap:19px}}@media(max-width:680px){:global(.route-content:has(.approvals-demo)){padding:18px 16px}.demo-heading{flex-direction:column;gap:12px}.demo-heading h1{font-size:25px}.demo-scope-controls{grid-template-columns:1fr 1fr}.demo-scope-controls:has(.scope-reset){grid-template-columns:1fr 1fr}.demo-period-controls{flex-wrap:wrap}.overview-links{grid-template-columns:1fr}.workspace-tabs{gap:16px}}
+</style>

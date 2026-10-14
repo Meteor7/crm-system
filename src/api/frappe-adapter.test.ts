@@ -126,6 +126,8 @@ describe('Frappe method contract', () => {
       getBootstrap: 'bootstrap.get_bootstrap',
       changeCurrentUserPassword: 'account.change_password',
       signOut: 'logout',
+      listPendingApprovals: 'approvals.list_pending_approvals',
+      markApprovalViewed: 'approvals.mark_approval_viewed',
       listNotifications: 'notifications.list_notifications',
       markNotificationRead: 'notifications.mark_notification_read',
       markAllNotificationsRead: 'notifications.mark_all_notifications_read',

@@ -251,7 +251,7 @@ describe('Opportunities board', () => {
     await regionBox('South China').setValue(true); await settle()
     expect(api.queryOpportunities).toHaveBeenLastCalledWith(expect.objectContaining({ scope: expect.objectContaining({ regions: ['East China', 'South China'] }) }))
     // Not an unfiltered link: the tabs are unavailable and the page says why.
-    expect(wrapper.find('.board-navigation a').exists()).toBe(false)
+    expect(wrapper.findAll('.board-navigation a').map(tab => tab.attributes('href'))).toEqual(['/approvals'])
     expect(wrapper.findAll('.board-navigation [aria-disabled="true"]').map(tab => tab.text())).toEqual(['Review', 'Plan', 'Warnings'])
     expect(wrapper.get('[data-scope-blocked]').text()).toContain('区域')
     setLocale('en-US'); await flushPromises()
@@ -261,7 +261,7 @@ describe('Opportunities board', () => {
     expect(wrapper.get('a[href^="/dashboard"]').attributes('href')).toBe('/dashboard?period=month&anchor=2026-09-01&region=South+China')
     expect(wrapper.get('a[href^="/plan"]').attributes('href')).toBe('/plan?period=month&anchor=2026-10-01&reviewAnchor=2026-09-01&region=South+China')
     await regionBox('North China').setValue(true); await settle()
-    expect(wrapper.find('.board-navigation a').exists()).toBe(false)
+    expect(wrapper.findAll('.board-navigation a').map(tab => tab.attributes('href'))).toEqual(['/approvals'])
     await region().get('.board-options button').trigger('click'); await settle()
     expect(wrapper.get('a[href^="/dashboard"]').attributes('href')).toBe('/dashboard?period=month&anchor=2026-09-01')
   })

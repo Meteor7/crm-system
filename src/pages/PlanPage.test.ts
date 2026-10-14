@@ -24,17 +24,24 @@ async function setup(role: UserRole = 'Manager', plan = planFixture(), details =
   return { api, wrapper, router, app: useAppStore(pinia) }
 }
 describe('Plan business interface', () => {
-  it('drills into the equipment group with the same metric and clears it when scope changes', async () => {
+  it('shows equipment counts as plain text and filters through the top controls', async () => {
     const data = planFixture()
-    data.equipmentGroups = [{ id: 'unclassified', name: null, activities: { value: 2, state: 'ready' }, po: { value: 1, state: 'ready' }, poAmounts: [], poAmountIncomplete: true }]
+    data.filters.equipment = ['Aconca']
+    data.equipmentGroups = [{ id: 'unclassified', name: null, activities: { value: 0, state: 'ready' }, po: { value: 3, state: 'ready' }, poAmounts: [], poAmountIncomplete: true }]
     const { wrapper, api } = await setup('Manager', data)
-    expect(wrapper.get('[data-equipment-summary]').text()).toContain('未分类')
-    expect(wrapper.get('[data-equipment-summary]').text()).toContain('部分金额数据不足')
-    await wrapper.get('[data-equipment-summary] button').trigger('click'); await flushPromises()
-    expect(api.getPlanDetails).toHaveBeenLastCalledWith(expect.objectContaining({ metric: 'scheduled_activities', equipmentGroup: 'unclassified', includeOverdue: false }))
-    expect(wrapper.get('[data-equipment-group-filter]').text()).toContain('未分类')
-    await wrapper.get('[data-equipment-group-filter] button').trigger('click'); await flushPromises()
-    expect(vi.mocked(api.getPlanDetails).mock.lastCall![0].equipmentGroup).toBeUndefined()
+    const summary = wrapper.get('[data-equipment-summary]')
+    expect(summary.text()).toContain('未分类')
+    expect(summary.text()).toContain('部分金额数据不足')
+    expect(summary.find('button, a, input').exists()).toBe(false)
+    const cells = summary.findAll('tbody td')
+    expect(cells[0]!.text()).toBe('0')
+    expect(cells[1]!.text()).toBe('3')
+    const requests = vi.mocked(api.getPlanDetails).mock.calls.length
+    await cells[0]!.trigger('click'); await cells[1]!.trigger('click'); await flushPromises()
+    expect(api.getPlanDetails).toHaveBeenCalledTimes(requests)
+    await wrapper.get('select[aria-label="Equipment"]').setValue('Aconca'); await flushPromises()
+    expect(api.getPlan).toHaveBeenLastCalledWith(expect.objectContaining({ equipment: 'Aconca' }))
+    expect(api.getPlanDetails).toHaveBeenLastCalledWith(expect.objectContaining({ equipment: 'Aconca', includeOverdue: false }))
     wrapper.unmount()
   })
   it('shows quote amounts only on quotes and PO amounts only on PO', async () => {

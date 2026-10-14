@@ -44,6 +44,8 @@ export const FRAPPE_METHODS = {
   changeCurrentUserPassword: 'account.change_password',
   // Frappe's own endpoint, outside the rayher_crm whitelist: `signOut` below does not go through `methodUrl`.
   signOut: 'logout',
+  listPendingApprovals: 'approvals.list_pending_approvals',
+  markApprovalViewed: 'approvals.mark_approval_viewed',
   listNotifications: 'notifications.list_notifications',
   markNotificationRead: 'notifications.mark_notification_read',
   markAllNotificationsRead: 'notifications.mark_all_notifications_read',
@@ -531,6 +533,8 @@ export function createFrappeApi(options: FrappeApiOptions = {}): CrmApi {
         throw error
       }
     },
+    listPendingApprovals: () => get('listPendingApprovals'),
+    markApprovalViewed: (id) => post('markApprovalViewed', { id }),
     async listNotifications(query) {
       const result = await get<Awaited<ReturnType<CrmApi['listNotifications']>>['data']['items']>('listNotifications', query as RequestValues)
       return { ...result, data: { items: result.data } }

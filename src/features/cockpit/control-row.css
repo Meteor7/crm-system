@@ -1,0 +1,7 @@
+/* Data filters follow the period controls; approvals have no data filters. */
+.cockpit-control-row{display:flex;align-items:center;flex-wrap:wrap;gap:8px;width:100%;padding-top:10px}
+.review-controls .cockpit-control-row .period-controls,.plan-controls .cockpit-control-row .period-controls{flex:0 0 auto;margin-left:0;min-width:0}
+.review-controls .cockpit-control-row>label,.plan-controls .cockpit-control-row>label{flex:1 1 125px;min-width:0;max-width:none;box-sizing:border-box;height:36px;gap:7px;font-size:11px}
+.review-controls .cockpit-control-row>label select,.plan-controls .cockpit-control-row>label select{flex:1;min-width:0;max-width:160px;font-size:12px}
+.cockpit-control-row .filter-name{white-space:nowrap}
+@container(max-width:1000px){.review-controls .cockpit-control-row .period-controls,.plan-controls .cockpit-control-row .period-controls{flex-basis:100%}.review-controls .cockpit-control-row>label,.plan-controls .cockpit-control-row>label{flex:1 1 140px}}

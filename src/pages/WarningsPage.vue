@@ -530,13 +530,15 @@ onBeforeUnmount(() => { revision++ })
         </div>
       </header>
       <nav class="review-controls" :aria-label="copy('Warnings filters', '预警筛选')">
-        <RouterLink v-if="data || query.anchor || error" class="plan-tab" :to="reviewRoute">Review</RouterLink><span v-else class="plan-tab is-disabled" role="link" aria-disabled="true" :title="copy('Available once the page has loaded', '页面加载完成后可用')">Review</span><RouterLink class="plan-tab" :to="planRoute">Plan</RouterLink><strong class="review-tab" aria-current="page">Warnings</strong><RouterLink class="plan-tab" :to="boardRoute">Opportunities</RouterLink>
+      <div class="cockpit-tabs"><RouterLink v-if="data || query.anchor || error" class="plan-tab" :to="reviewRoute">Review</RouterLink><span v-else class="plan-tab is-disabled" role="link" aria-disabled="true" :title="copy('Available once the page has loaded', '页面加载完成后可用')">Review</span><RouterLink class="plan-tab" :to="planRoute">Plan</RouterLink><strong class="review-tab" aria-current="page">Warnings</strong><RouterLink class="plan-tab" :to="boardRoute">Opportunities</RouterLink><RouterLink class="plan-tab" to="/approvals">{{ copy('Pending approvals', '待审批') }}</RouterLink></div>
+      <div class="cockpit-control-row">
+        <div class="period-controls"><div class="segmented" :aria-label="copy('Period', '统计周期')"><button v-for="period in periods" :key="period" :aria-pressed="query.period === period" :class="{ active: query.period === period }" :disabled="loading || busy" @click="changePeriod(period)">{{ label(period) }}</button></div><button :disabled="loading || busy || !data || atEarliestPeriod" :aria-label="copy('Previous period', '上一期')" @click="step(false)"><ChevronLeft :size="16" /></button><input :value="dateDraft ?? shownAnchor" :min="EARLIEST_COCKPIT_DATE" :max="shanghaiDate()" type="date" :aria-label="copy('Reference date', '参考日期')" :disabled="busy" @focus="dateDraft = ($event.target as HTMLInputElement).value" @input="dateDraft = ($event.target as HTMLInputElement).value" @change="pickAnchor" @blur="showAnchor" /><button :disabled="loading || busy || !data?.period.hasNext" :aria-label="copy('Next period', '下一期')" @click="step(true)"><ChevronRight :size="16" /></button></div>
         <label><span class="filter-name">{{ copy('Region', '区域') }}</span><RegionSelect v-model="query.region" :regions="filterOptions.regions" :parents="filterOptions.regionParents" :disabled="loading || busy || !filterOptions.regionReady" :all-label="filterOptions.regionReady ? copy('All regions', '全部区域') : copy('Region migration pending', '区域待迁移')" /></label>
         <label><span class="filter-name">{{ copy('Sales', '销售') }}</span><select v-model="query.sales" :disabled="loading || busy" aria-label="Sales"><option value="">{{ copy('All sales', '全部销售') }}</option><option v-for="person in filterOptions.sales" :key="person.id" :value="person.id">{{ person.name }}</option></select></label>
         <label><span class="filter-name">{{ copy('Market', '市场') }}</span><select v-model="query.market" :disabled="loading || busy" aria-label="Market"><option value="">{{ copy('All markets', '全部市场') }}</option><option v-for="market in filterOptions.markets" :key="market" :value="market">{{ market }}</option></select></label>
         <label><span class="filter-name">{{ copy('Equipment', '设备') }}</span><select v-model="query.equipment" :disabled="loading || busy" aria-label="Equipment"><option value="">{{ copy('All equipment', '全部设备') }}</option><option v-for="equipment in filterOptions.equipment ?? []" :key="equipment" :value="equipment">{{ equipment }}</option></select></label>
-        <div class="period-controls"><div class="segmented" :aria-label="copy('Period', '统计周期')"><button v-for="period in periods" :key="period" :aria-pressed="query.period === period" :class="{ active: query.period === period }" :disabled="loading || busy" @click="changePeriod(period)">{{ label(period) }}</button></div><button :disabled="loading || busy || !data || atEarliestPeriod" :aria-label="copy('Previous period', '上一期')" @click="step(false)"><ChevronLeft :size="16" /></button><input :value="dateDraft ?? shownAnchor" :min="EARLIEST_COCKPIT_DATE" :max="shanghaiDate()" type="date" :aria-label="copy('Reference date', '参考日期')" :disabled="busy" @focus="dateDraft = ($event.target as HTMLInputElement).value" @input="dateDraft = ($event.target as HTMLInputElement).value" @change="pickAnchor" @blur="showAnchor" /><button :disabled="loading || busy || !data?.period.hasNext" :aria-label="copy('Next period', '下一期')" @click="step(true)"><ChevronRight :size="16" /></button></div>
-      </nav>
+      </div>
+    </nav>
     </div>
     <div v-if="loading" class="review-state" role="status">{{ copy('Loading warnings…', '正在读取预警数据…') }}</div>
     <div v-else-if="error" class="review-state error" role="alert"><p>{{ error }}</p><button @click="load()">{{ copy('Retry', '重新加载') }}</button></div>
@@ -655,3 +657,7 @@ onBeforeUnmount(() => { revision++ })
 /* Below a 1200px page the filter names give way so the four first-row selects stay readable; each select keeps its aria-label. */
 @container(max-width:1200px){.review-controls .filter-name{display:none}}
 </style>
+
+<style scoped src="@/features/cockpit/control-row.css"></style>
+
+<style scoped src="@/features/cockpit/workspace-tabs.css"></style>

@@ -4458,6 +4458,8 @@ export function createMockApi(options: {
       throw new CrmApiError('BACKEND_NOT_CONNECTED', 'Mock 模式没有会话可退出', requestId(), false)
     },
 
+    async listPendingApprovals() { throw new CrmApiError('VALIDATION_ERROR', 'Pending approvals require a test stub.', 'test-stub') },
+    async markApprovalViewed() { throw new CrmApiError('VALIDATION_ERROR', 'Approval views require a test stub.', 'test-stub') },
     async listNotifications(query = {}) {
       await wait()
       const page = Number.isInteger(query.page) && Number(query.page) > 0 ? Number(query.page) : 1

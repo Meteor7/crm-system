@@ -233,7 +233,13 @@ async function loadOpportunity() {
     notFound.value = reason instanceof CrmApiError && reason.code === 'NOT_FOUND'
     if (!notFound.value) error.value = mapped.localizedMessage ?? mapped.message
   } finally {
-    if (currentRequest === opportunityRequest) loading.value = false
+    if (currentRequest === opportunityRequest) {
+      loading.value = false
+      if (route.query.approval === '1' && canReviewValidation.value && internalValidation.value?.status === 'pending' && internalValidation.value.requestedBy !== currentUserId.value) {
+        await nextTick()
+        document.getElementById('pending-internal-validation')?.scrollIntoView?.({ block: 'center' })
+      }
+    }
   }
 }
 async function loadReferences() {
@@ -586,7 +592,7 @@ onMounted(async () => {
             </dl>
           </section>
 
-          <InternalValidationPanel
+          <InternalValidationPanel id="pending-internal-validation"
             v-if="internalValidation"
             :validation="internalValidation"
             :stage="selected.stage"

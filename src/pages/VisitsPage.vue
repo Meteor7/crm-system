@@ -48,6 +48,7 @@ const statusLabel = computed<Record<VisitStatus, string>>(() => ({
 }))
 const statusTone: Record<VisitStatus, Tone> = { Planned: 'neutral', Visited: 'info', 'Minutes Submitted': 'warning', 'Manager Reviewed': 'positive' }
 let sequence = 0
+let openedReviewLink = ''
 
 async function load(): Promise<boolean> {
   const current = ++sequence
@@ -68,6 +69,10 @@ async function load(): Promise<boolean> {
     const focusedRow = Array.from(document.querySelectorAll<HTMLElement>('[data-visit-id]'))
       .find((element) => element.dataset.visitId === focusId)
     focusedRow?.scrollIntoView?.({ block: 'center' })
+    if (route.query.review === '1' && openedReviewLink !== focusId) {
+      const focused = rows.value.find(item => item.id === focusId)
+      if (canReview.value && focused?.status === 'Minutes Submitted') { openedReviewLink = focusId; open('review', focused) }
+    }
     return true
   } catch (reason) {
     if (current !== sequence) return false
@@ -153,7 +158,7 @@ onMounted(async () => {
   await load()
   if (route.query.create === '1' && canCreate.value) open('create')
 })
-watch(focusedVisitId, () => { void load() })
+watch([focusedVisitId, () => route.query.review], () => { modal.value = null; selected.value = null; openedReviewLink = ''; void load() })
 </script>
 
 <template>

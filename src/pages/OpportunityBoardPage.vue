@@ -254,20 +254,24 @@ async function exportRows() {
         <RouterLink v-if="app.bootstrap.user.role !== 'Engineer'" class="board-list-link" to="/opportunities">{{ copy('Open opportunity list', '打开商机列表') }} ↗</RouterLink>
       </header>
       <div class="board-controls">
-      <nav class="board-navigation" :aria-label="copy('Cockpit pages', '看板页面')"><template v-if="manager"><template v-for="tab in (['review', 'plan', 'warnings'] as const)" :key="tab"><RouterLink v-if="!outgoing.blocked.length" :to="tabRoute(tab)">{{ tabNames[tab] }}</RouterLink><span v-else class="is-disabled" role="link" aria-disabled="true" aria-describedby="board-scope-blocked">{{ tabNames[tab] }}</span></template></template><strong aria-current="page">Opportunities</strong></nav>
+      <nav class="board-navigation cockpit-tabs" :aria-label="copy('Cockpit pages', '看板页面')"><template v-if="manager"><template v-for="tab in (['review', 'plan', 'warnings'] as const)" :key="tab"><RouterLink v-if="!outgoing.blocked.length" :to="tabRoute(tab)">{{ tabNames[tab] }}</RouterLink><span v-else class="is-disabled" role="link" aria-disabled="true" aria-describedby="board-scope-blocked">{{ tabNames[tab] }}</span></template></template><strong aria-current="page">Opportunities</strong><RouterLink v-if="manager" to="/approvals">{{ copy('Pending approvals', '待审批') }}</RouterLink></nav>
       <p v-if="manager && outgoing.blocked.length" id="board-scope-blocked" class="board-scope-blocked" role="status" data-scope-blocked>{{ copy(`Review, Plan and Warnings show one value or all per filter. Select one value or All for ${blockedScope} to open them with this scope.`, `Review、Plan 和 Warnings 每项筛选只支持单个值或全部。请将${blockedScope}改为单个值或全部后再切换。`) }}</p>
-      <div v-if="filters" class="board-scope">
-        <div v-for="control in scopeControls" :key="control.key" class="scope-item"><span>{{ fieldLabel(control.field, locale) }}</span><BoardMultiSelect v-model="definition.scope[control.key]" :label="fieldLabel(control.field, locale)" :options="fieldOptions(control.field, filters, locale)" :disabled="control.key === 'regions' && !filters.regionReady" :placeholder="control.key === 'regions' && !filters.regionReady ? copy('Not ready', '尚未就绪') : copy('All', '全部')" /></div>
-      </div>
+
       </div>
     </section>
 
     <section v-if="filters" class="board-query-panel">
       <header class="board-panel-heading"><div><h2><SlidersHorizontal :size="17" />{{ copy('Query builder', '组合查询') }}</h2><p>{{ copy('Combine conditions. Results and totals update together.', '组合筛选条件，列表与汇总同步更新。') }}</p></div><div class="query-tools"><div class="board-segmented"><button :class="{ active: definition.match === 'all' }" :aria-pressed="definition.match === 'all'" @click="definition.match = 'all'">{{ copy('All (AND)', '全部满足 (AND)') }}</button><button :class="{ active: definition.match === 'any' }" :aria-pressed="definition.match === 'any'" @click="definition.match = 'any'">{{ copy('Any (OR)', '任一满足 (OR)') }}</button></div><button data-add-condition :disabled="conditionCount >= 30" @click="definition.conditions.push(condition())"><Plus :size="14" />{{ copy('Add condition', '添加条件') }}</button><button data-add-group :disabled="conditionCount >= 30" @click="definition.conditions.push({ match: 'any', conditions: [condition()] })">{{ copy('Add group', '添加条件组') }}</button><button @click="clear">{{ copy('Clear', '清空') }}</button></div></header>
+      <div class="board-date-scope">
       <div class="board-period-filter">
         <label>{{ copy('Period date field', '期间日期字段') }}<select :value="definition.periodFilter?.field ?? ''" data-period-field @change="setPeriodField(($event.target as HTMLSelectElement).value)"><option value="">{{ copy('No period filter', '未启用期间筛选') }}</option><option v-for="field in (['createdAt', 'stageChangedAt', 'poDate'] as const)" :key="field" :value="field">{{ fieldLabel(field, locale) }}</option></select></label>
-        <template v-if="definition.periodFilter"><select v-model="definition.periodFilter.kind" data-query-period :aria-label="copy('Query period', '查询期间')"><option value="week">{{ copy('Week', '周') }}</option><option value="month">{{ copy('Month', '月') }}</option><option value="quarter">{{ copy('Quarter', '季') }}</option><option value="year">{{ copy('Year', '年') }}</option></select><input v-model="definition.periodFilter.anchor" type="date" min="2000-01-01" max="2099-12-31" data-query-anchor :aria-label="copy('Query anchor date', '查询基准日期')" /><span data-period-range>{{ fieldLabel(definition.periodFilter.field, locale) }}: {{ periodRange(definition) }} · UTC+8</span></template>
-        <span v-else>{{ copy('Select a business date to apply the carried Review period. No date restriction is active.', '选择业务日期字段后才会应用传入的 Review 期间；当前未限制日期。') }}</span>
+        <template v-if="definition.periodFilter"><select v-model="definition.periodFilter.kind" data-query-period :aria-label="copy('Query period', '查询期间')"><option value="week">{{ copy('Week', '周') }}</option><option value="month">{{ copy('Month', '月') }}</option><option value="quarter">{{ copy('Quarter', '季') }}</option><option value="year">{{ copy('Year', '年') }}</option></select><input v-model="definition.periodFilter.anchor" type="date" min="2000-01-01" max="2099-12-31" data-query-anchor :aria-label="copy('Query anchor date', '查询基准日期')" /></template>
+
+      </div>
+      <div v-if="filters" class="board-scope">
+        <div v-for="control in scopeControls" :key="control.key" class="scope-item"><span>{{ fieldLabel(control.field, locale) }}</span><BoardMultiSelect v-model="definition.scope[control.key]" :label="fieldLabel(control.field, locale)" :options="fieldOptions(control.field, filters, locale)" :disabled="control.key === 'regions' && !filters.regionReady" :placeholder="control.key === 'regions' && !filters.regionReady ? copy('Not ready', '尚未就绪') : copy('All', '全部')" /></div>
+      </div>
+      <p class="board-period-description"><span v-if="definition.periodFilter" data-period-range>{{ fieldLabel(definition.periodFilter.field, locale) }}: {{ periodRange(definition) }} · UTC+8</span><span v-else>{{ copy('Select a business date to apply the carried Review period. No date restriction is active.', '选择业务日期字段后才会应用传入的 Review 期间；当前未限制日期。') }}</span></p>
       </div>
       <div class="board-presets"><span>{{ copy('Quick queries', '快捷查询') }}</span><button v-for="(preset, index) in presets" :key="preset.id" :data-preset="preset.id" @click="applyPreset(index)">{{ text(preset.label, locale) }}</button></div>
       <div v-if="definition.conditions.length" class="board-conditions"><BoardConditionGroupEditor v-model="definition.conditions" :filters="filters" :match="definition.match" :depth="1" :total="conditionCount" /></div>
@@ -335,3 +339,9 @@ async function exportRows() {
 </template>
 <style src="@/features/opportunity-board/board.css"></style>
 
+
+<style scoped>
+.board-date-scope{display:flex;flex-wrap:wrap;align-items:center;gap:8px;padding:0 20px}.board-date-scope .board-period-filter{flex:0 0 auto;min-width:0;margin:0;padding:0}.board-date-scope .board-scope{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;flex:1 1 520px;min-width:0}.board-date-scope .scope-item{min-width:0;min-height:36px}.board-date-scope .scope-item>span{font-size:11px}.board-date-scope .board-multiselect{width:auto;min-width:0;font-size:12px}.board-period-description{flex-basis:100%;margin:0;color:var(--crm-text-muted);font-size:11px;line-height:1.6}@container(max-width:680px){.board-date-scope .board-scope{grid-template-columns:repeat(2,minmax(0,1fr))}.board-date-scope .board-period-filter{flex-basis:100%;flex-wrap:wrap}}
+</style>
+
+<style scoped src="@/features/cockpit/workspace-tabs.css"></style>

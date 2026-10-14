@@ -1,0 +1,12 @@
+/* Shared cockpit tabs: text links with a single active underline. */
+.cockpit-tabs{display:flex;align-items:center;gap:24px;width:100%;min-width:0;margin:0;padding:0;overflow-x:auto;border:0;border-bottom:1px solid var(--crm-line);background:transparent}
+.cockpit-tabs>:is(a,strong,[role=link]){position:relative;display:inline-flex;align-items:center;justify-content:flex-start;gap:7px;flex:0 0 auto;height:42px;min-height:42px;padding:0 2px;border:0;border-radius:0;background:transparent;box-shadow:none;color:var(--crm-text-muted);font-size:13px!important;font-weight:500;line-height:1.4;text-decoration:none;white-space:nowrap}
+.cockpit-tabs>[aria-current=page]{color:var(--crm-navy);font-weight:650;background:transparent}
+.cockpit-tabs>[aria-current=page]:after{content:'';position:absolute;left:0;right:0;bottom:0;height:2px;border-radius:2px;background:var(--crm-brand)}
+.cockpit-tabs>[aria-disabled=true]{opacity:.55;cursor:not-allowed}
+.cockpit-tabs>a:hover{color:var(--crm-navy);background:transparent}
+.cockpit-tabs>a:focus-visible{outline:2px solid var(--crm-brand);outline-offset:-2px}
+.review-controls>.cockpit-tabs{flex:1 1 0;width:auto}
+.review-controls>.target-button{flex:0 0 auto}
+.cockpit-tab-count{min-width:19px;padding:2px 5px;border-radius:5px;background:var(--crm-brand-soft);color:var(--crm-link);text-align:center;font-size:10px;font-weight:600}
+@container(max-width:680px){.cockpit-tabs{gap:17px}}

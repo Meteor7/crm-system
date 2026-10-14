@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ClipboardCheck, Plus } from '@lucide/vue'
 import { api as defaultApi, CrmApiError, type CrmApi } from '@/api'
@@ -232,9 +232,25 @@ function clearPreparedDownload() {
   if (preparedDownload.value) URL.revokeObjectURL(preparedDownload.value.url)
   preparedDownload.value = null
 }
+function applyApprovalLink() {
+  const focus = typeof route.query.focus === 'string' ? route.query.focus : ''
+  const mode = route.query.mode
+  if (!focus || (mode !== 'manager' && mode !== 'engineer')) return
+  const request = rows.value.find(item => item.id === focus)
+  const capable = mode === 'manager' ? canManager.value : canEngineer.value && (app.bootstrap?.user.role === 'Manager' || request?.engineerOwner === app.bootstrap?.user.id)
+  if (!request || !capable || !DIALOG_STATES[mode].includes(request.status)) {
+    actionError.value = localeMessage('This item is no longer available for your approval.', '该事项当前已不在你的可审批范围内。')
+    return
+  }
+  activeView.value = mode; selectedRequestId.value = request.id; open(mode, request)
+}
 onMounted(async () => {
   await app.loadBootstrap(props.apiClient)
-  await load()
+  if (await load()) applyApprovalLink()
+})
+watch([() => route.query.focus, () => route.query.mode], async () => {
+  closeModal()
+  if (await load()) applyApprovalLink()
 })
 onBeforeUnmount(clearPreparedDownload)
 </script>

@@ -4,7 +4,7 @@ export const labels: Record<string, [string, string]> = {
   followups: ['完成报价跟进', 'Quote follow-ups completed'],
   visits_existing: ['老客户拜访', 'Existing customer visits'], visits_prospect: ['潜在客户拜访', 'Prospect visits'], visits_unclassified: ['未分类拜访', 'Unclassified visits'],
   visits: ['客户沟通', 'Customer visits'], leads: ['新增合格线索', 'New qualified leads'],
-  tests: ['完成测试', 'Test runs'], quotes: ['首次发布报价', 'Quotes sent'], orders: ['年度订单金额', 'Annual orders'],
+  tests: ['Demo测试完成', 'Demo Test Run'], quotes: ['首次发布报价', 'Quotes sent'], orders: ['年度订单金额', 'Annual orders'],
   qualified_opportunity: ['合格商机', 'Qualified opportunity'], demo_done: ['Demo 完成', 'Demo done'],
   customer_budget_approved: ['客户预算批准', 'Budget approved'], rfq_validated: ['RFQ 确认', 'RFQ validated'],
   quotation_sent: ['报价已发出', 'Quotation sent'], internal_validation: ['内部验证（可选）', 'Internal validation · optional'],

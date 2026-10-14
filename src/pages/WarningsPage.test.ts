@@ -266,7 +266,7 @@ describe('Warnings page', () => {
     expect(wrapper.get('.review-controls').text()).toContain('Warnings')
     // Review gets the same scope back that it hands to this page, anchor included: its default week differs.
     // Plan opens on the next week and keeps this one for the way back; Opportunities carries this week along.
-    expect(wrapper.findAll('.review-controls a').map(link => link.attributes('href'))).toEqual(['/dashboard?period=week&anchor=2026-09-07', '/plan?period=week&anchor=2026-09-14&reviewAnchor=2026-09-07', '/opportunity-board?period=week&reviewAnchor=2026-09-07'])
+    expect(wrapper.findAll('.review-controls a').map(link => link.attributes('href'))).toEqual(['/dashboard?period=week&anchor=2026-09-07', '/plan?period=week&anchor=2026-09-14&reviewAnchor=2026-09-07', '/opportunity-board?period=week&reviewAnchor=2026-09-07', '/approvals'])
     setLocale('en-US'); await flushPromises()
     expect(lost.get('[data-lost-row="opp-lost-3"]').text()).toContain('Post-mortem overdue')
     wrapper.unmount()
