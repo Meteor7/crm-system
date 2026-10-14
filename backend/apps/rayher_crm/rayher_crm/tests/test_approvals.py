@@ -6,7 +6,7 @@ import frappe
 from frappe.tests.utils import FrappeTestCase
 
 from rayher_crm.api.v1.errors import CrmApiException
-from rayher_crm.services import approvals, quotations
+from rayher_crm.services import approvals, document_access, quotations
 from rayher_crm.services.accounts import create_account
 
 
@@ -325,6 +325,27 @@ class TestApprovals(FrappeTestCase):
             quotations._assert_quotation_writable(master)
         with self.assertRaises(CrmApiException):
             approvals.mark_approval_viewed(item["id"])
+
+    def test_document_access_matches_manager_service_with_native_user_restrictions(self):
+        controlled = self._insert("CRM Controlled Document", document_id=f"APPROVAL-SCOPE-{self.tag}",
+            title="Restricted process manual", category="Technical", version="1", revision="R1",
+            status="Released", confidentiality="Restricted", access_mode="Request")
+        request = self._insert("CRM Document Access Request", controlled_document=controlled.name,
+            version_id=f"{controlled.name}/1/R1", document_version="1", document_revision="R1",
+            requester=self.sales, reason="Prepare customer review", status="Pending")
+        self._insert("User Permission", user=self.manager, allow="User", for_value=self.other_engineer,
+            apply_to_all_doctypes=0, applicable_for="CRM Document Access Request")
+        frappe.clear_cache(user=self.manager)
+        frappe.set_user(self.manager)
+        self.assertFalse(frappe.get_list("CRM Document Access Request", filters={"name": request.name}, pluck="name"))
+        self.assertIn(request.name, {row["id"] for row in document_access.list_requests()})
+        item = self._items(self.manager, request.name)[0]
+        approvals.mark_approval_viewed(item["id"])
+        self.assertEqual(self._items(self.sales, request.name), [])
+        self.assertEqual(self._items(self.engineer, request.name), [])
+        frappe.set_user(self.manager)
+        self.assertEqual(document_access.decide_request(request.name, "approve-original")["status"], "Approved")
+        self.assertEqual(self._items(self.manager, request.name), [])
 
     def test_document_access_queue_is_current_pending_manager_only_and_targets_exact_request(self):
         controlled = self._insert("CRM Controlled Document", document_id=f"APPROVAL-DOC-{self.tag}",

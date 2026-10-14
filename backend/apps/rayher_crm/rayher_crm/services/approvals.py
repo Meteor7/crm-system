@@ -40,7 +40,11 @@ def _view_id(user, task):
 def _pending_docs(doctype, condition, values, user, selected=None):
     if selected and selected[0] != doctype:
         return []
-    scope = source_condition(doctype, user, for_bound_query=True)
+    # Document Center authorizes access requests by Manager role, including native-restricted Managers.
+    if doctype == "CRM Document Access Request" and resolve_crm_role(user) == "Manager":
+        scope = "1=1"
+    else:
+        scope = source_condition(doctype, user, for_bound_query=True)
     if scope == "1=0":
         return []
     selection = " AND `name` = %s" if selected else ""
