@@ -6,8 +6,9 @@ import frappe
 from frappe.tests.utils import FrappeTestCase
 
 from rayher_crm.api.v1.errors import CrmApiException
-from rayher_crm.services import approvals, document_access, quotations
+from rayher_crm.services import approvals, document_access, opportunities, quotations
 from rayher_crm.services.accounts import create_account
+from rayher_crm.services.sites import create_site
 
 
 class TestApprovals(FrappeTestCase):
@@ -158,6 +159,45 @@ class TestApprovals(FrappeTestCase):
         self.assertEqual(self._items(self.other_manager, opportunity.name), [])
         with self.assertRaises(CrmApiException):
             approvals.mark_approval_viewed(item["id"])
+
+    def test_internal_validation_matches_business_scope_with_native_restrictions(self):
+        frappe.set_user(self.sales)
+        site = create_site(self.account, {"name": f"Validation {self.tag}", "city": "Shanghai",
+            "type": "Fab", "process": "Frontend", "status": "量产"})
+        for doctype, reviewer in (("CRM Opportunity Internal Validation", self.manager), ("CRM Opportunity", self.other_manager)):
+            with self.subTest(doctype=doctype):
+                frappe.set_user("Administrator")
+                opportunity = self._opportunity()
+                frappe.db.set_value(opportunity.doctype, opportunity.name, {"site": site["id"],
+                    "po_date": "2026-12-31", "sub_region": "East", "sale_type": "New Equipment",
+                    "probability_level": "pipeline", "currency": "CNY"})
+                validation = self._insert("CRM Opportunity Internal Validation", opportunity=opportunity.name,
+                    attempt_no=1, status="pending", reason="Production requested", expected_po_date="2026-12-01",
+                    requested_by=self.sales, requested_at=frappe.utils.now_datetime(), booking_draft="{}")
+                permission = self._insert("User Permission", user=reviewer, allow="User",
+                    for_value=self.other_engineer, apply_to_all_doctypes=0, applicable_for=doctype)
+                frappe.clear_cache(user=reviewer)
+                frappe.set_user(reviewer)
+                record = validation.name if doctype == validation.doctype else opportunity.name
+                self.assertFalse(frappe.get_list(doctype, filters={"name": record}, pluck="name"))
+                current = opportunities.get_strategy_opportunity(opportunity.name)
+                self.assertEqual(current["internalValidation"]["id"], validation.name)
+                listed, _, _, _ = opportunities.list_strategy_opportunities({"opportunityId": opportunity.name})
+                self.assertEqual([row["id"] for row in listed], [opportunity.name])
+                item = self._items(reviewer, opportunity.name)[0]
+                self.assertEqual(item["kind"], "production")
+                approvals.mark_approval_viewed(item["id"])
+                self.assertEqual(self._items(self.sales, opportunity.name), [])
+                self.assertEqual(self._items(self.engineer, opportunity.name), [])
+                frappe.set_user(reviewer)
+                decided = opportunities.review_internal_validation(opportunity.name,
+                    {"validationId": validation.name, "decision": "rejected", "comment": "Wait for the PO"},
+                    current["modified"])
+                self.assertEqual(decided["internalValidation"]["status"], "rejected")
+                self.assertEqual(self._items(reviewer, opportunity.name), [])
+                frappe.set_user("Administrator")
+                frappe.delete_doc("User Permission", permission.name, ignore_permissions=True)
+                frappe.clear_cache(user=reviewer)
 
     def test_rfq_manager_capability_does_not_allow_engineering_action(self):
         opportunity = self._opportunity()

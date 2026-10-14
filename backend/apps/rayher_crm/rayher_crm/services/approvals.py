@@ -15,6 +15,7 @@ from frappe.utils import now_datetime
 from rayher_crm.api.v1.errors import CrmApiException
 from rayher_crm.permissions.notification_scope import source_condition
 from rayher_crm.permissions.roles import capabilities_for_role, resolve_crm_role
+from rayher_crm.permissions.scope import has_crm_permission
 from rayher_crm.services.common import to_iso_timestamp
 
 VIEW_DOCTYPE = "CRM Approval View"
@@ -40,8 +41,8 @@ def _view_id(user, task):
 def _pending_docs(doctype, condition, values, user, selected=None):
     if selected and selected[0] != doctype:
         return []
-    # Document Center authorizes access requests by Manager role, including native-restricted Managers.
-    if doctype == "CRM Document Access Request" and resolve_crm_role(user) == "Manager":
+    # These original Manager services authorize approvals through business scope, not native lists.
+    if doctype in {"CRM Document Access Request", "CRM Opportunity Internal Validation"} and resolve_crm_role(user) == "Manager":
         scope = "1=1"
     else:
         scope = source_condition(doctype, user, for_bound_query=True)
@@ -153,6 +154,8 @@ def _collect(user, role, capabilities, selected=None):
     if "deal:internal_validation_approve" in capabilities:
         for doc in _pending_docs("CRM Opportunity Internal Validation", "`status` = %s AND `requested_by` != %s", ("pending", user), user, selected):
             opportunity = _related_doc("CRM Opportunity", doc.opportunity, bool(selected))
+            if not has_crm_permission(opportunity, user=user, permission_type="read"):
+                continue
             if doc.status != "pending" or doc.requested_by == user or opportunity.stage != "quotation_sent" or opportunity.archived:
                 continue
             if opportunity.account and frappe.db.get_value("Customer", opportunity.account, "custom_crm_archived"):
