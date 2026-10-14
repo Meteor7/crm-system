@@ -67,6 +67,19 @@ describe('Pending approvals page', () => {
     app.bootstrap = { ...bootstrap('Engineer'), capabilities: [] }; await flushPromises()
     expect(wrapper.findAll('[data-approval-id]')).toHaveLength(0)
   })
+  it('does not reattach focus refresh after unmounting during the initial request', async () => {
+    const { api, app, start } = await context()
+    let finish!: (value: ReturnType<typeof response>) => void
+    vi.mocked(api.listPendingApprovals).mockImplementationOnce(() => new Promise(resolve => { finish = resolve }))
+    const loadBootstrap = vi.spyOn(app, 'loadBootstrap')
+    const wrapper = start(); await flushPromises()
+    expect(api.listPendingApprovals).toHaveBeenCalledTimes(1)
+    wrapper.unmount()
+    finish(response()); await flushPromises()
+    window.dispatchEvent(new Event('focus')); await flushPromises()
+    expect(loadBootstrap).toHaveBeenCalledTimes(1)
+    expect(api.listPendingApprovals).toHaveBeenCalledTimes(1)
+  })
   it('shows a failed request as an error and retries, rather than claiming no tasks', async () => {
     const { api, start } = await context()
     vi.mocked(api.listPendingApprovals).mockRejectedValueOnce(new CrmApiError('NETWORK_ERROR', 'Queue failed.', 'req-queue'))

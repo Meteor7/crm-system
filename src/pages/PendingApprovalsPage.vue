@@ -49,7 +49,8 @@ async function initialize() {
     await app.loadBootstrap(props.apiClient)
     if (!alive) return
     if (!viewer.value) { error.value = app.errorSource || localeMessage('Unable to load the current user.', '无法读取当前用户信息'); loading.value = false; return }
-    active = true; await load(); window.addEventListener('focus', refresh)
+    active = true; await load()
+    if (alive) window.addEventListener('focus', refresh)
   }
   catch (reason) { if (alive) { error.value = requestErrorMessage(reason); loading.value = false } }
 }
