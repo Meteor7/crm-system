@@ -6,7 +6,7 @@ import frappe
 from frappe.tests.utils import FrappeTestCase
 
 from rayher_crm.api.v1.errors import CrmApiException
-from rayher_crm.services import approvals
+from rayher_crm.services import approvals, quotations
 from rayher_crm.services.accounts import create_account
 
 
@@ -293,6 +293,38 @@ class TestApprovals(FrappeTestCase):
         frappe.db.set_value(current.doctype, current.name, "current_approval", approval.name)
         frappe.db.set_value(master.doctype, master.name, "current_version", None)
         self.assertEqual(self._items(self.manager, master.name), [])
+
+    def test_quotation_archive_gate_follows_the_opportunity_current_account(self):
+        opportunity = self._opportunity()
+        master = self._insert("CRM Quotation", ref_no=f"Q-{self.tag}-MOVED", account=self.account,
+            opportunity=opportunity.name, quotation_owner=self.sales, status="Draft", latest_version_no=1)
+        version = self._insert("CRM Quotation Version", quotation=master.name, version_no=1,
+            status="Draft", approval_status="Pending", ref_no=master.ref_no,
+            account=self.account, quotation_owner=self.sales)
+        approval = self._insert("CRM Quotation Approval", quotation=master.name,
+            quotation_version=version.name, attempt_no=1, status="Pending",
+            submitted_by=self.sales, submitted_at=frappe.utils.now_datetime())
+        frappe.db.set_value(version.doctype, version.name, "current_approval", approval.name)
+        frappe.db.set_value(master.doctype, master.name, "current_version", version.name)
+        frappe.set_user(self.sales)
+        current_account = create_account({"name": f"Moved approvals {self.tag}", "shortName": "Moved",
+            "segment": "Frontend", "tier": "A", "city": "Shanghai", "region": "East", "owner": self.sales})["id"]
+        frappe.set_user("Administrator")
+        frappe.db.set_value(opportunity.doctype, opportunity.name, "account", current_account)
+
+        # A quotation retains its addressed customer, but follows its deal's archive gate.
+        frappe.db.set_value("Customer", self.account, "custom_crm_archived", 1)
+        item = self._items(self.manager, master.name)[0]
+        quotations._assert_quotation_writable(master)
+        approvals.mark_approval_viewed(item["id"])
+
+        frappe.db.set_value("Customer", self.account, "custom_crm_archived", 0)
+        frappe.db.set_value("Customer", current_account, "custom_crm_archived", 1)
+        self.assertEqual(self._items(self.manager, master.name), [])
+        with self.assertRaises(CrmApiException):
+            quotations._assert_quotation_writable(master)
+        with self.assertRaises(CrmApiException):
+            approvals.mark_approval_viewed(item["id"])
 
     def test_document_access_queue_is_current_pending_manager_only_and_targets_exact_request(self):
         controlled = self._insert("CRM Controlled Document", document_id=f"APPROVAL-DOC-{self.tag}",

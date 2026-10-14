@@ -132,8 +132,11 @@ def _collect(user, role, capabilities, selected=None):
             approval = _related_doc("CRM Quotation Approval", version.current_approval, bool(selected))
             if approval.status != "Pending" or approval.quotation != doc.name or approval.quotation_version != version.name:
                 continue
-            account = frappe.db.get_value("Customer", doc.account, "custom_crm_archived") if doc.account else False
-            opportunity = frappe.db.get_value("CRM Opportunity", doc.opportunity, ["archived", "tool_type"], as_dict=True) if doc.opportunity else None
+            opportunity = frappe.db.get_value("CRM Opportunity", doc.opportunity, ["account", "archived", "tool_type"], as_dict=True) if doc.opportunity else None
+            account_id = doc.account
+            if doc.opportunity:
+                account_id = opportunity.account if opportunity else None
+            account = frappe.db.get_value("Customer", account_id, "custom_crm_archived") if account_id else False
             if account or (opportunity and opportunity.archived):
                 continue
             items.append(_item("quotation", doc, approval.name, "报价审批", user, role,
