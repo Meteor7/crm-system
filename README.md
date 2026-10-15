@@ -1,4 +1,7 @@
-# Semicore 半导体 CRM MVP
+# crm-system
+CRM customer relationship management system with AI-assisted business workflows.
+
+包含 CRM 前后端、Docker 部署配置和[适量演示数据导入脚本](backend/apps/rayher_crm/rayher_crm/setup/local_demo.py)。
 
 本仓库交付 Vue 前端与 `rayher_crm` Frappe 后端。开发、构建和生产运行均连接 Frappe API，由 Frappe 会话、权限、DocType 和 MariaDB 提供正式持久化。
 
