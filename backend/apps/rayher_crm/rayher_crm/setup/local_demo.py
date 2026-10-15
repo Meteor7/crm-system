@@ -12,7 +12,7 @@ STAFF = {
 
 class LocalSeeder(base.Seeder):
     def seed_customers(self):
-        for index, (name, short, segment, tier, city, region, process, domain) in enumerate(base.CUSTOMERS):
+        for index, (name, short, segment, tier, city, region, process, domain) in enumerate(base.CUSTOMERS[:4]):
             name, short = PREFIX + name, PREFIX + short
             owner = self.sales[index % 2]
             created = self.today - timedelta(days=self.rng.randint(280, 640))
@@ -28,7 +28,7 @@ class LocalSeeder(base.Seeder):
                     "status": "量产" if si == 0 else "建设中",
                 })))
             contact_rows = []
-            for ci in range(3):
+            for ci in range(2):
                 title, department = base.CONTACT_TITLES[(index + ci) % len(base.CONTACT_TITLES)]
                 person = PREFIX + self.person()
                 contact_rows.append(self.at(created + timedelta(days=ci+2), owner, lambda: base.contacts.create_contact({
@@ -48,11 +48,32 @@ class LocalSeeder(base.Seeder):
         return values
 
     def opportunity_specs(self):
-        specs = super().opportunity_specs()
+        all_specs = super().opportunity_specs()
+        kinds = ["qualified_opportunity", "demo_done", "customer_budget_approved", "quotation_sent", "po_2026", "lost"]
+        specs = [next(row for row in all_specs if row["kind"] == kind) for kind in kinds]
         for spec in specs:
-            if spec["ending"].get("missing"):
-                spec["ending"]["missing"] = False
+            spec["convert"] = False
         return specs
+
+    def seed_leads(self, specs):
+        for index, account in enumerate(self.accounts):
+            created = self.today - timedelta(days=10-index)
+            payload = self.lead_payload(account, account["owner"], index, "New", created)
+            self.at(created, account["owner"], lambda: base.leads.create_lead(payload))
+            self.count("leads")
+
+    def seed_upsell(self):
+        pass
+
+    def seed_visits(self, deals):
+        for index in range(8):
+            account = self.accounts[index % len(self.accounts)]
+            day = self.today + timedelta(days=index-5)
+            payload = {"accountId": account["id"], "subject": account["short"]+"·技术交流", "objective":"[演示]确认技术需求与下一步行动", "date":str(day), "type":"On-site", "owner":account["owner"], "primaryContactId":account["contacts"][0]["id"]}
+            visit = self.at(day-timedelta(days=1), account["owner"], lambda: base.visits.create_visit(payload))
+            if day <= self.today:
+                self.at(day, account["owner"], lambda: base.visit_meetings.update_record(visit["id"], {"meetingStart":str(day)+" 10:00", "meetingEnd":str(day)+" 11:00", "purpose":"技术交流", "attendees":"[演示]客户及销售", "agenda":"需求与方案", "summary":"[演示]已完成技术交流", "conclusion":"准备下一步验证", "followup":"下周确认样品"}))
+            self.count("visits")
 
 
 def seed(confirm=""):
