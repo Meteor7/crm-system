@@ -1,4 +1,4 @@
-name: Release Gate
+name: CRM CI
 
 on:
   pull_request:
@@ -85,39 +85,10 @@ jobs:
           path: backend/build/ci-reports/
           retention-days: 14
 
-  backend:
-    needs: [frontend, package]
-    # Fork code must never be scheduled on the staging machine.
-    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
-    runs-on: [self-hosted, Linux, X64, crm-staging, crm-rootless]
-    timeout-minutes: 90
-    env:
-      CRM_CI_PROJECT: crm-ci-${{ github.run_id }}-${{ github.run_attempt }}
-    steps:
-      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
-        with:
-          persist-credentials: false
-      - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
-        with:
-          name: verified-archives
-          path: backend/build
-      - name: Fresh stack, native JUnit, HTTP acceptance and production image
-        run: bash backend/ci/backend.sh
-      - name: Ensure isolated stack cleanup
-        if: always()
-        run: bash backend/ci/cleanup.sh
-      - name: Save backend diagnostics
-        if: always()
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
-        with:
-          name: backend-reports-${{ github.run_attempt }}
-          path: backend/build/ci-reports/
-          retention-days: 14
-
-  # Keep this exact name: main's required status check already references it.
+  # Portfolio CI runs only on GitHub-hosted runners; deployment is manual.
   release-gate:
     if: always()
-    needs: [frontend, package, backend]
+    needs: [frontend, package]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:

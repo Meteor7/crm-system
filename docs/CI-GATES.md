@@ -1,5 +1,7 @@
 # Continuous integration gates
 
+> 本作品集仓库的 GitHub CI 仅运行前端检查与打包，均使用 GitHub 托管 Runner。原服务器的后端自动任务已移除，后端验证与部署脚本仍可按需执行。下文保留原项目完整发布检查的设计记录。
+
 The required GitHub check remains **release-gate**. It passes only when all three jobs succeed. Failed, cancelled, or skipped jobs block it, including backend jobs refused for fork PRs.
 
 | Job | Runs on | Checks |

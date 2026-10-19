@@ -1,64 +1,97 @@
-# crm-system
-CRM customer relationship management system with AI-assisted business workflows.
+# Planck CRM · 客户关系与销售管理
 
-包含 CRM 前后端、Docker 部署配置和[适量演示数据导入脚本](backend/apps/rayher_crm/rayher_crm/setup/local_demo.py)。
+面向半导体设备业务的 CRM，将客户、商机、设备演示与验证、报价、订单和合同串联起来，支持销售、工程师与管理者协同推进业务。
 
-本仓库交付 Vue 前端与 `rayher_crm` Frappe 后端。开发、构建和生产运行均连接 Frappe API，由 Frappe 会话、权限、DocType 和 MariaDB 提供正式持久化。
+**Vue 3 · TypeScript · Frappe / ERPNext 15 · MariaDB · Docker**
 
-## 已实现
+[功能概览](#功能概览) · [界面预览](#界面预览) · [运行项目](#运行项目) · [演示数据](#演示数据) · [工程实现](#工程实现)
 
-- 经营看板：Open/Weighted Pipeline、Confirmed Booking、漏斗、趋势、重点客户、行动、Demo 审批、验证与合同提醒。
-- 客户档案：筛选列表与 Account 360 抽屉，聚合 Site、关键人、需求、商机、Demo / 验证、合同和行动。
-- 采购需求：设备/应用、预算、完整度、负责人、Next Action 和关联业务。
-- 商机与 Booking：独立金额口径、阶段、概率、意愿分和来源追溯。
-- Demo Request：Sales 创建、修改、取消与提交，工程可行性评估、经理审批/驳回，以及批准后幂等生成 Evaluation。
-- Demo / Wafer Test：五段式验证看板、受控状态推进、Hold 记录和带日期/数值边界校验的 Wafer Test Run 指标追踪。
-- 合同管理：合同类型、签署状态、金额以及 30 / 60 / 90 天到期风险口径。
-- 全局壳层：内存路由、响应式导航、角色上下文、统一请求状态和 `.semicrm-app` 样式隔离。
-- 可靠性：列表搜索防抖与请求乱序保护、Account 360 身份守卫、权限/过期/部分数据提示、相对静态资源路径。
+## 功能概览
 
-## 本地运行
+| 模块 | 核心功能 |
+| --- | --- |
+| 经营看板 | 周期活动、销售漏斗、订单与年度目标、阶段转化率、停滞商机与风险提醒 |
+| 客户档案 | 客户、厂区、联系人、负责人及 Account 360 关联业务视图 |
+| 线索与商机 | 需求、预算、阶段、概率、下一步行动和来源追溯 |
+| 拜访与跟进 | 拜访计划、会议记录、客户互动与跟进行动 |
+| Demo 与验证 | Demo 申请、工程评估、经理审批、设备资源与 Wafer Test 指标 |
+| 报价与交付 | 报价、Booking、合同状态、到期提醒及已安装设备档案 |
 
-需要 Node.js 22.12+（本项目验证环境为 Node 24）和 pnpm 11.9.0。
+**典型业务链：** 客户 / 线索 → 商机 → Demo 与验证 → 报价 → 客户 PO / Booking → 合同与设备档案。
 
-```bash
+## 界面预览
+
+### 客户档案
+
+按负责人、区域和业务领域查看客户，集中呈现联系人、商机金额、下一步行动与风险。
+
+![CRM 客户档案界面](docs/images/customer-portfolio.png)
+
+<details>
+<summary><strong>销售经营看板：查看界面</strong></summary>
+
+从活动、商机阶段、年度目标与转化率几个维度查看销售进展。
+
+![CRM 销售经营看板](docs/images/sales-dashboard.png)
+
+</details>
+
+截图来自已初始化的本地环境（2026-10-15），使用标有「演示」的虚构业务数据。
+
+## 运行项目
+
+完整系统需要 Frappe 后端。准备 **Docker Linux 引擎、Git、Node.js 22.12+、pnpm 11.9.0、PowerShell 7**，然后执行：
+
+```powershell
+git clone https://github.com/Meteor7/crm-system.git
+cd crm-system
 pnpm install --frozen-lockfile
-pnpm dev
 ```
 
-默认地址：`http://127.0.0.1:5173`
+接着按 [后端部署说明](backend/README.md#local-lifecycle) 完成前端构建、应用打包、镜像构建与 Compose 启动。
 
-生产预览：
+| 环境 | 访问入口 |
+| --- | --- |
+| 仓库默认模板 | [http://127.0.0.1:2224/crm](http://127.0.0.1:2224/crm)，站点 `rayher-crm.localhost` |
+| 已有本地截图环境 | [http://127.0.0.1:8081/crm](http://127.0.0.1:8081/crm)，站点 `planck-crm.localhost` |
 
-```bash
-pnpm build
-pnpm preview
-```
+这些地址用于运行项目的本机。管理员为 `Administrator`；默认模板在首次启动时生成随机密码并保存在 Docker 凭据卷中，详见部署说明。
 
-## 质量检查
+`pnpm dev` 提供前端开发服务，业务功能仍需 Frappe 后端与有效登录会话。
 
-```bash
+## 演示数据
+
+[小规模演示脚本](backend/apps/rayher_crm/rayher_crm/setup/local_demo.py) 提供 **4 家客户、4 条线索、6 条商机、8 条拜访**，以及销售、经理、工程师各 2 个演示账号。
+
+- 商机覆盖合格商机、Demo 完成、预算获批、报价、收到 PO 与丢单等状态。
+- 脚本限定 `planck-crm.localhost`，通过 `seed(confirm="planck-crm.localhost")` 显式确认；发现已有演示客户时保留原有批次。
+- 默认模板站点名不同，创建演示站点前需配置 `SITE_NAME`；演示用户密码由管理员另行设置。
+
+推荐演示顺序：**客户档案 → 商机详情 → Demo 审批 → 报价 / Booking → 经营看板**。源码包含初始化脚本，业务数据保存在本地数据库。
+
+## 工程实现
+
+- **真实业务后端：** Frappe 会话、权限、DocType 与 MariaDB 持久化；前端通过 `rayher_crm.api.v1` 调用服务。
+- **业务过程可追溯：** 关联客户、商机、验证与订单，支持角色审批和受控状态流转。
+- **可验证交付：** TypeScript 类型检查、Vitest 测试、可复现打包，以及独立后端验收脚本。
+
+```powershell
 pnpm typecheck
 pnpm test
 pnpm build
 ```
 
-## 数据运行模式
+GitHub CI 保留前端检查与打包，使用 GitHub 托管 Runner。依赖原服务器的后端任务及企业微信自动通知已移除；部署通过已有脚本按需执行。完整后端验证入口保留在 [发布检查说明](backend/README.md)。
 
-正式运行入口仅使用 Frappe：
+## 文档与源码
 
-- `pnpm dev` 与 `pnpm dev:lan` 固定使用 Frappe 开发模式。
-- `pnpm build` 与 `pnpm build:frappe` 固定生成 Frappe 前端产物。
-- `src/api/frappe-adapter.ts` 调用 `rayher_crm.api.v1` 接口。
-- `backend/apps/rayher_crm` 包含 DocType、服务、权限、迁移与测试；数据由 Frappe/MariaDB 持久化。
+| 入口 | 内容 |
+| --- | --- |
+| [操作手册](docs/crm-user-operation-manual.md) | 页面与业务使用说明 |
+| [部署说明](backend/README.md) / [HTTPS 配置](deploy/nginx/README.md) | 启动、配置、日志与备份 |
+| [人工验收清单](docs/CRM-功能验收QA清单-人工UAT.md) | 功能验收场景 |
+| [前端](src/) / [后端](backend/apps/rayher_crm/) | 页面、API、权限、迁移与测试 |
 
-Mock adapter 仅供单元测试注入隔离夹具，不存在开发或生产 Mock 模式开关，也不会进入 Frappe 构建产物。
+本仓库保留 [原项目](https://github.com/kizzhang/PlanckSemicon_CRM/tree/codex/ui-component-polish) 的 Git 历史，用于项目展示与独立维护。
 
-## 设计与范围
-
-- MVP 规格：`docs/superpowers/specs/2026-07-17-semiconductor-crm-mvp-design.md`
-- 实施计划：`docs/superpowers/plans/2026-07-17-semiconductor-crm-mvp.md`
-- 交付模块规格：`docs/superpowers/specs/2026-07-17-demo-evaluation-contract-design.md`
-- 交付模块实施计划：`docs/superpowers/plans/2026-07-17-demo-evaluation-contract.md`
-- 原始 HTML 原型和 Word 需求文档保持不变。
-- 最终质量门：全部自动化测试、TypeScript 类型检查和生产构建均需通过。
+关联作品：[ERP / OA 企业运营与协同管理](https://github.com/Meteor7/erp-oa-system)。
