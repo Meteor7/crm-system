@@ -35,3 +35,8 @@
 .qh-crm .route-content.standard-typography { --crm-type-caption: 11px; --crm-type-secondary: 12px; --crm-type-body: 13px; --crm-type-emphasis: 14px; }
 @media (max-width: 839px) { .qh-crm .app-main { width: 100%; margin-left: 0; } .qh-crm .route-content { padding: 18px 14px; } .qh-crm .topbar { padding: 0 14px; } .qh-workspace-title > span { display: none; } .qh-crm .topbar-start { gap: 10px; } }
 @media (max-width: 440px) { .qh-workspace-title strong { font-size: 12px; } .qh-crm .topbar-end { gap: 7px; } }
+
+.qh-crm :is(.review-header-art, .review-watermark, .plan-header-art, .plan-brand-art, .board-brand-art) { display: none; }
+.qh-crm :is(.review-masthead, .plan-masthead) { background: #fff; }
+.qh-crm .route-content button.target-button { color: var(--crm-on-brand); }
+@media (max-width: 839px) { .qh-crm .app-sidebar:not(.is-open) { box-shadow: none; } }
