@@ -207,7 +207,7 @@ class TestBlueSheet(FrappeTestCase):
     def test_same_role_and_stance_contact_rebind_invalidates_suggestion(self):
         from rayher_crm.services.contacts import create_contact
         contact = create_contact({"accountId": self.account["id"], "name": "Replacement buyer", "title": "Director",
-            "department": "Engineering", "phone": "13800000002", "email": "replacement@example.invalid",
+            "department": "Engineering", "phone": "13800000001", "email": "replacement@example.invalid",
             "relationship": "Developing", "owner": self.sales, "status": "Active"})
         with patch.dict(frappe.conf, {"crm_blue_sheet_probability_rules": sample_rules()}):
             before = blue_sheet.get_assessment(self.name)

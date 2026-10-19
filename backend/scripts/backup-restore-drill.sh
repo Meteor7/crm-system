@@ -14,7 +14,7 @@ if [[ "${source_site}" == "${restore_site}" ]]; then
   exit 1
 fi
 root_password="$(cat "${secret_root}/db_root_password")"
-admin_password=__import__("os").environ["DEMO_BOOTSTRAP_PASSWORD"]${secret_root}/admin_password")"
+admin_password="$(cat "${secret_root}/admin_password")"
 if [[ -z "${root_password}" || -z "${admin_password}" ]]; then
   echo "Required restore credentials are empty." >&2
   exit 1

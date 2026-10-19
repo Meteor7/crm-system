@@ -95,7 +95,7 @@ class TestContactFileApi(FrappeTestCase):
         return {"name": name, "shortName": name[:8], "segment": "Frontend", "tier": "A", "city": "Shanghai", "region": "East", "owner": frappe.session.user, "confirmDuplicate": True}
 
     def _contact_input(self, account_id: str, name: str) -> dict:
-        return {"accountId": account_id, "name": name, "title": "Director", "department": "Engineering", "phone": "13800000002", "email": f"{name.replace(' ', '.').lower()}@example.invalid", "relationship": "Developing", "owner": frappe.session.user, "status": "Active"}
+        return {"accountId": account_id, "name": name, "title": "Director", "department": "Engineering", "phone": "13800000001", "email": f"{name.replace(' ', '.').lower()}@example.invalid", "relationship": "Developing", "owner": frappe.session.user, "status": "Active"}
 
     def test_the_files_of_an_archived_accounts_contact_take_no_upload_and_no_removal(self):
         suffix = frappe.generate_hash(length=8)

@@ -67,7 +67,7 @@ class TestOpportunityRelations(FrappeTestCase):
         })
         contact = create_contact({
             "accountId": account["id"], "name": f"{suffix} Contact", "title": "Director",
-            "department": "Engineering", "phone": "13800000002",
+            "department": "Engineering", "phone": "13800000001",
             "email": f"{suffix.lower()}@example.invalid", "relationship": "Developing",
             "owner": owner, "status": "Active",
         })

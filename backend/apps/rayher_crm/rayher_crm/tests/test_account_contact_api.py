@@ -114,7 +114,7 @@ class TestAccountContactApi(FrappeTestCase):
             "name": name,
             "title": "Director",
             "department": "Engineering",
-            "phone": "13800000002",
+            "phone": "13800000001",
             "email": f"{name.replace(' ', '.').lower()}@example.invalid",
             "relationship": "Developing",
             "owner": frappe.session.user,

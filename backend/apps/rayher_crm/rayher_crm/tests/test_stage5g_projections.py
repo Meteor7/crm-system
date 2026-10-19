@@ -61,7 +61,7 @@ class TestStage5GProjections(FrappeTestCase):
         })
         contact = create_contact({
             "accountId": account["id"], "siteId": site["id"], "name": f"{suffix} Contact",
-            "title": "Director", "department": "Engineering", "phone": "13800000002",
+            "title": "Director", "department": "Engineering", "phone": "13800000001",
             "email": f"projection-{suffix.lower()}@example.invalid", "relationship": "Developing",
             "owner": owner, "status": "Active",
         })

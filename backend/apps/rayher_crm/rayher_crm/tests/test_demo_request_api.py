@@ -108,7 +108,7 @@ class TestDemoRequestApi(FrappeTestCase):
         })
         contact = create_contact({
             "accountId": account["id"], "siteId": site["id"], "name": f"{suffix} Demo Contact",
-            "title": "Director", "department": "Engineering", "phone": "13800000002",
+            "title": "Director", "department": "Engineering", "phone": "13800000001",
             "email": f"demo-{suffix.lower()}@example.invalid", "relationship": "Developing",
             "owner": owner, "status": "Active",
         })
@@ -188,7 +188,7 @@ class TestDemoRequestApi(FrappeTestCase):
         self.assertEqual(draft["createdBy"], self.sales)
         self.assertEqual(draft["salesOwner"], self.sales)
         self.assertEqual(draft["engineerOwner"], self.engineer)
-        self.assertEqual(draft["formData"]["contactPerson"], "Core Demo Contact, Director, demo-core@example.invalid, 13800000002")
+        self.assertEqual(draft["formData"]["contactPerson"], "Core Demo Contact, Director, demo-core@example.invalid, 13800000001")
         self.assertEqual(draft["title"], "Demo Core - Inspection 3000 Demo")
         self.assertEqual(draft["sampleQuantity"], 1)
         self.assertRegex(draft["createdAt"], r"Z$")

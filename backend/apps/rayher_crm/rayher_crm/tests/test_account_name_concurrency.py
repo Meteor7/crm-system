@@ -58,7 +58,7 @@ class TestAccountNameConcurrency(FrappeTestCase):
 
     def _contact_input(self, account_id: str, name: str, **overrides) -> dict:
         return {"accountId": account_id, "name": name, "title": "Engineer", "department": "R&D",
-                "phone": "13800000002", "email": f"{name.replace(' ', '.').lower()}@example.invalid",
+                "phone": "13800000001", "email": f"{name.replace(' ', '.').lower()}@example.invalid",
                 "relationship": "Developing", "owner": self.sales, "status": "Active", **overrides}
 
     def _other(self):

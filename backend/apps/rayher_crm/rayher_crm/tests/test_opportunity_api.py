@@ -1023,7 +1023,7 @@ class TestOpportunityApi(FrappeTestCase):
         rows = {"opportunity": opportunity["id"]}
         contact = create_contact({
             "accountId": account["id"], "name": "Archive Contact", "title": "Director",
-            "department": "Engineering", "phone": "13800000002",
+            "department": "Engineering", "phone": "13800000001",
             "email": "archive-contact@example.invalid", "relationship": "Developing",
             "owner": self.other_sales, "status": "Active",
         })
@@ -1182,7 +1182,7 @@ class TestOpportunityApi(FrappeTestCase):
         account, site = self._account_site(self.sales, "ArchiveVisit")
         contact = create_contact({
             "accountId": account["id"], "name": "ArchiveVisit Contact", "title": "Director",
-            "department": "Engineering", "phone": "13800000002",
+            "department": "Engineering", "phone": "13800000001",
             "email": "archive-visit@example.invalid", "relationship": "Developing",
             "owner": self.sales, "status": "Active",
         })
@@ -1224,7 +1224,7 @@ class TestOpportunityApi(FrappeTestCase):
         account, site = self._account_site(self.sales, "ArchiveBooking")
         contact = create_contact({
             "accountId": account["id"], "name": "ArchiveBooking Contact", "title": "Director",
-            "department": "Engineering", "phone": "13800000002",
+            "department": "Engineering", "phone": "13800000001",
             "email": "archive-booking@example.invalid", "relationship": "Developing",
             "owner": self.sales, "status": "Active",
         })
@@ -1399,7 +1399,7 @@ class TestOpportunityApi(FrappeTestCase):
 
         contact = create_contact({
             "accountId": account["id"], "name": "Pat Buyer", "title": "Buyer",
-            "department": "Procurement", "phone": "13800000002",
+            "department": "Procurement", "phone": "13800000001",
             "email": "bluesheet-buyer@example.invalid", "relationship": "Developing",
             "owner": self.sales, "status": "Active",
         })

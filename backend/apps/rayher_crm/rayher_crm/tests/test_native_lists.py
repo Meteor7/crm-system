@@ -48,7 +48,7 @@ class TestNativeLists(FrappeTestCase):
         })
         self.contact = create_contact({
             "accountId": self.account["id"], "name": f"Native List Contact {suffix}", "title": "Director",
-            "department": "Engineering", "phone": "13800000002", "email": "native.list@example.invalid",
+            "department": "Engineering", "phone": "13800000001", "email": "native.list@example.invalid",
             "relationship": "Developing", "owner": self.owner, "status": "Active",
         })
         self.upload = pdf("native-list-roadmap.pdf", marker=frappe.generate_hash(length=12))

@@ -27,7 +27,7 @@ class TestReportingLinePatch(FrappeTestCase):
     def _contact(self, name: str, reports_to: str | None = None) -> str:
         return create_contact({
             "accountId": self.account, "name": name, "title": "Director", "department": "Engineering",
-            "phone": "13800000002", "email": f"{name.replace(' ', '.').lower()}@example.invalid",
+            "phone": "13800000001", "email": f"{name.replace(' ', '.').lower()}@example.invalid",
             "relationship": "Developing", "owner": "Administrator", "status": "Active",
             **({"reportsToContactId": reports_to} if reports_to else {}),
         })["id"]

@@ -182,7 +182,7 @@ services:
           echo "CRM site already exists; keeping existing database and site files."
         else
           db_root_password="$$(cat /run/crm-local-secrets/db_root_password)"
-          admin_password=__import__("os").environ["DEMO_BOOTSTRAP_PASSWORD"]
+          admin_password="$$(cat /run/crm-local-secrets/admin_password)"
           bench new-site "$${SITE_NAME}" \
             --mariadb-user-host-login-scope='%' \
             --db-root-username=root \

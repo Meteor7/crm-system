@@ -70,7 +70,7 @@ class TestInstalledToolApi(FrappeTestCase):
         })
         contact = create_contact({
             "accountId": account["id"], "siteId": site["id"], "name": f"{suffix} Contact",
-            "title": "Director", "department": "Engineering", "phone": "13800000002",
+            "title": "Director", "department": "Engineering", "phone": "13800000001",
             "email": f"tool-{suffix.lower()}@example.invalid", "relationship": "Developing",
             "owner": owner, "status": "Active",
         })

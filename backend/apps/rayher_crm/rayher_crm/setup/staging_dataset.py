@@ -42,7 +42,7 @@ from rayher_crm.services.regions import REGION_FIELD, REGION_PRESETS, options_te
 from rayher_crm.setup.custom_fields import ACCOUNT_SEGMENT_FIELD, CRM_CUSTOM_FIELDS
 
 
-ALLOWED_SITES = {"rayher-crm.test", "203.0.113.58"}
+ALLOWED_SITES = {"rayher-crm.test", "192.168.1.28"}
 
 # Deleted with raw SQL, dependents first. Child tables and immutable history rows included.
 WIPE_ORDER = (

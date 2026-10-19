@@ -76,7 +76,7 @@ class TestQuotationApi(FrappeTestCase):
         self.quotation_site = site
         self.quotation_contact = create_contact({
             "accountId": account["id"], "siteId": site["id"], "name": f"Quotation Contact {suffix}",
-            "title": "Director", "department": "Engineering", "phone": "13800000002",
+            "title": "Director", "department": "Engineering", "phone": "13800000001",
             "email": f"quotation-{suffix.lower()}@example.invalid", "relationship": "Developing",
             "owner": self.sales, "status": "Active",
         })
@@ -319,7 +319,7 @@ class TestQuotationApi(FrappeTestCase):
         })
         foreign_contact = create_contact({
             "accountId": other_account["id"], "name": f"Other Quotation Contact {suffix}", "title": "Director",
-            "department": "Engineering", "phone": "13800000002", "email": f"other-quotation-{suffix.lower()}@example.invalid",
+            "department": "Engineering", "phone": "13800000001", "email": f"other-quotation-{suffix.lower()}@example.invalid",
             "relationship": "Developing", "owner": self.sales, "status": "Active",
         })
         quote_date = "2026-08-10"

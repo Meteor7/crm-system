@@ -90,7 +90,7 @@ class TestInputErrors(FrappeTestCase):
     def _contact(self, name: str, **overrides) -> dict:
         return {
             "accountId": self.account["id"] if hasattr(self, "account") else "", "name": name, "title": "Director",
-            "department": "Engineering", "phone": "13800000002", "email": "input.errors@example.invalid",
+            "department": "Engineering", "phone": "13800000001", "email": "input.errors@example.invalid",
             "relationship": "Developing", "owner": self.sales, "status": "Active", **overrides,
         }
 

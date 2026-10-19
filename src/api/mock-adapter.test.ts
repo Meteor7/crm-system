@@ -169,7 +169,7 @@ describe('mock CRM API', () => {
     await expect(manager.createContact(contactInput({ name: 'Invalid contact owner', owner: 'person077@crm.example.invalid' })))
       .rejects.toMatchObject({ code: 'VALIDATION_ERROR' })
     await expect(manager.createLead({
-      name: 'Invalid lead owner', company: 'Owner Contract Co.', title: 'Manager', phone: '13800000002',
+      name: 'Invalid lead owner', company: 'Owner Contract Co.', title: 'Manager', phone: '13800000001',
       source: 'Other', status: 'New', owner: 'person053@crm.example.invalid', interest: 'Inspection', firstContactNote: '',
       nextAction: 'Call', nextActionDue: '2026-08-10',
     })).rejects.toMatchObject({ code: 'VALIDATION_ERROR' })
