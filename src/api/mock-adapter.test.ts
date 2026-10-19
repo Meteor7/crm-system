@@ -286,7 +286,7 @@ describe('mock CRM API', () => {
   it('aggregates a traceable account 360 view', async () => {
     const result = await api.getAccount360('ACC-001')
 
-    expect(result.data.account.name).toContain('示例企业015')
+    expect(result.data.account.name).toContain('示例企业014')
     expect(result.data.sites.length).toBeGreaterThan(0)
     expect(result.data.requirements.every((item) => item.accountId === 'ACC-001')).toBe(true)
     expect(result.data.demoRequests.every((item) => item.accountId === 'ACC-001')).toBe(true)

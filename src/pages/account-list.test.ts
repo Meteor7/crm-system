@@ -55,11 +55,11 @@ describe('the Account list (F1-08, F1-09, F1-11)', () => {
     expect(reads).toHaveBeenLastCalledWith(expect.objectContaining({ page: 2, search: undefined }))
 
     const input = wrapper.get('[data-account-search]')
-    await input.setValue('示例企业015')
+    await input.setValue('示例企业014')
     await input.trigger('keydown.enter')
     await flushPromises()
-    expect(reads).toHaveBeenLastCalledWith(expect.objectContaining({ search: '示例企业015', page: 1 }))
-    expect(router.currentRoute.value.query.search).toBe('示例企业015')
+    expect(reads).toHaveBeenLastCalledWith(expect.objectContaining({ search: '示例企业014', page: 1 }))
+    expect(router.currentRoute.value.query.search).toBe('示例企业014')
     expect(wrapper.findAll('[data-account-id]').length).toBeGreaterThan(0)
 
     await wrapper.get('.reset-button').trigger('click')

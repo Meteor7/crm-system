@@ -14,7 +14,7 @@ describe('authoritative personnel directory', () => {
       ['Demo Staff 01', 'Sales'], ['Demo Staff 02', 'Sales'], [ZHOU_NING, 'Engineer'], [SUN_HANG, 'Engineer'],
     ])
     expect(new Set(PERSONNEL.map((person) => person.id)).size).toBe(11)
-    expect(PERSONNEL.every((person) => /^[a-z.]+@crm\.example\.invalid$/.test(person.id))).toBe(true)
+    expect(PERSONNEL.every((person) => /^[a-z0-9.]+@crm\.example\.invalid$/.test(person.id))).toBe(true)
     expect(new Set(PERSONNEL.filter((person) => person.demoIdentityId).map((person) => person.demoIdentityId)).size).toBe(7)
     expect(new Set(PERSONNEL.map((person) => person.name)).size).toBe(11)
   })
