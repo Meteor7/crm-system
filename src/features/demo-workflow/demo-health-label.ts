@@ -3,12 +3,12 @@ import type { Locale } from '@/i18n'
 
 // Translate only the system-generated health messages; keep unknown server text intact.
 export function demoHealthReason(health: DemoHealthDto | undefined, locale: Locale): string {
-  const reason = health?.reason || '正常推进'
+  const reason = health?.reason || '演示员工152推进'
   if (locale === 'zh-CN') return reason
   const fixed: Record<string, string> = {
     '客户预期为今天': 'Customer expected date is today',
     '今天有进展': 'Progress made today',
-    '正常推进': 'Progressing normally',
+    '演示员工152推进': 'Progressing normally',
   }
   if (fixed[reason]) return fixed[reason]
   const patterns: Array<[RegExp, (days: string) => string]> = [

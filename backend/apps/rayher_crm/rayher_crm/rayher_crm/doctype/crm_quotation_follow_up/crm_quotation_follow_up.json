@@ -1,7 +1,7 @@
 {
   "doctype": "DocType",
   "name": "CRM Quotation Follow Up",
-  "module": "Rayher CRM",
+  "module": "QIHENG Demo CRM",
   "engine": "InnoDB",
   "istable": 1,
   "autoname": "hash",

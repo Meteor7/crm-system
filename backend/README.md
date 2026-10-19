@@ -1,4 +1,4 @@
-# Rayher CRM independent Frappe stack
+# QIHENG Demo CRM independent Frappe stack
 
 This directory defines the new CRM-only Frappe/ERPNext environment. It is intentionally isolated from the existing `rayher-crm` containers and `rayher-crm_*` volumes.
 

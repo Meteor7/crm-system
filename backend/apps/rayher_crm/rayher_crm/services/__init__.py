@@ -1,1 +1,1 @@
-"""Transactional business services for Rayher CRM."""
+"""Transactional business services for QIHENG Demo CRM."""

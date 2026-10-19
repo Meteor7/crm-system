@@ -19,7 +19,7 @@
     {"fieldname": "cancelled_at", "fieldtype": "Datetime", "label": "Cancelled At"},
     {"fieldname": "cancel_reason", "fieldtype": "Small Text", "label": "Cancel Reason"}
   ],
-  "index_web_pages_for_search": 0, "modified": "2026-09-15 00:00:00.000000", "modified_by": "Administrator", "module": "Rayher CRM", "name": "CRM Opportunity Internal Validation", "naming_rule": "Expression", "owner": "Administrator",
+  "index_web_pages_for_search": 0, "modified": "2026-09-15 00:00:00.000000", "modified_by": "Administrator", "module": "QIHENG Demo CRM", "name": "CRM Opportunity Internal Validation", "naming_rule": "Expression", "owner": "Administrator",
   "permissions": [
     {"read": 1, "role": "CRM Manager"},
     {"read": 1, "role": "CRM Sales"},

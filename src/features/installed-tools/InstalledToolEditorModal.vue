@@ -68,11 +68,11 @@ const contractInput = useLocalizedInput(() => form.value.contract, (value) => { 
        <label><span>{{ copy('Operating System', '操作系统') }}</span><input v-model="operatingSystemInput" :aria-label="copy('Operating System', '操作系统')" /></label>
        <label><span>{{ copy('Warranty Start', '质保开始') }}</span><input v-model="form.warrantyStart" type="date" :aria-label="copy('Warranty Start', '质保开始')" /></label>
        <label><span>{{ copy('Warranty End', '质保结束') }}</span><input v-model="form.warrantyEnd" type="date" :aria-label="copy('Warranty End', '质保结束')" /></label>
-       <label><span>{{ copy('Service Contract', '服务合同') }}</span><input v-model="serviceContractInput" :aria-label="copy('Service Contract', '服务合同')" /></label>
+       <label><span>{{ copy('Service Contract', '服务演示员工116') }}</span><input v-model="serviceContractInput" :aria-label="copy('Service Contract', '服务演示员工116')" /></label>
        <label><span>{{ copy('PM Cycle', 'PM 周期') }}</span><input v-model="pmCycleInput" :aria-label="copy('PM Cycle', 'PM 周期')" /></label>
        <label><span>{{ copy('Ownership Type', '归属类型') }}<RequiredMark /></span><input v-model="form.ownershipType" :aria-label="copy('Ownership Type', '归属类型')" required /></label>
        <label><span>{{ copy('Sales Order', '销售订单') }}</span><input v-model="salesOrderInput" :aria-label="copy('Sales Order', '销售订单')" /></label>
-       <label class="wide"><span>{{ copy('Contract', '合同') }}</span><input v-model="contractInput" :aria-label="copy('Contract', '合同')" /></label>
+       <label class="wide"><span>{{ copy('Contract', '演示员工116') }}</span><input v-model="contractInput" :aria-label="copy('Contract', '演示员工116')" /></label>
     </div>
   </ModalShell>
 </template>

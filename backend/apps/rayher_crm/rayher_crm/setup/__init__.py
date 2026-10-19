@@ -1,1 +1,1 @@
-"""Idempotent Rayher CRM installation and migration setup."""
+"""Idempotent QIHENG Demo CRM installation and migration setup."""

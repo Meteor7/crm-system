@@ -94,7 +94,7 @@ it('keeps FAE and Equipment Engineer capabilities identical', () => {
 
 - [ ] **Step 2: Run the focused tests and confirm failure**
 
-Run: `pnpm.cmd test -- src/domain/permissions.test.ts src/demo/identities.test.ts`  
+Run: `pnpm.cmd test -- src/domain/permissions.test.ts src/demo/identities.test.ts`
 Expected: FAIL because Management Viewer lacks approval/release and the engineering arrays differ.
 
 - [ ] **Step 3: Add exact shared types**
@@ -226,7 +226,7 @@ it('persists artifact Blobs', async () => {
 
 - [ ] **Step 2: Run the repository test and confirm failure**
 
-Run: `pnpm.cmd test -- src/demo/demo-repository.test.ts`  
+Run: `pnpm.cmd test -- src/demo/demo-repository.test.ts`
 Expected: FAIL because the repository module does not exist.
 
 - [ ] **Step 3: Implement one versioned snapshot and serialized transactions**
@@ -312,7 +312,7 @@ Tests receive isolated repositories through `createMockApi({ repository })` and 
 
 - [ ] **Step 6: Run repository and store tests**
 
-Run: `pnpm.cmd test -- src/demo/demo-repository.test.ts src/stores/app.test.ts`  
+Run: `pnpm.cmd test -- src/demo/demo-repository.test.ts src/stores/app.test.ts`
 Expected: PASS, including a new test that Sales writes a Request, switches to FAE, and reads the same Request.
 
 - [ ] **Step 7: Commit when Git metadata is available**
@@ -452,7 +452,7 @@ expect(api.answerDemoQuestion).toHaveBeenCalledWith('DR-001', 'DR-001-Q01', { an
 
 - [ ] **Step 2: Run the page and form tests to confirm failure**
 
-Run: `pnpm.cmd test -- src/features/demo-requests/DemoRequestForm.test.ts src/pages/delivery-workflow.test.ts`  
+Run: `pnpm.cmd test -- src/features/demo-requests/DemoRequestForm.test.ts src/pages/delivery-workflow.test.ts`
 Expected: FAIL because the date and Answer UI do not exist.
 
 - [ ] **Step 3: Add the non-Word date input**
@@ -490,7 +490,7 @@ Use `FAE Review`, `Boss Approval`, and `Boss 审批意见` in visible copy. Call
 
 - [ ] **Step 6: Run Request tests**
 
-Run: `pnpm.cmd test -- src/features/demo-requests/DemoRequestForm.test.ts src/pages/delivery-workflow.test.ts src/features/demo-requests/demo-request-docx.test.ts`  
+Run: `pnpm.cmd test -- src/features/demo-requests/DemoRequestForm.test.ts src/pages/delivery-workflow.test.ts src/features/demo-requests/demo-request-docx.test.ts`
 Expected: PASS; add an assertion that serialized DOCX XML does not contain the expected-date value.
 
 - [ ] **Step 7: Commit when Git metadata is available**
@@ -529,7 +529,7 @@ For a Sales role, assert sensitive fields such as customer contact, competition,
 
 - [ ] **Step 2: Run archive tests and confirm failure**
 
-Run: `pnpm.cmd test -- src/app/AppShell.test.ts src/pages/first-demo-completion.test.ts src/pages/permission-revocation.test.ts`  
+Run: `pnpm.cmd test -- src/app/AppShell.test.ts src/pages/first-demo-completion.test.ts src/pages/permission-revocation.test.ts`
 Expected: FAIL on the old title and independent `demoProjects` data.
 
 - [ ] **Step 3: Render the derived aggregate**
@@ -565,7 +565,7 @@ The left card displays `selected.id`, status, customer, owner, and `客户预期
 
 - [ ] **Step 5: Run archive tests**
 
-Run: `pnpm.cmd test -- src/app/AppShell.test.ts src/pages/first-demo-completion.test.ts src/pages/permission-revocation.test.ts`  
+Run: `pnpm.cmd test -- src/app/AppShell.test.ts src/pages/first-demo-completion.test.ts src/pages/permission-revocation.test.ts`
 Expected: PASS for Boss full view, Sales business view, and assigned engineering view.
 
 - [ ] **Step 6: Commit when Git metadata is available**
@@ -605,7 +605,7 @@ expect(api.setEvaluationTestRunDeadline).toHaveBeenCalled()
 
 - [ ] **Step 2: Run focused tests and confirm failure**
 
-Run: `pnpm.cmd test -- src/domain/evaluations.test.ts src/features/evaluations/EvaluationCard.test.ts src/pages/delivery-workflow.test.ts`  
+Run: `pnpm.cmd test -- src/domain/evaluations.test.ts src/features/evaluations/EvaluationCard.test.ts src/pages/delivery-workflow.test.ts`
 Expected: FAIL because the group helper and DDL action do not exist.
 
 - [ ] **Step 3: Add display groups without replacing enums**
@@ -634,7 +634,7 @@ Keep a Run Planned when all metrics are null. If all metrics are present, requir
 
 - [ ] **Step 6: Run Evaluation tests**
 
-Run: `pnpm.cmd test -- src/domain/evaluations.test.ts src/features/evaluations/EvaluationCard.test.ts src/pages/delivery-workflow.test.ts src/api/mock-adapter.test.ts`  
+Run: `pnpm.cmd test -- src/domain/evaluations.test.ts src/features/evaluations/EvaluationCard.test.ts src/pages/delivery-workflow.test.ts src/api/mock-adapter.test.ts`
 Expected: PASS, including DDL date validation and completed-summary validation.
 
 - [ ] **Step 7: Commit when Git metadata is available**
@@ -698,7 +698,7 @@ it('never projects internal or audit fields', () => {
 
 - [ ] **Step 2: Run the domain test and confirm failure**
 
-Run: `pnpm.cmd test -- src/domain/demo-report.test.ts`  
+Run: `pnpm.cmd test -- src/domain/demo-report.test.ts`
 Expected: FAIL because report functions do not exist.
 
 - [ ] **Step 3: Implement deterministic readiness**
@@ -729,7 +729,7 @@ Transition to `Customer Review` and `releaseDemoTestReport` both call `reportRea
 
 - [ ] **Step 6: Run report and adapter tests**
 
-Run: `pnpm.cmd test -- src/domain/demo-report.test.ts src/api/mock-adapter.test.ts`  
+Run: `pnpm.cmd test -- src/domain/demo-report.test.ts src/api/mock-adapter.test.ts`
 Expected: PASS.
 
 - [ ] **Step 7: Commit when Git metadata is available**
@@ -776,7 +776,7 @@ it('writes one PDF page per JPEG image', () => {
 
 - [ ] **Step 2: Run PDF tests and confirm failure**
 
-Run: `pnpm.cmd test -- src/features/evaluations/pdf-image-writer.test.ts src/features/evaluations/demo-test-report-pdf.test.ts`  
+Run: `pnpm.cmd test -- src/features/evaluations/pdf-image-writer.test.ts src/features/evaluations/demo-test-report-pdf.test.ts`
 Expected: FAIL because the PDF modules do not exist.
 
 - [ ] **Step 3: Implement the minimal image-only PDF writer**
@@ -852,7 +852,7 @@ export function downloadBlob(blob: Blob, fileName: string) {
 
 - [ ] **Step 7: Run document, card, and page tests**
 
-Run: `pnpm.cmd test -- src/features/evaluations/pdf-image-writer.test.ts src/features/evaluations/demo-test-report-pdf.test.ts src/features/evaluations/EvaluationCard.test.ts src/features/demo-requests/demo-request-docx.test.ts src/pages/delivery-workflow.test.ts`  
+Run: `pnpm.cmd test -- src/features/evaluations/pdf-image-writer.test.ts src/features/evaluations/demo-test-report-pdf.test.ts src/features/evaluations/EvaluationCard.test.ts src/features/demo-requests/demo-request-docx.test.ts src/pages/delivery-workflow.test.ts`
 Expected: PASS, including same Artifact ID/version across Demo Test and Demo 档案.
 
 - [ ] **Step 8: Commit when Git metadata is available**

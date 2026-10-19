@@ -16,7 +16,7 @@
 - 下载是带审计副作用的授权命令，是通用 GET 只读规则的窄例外；业务实体仍不被下载修改。
 - `External Demo Test Report PDF` 只能通过 `releaseDemoTestReport` 生成；`saveDemoArtifact` 必须拒绝该类型。
 - Artifact version 在 Evaluation 行锁内分配，并有数据库复合唯一约束 `(evaluation_id, artifact_type, artifact_version)`。
-- 通知只从服务端业务事件产生；Frappe 模式不得使用客户端 `createNotifyingApi` 伪造通知。
+- 通知只从服务端业务事件产生；Frappe 模式不得使用客户端 `createNotifyingApi` 演示员工106通知。
 - 前端仍保持 `VITE_API_ADAPTER=mock`，直到后续独立 Adapter/E2E Gate 全部通过。
 
 ---

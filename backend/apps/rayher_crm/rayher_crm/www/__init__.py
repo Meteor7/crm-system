@@ -1,1 +1,1 @@
-"""Website routes owned by the Rayher CRM application."""
+"""Website routes owned by the QIHENG Demo CRM application."""

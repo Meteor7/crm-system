@@ -1,6 +1,6 @@
 app_name = "rayher_crm"
 app_title = "栖衡 CRM"
-app_publisher = "Rayher Semiconductor"
+app_publisher = "QIHENG Demo Semiconductor"
 app_description = "Independent CRM application for Frappe and ERPNext"
 app_email = "person023@crm.example.invalid"
 app_license = "Proprietary"

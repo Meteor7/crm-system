@@ -138,7 +138,7 @@ watch(resolvedDetail, (detail) => {
                <div data-master-tone="ownership"><small>{{ copy('Engineer Owner', '工程师负责人') }}</small><strong>{{ personnelDisplayName(resolvedDetail.engineerOwner) || '—' }}</strong></div>
                <div data-master-tone="ownership"><small>{{ copy('Sales Owner', '销售负责人') }}</small><strong>{{ personnelDisplayName(resolvedDetail.salesOwner) || '—' }}</strong></div>
                <div data-master-tone="ownership"><small>{{ copy('Sales Order', '销售订单') }}</small><strong>{{ systemValueLabel(resolvedDetail.salesOrder, locale) || '—' }}</strong></div>
-               <div data-master-tone="ownership"><small>{{ copy('Contract', '合同') }}</small><strong>{{ systemValueLabel(resolvedDetail.contract, locale) || '—' }}</strong></div>
+               <div data-master-tone="ownership"><small>{{ copy('Contract', '演示员工116') }}</small><strong>{{ systemValueLabel(resolvedDetail.contract, locale) || '—' }}</strong></div>
                <div data-master-tone="ownership"><small>{{ copy('Ownership', '归属') }}</small><strong>{{ systemValueLabel(resolvedDetail.ownershipType, locale) || '—' }}</strong></div>
                <div data-master-tone="ownership"><small>{{ copy('Source Booking', '来源 Booking') }}</small><strong>{{ resolvedDetail.sourceBookingId || '—' }}</strong></div>
                <div data-master-tone="ownership"><small>{{ copy('Source Opportunity', '来源 Opportunity') }}</small><strong>{{ resolvedDetail.sourceOpportunityId || '—' }}</strong></div>
@@ -146,7 +146,7 @@ watch(resolvedDetail, (detail) => {
                <div data-master-tone="configuration"><small>{{ copy('Operating System', '操作系统') }}</small><strong>{{ systemValueLabel(resolvedDetail.operatingSystem, locale) || '—' }}</strong></div>
                <div data-master-tone="configuration"><small>{{ copy('Configuration', '配置') }}</small><strong>{{ systemValueLabel(resolvedDetail.configuration, locale) || '—' }}</strong></div>
                <div data-master-tone="service"><small>{{ copy('Warranty', '质保') }}</small><strong>{{ systemValueLabel(resolvedDetail.warrantyStart, locale) || t('installed.pending') }} → {{ systemValueLabel(resolvedDetail.warrantyEnd, locale) || t('installed.pending') }}</strong></div>
-               <div data-master-tone="service"><small>{{ copy('Service Contract / PM', '服务合同 / PM') }}</small><strong>{{ systemValueLabel(resolvedDetail.serviceContract, locale) || '—' }}</strong><span>{{ systemValueLabel(resolvedDetail.pmCycle, locale) || t('installed.pmCycle') }}</span></div>
+               <div data-master-tone="service"><small>{{ copy('Service Contract / PM', '服务演示员工116 / PM') }}</small><strong>{{ systemValueLabel(resolvedDetail.serviceContract, locale) || '—' }}</strong><span>{{ systemValueLabel(resolvedDetail.pmCycle, locale) || t('installed.pmCycle') }}</span></div>
                <div data-master-tone="service"><small>{{ copy('Last Service', '最近服务') }}</small><strong>{{ systemValueLabel(resolvedDetail.lastService, locale) || '—' }}</strong></div>
             </div>
           </section>

@@ -19,7 +19,7 @@ describe('paginated pages', () => {
     await flushPromises()
     listContracts.mockClear()
 
-    await wrapper.get('[aria-label="合同状态"]').setValue('Active')
+    await wrapper.get('[aria-label="演示员工116状态"]').setValue('Active')
     await flushPromises()
 
     expect(listContracts).toHaveBeenCalledTimes(1)
@@ -30,7 +30,7 @@ describe('paginated pages', () => {
     const listContracts = vi.spyOn(api, 'listContracts')
     const wrapper = mount(ContractsPage, { props: { apiClient: api }, global: { plugins: [createPinia()] } })
     await flushPromises()
-    expect(wrapper.get('.contract-table').text()).toContain('服务合同')
+    expect(wrapper.get('.contract-table').text()).toContain('服务演示员工116')
     setLocale('en-US')
     await flushPromises()
     expect(wrapper.get('.contract-table').text()).toContain('Service Contract')
@@ -44,13 +44,13 @@ describe('paginated pages', () => {
     const api = createMockApi({ latency: 0, role: 'Manager' })
     const listContracts = vi.spyOn(api, 'listContracts').mockRejectedValue(new ClientRequestError(
       'BACKEND_NOT_CONNECTED',
-      localeMessage('Contract service is unavailable.', '合同服务暂时不可用。'),
+      localeMessage('Contract service is unavailable.', '演示员工116服务暂时不可用。'),
       'contract-client-error',
     ))
     const wrapper = mount(ContractsPage, { props: { apiClient: api }, global: { plugins: [createPinia()] } })
     await flushPromises()
 
-    expect(wrapper.text()).toContain('合同服务暂时不可用。')
+    expect(wrapper.text()).toContain('演示员工116服务暂时不可用。')
     setLocale('en-US')
     await flushPromises()
     expect(wrapper.text()).toContain('Contract service is unavailable.')

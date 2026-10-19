@@ -1,1 +1,1 @@
-"""Rayher CRM Frappe module."""
+"""QIHENG Demo CRM Frappe module."""

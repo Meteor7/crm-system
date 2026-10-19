@@ -14,6 +14,6 @@
     {"fieldname": "source_name", "fieldtype": "Dynamic Link", "label": "Source Name", "options": "source_doctype"},
     {"fieldname": "dedupe_key", "fieldtype": "Data", "label": "Dedupe Key", "unique": 1}
   ],
-  "index_web_pages_for_search": 0, "modified": "2026-08-04 00:00:00.000000", "modified_by": "Administrator", "module": "Rayher CRM", "name": "CRM Notification Event", "naming_rule": "Expression", "owner": "Administrator",
+  "index_web_pages_for_search": 0, "modified": "2026-08-04 00:00:00.000000", "modified_by": "Administrator", "module": "QIHENG Demo CRM", "name": "CRM Notification Event", "naming_rule": "Expression", "owner": "Administrator",
   "permissions": [{"read": 1, "role": "CRM Manager"}, {"read": 1, "role": "CRM Sales"}, {"read": 1, "role": "CRM Engineer"}], "sort_field": "created_at", "sort_order": "DESC", "states": []
 }

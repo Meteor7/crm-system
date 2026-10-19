@@ -2,9 +2,9 @@
 
 ## Philippe PR07 更新（2026-10-05，开发候选，未部署）
 
-本次完整非 AI 交付计划新增了下文 9 月范围中排除的报价计划、报价跟进与独立展会活动；当前合同见 `../superpowers/plans/2026-10-05-philippe-pr07-plans.md`。报价主档维护草稿发送日及跟进子记录；独立活动使用 CRM Event，提供销售/经理录入入口，不创建外部邀请。新增接口为 `quotation_planning.get_planning/save_schedule/save_follow_up` 和 `events.list_events/get_event/save_event`，写入带原来源的并发版本。
+本次完整非 AI 交付计划新增了下文 9 月范围中排除的报价计划、报价跟进与独立展会活动；当前演示员工116见 `../superpowers/plans/2026-10-05-philippe-pr07-plans.md`。报价主档维护草稿发送日及跟进子记录；独立活动使用 CRM Event，提供销售/经理录入入口，不创建外部邀请。新增接口为 `quotation_planning.get_planning/save_schedule/save_follow_up` 和 `events.list_events/get_event/save_event`，写入带原来源的并发版本。
 
-Plan 增加 quotes、followups、events，金额仅人民币，原计划测试分为本期有日期的安排与其他进行中 Demo（`tests_other`）。往期未完成报价和跟进自动进入 `quotation_carryover`，页面提供数量及明细入口，保留原到期日，不加到本期数量；原行动逾期仍在 Warnings。多日活动按日期范围与周期相交计一次，保留起止日期。以下章节为历史合同及部署记录，不代表本候选已部署。
+Plan 增加 quotes、followups、events，金额仅人民币，原计划测试分为本期有日期的安排与其他进行中 Demo（`tests_other`）。往期未完成报价和跟进自动进入 `quotation_carryover`，页面提供数量及明细入口，保留原到期日，不加到本期数量；原行动逾期仍在 Warnings。多日活动按日期范围与周期相交计一次，保留起止日期。以下章节为历史演示员工116及部署记录，不代表本候选已部署。
 
 ## Planned Test Run 操作与执行人姓名（2026-09-22，开发分支，未部署）
 
@@ -13,7 +13,7 @@ Plan 增加 quotes、followups、events，金额仅人民币，原计划测试�
 - Evaluations 页面新增测试记录列表；Manager/Engineer 可对 Scheduled/Testing 阶段、当前轮次的 Planned 记录改期、填写结果完成或填写原因取消。Plan 的测试链接仍跳转到原 Evaluations 页面，不新增 Plan 写接口。
 - 原记录 ID 保留；完成须三项结果及摘要齐全，0 是有效结果。旧轮次、已完成、已取消及评审阶段记录不可编辑。保存使用父 Evaluation 的 `modified`，失败保留输入，版本冲突后由用户明确放弃草稿并重新载入；请求中禁止重复提交与关闭。权限撤销清除页面数据和弹窗。
 - Plan 通过单独的批量 User 查询返回行动执行人的 `actionOwnerName`，包括工程师；缺名返回 null，前端继续回退到账号。执行人不加入销售筛选，不改变销售归属、数量和分页。
-- 为验证真实页面调用，测试用 mock 的 Evaluation 补齐稳定版本、成功修改后的版本递增和 Test Run 历史。已有版本保留；旧模拟快照的初始版本仅用于并发令牌，不作为业务时间。正式 Frappe 仍使用原有并发和历史机制。
+- 为验证真实页面调用，测演示员工173 mock 的 Evaluation 补齐稳定版本、成功修改后的版本递增和 Test Run 历史。已有版本保留；旧模拟快照的初始版本仅用于并发令牌，不作为业务时间。正式 Frappe 仍使用原有并发和历史机制。
 - 本次不改 Status 附件存储、商机组合查询或导出，不新增业务库迁移。代码需与 PR #41 的接口一起集成；这段实现说明不代表已部署到 staging 或 production。
 - 回归覆盖见 `src/pages/evaluation-run-actions.test.ts`、`src/api/evaluation-run-lifecycle.test.ts`、`test_cockpit_plan.py` 和 `test_cockpit_api.py`。
 
@@ -75,7 +75,7 @@ Plan 增加 quotes、followups、events，金额仅人民币，原计划测试�
 - 每个商机 PO 数量计一次；拜访/测试/行动中的关联商机不能重复累加预计金额。
 - 金额口径（2026-09-20 后端确认，与 Review 对齐）：只使用商机上销售填写的人民币金额 `amount_cny`，未加权。`poAmounts` 字段形状不变，仍为 `[{currency, value}]`，但后端只会返回一条 `currency="CNY"`（或 `[]`）；value 是两位小数的十进制字符串。不读取原币 `amount`，不做汇率换算。未填写 `amount_cny` 的商机不计入金额，行内 amount/currency 为 null，并使 `poAmountIncomplete=true`。
 - S1 仅计数量，不把尚无可靠金额的商机计为 0；相关行 amount/currency 为 null，聚合 `poAmountIncomplete=true`。其他缺失金额同样处理。
-- 已知金额仍可显示，但有任何缺失时必须显示“部分金额数据不足”。完全没有本期商机时为 []、false；不伪造金额。
+- 已知金额仍可显示，但有任何缺失时必须显示“部分金额数据不足”。完全没有本期商机时为 []、false；不演示员工106金额。
 - `expectedPO.items` 返回同一 po 明细排序下前 5 条，`total` 为全部本期预计 PO 商机数；“查看全部”调用明细接口。
 - 四档概率：low_probability → pipeline → upside → committed。无值回传 null。
 - Metric 的 ready + 0 才是真正零；无法统计时 insufficient + null，并提供 reason，不用 0 掩盖缺数据。
@@ -157,7 +157,7 @@ Plan 增加 quotes、followups、events，金额仅人民币，原计划测试�
 本节覆盖上文历史交接中以 Planned Test Run、当前轮次及测试日期为条件的旧规则；只修改计划测试，其他指标继续按原周期口径。
 
 - 业务条件：Wafer Preparation、Test Preparation 均完成后进入 Plan；Scheduled 与 Testing 均计入；Internal Review（含旧 Analysis 状态）及后续阶段不计入。被取消的 Demo 不计入。历史记录未存准备标记时，沿用 Demo Test 页面按 Scheduled/Testing 判为准备完成的兼容规则；明确 Pending 仍未准备完成。
-- 一份 Demo 计一次；不需要预建 Test Run，不要求 lot、wafers、测试结果、摘要或测试截止日期。测试记录的完成、取消、改期都不改变 Demo 的 Plan 归属。客户要求重测、重新进入 Testing 后再次计入。
+- 一份 Demo 计一次；不需要预建 Test Run，不要求 lot、wafers、测试结果、摘要或测试截止日期。测试记录的完成、取消、改期演示员工177改变 Demo 的 Plan 归属。客户要求重测、重新进入 Testing 后再次计入。
 - 测试数量是当前仍处在上述阶段的 Demo 总数，仍受销售／区域／市场筛选，但不受周／月／季／年日期窗口排除；这点在页面说明中明确。汇总、销售、市场活动数和明细使用同一集合。
 - 测试行 `id=evaluationId`，`status=Scheduled|Testing`；`date` 取现有 `test_run_deadline`，缺失返回 null。日期只用于展示，不回填、不虚构日期，也不返回 missing_date。拜访与行动的原缺日期提示不变。
 - 日程保持周一至周日七列；无日期或截止日期在周期外的 Demo 放在下方“待排期／进行中”分组。保留真实截止日期；按销售／市场分组时同样保留这些 Demo。往期未完成 Action 仍不展示。
@@ -171,6 +171,6 @@ Plan 增加 quotes、followups、events，金额仅人民币，原计划测试�
 - 包含 Plan 按 Demo 阶段统计、无日期测试展示、Plan/Review 共享销售表对齐，以及两页左上角“销售经营看板 · 检测与量测系统”删除。
 - 仅替换现有发布包中的两个 Plan 后端服务文件与前端构建资源；校验后端原文件与本地 HEAD 基线一致，其他后端文件完整保留。无 schema 改动，未运行数据库迁移。
 - 已执行数据库与文件备份，位于服务器 `backups/pre-update-17cce3f-plan-demo-20260922-20260922-030855`；上一版 `17cce3f-sales-align-20260922` 镜像与输入保留，可回退。
-- 所有应用服务正常，backend/frontend 健康检查通过；部署前后 9 类业务记录数量一致。
+- 所有应用服务演示员工152，backend/frontend 健康检查通过；部署前后 9 类业务记录数量一致。
 - 部署后只读接口核对：周/月/季度/年均为 5 个计划测试，汇总、销售合计、市场活动与明细一致；Sales/Engineer 均被两个服务入口拒绝。
 - 实际浏览器确认：Review 与 Plan 旧抬头已移除、销售表数值表头/内容同向右对齐、Plan 显示 5 个测试、七列周视图保留；年度 68 条记录第二页显示 18 条，翻页不改变汇总。页面未发现控制台错误。

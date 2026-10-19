@@ -1,8 +1,8 @@
-# RAYHER Seven-Page Frontend Redesign Implementation Plan
+# QIHENG Demo Seven-Page Frontend Redesign Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** 在现有 RAYHER Vue 前端内交付七个相互关联、可浏览和可交互的业务页面原型。
+**Goal:** 在现有 QIHENG Demo Vue 前端内交付七个相互关联、可浏览和可交互的业务页面原型。
 
 **Architecture:** 保留现有 AppShell、设计变量和旧页面，通过新的集中式只读演示数据模块驱动七个页面。新路由使用现有 Vue Router memory history；页面只维护选择、筛选和演示状态，不改变后端 API 契约。
 
@@ -11,7 +11,7 @@
 ## Global Constraints
 
 - 本轮仅实现前端七页面，不创建 Frappe、MariaDB 或 Redis 容器。
-- 保留 RAYHER 原配色，不套用 Salesforce 配色。
+- 保留 QIHENG Demo 原配色，不套用 Salesforce 配色。
 - 模拟数据不得写入 `localStorage`，不得包含真实凭据或机密文件 URL。
 - 旧页面和路由保留，主导航切换到新的七页面信息架构。
 - 只修改本需求直接相关的前端文件。

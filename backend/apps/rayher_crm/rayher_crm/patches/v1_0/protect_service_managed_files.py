@@ -20,7 +20,7 @@ _NATIVE_SCOPED_DOCTYPES = {
 def inventory() -> dict:
     snapshot = canonical_local_file_inventory()
     crm_doctypes = set(frappe.get_all(
-        "DocType", filters={"module": "Rayher CRM"}, pluck="name",
+        "DocType", filters={"module": "QIHENG Demo CRM"}, pluck="name",
     ))
     rows = [
         row for row in snapshot["files"].values()

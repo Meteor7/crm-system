@@ -1,7 +1,7 @@
 # CRM Mock Demo：接口、权限与数据同步审查
 
-> 日期：2026-08-03  
-> 范围：前端 Demo（Vue 3 + TypeScript + Pinia + Mock Adapter）  
+> 日期：2026-08-03
+> 范围：前端 Demo（Vue 3 + TypeScript + Pinia + Mock Adapter）
 > 结论：当前可以继续打磨和验收 Mock 前端；Frappe 后端尚未接入，不能把本报告当作 Stage/Production 后端验收结果。
 
 ## 1. 当前运行边界

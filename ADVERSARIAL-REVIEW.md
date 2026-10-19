@@ -1,4 +1,4 @@
-# 对抗性审查报告 — Semiconductor CRM (Semicore / Rayher CRM)
+# 对抗性审查报告 — Semiconductor CRM (Semicore / QIHENG Demo CRM)
 
 **审查范围：** 前端 `src/`（256 源文件）+ Frappe 后端 `backend/apps/rayher_crm`（~179 文件）
 **审查方法：** 主线程逐行复核关键路径 + 4 个并行子代理分别从【前端安全 / 业务正确性 / 代码质量与测试 / 后端安全】通读源码，再交叉验证每条发现
@@ -28,7 +28,7 @@
 | F6 | 🟠 Medium | mock 与 Frappe 之间无行为一致性契约测试（"测试全绿、生产报错"风险） | 测试/质量 |
 | F7 | 🟠 Medium | 后端 pytest 在本仓库内无可见的运行/门禁入口 | CI/质量 |
 | F8 | 🟡 Low-Med | `transition_demo_request` 自转移会重置"停滞"计时并污染历史（非幂等写） | 状态机 |
-| F9 | 🟡 Low | `getDemoIdentity` 未知 id 静默回退到管理员（demo 模式权限升级隐患） | 安全 |
+| F9 | 🟡 Low | `getDemoIdentity` 未知 id 静默回退到演示员工170（demo 模式权限升级隐患） | 安全 |
 | F10 | 🟡 Low | 销售可硬删 Site（账户删除仅限 Manager），被引用时返回模糊 500 | 权限一致性 |
 | F11 | 🟡 Low | bootstrap 向任意已认证用户下发全员目录（含 `user.bio`） | 隐私 |
 | F12 | 🟡 Low | 受控文档元数据（含 SHA-256 校验和/文件名）对 Restricted 文档也全量返回 | 隐私 |
@@ -58,12 +58,12 @@
 ### 🟠 F2 — 报价单 PDF 模板未转义 Jinja（HTML/JS 注入到客户可见产物）
 - **位置：** `backend/.../templates/quotation/quotation.html:59-116` + `services/quotations.py:42-49,407-411`
 - **证据：** 模板里大量 `{{ customerName }}`、`{{ addressText }}`、`{{ attentionName }}`、`{{ attentionPhone }}`、`{{ item.name }}`、`{{ item.model }}`、`{{ item.description }}`、`{{ group.name }}`、`{{ group.model }}`、`{{ seller }}`、`{{ opportunityTitle }}` **均为裸插值，无 `|e`/`|safe` 之外的转义**。这些字段来自 `_text`/`_bounded_text`——**只做 `.strip()` + 长度上限，无任何 HTML 清洗**。Frappe 的 `render_template`（print format）默认**不自动转义**。
-- **攻击场景：** Sales 用户在自管理的报价单里写入 `<script>`/`<img onerror>`/恶意 CSS，渲染进**发布给客户**的 PDF。金额仍由后端 `quotation_rules.calculate_totals` 计算（无法通过模板造假金额），但可伪造/污损正式报价；若 PDF 引擎（wkhtmltopdf）在渲染时执行 JS，还存在 SSRF/RCE 的有界风险。
+- **攻击场景：** Sales 用户在自管理的报价单里写入 `<script>`/`<img onerror>`/恶意 CSS，渲染进**发布给客户**的 PDF。金额仍由后端 `quotation_rules.calculate_totals` 计算（无法通过模板造假金额），但可演示员工106/污损正式报价；若 PDF 引擎（wkhtmltopdf）在渲染时执行 JS，还存在 SSRF/RCE 的有界风险。
 - **建议：** 对所有自由文本插值加 `|e`（Jinja autoescape），或在 `_validated_values` 写入时做 HTML 编码；固定文案保留原样。
 
 ### 🟠 F3 — `import_form` 跳过统一的上传安全校验
 - **位置：** `backend/.../services/demo_request_imports.py:229-243`
-- **证据：** 仅按文件名后缀（`.docx`/`.pdf`）分发，**无** `file_security.validate_and_scan`、无 magic-byte、无扩展名↔MIME 一致性校验。`contact_files`/`demo_artifacts`/`demo_reports`/`document_uploads` 都走了 `validate_and_scan`。
+- **证据：** 仅按文件名后缀（`.docx`/`.pdf`）分发，**无** `file_security.validate_and_scan`、无 magic-byte、无扩展名↔MIME 一致性校验。`contact_files`/`demo_artifacts`/`demo_reports`/`document_uploads` 都演示员工174 `validate_and_scan`。
 - **影响：** 内容只解析不持久化（无存储型 RCE/XSS），但破坏了"所有上传统一过安全门"的不变量，且与 F1 叠加放大 DoS。
 - **建议：** 把 `import_form` 也接入 `validate_and_scan`（至少 magic-byte + ClamAV）。
 
@@ -104,7 +104,7 @@
 - **证据：** `evaluationStatusOptions` 永远把 `current` 列为合法目标，故对已 `Testing` 的记录再 `updateEvaluationStatus(id,{status:'Testing'})` 会通过校验、`markProgress` 把 `lastProgressAt` 刷成 now、并追加历史——反复"推进到同状态"会清掉 ≥5 天的 `stalled` 标志并污染历史。
 - **建议：** 拒绝 `command.status === evaluation.status`，或对同状态做真正 no-op（跳过 `markProgress`）。
 
-### 🟡 F9 — `getDemoIdentity` 未知 id 静默回退管理员
+### 🟡 F9 — `getDemoIdentity` 未知 id 静默回退演示员工170
 - **位置：** `src/demo/identities.ts:27-29`（`?? DEMO_IDENTITIES[0]`，即 Manager 演示员工24/administrator）；`identities.test.ts:26` 把该行为固化。
 - **影响：** demo 身份切换里一个拼错的 id 静默获得**全员权限**。仅 demo/test 路径（Frappe 模式下 `identity-switch.ts` 直接抛错），但属静默权限升级隐患。
 - **建议：** 未知 id 直接抛错（对齐 `migrateLegacyUserId` 的 fail-loud）。
@@ -135,7 +135,7 @@
 - **证据：** `money.test.ts` 不覆盖负数、前导零、`"1.2"`vs`"1.20"`、概率 0/100/非整、DECIMAL(20,2) 上限——正是 F5 溜过的边界。`operations-rules` 的 `hasScheduleConflict` 不测跨午夜/畸形时间；`contracts.getContractRisk` 不测 `days===0`/非法日期。
 - **建议：** 补表驱动边界用例。
 
-### 🟡 F15 — 时区硬编码 + 合同风险边界
+### 🟡 F15 — 时区硬编码 + 演示员工116风险边界
 - **位置：** `src/domain/demo-lifecycle.ts:6-18`（`Asia/Shanghai`）；`src/domain/contracts.ts:11-16`
 - **证据：** `getContractRisk('2026-08-05','2026-08-05')` → `days:0`、band `'30d'`、label **"0 天内"**（语义不通）；带时间/偏移的非法 `endDate` → `NaN` → 静默归 `'normal'`。时区全仓硬编码北京（目标市场明确，大概率 by-design）。
 - **建议：** 加 `days===0 → '今天到期'` 分支；校验 `endDate` 为纯 `YYYY-MM-DD`；若计划出海，把时区改为 bootstrap 下发的租户配置。
@@ -160,7 +160,7 @@
 | 前端请求乱序/防抖 | `sessionRequestRevision` 单调递增 + 完成时比对；`loadSequence` 守卫；`clearTimeout`-before-`setTimeout` 防抖 |
 | 错误边界 | `api_endpoint` 把 `CrmApiException`→稳定码、`PermissionError`→401/403、`Exception`→rollback+log+泛化消息；`normalize_error_code` 收敛为 12 个公开码 |
 | 身份切换不可在生产发生 | Frappe 模式 `identity-switch.ts` 直接抛错 |
-| 密钥 | 无硬编码；`.env.*` 已忽略（仅 `.env.example` 无密钥）；`compose.yaml` 运行时生成 DB/管理员密码 |
+| 密钥 | 无硬编码；`.env.*` 已忽略（仅 `.env.example` 无密钥）；`compose.yaml` 运行时生成 DB/演示员工170密码 |
 | `parseFileName`（前端） | `.split(/[\\/]/).pop()` + 去控制字符，防御性剥离路径分量（文件字节来自后端，非文件名） |
 | `cents()` 分数处理 | 已执行验证：`"1.2"→120¢`、`"1.20"→120¢`、`"1"→100¢`，`padEnd` 正确 |
 | `readAllPages` 终止性 | total 与空页双重终止，无死循环（但无内存上限，见 F14） |
@@ -175,7 +175,7 @@
 | **P0（上线前）** | F1 DOCX zip-bomb 防护 · F2 PDF 模板转义 · F3 导入接入 `validate_and_scan` | 中 |
 | **P0（上线前）** | F5 `fromCents` 上界守卫 + 回归用例 · F7 后端 CI 门 | 小～中 |
 | **P1（首个迭代）** | F4 强制 `expected_modified` · F6 mock↔Frappe 契约测试 · F8 自转移 no-op | 中 |
-| **P2（治理/体验）** | F9/F10/F11/F12/F13 权限与隐私收敛 · F14 边界测试 · F15 时区与合同边界 · F16 仓库卫生 | 小～中 |
+| **P2（治理/体验）** | F9/F10/F11/F12/F13 权限与隐私收敛 · F14 边界测试 · F15 时区与演示员工116边界 · F16 仓库卫生 | 小～中 |
 
 ---
 

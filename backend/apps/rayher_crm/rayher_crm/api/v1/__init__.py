@@ -1,1 +1,1 @@
-"""Version 1 of the Rayher CRM API."""
+"""Version 1 of the QIHENG Demo CRM API."""

@@ -196,7 +196,7 @@ export interface ControlledDocument {
 
 export const opportunities: StrategyOpportunity[] = [
   {
-    id: 'OPP-003', accountId: 'ACC-002', siteId: 'SITE-004', title: 'HBM AOI 扩线项目', account: '示例企业044有限公司', site: '武汉二期', owner: 'Demo Staff 01', stage: 'quotation_sent', probabilityLevel: 'committed', amount: 32500000, poDate: '2026-09-18', updated: '2 天前', score: 86,
+    id: 'OPP-003', accountId: 'ACC-002', siteId: 'SITE-004', title: 'HBM AOI 扩线项目', account: '示例企业044有限公司', site: '演示员工26', owner: 'Demo Staff 01', stage: 'quotation_sent', probabilityLevel: 'committed', amount: 32500000, poDate: '2026-09-18', updated: '2 天前', score: 86,
     stageChangedAt: '2026-07-14T01:30:00Z', budgetApprovedOn: '', lostAtStage: '', lostAt: '', lostBy: '', internalValidation: null, liveBooking: null,
     stageHistory: [
       { id: 'OSH-OPP-003-2', from: 'rfq_validated', to: 'quotation_sent', source: 'event', event: 'quotation_published', referenceDoctype: '', referenceName: '', reason: '', actor: 'person002@crm.example.invalid', recordedAt: '2026-07-14T01:30:00Z', reachedAt: '2026-07-14T01:30:00Z', reachedAtBasis: 'recorded' },
@@ -207,14 +207,14 @@ export const opportunities: StrategyOpportunity[] = [
     redFlags: ['集团采购要求追加 5% 价格让步', '最终预算批复尚未完成'],
     informationNeeded: ['CFO 最终预算签批日期', '竞争对手最新服务承诺'],
     stakeholders: [
-      { name: '王志远', title: '设备副总经理', role: 'Economic Buyer', influence: 'High', stance: 'Neutral', coverage: 'Manager relationship' },
+      { name: '王志远', title: '设备演示员工113经理', role: 'Economic Buyer', influence: 'High', stance: 'Neutral', coverage: 'Manager relationship' },
       { name: '陈珂', title: '良率工程总监', role: 'Technical Buyer', influence: 'High', stance: 'Support', coverage: 'Weekly technical sync' },
       { name: '赵昕', title: 'AOI 工艺经理', role: 'Coach', influence: 'High', stance: 'Support', coverage: 'Direct access' },
       { name: '李敏', title: '采购经理', role: 'Procurement', influence: 'Medium', stance: 'Against', coverage: 'Needs executive visit' },
     ],
     actions: [
       { title: '准备最终商务让步边界', owner: 'Demo Staff 01', due: '07-22', status: 'Open' },
-      { title: '安排 VP 与设备副总会谈', owner: 'Demo Staff 06', due: '07-25', status: 'Open' },
+      { title: '安排 VP 与设备演示员工113会谈', owner: 'Demo Staff 06', due: '07-25', status: 'Open' },
       { title: '提交扩产交付资源确认', owner: 'Demo Staff 05', due: '07-19', status: 'Done' },
     ],
   },
@@ -233,7 +233,7 @@ export const opportunities: StrategyOpportunity[] = [
     actions: [{ title: '确认第二批样片物流', owner: 'Demo Staff 08', due: '07-21', status: 'Open' }, { title: '补齐 Economic Buyer 关系', owner: 'Demo Staff 06', due: '07-30', status: 'Open' }],
   },
   {
-    id: 'OPP-007', accountId: 'ACC-005', siteId: 'SITE-005', title: '先进封装外观检测', account: '示例企业040有限公司', site: '南通工厂', owner: 'Demo Staff 02', stage: 'qualified_opportunity', probabilityLevel: '', amount: 7600000, poDate: '2026-12-15', updated: '11 天前', score: 63,
+    id: 'OPP-007', accountId: 'ACC-005', siteId: 'SITE-005', title: '先进封装外观检测', account: '示例企业040有限公司', site: '演示员工12', owner: 'Demo Staff 02', stage: 'qualified_opportunity', probabilityLevel: '', amount: 7600000, poDate: '2026-12-15', updated: '11 天前', score: 63,
     stageChangedAt: '', budgetApprovedOn: '', lostAtStage: '', lostAt: '', lostBy: '', internalValidation: null, liveBooking: null,
     stageHistory: [
       { id: 'OSH-OPP-007-1', from: '', to: 'qualified_opportunity', source: 'migration', event: 'migration', referenceDoctype: '', referenceName: '', reason: '旧阶段 需求发现', actor: 'Administrator', recordedAt: '2026-07-01T02:00:00Z', reachedAt: '', reachedAtBasis: 'unknown' },
@@ -261,7 +261,7 @@ export const opportunities: StrategyOpportunity[] = [
     actions: [{ title: '安排交付启动会', owner: 'Demo Staff 02', due: '07-21', status: 'Open' }],
   },
   {
-    id: 'OPP-008', accountId: 'ACC-002', siteId: 'SITE-003', title: '武汉一厂 CD 量测扩产', account: '示例企业044有限公司', site: '武汉一厂', owner: 'Demo Staff 01', stage: 'internal_validation', probabilityLevel: 'pipeline', amount: 21600000, poDate: '2026-08-15', updated: '昨天', score: 78,
+    id: 'OPP-008', accountId: 'ACC-002', siteId: 'SITE-003', title: '演示员工25 CD 量测扩产', account: '示例企业044有限公司', site: '演示员工25', owner: 'Demo Staff 01', stage: 'internal_validation', probabilityLevel: 'pipeline', amount: 21600000, poDate: '2026-08-15', updated: '昨天', score: 78,
     stageChangedAt: '2026-07-20T01:00:00Z', budgetApprovedOn: '2026-07-06', lostAtStage: '', lostAt: '', lostBy: '', internalValidation: null, liveBooking: null,
     // Production was approved before the PO, so the approval created the Pending Booking BKG-003.
     stageHistory: [
@@ -278,7 +278,7 @@ export const opportunities: StrategyOpportunity[] = [
       { at: '2026-07-18 10:00', actor: 'Demo Staff 01', field: 'internalValidationRequested', from: '', to: 'CRM-VAL-00001' },
     ],
     probabilityHistory: [{ id: 'PLH-OPP-008-1', from: '', to: 'pipeline', reason: '', actor: 'Demo Staff 01', at: '2026-07-08T02:10:00Z' }],
-    strengths: ['武汉一厂已在量产线使用同型号设备', '客户扩产排期已锁定'], redFlags: ['客户 PO 预计 8 月中旬才能下达'], informationNeeded: ['客户 PO 下达日期'],
+    strengths: ['演示员工25已在量产线使用同型号设备', '客户扩产排期已锁定'], redFlags: ['客户 PO 预计 8 月中旬才能下达'], informationNeeded: ['客户 PO 下达日期'],
     stakeholders: [],
     actions: [{ title: '跟进客户 PO 下达进度', owner: 'Demo Staff 01', due: '07-28', status: 'Open' }],
   },
@@ -298,21 +298,21 @@ export const opportunityInternalValidations: Array<OpportunityInternalValidation
 
 export const demoProjects = [
   {
-    id: 'DEMO-2607-01', title: 'HBM TSV 缺陷检测', account: '示例企业044', opportunity: 'HBM AOI 扩线项目', owner: '演示员工23 / FAE', status: 'Analysis', progress: 72, tool: 'RAYHER AX-9000', objective: '验证微凸点、TSV 残留及边缘裂纹的检出能力', target: '2026-07-28', successFactors: ['Capture ≥ 96%', 'False Positive ≤ 1.5%', 'WPH ≥ 42'],
+    id: 'DEMO-2607-01', title: 'HBM TSV 缺陷检测', account: '示例企业044', opportunity: 'HBM AOI 扩线项目', owner: '演示员工23 / FAE', status: 'Analysis', progress: 72, tool: 'QIHENG Demo AX-9000', objective: '验证微凸点、TSV 残留及边缘裂纹的检出能力', target: '2026-07-28', successFactors: ['Capture ≥ 96%', 'False Positive ≤ 1.5%', 'WPH ≥ 42'],
     approvals: [{ label: 'Sales 提交', actor: 'Demo Staff 01', status: 'Done' }, { label: 'FAE Review', actor: '演示员工23', status: 'Done' }, { label: 'Manager Approval', actor: 'Demo Staff 06', status: 'Done' }, { label: 'Customer Review', actor: '待安排', status: 'Current' }],
     executions: [{ id: 'DEMO-2607-01-EXE-01', tool: 'AX9-LAB-02', window: '07-18 至 07-25', engineer: '演示员工23', status: 'Analysis' }],
     wafers: [{ id: 'WAF-HBM-031', lot: 'L260714-A', material: 'Silicon / Cu', diameter: '300 mm', thickness: '775 μm', status: 'Testing' }, { id: 'WAF-HBM-032', lot: 'L260714-A', material: 'Silicon / Cu', diameter: '300 mm', thickness: '775 μm', status: 'Stored' }],
     testRuns: [{ id: 'RUN-0718-A', date: '07-18', recipe: 'HBM-TSV-v4', capture: 96.8, falsePositive: 1.2, wph: 44, result: 'Pass' }, { id: 'RUN-0719-B', date: '07-19', recipe: 'HBM-EDGE-v2', capture: 95.9, falsePositive: 1.4, wph: 46, result: 'Review' }],
   },
   {
-    id: 'DEMO-2607-02', title: '12-inch AOI验证', account: '豪威科技', opportunity: 'CIS 缺陷检测平台', owner: '演示员工14 / FAE', status: 'Sample Received', progress: 38, tool: 'RAYHER VI-620', objective: '验证 CIS 表面颗粒、划伤与 Pattern 缺陷分类', target: '2026-08-06', successFactors: ['Capture ≥ 95%', 'False Positive ≤ 2.0%', '完成客户 Golden Sample 对齐'],
+    id: 'DEMO-2607-02', title: '12-inch AOI验证', account: '豪威科技', opportunity: 'CIS 缺陷检测平台', owner: '演示员工14 / FAE', status: 'Sample Received', progress: 38, tool: 'QIHENG Demo VI-620', objective: '验证 CIS 表面颗粒、划伤与 Pattern 缺陷分类', target: '2026-08-06', successFactors: ['Capture ≥ 95%', 'False Positive ≤ 2.0%', '完成客户 Golden Sample 对齐'],
     approvals: [{ label: 'Sales 提交', actor: 'Demo Staff 08', status: 'Done' }, { label: 'FAE Review', actor: '演示员工14', status: 'Done' }, { label: 'Manager Approval', actor: 'Demo Staff 06', status: 'Done' }, { label: 'Customer Review', actor: '待测试', status: 'Waiting' }],
     executions: [{ id: 'DEMO-2607-02-EXE-01', tool: 'VI6-DEMO-01', window: '07-24 至 08-02', engineer: '演示员工14', status: 'Scheduled' }],
     wafers: [{ id: 'WAF-12A-07', lot: 'CIS-2607', material: 'Silicon / PR', diameter: '300 mm', thickness: '725 μm', status: 'Received' }],
     testRuns: [{ id: 'RUN-PLANNED', date: '07-24', recipe: 'CIS-GOLDEN-v1', capture: 0, falsePositive: 0, wph: 0, result: 'Planned' }],
   },
   {
-    id: 'DEMO-2607-03', title: 'Fan-out RDL量产评估', account: '华天科技', opportunity: '先进封装量产线', owner: '演示员工23 / FAE', status: 'Sample Received', progress: 49, tool: 'RAYHER AX-7600', objective: '确认 RDL 断线及 Via 开口缺陷的量产检出窗口', target: '2026-08-18', successFactors: ['Capture ≥ 94%', 'WPH ≥ 36', '客户复核一致率 ≥ 90%'],
+    id: 'DEMO-2607-03', title: 'Fan-out RDL量产评估', account: '华天科技', opportunity: '先进封装量产线', owner: '演示员工23 / FAE', status: 'Sample Received', progress: 49, tool: 'QIHENG Demo AX-7600', objective: '确认 RDL 断线及 Via 开口缺陷的量产检出窗口', target: '2026-08-18', successFactors: ['Capture ≥ 94%', 'WPH ≥ 36', '客户复核一致率 ≥ 90%'],
     approvals: [{ label: 'Sales 提交', actor: 'Demo Staff 07', status: 'Done' }, { label: 'FAE Review', actor: '演示员工23', status: 'Done' }, { label: 'Manager Approval', actor: 'Demo Staff 06', status: 'Done' }, { label: 'Customer Review', actor: '样片追加中', status: 'Current' }],
     executions: [{ id: 'DEMO-2607-03-EXE-01', tool: 'AX7-DEMO-03', window: '07-15 至 07-18', engineer: '演示员工23', status: 'Scheduled' }],
     wafers: [{ id: 'WAF-FO-112', lot: 'FO-0720', material: 'Mold / Cu', diameter: '300 mm', thickness: '680 μm', status: 'More Sample Needed' }],
@@ -321,7 +321,7 @@ export const demoProjects = [
 ] as unknown as DemoProject[]
 
 export const installedTools = [
-  { id: 'TOOL-001', serial: 'AX9-CN-260018', model: 'AX-9000', account: '示例企业044', site: '武汉二期 Fab', location: 'Bay A3', status: 'Production', software: '6.4.2', targetSoftware: '6.4.2', warrantyEnd: '2027-03-31', serviceLevel: '24×7 Premium', health: 94, milestones: [{ label: 'FAT', date: '2026-01-18', state: 'Done' }, { label: 'Shipment', date: '2026-02-06', state: 'Done' }, { label: 'Installation', date: '2026-02-22', state: 'Done' }, { label: 'SAT', date: '2026-03-09', state: 'Done' }, { label: 'Warranty', date: '2027-03-31', state: 'Current' }], documents: ['User Manual AX9 v6.4', 'PM Procedure AX9 R3', 'Cybersecurity Note 2026-02'] },
+  { id: 'TOOL-001', serial: 'AX9-CN-260018', model: 'AX-9000', account: '示例企业044', site: '演示员工26 Fab', location: 'Bay A3', status: 'Production', software: '6.4.2', targetSoftware: '6.4.2', warrantyEnd: '2027-03-31', serviceLevel: '24×7 Premium', health: 94, milestones: [{ label: 'FAT', date: '2026-01-18', state: 'Done' }, { label: 'Shipment', date: '2026-02-06', state: 'Done' }, { label: 'Installation', date: '2026-02-22', state: 'Done' }, { label: 'SAT', date: '2026-03-09', state: 'Done' }, { label: 'Warranty', date: '2027-03-31', state: 'Current' }], documents: ['User Manual AX9 v6.4', 'PM Procedure AX9 R3', 'Cybersecurity Note 2026-02'] },
   { id: 'TOOL-002', serial: 'VI6-CN-250104', model: 'VI-620', account: '豪威科技', site: '上海量产中心', location: 'Line CIS-2', status: 'Upgrade Due', software: '5.8.1', targetSoftware: '6.0.0', warrantyEnd: '2026-09-12', serviceLevel: 'Business 8×5', health: 72, milestones: [{ label: 'FAT', date: '2025-07-11', state: 'Done' }, { label: 'Shipment', date: '2025-07-25', state: 'Done' }, { label: 'Installation', date: '2025-08-12', state: 'Done' }, { label: 'SAT', date: '2025-09-12', state: 'Done' }, { label: 'Warranty', date: '2026-09-12', state: 'Current' }], documents: ['VI-620 User Manual v5.8', 'Upgrade Procedure 6.0 Draft'] },
   { id: 'TOOL-003', serial: 'AX7-CN-260041', model: 'AX-7600', account: '华天科技', site: '南京先进封装基地', location: 'FOWLP Bay 6', status: 'Installation', software: '6.3.0', targetSoftware: '6.3.1', warrantyEnd: 'Pending SAT', serviceLevel: 'Installation Coverage', health: 81, milestones: [{ label: 'FAT', date: '2026-06-18', state: 'Done' }, { label: 'Shipment', date: '2026-06-29', state: 'Done' }, { label: 'Installation', date: '2026-07-18', state: 'Current' }, { label: 'SAT', date: '2026-07-29', state: 'Waiting' }, { label: 'Warranty', date: 'After SAT', state: 'Waiting' }], documents: ['AX-7600 Installation Guide R2', 'SAT Template CN-04'] },
 ] as unknown as InstalledTool[]

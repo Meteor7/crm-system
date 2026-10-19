@@ -1,9 +1,9 @@
 # CRM FAT E2E 真实 Staging 验收报告
 
-**测试日期**：2026-08-26  
-**系统**：PLANCK CRM / rayher_crm  
-**目标环境**：staging  真实 Frappe runtime  
-**构建版本**：`v15-staging-9ab287c`  
+**测试日期**：2026-08-26
+**系统**：PLANCK CRM / rayher_crm
+**目标环境**：staging  真实 Frappe runtime
+**构建版本**：`v15-staging-9ab287c`
 **报告结论**：**部分通过，暂不满足 Product 发布条件**
 
 ## 1. 证据口径
@@ -98,8 +98,8 @@ Engineer 对 Contact、Quotation、Visit 的拒绝符合权限边界；Account�
 
 ### 5.1 Manager 会话
 
-访问入口：`http://127.0.0.1:44174/login?redirect-to=%2Fcrm`  
-身份：`演示员工21 / Manager`  
+访问入口：`http://127.0.0.1:44174/login?redirect-to=%2Fcrm`
+身份：`演示员工21 / Manager`
 页面运行时：真实 Frappe runtime，非 Mock。
 
 | 功能 | 操作 | 结果 |

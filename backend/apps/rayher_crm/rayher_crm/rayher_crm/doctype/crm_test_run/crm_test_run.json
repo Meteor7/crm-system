@@ -13,6 +13,6 @@
     {"fieldname":"wph","fieldtype":"Float","label":"WPH"},
     {"fieldname":"summary","fieldtype":"Small Text","label":"Summary"}
   ],
-  "index_web_pages_for_search":0,"modified":"2026-09-20 00:00:00.000000","modified_by":"Administrator","module":"Rayher CRM","name":"CRM Test Run","naming_rule":"Expression","owner":"Administrator",
+  "index_web_pages_for_search":0,"modified":"2026-09-20 00:00:00.000000","modified_by":"Administrator","module":"QIHENG Demo CRM","name":"CRM Test Run","naming_rule":"Expression","owner":"Administrator",
   "permissions":[{"read":1,"role":"CRM Manager"},{"read":1,"role":"CRM Sales"},{"read":1,"role":"CRM Engineer"}],"sort_field":"modified","sort_order":"DESC","states":[]
 }

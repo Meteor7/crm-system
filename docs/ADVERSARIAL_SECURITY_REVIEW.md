@@ -1,4 +1,4 @@
-# 对抗性安全审查报告 — semiconductor-crm (Rayher CRM)
+# 对抗性安全审查报告 — semiconductor-crm (QIHENG Demo CRM)
 
 **审查日期：** 2026-08-06（第一轮）+ 2026-08-06（第二轮深审）
 **审查范围：** Vue 3 + TypeScript 前端（`src/`）与 Frappe/Python 后端（`backend/apps/rayher_crm/`）

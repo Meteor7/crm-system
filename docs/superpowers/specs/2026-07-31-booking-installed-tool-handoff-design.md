@@ -38,7 +38,7 @@
 - 状态：`Delivery Preparation`
 - 生命周期：FAT 为 Current；Shipment、Installation、SAT、Warranty 为 Waiting。
 - 保留来源 Booking、来源 Opportunity（如有）、客户、厂区、Sales Owner 与负责工程师。
-- 软件、固件、合同、现场位置等字段使用转出表单值或“待确认”。
+- 软件、固件、演示员工116、现场位置等字段使用转出表单值或“待确认”。
 
 ## Installed Tools 页面
 

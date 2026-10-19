@@ -1,1 +1,1 @@
-"""Rayher CRM HTTP API package."""
+"""QIHENG Demo CRM HTTP API package."""

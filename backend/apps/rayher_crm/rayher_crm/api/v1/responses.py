@@ -1,4 +1,4 @@
-"""Stable public response envelopes for Rayher CRM APIs."""
+"""Stable public response envelopes for QIHENG Demo CRM APIs."""
 
 from __future__ import annotations
 

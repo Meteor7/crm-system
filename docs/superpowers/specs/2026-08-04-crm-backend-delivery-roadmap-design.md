@@ -1,8 +1,8 @@
 # CRM 独立后端、数据库与 Ubuntu 发布路线设计
 
-**日期：** 2026-08-04  
-**状态：** 已完成设计讨论与自审，待用户审阅书面规格  
-**权威契约：** `docs/CRM-后端数据库对接契约-2026-08-04.md`  
+**日期：** 2026-08-04
+**状态：** 已完成设计讨论与自审，待用户审阅书面规格
+**权威契约：** `docs/CRM-后端数据库对接契约-2026-08-04.md`
 **Stage 1 执行规格：** `docs/CRM-后端对接契约-Stage1执行规格-2026-08-04.md`
 
 ## 1. 目标与边界
@@ -161,7 +161,7 @@ backend/
 - 行级范围在 Permission Query Condition/SQL 层实施，列表和详情使用同一规则；`teamOwners` 死字段需登记决策（契约 B2）。
 - MariaDB、Redis 和 Worker 不发布公网端口。文件上传强制 **MIME 魔数（非后缀）白名单、总大小上限、单请求份数上限、病毒扫描、上传归属断言**；文件下载按 fileId 重新校验账户范围并写审计，阻断 IDOR；主文件始终是 Frappe Private File（契约 B12）。
 - 非 Mock 构建禁止 `switchDemoIdentity()`（契约 B3）。
-- 通知必须落地服务端事件 DocType（`actor`/`category`/`recipient_user`/`route`/`created_at`/`read_at`），带服务端 ISO `created_at` 与解析后的 `recipient_user_id`，删除硬编码种子；frappe 模式禁用客户端 `createNotifyingApi` Proxy，通知不再由客户端伪造（契约 B14）。
+- 通知必须落地服务端事件 DocType（`actor`/`category`/`recipient_user`/`route`/`created_at`/`read_at`），带服务端 ISO `created_at` 与解析后的 `recipient_user_id`，删除硬编码种子；frappe 模式禁用客户端 `createNotifyingApi` Proxy，通知不再由客户端演示员工106（契约 B14）。
 - 发布的报告 PDF 由服务端从 canonical 数据重生成（或至少存输入数据 hash/签名），客户端字节仅供预览，水印服务端施加，PDF 须有文本层（契约 B13）。
 - 列表强制分页上限（建议 ≤200）并返回准确 `meta.total`；列表端点返回 `PageData` 包裹而非裸数组，**对应前端契约改造须在子项目 5 显式排期**（契约 B9）。
 - 关键历史和审计记录不可变或软删除。

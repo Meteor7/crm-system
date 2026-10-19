@@ -3,7 +3,7 @@
 ## 原型事实
 
 - 当前目录只有 `semiconductor-crm-demo.html` 与架构需求文档，不是 Frappe Bench，也没有现成前端工程或 Git 仓库。
-- 原型已验证 9 个页面和主要业务语义：经营看板、客户、关键人、商机/Booking、拜访、采购需求、Demo Request、产品验证、合同。
+- 原型已验证 9 个页面和主要业务语义：经营看板、客户、关键人、商机/Booking、拜访、采购需求、Demo Request、产品验证、演示员工116。
 - 原型把样式、数据和交互集中在单个 HTML，并用 `localStorage` 作为演示数据源；生产化文档明确禁止继续采用该结构。
 - 正式技术边界已确定为 Vue 3、TypeScript、Vite、Pinia、Vue Router `createMemoryHistory`、Element Plus 与 ECharts；根节点必须使用 `.semicrm-app` 隔离样式。
 - 文档要求深海军蓝 `#123B4A`、青绿 `#147C72`、暖白灰 `#F5F7F7`、正向黄绿 `#B8CC5A`、关注琥珀 `#D6A84B`，并覆盖 loading、empty、error、permission denied、partial/stale、disabled/read-only 和 success 状态。
@@ -33,12 +33,12 @@
 ### 合并表达
 
 - 关键人和 Site 合并进 Account 360，避免 MVP 阶段出现两个信息稀疏的独立页面。
-- 拜访、Demo/Evaluation 与合同以 Dashboard/Account 360 的摘要和风险入口表达，保留后续模块关系。
+- 拜访、Demo/Evaluation 与演示员工116以 Dashboard/Account 360 的摘要和风险入口表达，保留后续模块关系。
 
 ### 暂缓
 
 - Frappe 后端、DocType、真实登录/权限、队列任务、RSS 抓取和数据库持久化。
-- Demo 工程评估/经理审批、Test Run 录入、合同文件、Booking 写入等完整写流程。
+- Demo 工程评估/经理审批、Test Run 录入、演示员工116文件、Booking 写入等完整写流程。
 - 独立 SPA 登录、客户门户、外部消息发送、全文抓取与 AI 自动创建销售任务。
 
 ## 信息架构与路由

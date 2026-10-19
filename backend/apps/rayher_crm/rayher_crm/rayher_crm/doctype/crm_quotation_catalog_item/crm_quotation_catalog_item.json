@@ -7,7 +7,7 @@
     {"fieldname": "parent_item", "fieldtype": "Link", "label": "Parent", "options": "CRM Quotation Catalog Item", "in_list_view": 1},
     {"fieldname": "catalog_key", "fieldtype": "Data", "label": "Catalog Key", "reqd": 1, "read_only": 1, "unique": 1}
   ],
-  "index_web_pages_for_search": 0, "modified": "2026-08-18 00:00:00.000000", "modified_by": "Administrator", "module": "Rayher CRM", "name": "CRM Quotation Catalog Item", "naming_rule": "Expression", "owner": "Administrator",
+  "index_web_pages_for_search": 0, "modified": "2026-08-18 00:00:00.000000", "modified_by": "Administrator", "module": "QIHENG Demo CRM", "name": "CRM Quotation Catalog Item", "naming_rule": "Expression", "owner": "Administrator",
   "permissions": [{"read": 1, "role": "CRM Manager"}, {"read": 1, "role": "CRM Sales"}],
   "sort_field": "creation", "sort_order": "ASC", "states": []
 }

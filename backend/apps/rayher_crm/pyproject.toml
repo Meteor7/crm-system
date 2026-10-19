@@ -1,9 +1,9 @@
 [project]
 name = "rayher_crm"
 authors = [
-    { name = "Rayher Semiconductor" }
+    { name = "QIHENG Demo Semiconductor" }
 ]
-description = "Independent Rayher CRM application for Frappe and ERPNext"
+description = "Independent QIHENG Demo CRM application for Frappe and ERPNext"
 requires-python = ">=3.10"
 dynamic = ["version"]
 dependencies = [

@@ -65,7 +65,7 @@ Cookie 跨站和前端地址分叉。模板、生产取值和重建步骤见 `de
 - Nginx：恢复上一份配置，`sudo nginx -t` 通过后 `sudo systemctl reload nginx`。Compose 和数据卷
   不受影响。
 - `FORWARDED_ALLOW_IPS`：随版本回滚即可。它只决定 cookie 是否带 `Secure`，不涉及数据。
-- 任何情况下都不要执行 `docker compose down --volumes`。
+- 任何情况下演示员工177要执行 `docker compose down --volumes`。
 
 ## 给测试服加 HTTPS（未实施）
 

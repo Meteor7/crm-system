@@ -21,7 +21,7 @@ const labels: Record<string, LocalizedPair> = {
   'Analysis': { 'zh-CN': '分析中', 'en-US': 'Analysis' },
   'Superseded': { 'zh-CN': '已替代', 'en-US': 'Superseded' },
   Active: { 'zh-CN': '启用', 'en-US': 'Active' },
-  'Left Company': { 'zh-CN': '已离职', 'en-US': 'Left company' },
+  'Left Company': { 'zh-CN': '已演示员工166', 'en-US': 'Left company' },
   Archived: { 'zh-CN': '已归档', 'en-US': 'Archived' },
   Strong: { 'zh-CN': '强', 'en-US': 'Strong' },
   Developing: { 'zh-CN': '发展中', 'en-US': 'Developing' },
@@ -112,7 +112,7 @@ const labels: Record<string, LocalizedPair> = {
 
 const contactStatusLabels: Record<string, LocalizedPair> = {
   Active: { 'zh-CN': '在职', 'en-US': 'Active' },
-  'Left Company': { 'zh-CN': '已离职', 'en-US': 'Left company' },
+  'Left Company': { 'zh-CN': '已演示员工166', 'en-US': 'Left company' },
   Archived: { 'zh-CN': '已归档', 'en-US': 'Archived' },
 }
 
@@ -144,7 +144,7 @@ export function salesUnits(currentLocale: Locale) {
 }
 
 export function recordTypeLabel(value: string, currentLocale: Locale) {
-  const chinese: Record<string, string> = { Account: '客户', Contact: '联系人', Opportunity: '商机', Deal: '商机', Booking: '订单', 'Demo Request': 'Demo 申请', Requirement: '需求', Visit: '拜访', Evaluation: '评估', Contract: '合同' }
+  const chinese: Record<string, string> = { Account: '客户', Contact: '联系人', Opportunity: '商机', Deal: '商机', Booking: '订单', 'Demo Request': 'Demo 申请', Requirement: '需求', Visit: '拜访', Evaluation: '评估', Contract: '演示员工116' }
   return currentLocale === 'zh-CN' ? chinese[value] ?? value : value
 }
 

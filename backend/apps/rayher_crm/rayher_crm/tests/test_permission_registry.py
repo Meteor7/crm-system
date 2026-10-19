@@ -51,8 +51,8 @@ class TestPermissionRegistry(FrappeTestCase):
 
     def test_a_second_app_module_cannot_escape_the_inventory(self):
         # Both inventories and the module-keyed DocShare guards cover one module.
-        with self.assertRaisesRegex(ValueError, "single Rayher CRM module"):
-            registry.validate_source_registry(modules=["Rayher CRM", "CRM Territory"])
+        with self.assertRaisesRegex(ValueError, "single QIHENG Demo CRM module"):
+            registry.validate_source_registry(modules=["QIHENG Demo CRM", "CRM Territory"])
         original_get_all = frappe.get_all
 
         def with_second_module(doctype, *args, **kwargs):
@@ -60,7 +60,7 @@ class TestPermissionRegistry(FrappeTestCase):
             return [*rows, "CRM Territory"] if doctype == "Module Def" else rows
 
         with patch.object(frappe, "get_all", side_effect=with_second_module):
-            with self.assertRaisesRegex(ValueError, "single Rayher CRM module"):
+            with self.assertRaisesRegex(ValueError, "single QIHENG Demo CRM module"):
                 registry.validate_permission_registry()
 
     def test_changed_child_table_boundary_fails_the_gate(self):
@@ -170,7 +170,7 @@ class TestPermissionRegistry(FrappeTestCase):
 
         def with_custom_object(doctype, *args, **kwargs):
             rows = original_get_all(doctype, *args, **kwargs)
-            if doctype == "DocType" and kwargs.get("filters") == {"module": "Rayher CRM"}:
+            if doctype == "DocType" and kwargs.get("filters") == {"module": "QIHENG Demo CRM"}:
                 return [*rows, "CRM Unregistered Site Report"]
             return rows
 

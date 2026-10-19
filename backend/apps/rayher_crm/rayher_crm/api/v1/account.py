@@ -1,4 +1,4 @@
-"""Authenticated account-management endpoints for Rayher CRM."""
+"""Authenticated account-management endpoints for QIHENG Demo CRM."""
 
 from __future__ import annotations
 

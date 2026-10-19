@@ -1,4 +1,4 @@
-# RAYHER CRM P0/P1 Backend Implementation Plan
+# QIHENG Demo CRM P0/P1 Backend Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
@@ -81,7 +81,7 @@ Expected: 镜像 manifest 包含 `linux/amd64`；端口无监听记录。
 
 - [ ] **Step 2: Generate the standard Frappe app scaffold**
 
-Run a disposable container from the pinned image, execute `bench new-app rayher_crm --no-git`, copy only the generated app into `backend/apps/rayher_crm`, then remove the disposable container. App metadata is fixed to title `Rayher CRM`、publisher `Rayher`、email `person009@legacy.example.invalid`、license `MIT`。
+Run a disposable container from the pinned image, execute `bench new-app rayher_crm --no-git`, copy only the generated app into `backend/apps/rayher_crm`, then remove the disposable container. App metadata is fixed to title `QIHENG Demo CRM`、publisher `QIHENG Demo`、email `person009@legacy.example.invalid`、license `MIT`。
 
 Expected: `backend/apps/rayher_crm/pyproject.toml` and `backend/apps/rayher_crm/rayher_crm/hooks.py` exist.
 
@@ -135,8 +135,8 @@ def test_required_roles_exist():
     assert expected <= set(frappe.get_all("Role", pluck="name"))
 
 def test_customer_code_cannot_change():
-    customer = make_customer("RAYHER-2026-001")
-    customer.rayher_customer_code = "RAYHER-2026-002"
+    customer = make_customer("QIHENG Demo-2026-001")
+    customer.rayher_customer_code = "QIHENG Demo-2026-002"
     with pytest.raises(frappe.ValidationError):
         customer.save()
 ```

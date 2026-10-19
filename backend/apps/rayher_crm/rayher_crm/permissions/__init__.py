@@ -1,1 +1,1 @@
-"""Role and row-scope enforcement for Rayher CRM."""
+"""Role and row-scope enforcement for QIHENG Demo CRM."""

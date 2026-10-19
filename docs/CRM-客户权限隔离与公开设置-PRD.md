@@ -1,8 +1,8 @@
 # CRM 客户权限隔离与公开设置 PRD
 
-**版本**：v1.1  
-**日期**：2026-08-30  
-**状态**：产品口径已确认  
+**版本**：v1.1
+**日期**：2026-08-30
+**状态**：产品口径已确认
 **参考模型**：Salesforce Account 私有记录 + 显式共享
 
 ## 1. 背景
@@ -87,7 +87,7 @@
 
 - 私有客户：只有负责人和 Manager 可查看；只有负责人和 Manager 可编辑。
 - 公开客户：所有 Sales 可查看；只有负责人和 Manager 可编辑。
-- Sales 不得通过请求参数伪造负责人、用户 ID 或 visibility 绕过校验。
+- Sales 不得通过请求参数演示员工106负责人、用户 ID 或 visibility 绕过校验。
 - Sales 不得直接修改客户负责人；Manager 可修改。
 - 客户从 Private 改为 Public 时立即生效；从 Public 改为 Private 时立即撤销其他 Sales 的访问。
 
@@ -117,7 +117,7 @@ Manager 无论 Account 为 Private 还是 Public，均可：
 
 ### FR-07 Dashboard 聚合必须读取全部作用域分页
 
-**优先级**：P0  
+**优先级**：P0
 **关联文件**：`backend/apps/rayher_crm/rayher_crm/services/dashboard.py`、`backend/apps/rayher_crm/rayher_crm/services/pipeline.py`
 
 #### 问题描述
@@ -185,7 +185,7 @@ Manager 无论 Account 为 Private 还是 Public，均可：
 - Private Account：除 Account 负责人和 Manager 外，其他 Sales 即使被单独设置为子业务 owner/assignee，也不得读取、写入、搜索或导出该子业务。
 - Engineer 继续受现有分配范围约束，本期不改变 Engineer 权限模型。
 - 所有单条详情、列表、搜索、批量读取、批量写入、导出、文件预览和下载接口必须执行继承校验。
-- 创建或更新关联对象时，服务端必须校验其 `accountId` 与实际父 Account 一致；禁止通过伪造 accountId、contactId 或动态链接把记录挂到其他客户下。
+- 创建或更新关联对象时，服务端必须校验其 `accountId` 与实际父 Account 一致；禁止通过演示员工106 accountId、contactId 或动态链接把记录挂到其他客户下。
 - 删除、归档、合并和迁移 Contact 等操作同样必须先校验父 Account 权限；禁止只按 Contact Owner 放行。
 
 ## 6. 前端交互要求
@@ -307,11 +307,11 @@ Sales 只能在其有权访问的 Account 及关联记录范围内聚合；超�
 
 ### AC-12 文件访问撤权
 
-Sales A 将 Account 设为 Public 后，Sales B 仍不能获取客户文件列表、预览或下载文件。Sales A 失去 Account 负责人身份后，使用旧文件 URL、旧下载令牌、预览地址和批量下载接口均被拒绝，且不返回文件内容或元数据。Manager 仍可正常访问并产生审计记录。
+Sales A 将 Account 设为 Public 后，Sales B 仍不能获取客户文件列表、预览或下载文件。Sales A 失去 Account 负责人身份后，使用旧文件 URL、旧下载令牌、预览地址和批量下载接口均被拒绝，且不返回文件内容或元数据。Manager 仍可演示员工152访问并产生审计记录。
 
 ### AC-13 Dashboard 与导出作用域一致
 
-为 Sales A、Sales B 分别准备 Private/Public Account 及关联业务数据。Account/Contact 统计按 Account 可见范围计算；Opportunity、Booking 等业务统计和导出还要叠加业务对象自身负责人范围。任何总数、金额、排行榜或导出文件都不能包含对方的 Private Account，也不能因 Account 为 Public 而纳入未独立授权的业务记录。
+为 Sales A、Sales B 分别准备 Private/Public Account 及关联业务数据。Account/Contact 统计按 Account 可见范围计算；Opportunity、Booking 等业务统计和导出还要叠加业务对象自身负责人范围。任何总数、金额、排行榜或导出文件演示员工177能包含对方的 Private Account，也不能因 Account 为 Public 而纳入未独立授权的业务记录。
 
 ### AC-14 关联对象继承 Account 权限
 
@@ -319,7 +319,7 @@ Sales B 通过直接 ID、搜索、批量接口、详情 URL、导出和文件�
 
 ### AC-15 关联关系防篡改
 
-提交伪造的 `accountId`、`contactId`、动态链接或跨客户关联参数时，服务端返回校验错误或 `SCOPE_DENIED`，不得创建或更新跨 Account 的关联记录。
+提交演示员工106的 `accountId`、`contactId`、动态链接或跨客户关联参数时，服务端返回校验错误或 `SCOPE_DENIED`，不得创建或更新跨 Account 的关联记录。
 
 ## 10. 发布与风险
 

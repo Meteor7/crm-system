@@ -51,7 +51,7 @@
 
 - 三个视图共享同一份 `listInstalledTools` 结果。
 - 现有搜索、客户、状态和工程师筛选继续生效，并同时作用于两个看板和档案列表。
-- 新项目周期看板直接使用 `InstalledToolDto.milestones`，不新增前端伪造阶段数据。
+- 新项目周期看板直接使用 `InstalledToolDto.milestones`，不新增前端演示员工106阶段数据。
 - 当前详情中的本地档案补充数据和 fallback 规则保持不变。
 
 ## 空状态与错误处理

@@ -1,10 +1,10 @@
-# RAYHER Salesforce 壳层视觉优化 Implementation Plan
+# QIHENG Demo Salesforce 壳层视觉优化 Implementation Plan
 
-> **状态：已取消。** 不执行 Salesforce 配色；最终只实现原型 RAYHER 三色图形与 `RAYHER` 主名称，保留“客户经营系统”副标题、原配色和页面结构。
+> **状态：已取消。** 不执行 Salesforce 配色；最终只实现原型 QIHENG Demo 三色图形与 `QIHENG Demo` 主名称，保留“客户经营系统”副标题、原配色和页面结构。
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** 在完全保留当前 CRM 页面结构和业务行为的前提下，将品牌替换为 RAYHER，并应用 Salesforce 深蓝、亮蓝、冷灰和白色容器视觉语言。
+**Goal:** 在完全保留当前 CRM 页面结构和业务行为的前提下，将品牌替换为 QIHENG Demo，并应用 Salesforce 深蓝、亮蓝、冷灰和白色容器视觉语言。
 
 **Architecture:** 品牌结构和壳层交互样式集中修改 `AppShell.vue`，全局颜色、边框和阴影集中修改设计令牌与基础样式。业务页面、路由、权限、API、图表数据和导航结构保持不变。
 
@@ -13,14 +13,14 @@
 ## Global Constraints
 
 - 保留当前固定左侧导航、浅色顶部栏和全部业务页面布局。
-- 品牌主字标为 `RAYHER`，副标题为 `SEMICONDUCTOR CRM`。
+- 品牌主字标为 `QIHENG Demo`，副标题为 `SEMICONDUCTOR CRM`。
 - 使用 `#032D60`、`#0176D3`、`#1B96FF` 和 `#F3F5F7` 作为壳层视觉色。
 - 不新增顶部对象标签栏，不移动导航入口，不新增图片、字体或第三方依赖。
 - 只运行 AppShell、设计令牌和本轮受影响页面的定向验证。
 
 ---
 
-### Task 1: RAYHER 品牌身份
+### Task 1: QIHENG Demo 品牌身份
 
 **Files:**
 - Modify: `src/app/AppShell.vue`
@@ -34,7 +34,7 @@
 - [ ] **Step 1: Write the failing test**
 
 ```ts
-it('uses the approved RAYHER identity from the prototype', async () => {
+it('uses the approved QIHENG Demo identity from the prototype', async () => {
   const router = createAppRouter()
   await router.push('/dashboard')
   await router.isReady()
@@ -42,7 +42,7 @@ it('uses the approved RAYHER identity from the prototype', async () => {
     global: { plugins: [createPinia(), router], stubs: { CrmChart: { template: '<div />' } } },
   })
 
-  expect(wrapper.get('[data-testid="brand-name"]').text()).toBe('RAYHER')
+  expect(wrapper.get('[data-testid="brand-name"]').text()).toBe('QIHENG Demo')
   expect(wrapper.get('[data-testid="brand-subtitle"]').text()).toBe('SEMICONDUCTOR CRM')
   expect(wrapper.get('[data-testid="rayher-mark"]').findAll('i')).toHaveLength(3)
   expect(wrapper.text()).not.toContain('SEMICORE')
@@ -53,7 +53,7 @@ it('uses the approved RAYHER identity from the prototype', async () => {
 
 Run: `pnpm test src/app/AppShell.test.ts`
 
-Expected: FAIL because the current shell still renders `SEMICORE` and has no RAYHER test IDs.
+Expected: FAIL because the current shell still renders `SEMICORE` and has no QIHENG Demo test IDs.
 
 - [ ] **Step 3: Write minimal implementation**
 
@@ -62,12 +62,12 @@ Replace the CPU icon block with:
 ```vue
 <span class="brand-mark" data-testid="rayher-mark" aria-hidden="true"><i /><i /><i /></span>
 <div>
-  <strong data-testid="brand-name">RAYHER</strong>
+  <strong data-testid="brand-name">QIHENG Demo</strong>
   <span data-testid="brand-subtitle">SEMICONDUCTOR CRM</span>
 </div>
 ```
 
-Remove the unused `Cpu` import and style the three tiles with the prototype lime, teal, and pale colors. Change `index.html` title to `Rayher Semiconductor CRM · 客户经营`.
+Remove the unused `Cpu` import and style the three tiles with the prototype lime, teal, and pale colors. Change `index.html` title to `QIHENG Demo Semiconductor CRM · 客户经营`.
 
 - [ ] **Step 4: Run test to verify it passes**
 
@@ -143,4 +143,4 @@ Expected: exit code 0 with updated AppShell and design-system assets.
 
 - [ ] **Step 3: Browser verification**
 
-Open `http://127.0.0.1:4173/dashboard` and verify RAYHER branding, unchanged navigation structure, Salesforce palette, desktop layout, mobile navigation and zero console errors.
+Open `http://127.0.0.1:4173/dashboard` and verify QIHENG Demo branding, unchanged navigation structure, Salesforce palette, desktop layout, mobile navigation and zero console errors.

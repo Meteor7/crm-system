@@ -71,7 +71,7 @@ describe('Mock customer and opportunity operations', () => {
     await flushPromises()
 
     await wrapper.get('[data-testid="new-account"]').trigger('click')
-    await wrapper.get('[aria-label="客户全称"]').setValue('示例企业037有限公司')
+    await wrapper.get('[aria-label="演示员工125"]').setValue('示例企业037有限公司')
     await wrapper.get('[aria-label="客户简称"]').setValue('Demo Fab')
     await wrapper.get('[aria-label="客户业务领域"]').setValue('__custom_account_segment__')
     await wrapper.get('[aria-label="客户业务领域自定义"]').setValue('Power Semiconductor')
@@ -100,7 +100,7 @@ describe('Mock customer and opportunity operations', () => {
     const region = wrapper.get('[aria-label="客户区域"]')
     expect((region.element as HTMLSelectElement).value).toBe('East China')
     expect(region.findAll('option').map((option) => option.text())).toEqual(['华东', '华南', '华西', '华北', '华中', '＋自定义区域'])
-    await wrapper.get('[aria-label="客户全称"]').setValue('示例企业006有限公司')
+    await wrapper.get('[aria-label="演示员工125"]').setValue('示例企业006有限公司')
     await wrapper.get('[aria-label="客户简称"]').setValue('NE Fab')
     await region.setValue('__custom_account_segment__')
     await wrapper.get('[aria-label="客户区域自定义"]').setValue('Northeast China')
@@ -125,7 +125,7 @@ describe('Mock customer and opportunity operations', () => {
     await flushPromises()
 
     await wrapper.get('[data-testid="new-account"]').trigger('click')
-    await wrapper.get('[aria-label="客户全称"]').setValue('示例企业005有限公司')
+    await wrapper.get('[aria-label="演示员工125"]').setValue('示例企业005有限公司')
     await wrapper.get('[aria-label="客户简称"]').setValue('Shanghai Test Fab')
     await wrapper.get('[data-add-site]').trigger('click')
     await wrapper.get('[aria-label="新厂区 1 名称"]').setValue('上海一厂')
@@ -164,7 +164,7 @@ describe('Mock customer and opportunity operations', () => {
     await flushPromises()
 
     await wrapper.get('[data-testid="new-account"]').trigger('click')
-    await wrapper.get('[aria-label="客户全称"]').setValue('示例企业041有限公司')
+    await wrapper.get('[aria-label="演示员工125"]').setValue('示例企业041有限公司')
     await wrapper.get('[aria-label="客户简称"]').setValue('Retry Fab')
     await wrapper.get('[data-add-site]').trigger('click')
     await wrapper.get('[data-add-site]').trigger('click')

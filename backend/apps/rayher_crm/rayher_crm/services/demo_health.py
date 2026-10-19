@@ -80,9 +80,9 @@ def derive_demo_health(
         return health("stalled", f"已连续 {days_since_progress} 天无有效进展")
     if last_progress is None:
         # No progress was ever recorded, so none is claimed for today.
-        return health("healthy", "正常推进")
+        return health("healthy", "演示员工152推进")
     if days_since_progress == 0:
         return health("healthy", "今天有进展")
     if days_since_progress <= 2:
         return health("healthy", f"{days_since_progress} 天内有进展")
-    return health("healthy", "正常推进")
+    return health("healthy", "演示员工152推进")

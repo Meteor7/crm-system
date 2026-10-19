@@ -17,7 +17,7 @@ Replaced/missing hooks include the write guards in
 `doc_events` (Customer, Contact, Lead, Address and User `before_save`, Customer,
 Contact, Lead, Address and Customer Group `before_rename`, User `after_rename`,
 and File `before_insert`/`before_validate`) and the private file content deletion hook. The
-app must keep its single `Rayher CRM` module, which both inventories and the
+app must keep its single `QIHENG Demo CRM` module, which both inventories and the
 module-keyed DocShare guards cover.
 
 On an installed site the gate also checks the hooks Frappe actually uses after

@@ -222,12 +222,12 @@ class TestNativeLists(FrappeTestCase):
             return row.name
 
         owner_rows = {
-            "DefaultValue": child("DefaultValue", self.owner, "defaults", defkey="company", defvalue="Rayher"),
+            "DefaultValue": child("DefaultValue", self.owner, "defaults", defkey="company", defvalue="QIHENG Demo"),
             "User Email": child("User Email", self.owner, "user_emails", email_account="Native List Mailbox", email_id=self.owner),
             "User Social Login": child("User Social Login", self.owner, "social_logins", provider="frappe", username="native-list-owner"),
-            "Block Module": child("Block Module", self.owner, "block_modules", module="Rayher CRM"),
+            "Block Module": child("Block Module", self.owner, "block_modules", module="QIHENG Demo CRM"),
         }
-        own_default = child("DefaultValue", self.other_sales, "defaults", defkey="company", defvalue="Rayher")
+        own_default = child("DefaultValue", self.other_sales, "defaults", defkey="company", defvalue="QIHENG Demo")
         # A system default belongs to no user.
         frappe.defaults.set_global_default("crm_native_list_probe", frappe.generate_hash(length=8))
 

@@ -324,7 +324,7 @@ add_header Strict-Transport-Security "max-age=31536000" always;
 双击根 CA `.cer` 文件，选择“安装证书” -> “本地计算机” -> “将所有证书放入
 以下存储” -> “受信任的根证书颁发机构”。域控环境优先使用组策略统一下发。
 
-管理员 PowerShell：
+演示员工170 PowerShell：
 
 ```powershell
 Import-Certificate `
@@ -368,7 +368,7 @@ curl -sI https://<域名>/api/method/ping | grep -i '^set-cookie: sid='
 - HTTPS 证书主机名和 SAN 匹配；
 - 浏览器没有证书警告；
 - 浏览器地址栏没有应用端口；
-- API 返回正常，Guest 进入登录边界；
+- API 返回演示员工152，Guest 进入登录边界；
 - 登录、文件上传/下载和 WebSocket 使用 HTTPS/WSS；
 - 经 HTTPS 返回的 `Set-Cookie: sid=` 带 `Secure`。CRM 依赖 Compose backend 的
   `FORWARDED_ALLOW_IPS`，见 `deploy/nginx/README.md`；

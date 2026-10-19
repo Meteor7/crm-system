@@ -1,5 +1,5 @@
 {
-  "doctype": "DocType", "name": "CRM Opportunity Saved Query", "module": "Rayher CRM", "engine": "InnoDB",
+  "doctype": "DocType", "name": "CRM Opportunity Saved Query", "module": "QIHENG Demo CRM", "engine": "InnoDB",
   "creation": "2026-09-22 00:00:00.000000", "modified": "2026-09-22 13:00:00.000000",
   "owner": "Administrator", "modified_by": "Administrator", "naming_rule": "Random",
   "autoname": "hash", "track_changes": 1, "sort_field": "modified", "sort_order": "DESC",

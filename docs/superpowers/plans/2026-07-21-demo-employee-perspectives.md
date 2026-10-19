@@ -84,7 +84,7 @@ Expected: PASS.
 
 - [ ] **Step 1: Write failing interaction tests**
 
-断言管理员可打开五项身份菜单；切换 FAE 后管理驾驶舱消失、Service Calendar 和 Procedure Run 保留，并从 `/dashboard` 自动跳到第一个允许页面；切换 Sales User 后 Procedure Run 不显示。
+断言演示员工170可打开五项身份菜单；切换 FAE 后管理驾驶舱消失、Service Calendar 和 Procedure Run 保留，并从 `/dashboard` 自动跳到第一个允许页面；切换 Sales User 后 Procedure Run 不显示。
 
 - [ ] **Step 2: Run test to verify it fails**
 

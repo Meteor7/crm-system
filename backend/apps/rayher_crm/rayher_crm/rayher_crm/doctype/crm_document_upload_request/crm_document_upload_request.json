@@ -26,6 +26,6 @@
     {"fieldname":"published_document","fieldtype":"Link","label":"Published Document","options":"CRM Controlled Document","read_only":1}
   ],
   "index_web_pages_for_search": 0, "modified": "2026-08-12 00:00:00.000000", "modified_by": "Administrator",
-  "module": "Rayher CRM", "name": "CRM Document Upload Request", "naming_rule": "Expression", "owner": "Administrator",
+  "module": "QIHENG Demo CRM", "name": "CRM Document Upload Request", "naming_rule": "Expression", "owner": "Administrator",
   "permissions": [{"read":1,"create":1,"write":1,"role":"CRM Manager"}], "sort_field":"creation", "sort_order":"DESC", "states":[]
 }

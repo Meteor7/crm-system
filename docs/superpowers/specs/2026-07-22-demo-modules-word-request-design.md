@@ -1,7 +1,7 @@
 # Demo 与验证三模块及 Word Request 设计
 
-**日期：** 2026-07-22  
-**状态：** 已确认设计，等待实施计划  
+**日期：** 2026-07-22
+**状态：** 已确认设计，等待实施计划
 **范围：** 仅修改当前 Vue / Mock Demo；不修改 Frappe 后端、DocType、后端状态机或生产权限
 
 ## 1. 目标
@@ -45,7 +45,7 @@ flowchart LR
     Save --> Word["生成并下载 Word"]
     Save --> Overview["Demo 流程总览"]
     Save --> Test["Demo Test"]
-    Overview --> Boss["Boss / 管理员查看完整详情"]
+    Overview --> Boss["Boss / 演示员工170查看完整详情"]
     Overview --> Staff["其他身份查看业务摘要"]
     Word --> Engineer["FAE / 设备工程师查看技术申请"]
 ```

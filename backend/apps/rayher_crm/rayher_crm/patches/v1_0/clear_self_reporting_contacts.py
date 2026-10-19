@@ -1,6 +1,6 @@
 import frappe
 
-LOG_TITLE = "Rayher CRM reporting lines put right"
+LOG_TITLE = "QIHENG Demo CRM reporting lines put right"
 
 
 def _account_of(name: str) -> str | None:

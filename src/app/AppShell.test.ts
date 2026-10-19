@@ -28,7 +28,7 @@ describe('AppShell', () => {
     const logo = wrapper.get('[data-testid="brand-logo"]')
     expect(logo.attributes('src')).toBe('/brand/qiheng-logo.svg')
     expect(logo.attributes('alt')).toBe('栖衡 CRM')
-    expect(wrapper.text()).not.toContain('RAYHER')
+    expect(wrapper.text()).not.toContain('QIHENG Demo')
     expect(wrapper.text()).not.toContain('客户经营系统')
     expect(wrapper.text()).not.toContain('SEMICORE')
   })

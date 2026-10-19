@@ -17,7 +17,7 @@ docker exec rayher-crm-stage1-production-backend-1 bench --site 203.0.113.32 cle
 docker exec rayher-crm-stage1-production-backend-1 bench --site 203.0.113.32 execute frappe.get_hooks --kwargs '{"hook":"before_write_file"}'
 ```
 
-第二条命令必须返回包含 `rayher_crm.security.attachment_gate.reject_file_write` 的列表；同时确认站点 `crm_attachment_uploads_paused=true`，有效 `before_request` 包含 `reject_upload_request`。随后在正常生产模式下验证公开/私有 save_file 拒绝且无文件或记录残留，再跑角色冒烟，全部满足才恢复有限放行。验证有效钩子时不得用 developer_mode 或进程内替换钩子代替生产缓存路径。若更换 backend 容器地址，刷新 frontend 的上游解析并检查 HTTPS 健康和 Cookie。部署步骤缺失、钩子未生效或复测失败均停止放行。
+第二条命令必须返回包含 `rayher_crm.security.attachment_gate.reject_file_write` 的列表；同时确认站点 `crm_attachment_uploads_paused=true`，有效 `before_request` 包含 `reject_upload_request`。随后在演示员工152生产模式下验证公开/私有 save_file 拒绝且无文件或记录残留，再跑角色冒烟，全部满足才恢复有限放行。验证有效钩子时不得用 developer_mode 或进程内替换钩子代替生产缓存路径。若更换 backend 容器地址，刷新 frontend 的上游解析并检查 HTTPS 健康和 Cookie。部署步骤缺失、钩子未生效或复测失败均停止放行。
 
 ## 原 P1 复核与修正记录
 
@@ -73,7 +73,7 @@ Compose 使用原版 `releases/3088723-main-20261007/backend/compose.yaml` 加�
 
 | 顺序 | 工作 | 跟踪 | 验收与开放条件 |
 | --- | --- | --- | --- |
-| 1 | 扫描超限拒绝、整次上传截止时间、Office 部件限制 | #243、#244、PR #245 | 最新提交完整 CI 和 review 通过；部署后真实 clamd 超限拒绝；超时无记录/文件残留；正常大型 Office 成功。先修复，后恢复附件功能。 |
+| 1 | 扫描超限拒绝、整次上传截止时间、Office 部件限制 | #243、#244、PR #245 | 最新提交完整 CI 和 review 通过；部署后真实 clamd 超限拒绝；超时无记录/文件残留；演示员工152大型 Office 成功。先修复，后恢复附件功能。 |
 | 2 | 普通私有客户附件权限 | #220 | 客户移交后原负责人不能从原生 API、列表及私有 URL 读到文件；确认后才考虑开放 Desk 附件。 |
 | 3 | RFQ 搜索与分页截断 | #58 | 1501 条及以上数据验证总数、搜索、跨页完整性；批量导入或接近 1000 条前完成。当前生产 RFQ 为 0。 |
 | 4 | PDF/CSV 原件误标 PPTX、审批轨迹文案 | 新增上线后清单、#186 | 按实际文件格式展示按钮/提示；轨迹对应真实审批状态。 |

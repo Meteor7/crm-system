@@ -1,1 +1,1 @@
-"""Security boundary helpers for Rayher CRM."""
+"""Security boundary helpers for QIHENG Demo CRM."""

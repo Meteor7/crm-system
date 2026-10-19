@@ -12,7 +12,7 @@ web
 
 ## Product Purpose
 
-客户、商机、Demo 验证、报价、Booking、合同与经营看板。当前交付目标是可运行、可展示的面试作品集。
+客户、商机、Demo 验证、报价、Booking、演示员工116与经营看板。当前交付目标是可运行、可展示的面试作品集。
 
 ## Operating Context
 

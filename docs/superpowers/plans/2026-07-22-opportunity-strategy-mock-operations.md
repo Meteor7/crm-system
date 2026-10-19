@@ -105,7 +105,7 @@ Expected: PASS。
 
 - [ ] **Step 1: 写失败测试**
 
-覆盖以下行为：管理员新增客户；Sales User 新增本人客户；设备工程师被拒绝；管理员新增/编辑商机；新增、编辑、删除 Stakeholder；新增、完成、删除 Action；每次商机子项操作追加 Change History；路由级重复读取仍返回变更后的数据。
+覆盖以下行为：演示员工170新增客户；Sales User 新增本人客户；设备工程师被拒绝；演示员工170新增/编辑商机；新增、编辑、删除 Stakeholder；新增、完成、删除 Action；每次商机子项操作追加 Change History；路由级重复读取仍返回变更后的数据。
 
 - [ ] **Step 2: 运行测试确认失败**
 
@@ -182,7 +182,7 @@ Expected: PASS。
 
 - [ ] **Step 1: 写失败测试**
 
-验证管理员看到 `data-testid="new-account"`，提交名称、简称、Segment、地区、城市和 Owner 后列表出现新客户；Management Viewer 与 Equipment Engineer 不显示按钮。
+验证演示员工170看到 `data-testid="new-account"`，提交名称、简称、Segment、地区、城市和 Owner 后列表出现新客户；Management Viewer 与 Equipment Engineer 不显示按钮。
 
 - [ ] **Step 2: 运行测试确认失败**
 

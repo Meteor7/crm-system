@@ -1,9 +1,9 @@
 # CRM FAT 全量 QA / Playwright E2E 总结
 
-**测试日期**：2026-08-27  
-**系统**：PLANCK CRM / `rayher_crm`  
-**环境**：staging，真实 Frappe runtime  
-**入口**：`http://203.0.113.58:4174`（本轮 Playwright 通过 staging 会话访问）  
+**测试日期**：2026-08-27
+**系统**：PLANCK CRM / `rayher_crm`
+**环境**：staging，真实 Frappe runtime
+**入口**：`http://203.0.113.58:4174`（本轮 Playwright 通过 staging 会话访问）
 **结论**：**部分通过，核心业务链通过；不满足 Product 发布前全量放行条件**
 
 ## 1. 证据范围与口径
@@ -55,7 +55,7 @@
 
 ### 3.1 Manager：报价审批与发布
 
-**页面**：Quotation 列表及 `PK20260827-A2` 详情页。  
+**页面**：Quotation 列表及 `PK20260827-A2` 详情页。
 **身份证据**：页面右上角显示 `演示员工21 / Manager`。
 
 验证内容：
@@ -71,7 +71,7 @@
 
 ### 3.2 Manager：Booking 新建与确认
 
-**页面**：Booking 列表、新增 Booking、编辑 Booking。  
+**页面**：Booking 列表、新增 Booking、编辑 Booking。
 **业务类型**：Upsell / Equipment。
 
 实际操作：

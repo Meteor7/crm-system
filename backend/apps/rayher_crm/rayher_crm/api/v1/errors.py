@@ -233,10 +233,10 @@ def api_endpoint(function):
                 if is_too_long(failure):
                     # The value may be one a service put together and not one the user typed, and
                     # then the service is what has to change: keep it where a developer looks.
-                    frappe.log_error(title="Rayher CRM value too long on save")
+                    frappe.log_error(title="QIHENG Demo CRM value too long on save")
                 frappe.local.response["http_status_code"] = HTTP_STATUS_BY_CODE[refused.code]
                 return error_response(refused)
-            frappe.log_error(title="Rayher CRM API failure")
+            frappe.log_error(title="QIHENG Demo CRM API failure")
             error = CrmApiException("INTERNAL_ERROR", "The request could not be completed.", retryable=True)
             frappe.local.response["http_status_code"] = 500
             return error_response(error)

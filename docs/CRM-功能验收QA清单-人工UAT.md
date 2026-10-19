@@ -8,7 +8,7 @@
 | 测试角色 | CRM Manager、CRM Sales、CRM Engineer |
 | 证据要求 | 实际业务 ID、Request ID、截图、下载文件名 |
 
-> 失败时记录“角色、URL、业务 ID、操作、预期、实际、Request ID”。本清单只验收正常用户路径，不包含伪造 Frappe 通用 REST 请求的攻击用例。
+> 失败时记录“角色、URL、业务 ID、操作、预期、实际、Request ID”。本清单只验收演示员工152用户路径，不包含演示员工106 Frappe 通用 REST 请求的攻击用例。
 
 ## 0. 安全环境与质量门
 
@@ -57,12 +57,12 @@
 | 3.4 | Engineer | 确认可做 | Request 进入 Manager Approval；商机仍为“技术确认” | ☐ |
 | 3.5 | Manager | 批准并创建 Evaluation | 唯一创建 Evaluation；商机自动进入“Demo验证” | ☐ |
 | 3.6 | Engineer | 完成报告、Completed Test Run，并推进 Accepted | 商机自动进入“预算审批” | ☐ |
-| 3.7 | Sales/Engineer | 尝试从 Opportunity 手工推进自动门禁 | 页面无入口；正常接口稳定拒绝 | ☐ |
+| 3.7 | Sales/Engineer | 尝试从 Opportunity 手工推进自动门禁 | 页面无入口；演示员工152接口稳定拒绝 | ☐ |
 | 3.8 | Manager | 回退商机，填写原因 | 仅允许合法目标，生成审计；无理由、旧版本或活动 Request 冲突时拒绝 | ☐ |
 | 3.9 | Sales/Engineer | 查看同一商机 | 无 Manager 回退按钮 | ☐ |
 | 3.10 | 全部 | 查看 Opportunity 详情 | 只显示阶段、策略、Action、Stakeholder、商业信息；无 Demo 内容板块 | ☐ |
 
-## 4. Sales 正常流程
+## 4. Sales 演示员工152流程
 
 | # | 模块 | 操作 | 预期 | 结果 |
 | --- | --- | --- | --- | --- |
@@ -71,7 +71,7 @@
 | 4.3 | Lead | New→Working→Qualified→Converted | 生成/复用正确 Account、Contact、初始 Opportunity | ☐ |
 | 4.4 | Visit | Planned→Visited→Minutes Submitted→Manager Reviewed | Opportunity 关联保留；纪要后的行动字段不可清空 | ☐ |
 | 4.5 | Visit | 指定行动负责人并完成行动 | 负责人具备实际处理能力，通知与状态一致 | ☐ |
-| 4.6 | Quotation | 创建、自动保存、版本、预览、发布、Accepted | 金额/日期错误为 422；版本冲突 409；下载文件正常 | ☐ |
+| 4.6 | Quotation | 创建、自动保存、版本、预览、发布、Accepted | 金额/日期错误为 422；版本冲突 409；下载文件演示员工152 | ☐ |
 | 4.7 | Opportunity | 预算审批→报价→采购流程→Won | 只允许顺序推进；Rejected/Won 不被定时过期覆盖 | ☐ |
 | 4.8 | Booking | 从 Won Opportunity 创建 Confirmed Booking | 同一商机只允许一个非 Cancelled Booking；重复为 409 | ☐ |
 

@@ -71,7 +71,7 @@ semiconductor-crm:boss-dashboard-subscriptions:v1:<user-id>
 
 - 入口只在 `Management Viewer` 经营看板出现。
 - 订阅仅改变展示优先级，不改变数据权限、聚合口径或后端查询。
-- `CRM Administrator` 现有首页行为不扩大；本功能不将管理员自动视为 Boss。
+- `CRM Administrator` 现有首页行为不扩大；本功能不将演示员工170自动视为 Boss。
 - 订阅设置是浏览器级 Demo 能力，不宣称账号同步或正式后端持久化。
 
 ## 测试与验收

@@ -61,13 +61,13 @@
 | F6 | mock↔Frappe 行为契约缺失 | 🟡 **部分修复** | 新增 `server-id-contract.test.ts`（纯类型层）+ `frappe-frontend-contract.ps1`（bundle 禁词/资产存在性）；**仍无**同一输入灌双实现比对的行为契约 |
 | F7 | 后端 pytest 无门禁 | 🟡 **部分修复** | `run-backend-tests.ps1`（强制 `.test` 站点）+ 6 个 HTTP 验收 ps1 已就位；仓库内仍无 CI workflow，门禁靠人执行 |
 | F8 | Evaluation 自转移重置停滞计时 | ❌ 未修复 | `evaluationStatusOptions` 仍把 `current` 列为合法目标，`mock-adapter` 无同状态拒绝 |
-| F9 | demo 身份未知 id 回退管理员 | ❌ 未修复 | `identities.ts:28` 仍为 `?? DEMO_IDENTITIES[0]` |
+| F9 | demo 身份未知 id 回退演示员工170 | ❌ 未修复 | `identities.ts:28` 仍为 `?? DEMO_IDENTITIES[0]` |
 | F10 | 销售可硬删 Site、引用时 500 | ❌ 未修复 | `delete_site` 仍仅 `account:write` + `ignore_permissions` 硬删 Address，无 Link 引用守卫（仅清 Contact.custom_crm_site） |
 | F11 | bootstrap 全员目录含 `user.bio` | ❌ 未修复 | `_personnel_directory` 仍下发 `bio` |
 | F12 | Restricted 文档 checksum 泄露 | ❌ 未修复 | `read_only_views.py:81` 仍返回 `content_hash` |
 | F13 | `get_bootstrap` 缺 `@api_endpoint` | ❌ 未修复 | 仍无装饰器（`get_health` Guest 开放为有意设计，可接受） |
 | F14 | money/边界测试不足 | 🟡 略改善 | `money.test.ts` 4→5 例，仍未覆盖负数/前导零/上限 |
-| F15 | 合同 0 天/非法日期边界 | ❌ 未修复 | `contracts.ts` 无 `days===0` 文案分支 |
+| F15 | 演示员工116 0 天/非法日期边界 | ❌ 未修复 | `contracts.ts` 无 `days===0` 文案分支 |
 | F16 | 仓库卫生 | ✅ 基本修复 | `.gitignore` 已含 `_archive/`、`.codex-docker-config/`、`artifacts/` 等；根目录原型 HTML/调研 MD 仍在 |
 
 ---
@@ -81,10 +81,10 @@
 - **攻击场景：** 任一 Sales 上传构造的 Office 文件 → 触发容器内解析 → 若命中转换器漏洞则直接落在应用容器（可读站点 `site_config.json` 的 DB 凭据）。另每次调用冷启动 soffice（约 0.5–2s），无并发信号量 → 并发上传可做 CPU 放大。
 - **建议：** 把转换挪到独立的一次性容器或至少 `--convert-to` 专用 profile + ulimit；加进程级并发上限（如 semaphore=1）；长期盯 LibreOffice 安全公告并固定版本。
 
-### 🟡 N2 — TipRay 头部前缀可被任意上传者伪造，绕过 magic-byte/一致性校验（Low-Medium）
+### 🟡 N2 — TipRay 头部前缀可被任意上传者演示员工106，绕过 magic-byte/一致性校验（Low-Medium）
 
 - **位置：** `file_security.validate_and_scan`：`content.startswith(TIPRAY_HEADER)` 时直接信任 `claimed_mime`。
-- **影响：** 任何认证用户在文件前拼 15 字节 `%TSD-Header-###%` 即可把**任意二进制**以 `.pdf` 名义存入 contact_files / demo_artifacts / RFQ 原件（ClamAV 仍会扫，投递带 `nosniff`+`attachment`，故非直接 RCE/XSS）；受控文档发布路径不受影响（有 hash 校验）。RFQ 预览路径对 TipRay 显式拒绝，证明设计者知晓此格式——但**信任判定基于 15 字节前缀，任何人都可伪造**。
+- **影响：** 任何认证用户在文件前拼 15 字节 `%TSD-Header-###%` 即可把**任意二进制**以 `.pdf` 名义存入 contact_files / demo_artifacts / RFQ 原件（ClamAV 仍会扫，投递带 `nosniff`+`attachment`，故非直接 RCE/XSS）；受控文档发布路径不受影响（有 hash 校验）。RFQ 预览路径对 TipRay 显式拒绝，证明设计者知晓此格式——但**信任判定基于 15 字节前缀，任何人都可演示员工106**。
 - **建议：** 若需支持 DLP 加密件，改为可校验的判定（如全文熵值 + 尾部结构），或仅允许 Manager 角色上传 TipRay 件，其余一律拒绝。
 
 ### 🟡 N3 — 上传预算放宽到 100MiB×10 文件 + 210m body 的可用性放大（Low-Medium）

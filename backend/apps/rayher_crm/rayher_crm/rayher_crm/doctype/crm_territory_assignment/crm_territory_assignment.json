@@ -1,7 +1,7 @@
 {
   "doctype": "DocType",
   "name": "CRM Territory Assignment",
-  "module": "Rayher CRM",
+  "module": "QIHENG Demo CRM",
   "engine": "InnoDB",
   "creation": "2026-10-05 12:00:00.000000",
   "modified": "2026-10-05 12:00:00.000000",

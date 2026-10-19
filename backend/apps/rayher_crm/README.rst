@@ -1,7 +1,7 @@
-Rayher CRM
+QIHENG Demo CRM
 ==========
 
-Independent CRM custom application for the Rayher Frappe and ERPNext stack.
+Independent CRM custom application for the QIHENG Demo Frappe and ERPNext stack.
 
 The application owns CRM roles, permissions, DocTypes, API endpoints,
 migrations, audit events, notifications, and private-file authorization. It

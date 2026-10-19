@@ -30,8 +30,8 @@ from rayher_crm.services.contacts import create_contact
 from rayher_crm.services.file_security import PDF_SCRIPT_MESSAGE, PDF_UNREADABLE_MESSAGE, validate_and_scan
 from rayher_crm.services.visits import create_visit
 
-FAILURE_LOG = {"method": "Rayher CRM API failure"}
-TOO_LONG_LOG = {"method": "Rayher CRM value too long on save"}
+FAILURE_LOG = {"method": "QIHENG Demo CRM API failure"}
+TOO_LONG_LOG = {"method": "QIHENG Demo CRM value too long on save"}
 PDF = "application/pdf"
 
 

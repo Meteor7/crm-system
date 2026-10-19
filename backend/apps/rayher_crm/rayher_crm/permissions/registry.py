@@ -14,7 +14,7 @@ from pathlib import Path
 
 
 APP_ROOT = Path(__file__).parents[1]
-APP_MODULE = "Rayher CRM"
+APP_MODULE = "QIHENG Demo CRM"
 CRM_ROLES = ("CRM Manager", "CRM Sales", "CRM Engineer")
 PERMISSIONS = (
     "select", "read", "write", "create", "delete", "submit", "cancel", "amend", "import",

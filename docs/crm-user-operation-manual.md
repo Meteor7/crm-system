@@ -81,7 +81,7 @@ Semiconductor CRM 用于连接半导体设备销售、Demo 验证、设备交付
 - **筛选条件：** 各列表页可以按客户、负责人、状态、业务领域或城市筛选。
 - **立即刷新：** 数据提示为 `PARTIAL / STALE` 时，点击“立即刷新”重新读取。
 - **Request ID：** 页面发生加载或权限错误时，用于问题追踪。
-- **状态颜色：** 绿色通常表示完成或正常，黄色表示待处理或风险，红色表示失败、取消或拒绝。
+- **状态颜色：** 绿色通常表示完成或演示员工152，黄色表示待处理或风险，红色表示失败、取消或拒绝。
 
 ## 3. 角色与权限
 
@@ -117,7 +117,7 @@ Semiconductor CRM 用于连接半导体设备销售、Demo 验证、设备交付
 | 查看 Installed Tools | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 | 查看 Document Center | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 
-> Boss 不是系统管理员。Boss 主要负责跨团队经营查看、Demo 最终审批和客户报告发布；经营数据和绝大多数业务主数据为只读。
+> Boss 不是系统演示员工170。Boss 主要负责跨团队经营查看、Demo 最终审批和客户报告发布；经营数据和绝大多数业务主数据为只读。
 
 ## 4. 核心业务闭环
 
@@ -157,7 +157,7 @@ flowchart LR
 
 ```mermaid
 flowchart LR
-    A["Won / Booking / 合同"] --> B["Installed Tool 台账"]
+    A["Won / Booking / 演示员工116"] --> B["Installed Tool 台账"]
     B --> C["FAT"]
     C --> D["Shipment"]
     D --> E["Installation"]
@@ -258,7 +258,7 @@ Calendar 从上游业务模块读取日期。上游记录修改后，Calendar �
 
 **功能目的**
 
-以客户为中心查看 Account 360，包括 Site、关键人、采购需求、Opportunity、Booking、拜访、Demo、合同和行动。
+以客户为中心查看 Account 360，包括 Site、关键人、采购需求、Opportunity、Booking、拜访、Demo、演示员工116和行动。
 
 **查看客户**
 
@@ -277,7 +277,7 @@ Calendar 从上游业务模块读取日期。上游记录修改后，Calendar �
 - 采购需求与行动；
 - 拜访与下一步；
 - Demo / Wafer Test；
-- 合同。
+- 演示员工116。
 
 **新增客户（Sales／Sales Manager）**
 
@@ -638,7 +638,7 @@ Installed Tools 是客户现场已交付设备台账，不是公司库存或固�
 - FAT、Shipment、Installation、SAT 和 Warranty 里程碑；
 - 软件、固件、操作系统和配置；
 - 版本与配置变更历史；
-- 质保、PM 和服务合同；
+- 质保、PM 和服务演示员工116；
 - 适用 Current 文档；
 - 维修和服务记录。
 
@@ -742,7 +742,7 @@ Content Access 为 Direct 时，正式环境应由服务端生成受控输出，
 - 编辑 Opportunity / Booking；
 - 修改 Test Run；
 - 代替 Sales Manager 审核拜访；
-- 使用 CRM Administrator 身份完成正常管理工作。
+- 使用 CRM Administrator 身份完成演示员工152管理工作。
 
 ### 9.2 Sales Manager
 

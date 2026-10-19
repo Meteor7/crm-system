@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Replace the desktop sidebar's temporary RAYHER identity with the approved horizontal QIHENG DEMO logo.
+**Goal:** Replace the desktop sidebar's temporary QIHENG Demo identity with the approved horizontal QIHENG DEMO logo.
 
 **Architecture:** Store the approved PNG under `public/brand` so Vite serves it from a stable root-relative URL. Keep the change inside `AppShell.vue`, replacing only the brand markup and its obsolete CSS. Lock the behavior with the existing AppShell component test.
 
@@ -32,11 +32,11 @@
 - [x] **Step 1: Write the failing test**
 
 ```ts
-it('uses the approved QIHENG DEMO logo without the retired RAYHER label', async () => {
+it('uses the approved QIHENG DEMO logo without the retired QIHENG Demo label', async () => {
   const logo = wrapper.get('[data-testid="planck-logo"]')
   expect(logo.attributes('src')).toBe('/brand/planck-logo-standard.png')
   expect(logo.attributes('alt')).toBe('QIHENG DEMO')
-  expect(wrapper.text()).not.toContain('RAYHER')
+  expect(wrapper.text()).not.toContain('QIHENG Demo')
   expect(wrapper.text()).not.toContain('客户经营系统')
 })
 ```

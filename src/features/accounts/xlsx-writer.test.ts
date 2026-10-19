@@ -87,7 +87,7 @@ describe('xlsx writer', () => {
     })
     expect(new DOMParser().parseFromString(relationships, 'application/xml').getElementsByTagName('Relationship')).toHaveLength(6)
     expect(workbook).toContain('客户全貌 Overview')
-    expect(workbook).toContain('Demo与合同 Demo')
+    expect(workbook).toContain('Demo与演示员工116 Demo')
     expect(styles).toContain('formatCode="¥#,##0"')
     expect(overview).toContain('<pane ySplit="3"')
     expect(overview).toContain('<mergeCell ref="A1:H2"/>')

@@ -469,7 +469,7 @@ async function decideRequest(decision: ApprovalDecision) {
 function requestStatusLabel(status: ApprovalRequest['status']) {
   const labels: Record<ApprovalRequest['status'], string> = {
     'Manager Review': locale.value === 'en-US' ? 'Manager review' : '经理审核',
-    'Document Manager Review': locale.value === 'en-US' ? 'Document manager review' : '文档管理员审核',
+    'Document Manager Review': locale.value === 'en-US' ? 'Document manager review' : '文档演示员工170审核',
     Approved: locale.value === 'en-US' ? 'Approved' : '已批准',
     'More Info Required': locale.value === 'en-US' ? 'More information required' : '待补充信息',
     Rejected: locale.value === 'en-US' ? 'Rejected' : '已拒绝',
@@ -712,7 +712,7 @@ onBeforeUnmount(() => {
               <ol class="stage-rail">
                 <li class="is-done"><i /><span>{{ locale === 'en-US' ? 'Submitted' : '已提交' }}</span></li>
                 <li class="is-current"><i /><span>{{ locale === 'en-US' ? 'Manager review' : '经理审核' }}</span></li>
-                <li><i /><span>{{ locale === 'en-US' ? 'Document manager review' : '文档管理员审核' }}</span></li>
+                <li><i /><span>{{ locale === 'en-US' ? 'Document manager review' : '文档演示员工170审核' }}</span></li>
               </ol>
             </section>
 
@@ -1017,7 +1017,7 @@ onBeforeUnmount(() => {
                   <ol class="stage-rail request-stage">
                     <li class="is-done"><i /><span>{{ locale === 'en-US' ? 'Submitted' : '已提交' }}</span></li>
                     <li class="is-current"><i /><span>{{ locale === 'en-US' ? 'Manager review' : '经理审核' }}</span></li>
-                    <li><i /><span>{{ locale === 'en-US' ? 'Document admin' : '文档管理员' }}</span></li>
+                    <li><i /><span>{{ locale === 'en-US' ? 'Document admin' : '文档演示员工170' }}</span></li>
                   </ol>
                   <dl class="document-facts">
                     <div><dt>{{ locale === 'en-US' ? 'Requester' : '申请人' }}</dt><dd>{{ currentUserName }}</dd></div>
@@ -1096,7 +1096,7 @@ onBeforeUnmount(() => {
         <div class="upload-form-grid">
           <label class="wide">{{ locale === 'en-US' ? 'Title' : '标题' }}<input v-model="uploadForm.title" required></label>
           <label>{{ locale === 'en-US' ? 'Archive section' : '归档板块' }}<select v-model="uploadForm.category"><option value="Technical">{{ locale === 'en-US' ? 'Technical documents' : '技术文档' }}</option><option value="Commercial">{{ locale === 'en-US' ? 'Commercial documents' : '商务文档' }}</option></select></label>
-          <label>{{ locale === 'en-US' ? 'Document type' : '文档类型' }}<input v-model="uploadForm.documentType" :placeholder="locale === 'en-US' ? 'Contract / equipment manual' : '合同 / 设备说明书'" required></label>
+          <label>{{ locale === 'en-US' ? 'Document type' : '文档类型' }}<input v-model="uploadForm.documentType" :placeholder="locale === 'en-US' ? 'Contract / equipment manual' : '演示员工116 / 设备说明书'" required></label>
           <label>{{ locale === 'en-US' ? 'Access mode' : '访问方式' }}<select v-model="uploadForm.accessMode"><option value="Direct">{{ locale === 'en-US' ? 'Direct access' : '直接访问' }}</option><option value="Request">{{ locale === 'en-US' ? 'Request access' : '申请后访问' }}</option></select></label>
           <label>{{ locale === 'en-US' ? 'Confidentiality' : '密级' }}<select v-model="uploadForm.confidentiality"><option v-for="level in ['Internal', 'Confidential', 'Restricted']" :key="level" :value="level">{{ documentLabel(level) }}</option></select></label>
           <label>{{ locale === 'en-US' ? 'Product / equipment' : '产品 / 设备' }}<input v-model="uploadForm.product" :placeholder="locale === 'en-US' ? 'General' : '通用'"></label>

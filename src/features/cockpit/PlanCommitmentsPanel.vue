@@ -66,7 +66,7 @@ const records = (row: typeof rows.value[number]) => row.item.commitment.conflict
         <th>{{ row.name }}</th><td>{{ metricText(row.item.scheduled, locale) }}</td>
         <td>{{ metricText(row.item.commitment, locale) }}</td><td>{{ metricText(row.item.target, locale) }}</td>
         <td>
-          <p v-if="row.item.commitment.conflicts?.length" data-commitment-conflict>{{ copy('Multiple records were preserved after a user merge. Ask an administrator to reconcile the records below before editing; the total remains unknown.', '用户合并后保留了多条承诺。请管理员核对下列记录后再编辑；合计暂时无法确定。') }}</p>
+          <p v-if="row.item.commitment.conflicts?.length" data-commitment-conflict>{{ copy('Multiple records were preserved after a user merge. Ask an administrator to reconcile the records below before editing; the total remains unknown.', '用户合并后保留了多条承诺。请演示员工170核对下列记录后再编辑；合计暂时无法确定。') }}</p>
           <button v-else-if="row.canEdit" :disabled="saving" data-commitment-edit @click="open(row)">{{ copy('Edit commitment', '填写承诺') }}</button>
           <div v-for="record in records(row)" :key="record.id" :data-commitment-record="record.id">
             <p v-if="row.item.commitment.conflicts?.length">{{ copy('Record', '记录') }}: {{ record.id }} · {{ copy('Count', '数量') }}: {{ record.value }}</p>

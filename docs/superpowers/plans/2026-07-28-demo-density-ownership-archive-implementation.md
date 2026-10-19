@@ -49,7 +49,7 @@ it('rejects empty and team placeholder engineers', () => {
 
 - [ ] **Step 2: Run the domain test and verify failure**
 
-Run: `pnpm.cmd test src/domain/demo-archive.test.ts`  
+Run: `pnpm.cmd test src/domain/demo-archive.test.ts`
 Expected: FAIL because `demo-archive.ts` does not exist.
 
 - [ ] **Step 3: Add explicit workflow owner and equipment fields**
@@ -82,7 +82,7 @@ export function groupDemoArchives(items: DemoWorkflowDto[], mode: DemoArchiveGro
 
 - [ ] **Step 5: Run the domain test**
 
-Run: `pnpm.cmd test src/domain/demo-archive.test.ts`  
+Run: `pnpm.cmd test src/domain/demo-archive.test.ts`
 Expected: PASS.
 
 ---
@@ -122,7 +122,7 @@ expect(created.data.salesOwner).toBe('Demo Staff 01')
 
 - [ ] **Step 2: Verify the tests fail**
 
-Run: `pnpm.cmd test src/demo/demo-repository.test.ts src/api/mock-adapter.test.ts`  
+Run: `pnpm.cmd test src/demo/demo-repository.test.ts src/api/mock-adapter.test.ts`
 Expected: FAIL on version and owner assertions.
 
 - [ ] **Step 3: Save both owners at Request creation**
@@ -165,7 +165,7 @@ const ownerChange = request.engineerOwner === command.engineerOwner.trim()
 
 - [ ] **Step 6: Run repository and adapter tests**
 
-Run: `pnpm.cmd test src/demo/demo-repository.test.ts src/api/mock-adapter.test.ts src/features/demo-requests/DemoRequestForm.test.ts`  
+Run: `pnpm.cmd test src/demo/demo-repository.test.ts src/api/mock-adapter.test.ts src/features/demo-requests/DemoRequestForm.test.ts`
 Expected: PASS.
 
 ---
@@ -192,7 +192,7 @@ expect((await manager.listDemoWorkflows()).data.length).toBeGreaterThan((await s
 
 - [ ] **Step 2: Run tests and verify owner-scope failure**
 
-Run: `pnpm.cmd test src/api/mock-adapter.test.ts`  
+Run: `pnpm.cmd test src/api/mock-adapter.test.ts`
 Expected: FAIL because Demo scope is still account-based.
 
 - [ ] **Step 3: Add a Demo-specific scope predicate**
@@ -224,7 +224,7 @@ The Frappe adapter maps the same fields from the returned Request/Evaluation dat
 
 - [ ] **Step 5: Run Mock and Frappe adapter tests**
 
-Run: `pnpm.cmd test src/api/mock-adapter.test.ts src/api/frappe-adapter.test.ts src/pages/permission-revocation.test.ts`  
+Run: `pnpm.cmd test src/api/mock-adapter.test.ts src/api/frappe-adapter.test.ts src/pages/permission-revocation.test.ts`
 Expected: PASS.
 
 ---
@@ -254,7 +254,7 @@ Verify selecting `FAE Leo` only retains cards whose `engineerOwner` is `FAE Leo`
 
 - [ ] **Step 2: Run the page test and verify failure**
 
-Run: `pnpm.cmd test src/pages/DemoWorkflowPage.test.ts`  
+Run: `pnpm.cmd test src/pages/DemoWorkflowPage.test.ts`
 Expected: FAIL because only one owner and no stage-scroll marker exist.
 
 - [ ] **Step 3: Render both owners and compact the card**
@@ -281,7 +281,7 @@ Add `salesOwner` and `engineerOwner` props/events. Generate options from the per
 
 - [ ] **Step 5: Run board tests**
 
-Run: `pnpm.cmd test src/pages/DemoWorkflowPage.test.ts`  
+Run: `pnpm.cmd test src/pages/DemoWorkflowPage.test.ts`
 Expected: PASS.
 
 ---
@@ -316,7 +316,7 @@ Also assert archive cards contain only `Accepted` or `Rejected`, and page text d
 
 - [ ] **Step 2: Run page tests and verify failure**
 
-Run: `pnpm.cmd test src/pages/DemoWorkflowPage.test.ts src/pages/seven-page-workspace.test.ts`  
+Run: `pnpm.cmd test src/pages/DemoWorkflowPage.test.ts src/pages/seven-page-workspace.test.ts`
 Expected: FAIL because the archive surface does not exist.
 
 - [ ] **Step 3: Extract the existing detail into `DemoArchiveDetail.vue`**
@@ -344,7 +344,7 @@ Keep `surface`, filters, `groupBy`, `view`, and `focus` in route query state. Op
 
 - [ ] **Step 6: Run page and workspace tests**
 
-Run: `pnpm.cmd test src/pages/DemoWorkflowPage.test.ts src/pages/seven-page-workspace.test.ts src/pages/first-demo-completion.test.ts`  
+Run: `pnpm.cmd test src/pages/DemoWorkflowPage.test.ts src/pages/seven-page-workspace.test.ts src/pages/first-demo-completion.test.ts`
 Expected: All Demo assertions pass; any unrelated pre-existing Installed Tools assertion is reported separately.
 
 ---
@@ -369,15 +369,15 @@ Expected: PASS.
 
 - [ ] **Step 2: Run typecheck and production build**
 
-Run: `pnpm.cmd run typecheck`  
+Run: `pnpm.cmd run typecheck`
 Expected: exit 0.
 
-Run: `pnpm.cmd run build`  
+Run: `pnpm.cmd run build`
 Expected: exit 0.
 
 - [ ] **Step 3: Run full regression**
 
-Run: `pnpm.cmd test`  
+Run: `pnpm.cmd test`
 Expected: no new failures compared with the two known unrelated baseline failures: AppShell timeout and Installed Tools wording expectation.
 
 - [ ] **Step 4: Verify the 4173 HMR server**

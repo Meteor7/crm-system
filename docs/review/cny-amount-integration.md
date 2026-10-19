@@ -8,7 +8,7 @@ Claude 合并时需保留 7d48bc2、5543485 及区域模块，不能用本分支
 
 ## 金额口径
 
-- S2–S6 阶段金额、销售表 Pipeline：取销售填写的 amount_cny，以 Decimal 加总，再由前端按 ¥M 展示。商机原币种为 CNY / USD / EUR 都不影响该人民币值的使用。
+- S2–S6 阶段金额、销售表 Pipeline：取销售填写的 amount_cny，以 Decimal 加总，再由前端按 ¥M 展示。商机原币种为 CNY / USD / EUR 演示员工177影响该人民币值的使用。
 - 明细、停滞商机和丢单均使用同一人民币金额。沿用 DTO 的 amount / currency 字段，currency=CNY；阶段明细增加金额展示，方便逐条核对。
 - S1 只计数量，不进入 Pipeline 金额；S7 按实际 PO 日期计数量。商机金额不充当 Booking 实际人民币订单金额；订单实际金额、差额与达成率自 2026-09-18 起按订单本身的人民币金额计算（见 approved-ui-backend-contract.md 第 4 点）。
 - amount_cny 缺失、空串、0 或非法数值均为缺金额，不回退到原币 amount；若汇总范围内有一条缺金额，汇总显示数据不足，不把已知部分伪装成完整总额。可靠范围内没有商机时金额为 0。

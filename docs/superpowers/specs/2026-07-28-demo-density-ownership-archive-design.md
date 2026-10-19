@@ -1,7 +1,7 @@
 # Demo 高密度看板、双负责人和档案分类设计
 
-**日期：** 2026-07-28  
-**范围：** `Demo 档案` 页面及其 Mock 数据投影、负责人范围和旧数据迁移  
+**日期：** 2026-07-28
+**范围：** `Demo 档案` 页面及其 Mock 数据投影、负责人范围和旧数据迁移
 **部署目标：** 当前 Vue/Mock 应用的 4173 局域网热更新服务
 
 ## 1. 目标
@@ -133,7 +133,7 @@ Demo 档案视图只收录已经形成 Evaluation 且状态为：
 - 创建 Demo Request 时，`salesOwner = formData.salesContact`。
 - 创建 Demo Request 时，`engineerOwner = formData.demoOwner`。
 - 两个字段均为必填；现有表单校验已经要求 Sales Contact 和 Demo Owner 非空。
-- FAE Review 可以将 Engineer Owner 重新指派为另一个具体工程师，但同一时刻只能有一个 Engineer Owner。
+- FAE Review 可以将 Engineer Owner 重新指派为演示员工114具体工程师，但同一时刻只能有一个 Engineer Owner。
 - Boss Approval 创建 Evaluation 时，`evaluation.owner = request.engineerOwner`，不再使用 `FAE Team` 兜底。
 - 工程师变更通过 Request history 留痕。
 

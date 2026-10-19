@@ -9,7 +9,7 @@ describe('contract expiry risk', () => {
     ['2026-08-10', '30d', '24 天内'],
     ['2026-09-01', '60d', '46 天内'],
     ['2026-10-01', '90d', '76 天内'],
-    ['2027-01-01', 'normal', '正常'],
+    ['2027-01-01', 'normal', '演示员工152'],
   ] as const)('classifies %s into %s', (endDate, band, label) => {
     expect(getContractRisk(endDate, '2026-07-17')).toMatchObject({ band, label })
   })
