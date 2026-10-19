@@ -242,7 +242,7 @@ watch(selectedProject, resetSectionPages)
           <section class="profile-section"><header><Users :size="16" /><strong>{{ locale === 'en-US' ? 'Stakeholders & reporting lines' : '关键人与组织关系' }}</strong><span>{{ detail.contacts.length }}</span></header><article v-for="contact in detail.contacts" :key="contact.id"><span class="avatar">{{ contact.name.slice(-1) }}</span><div><strong>{{ contact.name }} · {{ contact.title }}</strong><small>{{ contact.department }} · {{ salesEnumLabel(contact.role ?? '', locale) }} · {{ contact.email || '—' }}</small></div><StatusBadge :label="salesEnumLabel(contact.relationship, locale)" :tone="relationshipTone(contact.relationship)" /></article><div v-if="!detail.contacts.length" class="mini-empty">{{ locale === 'en-US' ? 'Stakeholder details pending' : '关键人关系待补充' }}</div></section>
           <section class="project-workspace">
             <header class="project-workspace-header">
-              <div><span class="eyebrow">{{ locale === 'en-US' ? 'PROJECT BUSINESS VIEW' : '项目业务视图' }}</span><h3>{{ locale === 'en-US' ? 'Project business view' : '项目业务视图' }}</h3><p>{{ locale === 'en-US' ? 'Select a project to switch opportunities, contracts, visits, and Demo information together.' : '选择项目后，商机、演示员工116、拜访与 Demo 信息同步切换。' }}</p></div>
+              <div><span class="eyebrow">{{ locale === 'en-US' ? 'PROJECT BUSINESS VIEW' : '项目业务视图' }}</span><h3>{{ locale === 'en-US' ? 'Project business view' : '项目业务视图' }}</h3><p>{{ locale === 'en-US' ? 'Select a project to switch opportunities, contracts, visits, and Demo information together.' : '选择项目后，商机、合同、拜访与 Demo 信息同步切换。' }}</p></div>
               <div class="project-filter-controls">
                 <div class="project-type-filter" :aria-label="t('accounts.projectFilter')">
                   <button type="button" data-testid="project-type-all" :class="{ active: selectedProjectType === 'all' }" @click="selectProjectType('all')">{{ locale === 'en-US' ? 'All' : '全部' }}</button>
@@ -267,9 +267,9 @@ watch(selectedProject, resetSectionPages)
                 <PaginationControls v-if="dealRows.length > PROJECT_PAGE_SIZE" :page="sectionPages.deals" :page-size="PROJECT_PAGE_SIZE" :total="dealRows.length" @change="sectionPages.deals = $event" />
               </section>
               <section class="project-section">
-                <header><FileSignature :size="16" /><strong>{{ locale === 'en-US' ? 'Contracts' : '演示员工116' }}</strong><span>{{ contractRows.length }}</span></header>
+                <header><FileSignature :size="16" /><strong>{{ locale === 'en-US' ? 'Contracts' : '合同' }}</strong><span>{{ contractRows.length }}</span></header>
                 <article v-for="item in pagedRows(contractRows, 'contracts')" :key="item.id"><div><strong>{{ item.title }}</strong><small>{{ item.meta }}</small></div><StatusBadge :label="salesEnumLabel(item.status, locale)" :tone="item.tone" /></article>
-                <div v-if="!contractRows.length" class="mini-empty">{{ locale === 'en-US' ? 'No contracts linked to this project' : '该项目暂无关联演示员工116' }}</div>
+                <div v-if="!contractRows.length" class="mini-empty">{{ locale === 'en-US' ? 'No contracts linked to this project' : '该项目暂无关联合同' }}</div>
                 <PaginationControls v-if="contractRows.length > PROJECT_PAGE_SIZE" :page="sectionPages.contracts" :page-size="PROJECT_PAGE_SIZE" :total="contractRows.length" @change="sectionPages.contracts = $event" />
               </section>
               <section class="project-section">

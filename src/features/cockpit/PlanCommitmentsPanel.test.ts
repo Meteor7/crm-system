@@ -94,7 +94,7 @@ describe('Plan commitments', () => {
     }
     const wrapper = mount(PlanCommitmentsPanel, { props: { data, apiClient: api } })
     const row = wrapper.get('[data-commitment-owner="alice"]')
-    expect(row.get('[data-commitment-conflict]').text()).toContain('演示员工170核对')
+    expect(row.get('[data-commitment-conflict]').text()).toContain('管理员核对')
     expect(row.find('[data-commitment-edit]').exists()).toBe(false)
     const first = row.get('[data-commitment-record="promise"]'), second = row.get('[data-commitment-record="second"]')
     expect(first.text()).toContain('promise · 数量: 5')

@@ -62,14 +62,14 @@
 | # | 我方 Demo 可见功能 | Salesforce 对应能力 | 对齐结论 | 验收观察 |
 | ---: | --- | --- | --- | --- |
 | 1 | 信息中心：Open Pipeline、Weighted Pipeline、Confirmed Booking、Closed Won、客户贡献、Demo 状态、近期事项 | Sales Dashboards、Reports、Forecast 汇总 | **部分对齐** | 已具备管理层经营看板和口径说明；但属于固定看板，未看到用户自助报表、Dashboard Builder、订阅和钻取报表 |
-| 2 | 客户档案与 Account 360：客户等级、Site、关键人、Pipeline、Booking、演示员工116、拜访、Demo | Accounts、Contacts、Related Lists、Account Planning | **强对齐** | 已形成客户主档和跨对象聚合视图，能够保留客户上下文 |
+| 2 | 客户档案与 Account 360：客户等级、Site、关键人、Pipeline、Booking、合同、拜访、Demo | Accounts、Contacts、Related Lists、Account Planning | **强对齐** | 已形成客户主档和跨对象聚合视图，能够保留客户上下文 |
 | 3 | 联系人主档：客户、厂区、职位、部门、电话、邮箱、Owner、状态 | Contacts、Account Contact Relationships | **强对齐** | 列表、筛选、新增、编辑和状态字段齐全；Opportunity 影响力在商机详情单独处理 |
 | 4 | Leads：来源、状态、Owner、下一步、日期、搜索和筛选 | Leads、Lead Status、Lead Source、List Views | **强对齐** | New、Working、Qualified、Nurturing、Disqualified、Converted 等状态已可见 |
 | 5 | Lead 360 与 Lead 转换：复用或新建 Account、Contact，并创建 Opportunity | Salesforce Lead Conversion | **强对齐** | 转换表单已支持复用现有 Account、创建 Contact、填写 Opportunity 名称、金额、成交日、Owner 和产品；结构与 Salesforce 的 Lead → Account / Contact / Opportunity 转换接近 |
 | 6 | Opportunity 列表：Stage、Close Date、Amount、Probability、Forecast、Owner、Updated | Opportunities、List Views、Forecast Category | **强对齐** | 支持搜索和 Stage / Forecast / Owner 筛选，记录可进入独立详情页 |
 | 7 | Opportunity 详情：Path、阶段推进、About、Status、Action Plan、Change History、Commercial Forecast | Opportunity Record、Sales Path、Activity、Opportunity History | **强对齐** | 已展示六阶段 Path、推进下一阶段、金额、概率、Forecast Category、Next Step、变更历史和商业预测信息 |
 | 8 | Buying Influence、Strength、Red Flag、Information Needed | Opportunity Contact Roles、Account Plans、Deal Insights | **部分对齐** | 已有商机策略框架和新增 Buying Influence 入口；但未看到标准化 Contact Role、关系图、影响力覆盖度或 AI Deal Insights |
-| 9 | Booking：类型、来源、设备需求、客户 DDL、金额、状态、Owner | Orders、Opportunity Products、Contracts，或企业自定义 Booking 对象 | **部分对齐** | 已能表达确认订单预期以及 Renewal / Maintenance；但不是 Salesforce 标准“产品—报价—订单—演示员工116”链路 |
+| 9 | Booking：类型、来源、设备需求、客户 DDL、金额、状态、Owner | Orders、Opportunity Products、Contracts，或企业自定义 Booking 对象 | **部分对齐** | 已能表达确认订单预期以及 Renewal / Maintenance；但不是 Salesforce 标准“产品—报价—订单—合同”链路 |
 | 10 | 拜访与 Action、Calendar、个人/全员安排、客户预期、Demo Test DDL、Booking DDL | Tasks、Events、Calendars、Activity Timeline | **部分对齐** | 已有拜访计划、完成、纪要、审核、Action 和日历联动；但活动类型仍偏业务专用，未形成通用电话、邮件、会议、任务时间线 |
 | 11 | Demo 档案：项目周期、生命周期、健康状态、停滞与临期提醒 | Custom Objects、Flow、Reports / Dashboards | **行业差异化** | Salesforce Sales Cloud 无同名标准模块；可通过自定义对象和自动化配置，但我方行业语义更直接 |
 | 12 | Demo Request：Sales Preparation、Engineer Review、Manager Approval、Word 下载 | Custom Objects、Flow Approval Processes、Salesforce Files | **行业差异化** | 已形成售前样品测试申请和跨部门审批模型；Salesforce 需要平台定制，不属于标准 Opportunity 流程 |
@@ -88,7 +88,7 @@
 | 3 | Collaborative Forecasts、Quota 和经理调整 | Salesforce Forecasts 提供团队预期收入、Forecast Category、层级汇总、周变化、Quota 对比和经理视角。[官方文档](https://help.salesforce.com/s/articleView?id=sf.forecasts3_basic_tasks_intro.htm&language=en_US&type=5) | 销售经理按月/季度查看 Pipeline、Best Case、Commit、Closed；对销售提交的 Commit 做管理判断并与团队目标比较 | 在固定 KPI 看板之外增加 Forecast 工作台：期间、团队/Owner、Quota、Commit、Best Case、Pipeline、经理调整和提交快照 |
 | 4 | 用户自助 Reports 与 Dashboards | Salesforce 支持创建、筛选、分享、导出、订阅 Report，并用 Report 组成 Dashboard。[官方文档](https://help.salesforce.com/s/articleView?id=analytics.analytics_overview.htm&language=en_US&type=5) | 管理者临时建立“Q3 中国区先进封装商机”“30 天内无 Action 的机会”“不同设备型号赢单率”等报表，而不等待开发新页面 | 当前固定看板保留，同时增加最小可演示的 Report Builder：选择对象、字段、筛选、分组、图表、保存视图和导出 |
 | 5 | 通用 Activity Timeline、邮件/会议自动关联 | Salesforce Activities 将 Task、Event、Calendar 统一关联到 Account、Contact、Lead、Opportunity 等记录；Sales Engagement 还可自动关联相关邮件和日历活动。[Activities 官方文档](https://help.salesforce.com/s/articleView?id=sales.activities.htm&language=en_US&type=5) / [Sales Engagement 官方文档](https://help.salesforce.com/s/articleView?id=sales.hvs_user_intro.htm&language=en_US&type=5) | 销售发送邮件、安排会议、记录电话、创建跟进任务后，所有活动自动出现在客户和商机时间线上 | 将当前“拜访与 Action”扩展为通用 Activity：Call、Email、Meeting、Task、Visit；在 Account、Contact、Lead、Opportunity 详情统一展示时间线 |
-| 6 | 标准订单与演示员工116链 | Salesforce 的产品能力可继续关联 Quote、Order、Contract / Service Contract；当前 Booking 只是业务预期记录。[产品概念官方文档](https://help.salesforce.com/s/articleView?id=sales.products_def.htm&language=en_US&type=5) | Opportunity Won 后生成订单；按设备和服务拆分交付内容，再关联演示员工116、付款节点和服务期限 | 明确 Booking 与正式 Order 的边界；Demo 下一版至少演示 `Won Opportunity → Booking/Order → Contract → Installed Tool` |
+| 6 | 标准订单与合同链 | Salesforce 的产品能力可继续关联 Quote、Order、Contract / Service Contract；当前 Booking 只是业务预期记录。[产品概念官方文档](https://help.salesforce.com/s/articleView?id=sales.products_def.htm&language=en_US&type=5) | Opportunity Won 后生成订单；按设备和服务拆分交付内容，再关联合同、付款节点和服务期限 | 明确 Booking 与正式 Order 的边界；Demo 下一版至少演示 `Won Opportunity → Booking/Order → Contract → Installed Tool` |
 
 ### 4.2 P1：明显提升销售运营成熟度
 

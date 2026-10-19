@@ -30,9 +30,9 @@ Frappe 静态资源不是 Docker 镜像构建时自动从 `src/` 生成。任何
 
 ## 目标与边界
 
-- 修复演示员工152用户操作会触发的错记录、错跳转、分页不可达、错误状态、事务残留、竞态和测试假绿。
+- 修复正常用户操作会触发的错记录、错跳转、分页不可达、错误状态、事务残留、竞态和测试假绿。
 - 使用真实半导体业务语义的数据跑通当前 Frappe 前后端全流程。
-- 不处理必须主动演示员工106 Frappe 通用 REST 请求才能触发的鉴权绕过、横向攻击或注入。
+- 不处理必须主动伪造 Frappe 通用 REST 请求才能触发的鉴权绕过、横向攻击或注入。
 - 不增加无关功能、新角色或新业务模块。
 
 ## 当前优先批次：Opportunity × Demo 自动门禁
@@ -86,7 +86,7 @@ Frappe 静态资源不是 Docker 镜像构建时自动从 `src/` 生成。任何
 - Document Upload 的 Request、File、Document、Audit 原子化，审批只能有一个终态。
 - Installed Tool 日期单调且不允许未来日期；旧服务补录不得回退 lastService；serial 冲突返回 409。
 - 同一 Won Opportunity 只允许一个非 Cancelled Booking。
-- Opportunity 演示员工152接口按顺序推进，普通创建不得直接为 Won/Lost。
+- Opportunity 正常接口按顺序推进，普通创建不得直接为 Won/Lost。
 
 ### 6. Quotation Manager 审批流
 

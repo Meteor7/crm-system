@@ -42,7 +42,7 @@ describe('AppShell in Frappe mode', () => {
     window.dispatchEvent(new PageTransitionEvent('pageshow', { persisted: true }))
     expect(reload).not.toHaveBeenCalled()
     // Brought back after a later page of the tab signed in as someone else (or signed out): it loads anew.
-    sessionStorage.setItem('rayher-crm:session-user', 'someone.else@example.invalid')
+    sessionStorage.setItem('rayher-crm:session-user', 'person052@example.invalid')
     window.dispatchEvent(new PageTransitionEvent('pageshow', { persisted: true }))
     expect(reload).toHaveBeenCalledTimes(1)
     reload.mockClear()
@@ -197,7 +197,7 @@ describe('AppShell in Frappe mode', () => {
     // Loaded afresh (not brought back) in a tab whose last page was someone else's: the page's own bootstrap is
     // what the tab holds now.
     const fresh = await shell()
-    sessionStorage.setItem('rayher-crm:session-user', 'someone.else@example.invalid')
+    sessionStorage.setItem('rayher-crm:session-user', 'person052@example.invalid')
     fresh.answer(booted)
     await flushPromises()
     expect(fresh.reload).not.toHaveBeenCalled()

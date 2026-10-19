@@ -32,7 +32,7 @@ Manager／Sales 可检查事实、规则版本和匹配理由，Engineer 不可�
 
 新增 GET `opportunities.get_blue_sheet_assessment`；POST `opportunities.save_blue_sheet_flags` 和 `opportunities.apply_blue_sheet_suggestion`，写入携带 `id`、`input`、`expectedModified`。测试替身只有抛错类型桩，新行为使用 API stub／HTTP fake。
 
-已编写 8 项纯规则测试、11 项 Frappe 原生测试，以及红旗编辑、冲突、显式确认、身份切换、竞争引用、Warnings 和 HTTP 演示员工116回归。最终头双审及完整门禁尚待执行；正式概率规则仍待业务提供并验收。
+已编写 8 项纯规则测试、11 项 Frappe 原生测试，以及红旗编辑、冲突、显式确认、身份切换、竞争引用、Warnings 和 HTTP 合同回归。最终头双审及完整门禁尚待执行；正式概率规则仍待业务提供并验收。
 
 ## 首轮对抗性审查修订
 

@@ -82,7 +82,7 @@ export type Capability =
   | 'evaluation:view' | 'evaluation:write' | 'contract:view' | 'system:configure'
 
 export const ROLE_PROFILES: Record<UserRole, { label: string; scope: 'all' | 'cross-team-readonly' | 'team' | 'own' | 'assigned'; capabilities: Capability[] }> = {
-  'CRM Administrator': { label: 'CRM 演示员工170', scope: 'all', capabilities: ALL_CAPABILITIES },
+  'CRM Administrator': { label: 'CRM 管理员', scope: 'all', capabilities: ALL_CAPABILITIES },
   'Management Viewer': { label: '管理者权限', scope: 'cross-team-readonly', capabilities: MANAGEMENT_READ_CAPABILITIES },
   'Sales Manager': { label: '销售经理', scope: 'team', capabilities: SALES_MANAGER_CAPABILITIES },
   'Sales User': { label: '销售人员', scope: 'own', capabilities: SALES_USER_CAPABILITIES },
@@ -324,7 +324,7 @@ Expected: PASS and navigation items appear only for authorized roles.
 const spec = buildCustomerReportModel(tsmcDetail, '2026-07-17')
 expect(spec.sheets.map(sheet => sheet.name)).toEqual([
   '客户全貌 Overview', '商机 Opportunities', '需求与行动 Actions',
-  '关键人与拜访 People', 'Demo与演示员工116 Demo',
+  '关键人与拜访 People', 'Demo与合同 Demo',
 ])
 expect(spec.fileName).toMatch(/Customer_360_2026-07-17\.xlsx$/)
 expect(findCell(spec, '商机 Opportunities', 'Confirmed Booking')).toBeDefined()

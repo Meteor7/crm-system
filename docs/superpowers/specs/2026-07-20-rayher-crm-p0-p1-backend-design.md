@@ -37,7 +37,7 @@ Field Service、Procedure Run、智能排期、客户门户和离线文档包不
 
 ### 2.2 本地密钥
 
-数据库 Root 密码和 Administrator 密码由一次性初始化容器随机生成，保存在 Docker 命名卷，不写入源码、文档、Compose 文件或命令输出。演示员工170密码只在需要登录时复制到本机剪贴板，不在终端或回复中显示。
+数据库 Root 密码和 Administrator 密码由一次性初始化容器随机生成，保存在 Docker 命名卷，不写入源码、文档、Compose 文件或命令输出。管理员密码只在需要登录时复制到本机剪贴板，不在终端或回复中显示。
 
 ### 2.3 前端承载
 
@@ -156,7 +156,7 @@ Workflow：
 - Content Access 决定能否预览或下载。
 - Internal 技术文档目录对员工可见，相关工程角色可直接访问。
 - Commercial 目录仅 Sales、Sales Manager、管理者权限和 Document Manager 可见。
-- Restricted、价格、演示员工116和客户专属目录仅 Account Team、管理者权限和 Document Manager 可见。
+- Restricted、价格、合同和客户专属目录仅 Account Team、管理者权限和 Document Manager 可见。
 
 ### 8.3 访问申请与下载
 
@@ -186,7 +186,7 @@ Workflow：
 
 提供幂等开发种子命令：
 
-- 导入现有 Mock 客户、联系人、Site、需求、商机、Demo、测试、演示员工116、拜访和 Action。
+- 导入现有 Mock 客户、联系人、Site、需求、商机、Demo、测试、合同、拜访和 Action。
 - 导入 CUSTOMER06 Customer 360 Excel 中可映射的数据。
 - 导入 P1 Opportunity Strategy、Demo Workflow、Installed Tool 和 Document Center 演示数据。
 - 所有记录标记 `is_development_data`，重复执行不重复创建。

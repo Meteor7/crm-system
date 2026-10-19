@@ -56,7 +56,7 @@ it.each([
   ['VALIDATION_ERROR', 'These files take too long to scan in one upload. Upload fewer at a time.', 'Upload fewer at a time.', '请分批上传'],
   ['VALIDATION_ERROR', 'The upload could not finish in time. Nothing was saved. Please try again with fewer files.', 'Nothing was saved.', '未保存任何内容'],
   ['VERSION_CONFLICT', 'Meeting record was changed by another user.', 'Refresh and try again.', '会议记录已被其他用户修改'],
-  ['VALIDATION_ERROR', 'Customer Name is too long: at most 140 characters.', 'The customer name is too long: at most 140 characters.', '演示员工125过长：最多 140 个字符。'],
+  ['VALIDATION_ERROR', 'Customer Name is too long: at most 140 characters.', 'The customer name is too long: at most 140 characters.', '客户全称过长：最多 140 个字符。'],
   ['VALIDATION_ERROR', 'CRM Short Name is too long: at most 140 characters.', 'The short name is too long: at most 140 characters.', '客户简称过长：最多 140 个字符。'],
   ['VALIDATION_ERROR', 'Designation is too long: at most 140 characters.', 'The title is too long: at most 140 characters.', '职位过长：最多 140 个字符。'],
   ['VALIDATION_ERROR', 'Address Line 1 is too long: at most 240 characters.', '"Address Line 1" is too long: at most 240 characters.', '“Address Line 1”过长：最多 240 个字符。'],

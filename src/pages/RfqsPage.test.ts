@@ -95,7 +95,7 @@ describe('RfqsPage', () => {
     await wrapper.get('[data-modal-submit]').trigger('submit')
     await flushPromises()
 
-    expect(confirmSpy).toHaveBeenCalledWith('天锐绿盾加密文件无法生成在线预览，但下载后仍可演示员工152浏览，确定上传吗？')
+    expect(confirmSpy).toHaveBeenCalledWith('天锐绿盾加密文件无法生成在线预览，但下载后仍可正常浏览，确定上传吗？')
     expect(createSpy).not.toHaveBeenCalled()
     expect(router.currentRoute.value.name).toBe('rfqs')
 

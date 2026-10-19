@@ -27,8 +27,8 @@
 
 - Hook 不打印 `sid`，不写审计日志，不接触密码、Token 或其他 Cookie 值。
 - 只处理键名严格等于 `sid` 的 Cookie；其他 Frappe Cookie 保持原状。
-- 演示员工152退出登录继续调用 Frappe 标准 logout，立即删除服务端 Session 并清除 Cookie。
-- 服务端 Session 的过期策略保持不变，避免演示员工152使用期间意外掉线。
+- 正常退出登录继续调用 Frappe 标准 logout，立即删除服务端 Session 并清除 Cookie。
+- 服务端 Session 的过期策略保持不变，避免正常使用期间意外掉线。
 - 浏览器的“恢复上次会话”功能或后台常驻进程可能延续浏览器会话，这是浏览器行为边界；系统不使用不可靠的 `beforeunload` 网络请求强制退出。
 
 ## 5. 错误处理
@@ -40,7 +40,7 @@
 
 - 单元测试先证明当前缺少 Hook，再验证：存在 `sid` 时清空 `max_age`/`expires`；不存在 `sid` 时无副作用；其他 Cookie 不变。
 - App package contract 验证 `hooks.py` 注册了 `after_request`。
-- 本地 Docker 部署后，使用临时测演示员工173户或受控测试路径检查登录响应头：`sid` 保留 `HttpOnly` 与 `SameSite=Lax`，不含 `Max-Age` 和 `Expires`；验证过程中不输出 Cookie 值。
+- 本地 Docker 部署后，使用临时测试用户或受控测试路径检查登录响应头：`sid` 保留 `HttpOnly` 与 `SameSite=Lax`，不含 `Max-Age` 和 `Expires`；验证过程中不输出 Cookie 值。
 - 验证同一浏览器会话内刷新仍能访问认证接口，标准 logout 后原会话失效。
 - 执行后端全量测试、前端全量测试和 Frappe 生产构建；测试结束后恢复 `allow_tests=false`。
 

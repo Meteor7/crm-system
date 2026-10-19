@@ -65,7 +65,7 @@ Stakeholder是Customer级主档；Opportunity通过关联记录引用Stakeholder
 
 - Internal技术文档：登录员工可见目录；相关工程角色可直接访问，其他人申请。
 - Commercial文档：Sales、Sales Manager、管理者权限和Document Manager可见目录。
-- Restricted、价格、演示员工116和客户专属文档：只对Account Team、管理者权限和Document Manager显示目录。
+- Restricted、价格、合同和客户专属文档：只对Account Team、管理者权限和Document Manager显示目录。
 - 普通获批用户默认只能获得带个人化水印的PDF，不获得主文件URL。
 - 原始可编辑文件仅Document Manager或显式特批人员访问。
 - Access Request必须记录原因、关联业务对象、有效期、审批人和撤销状态。

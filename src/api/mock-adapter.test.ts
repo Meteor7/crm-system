@@ -2447,7 +2447,7 @@ describe('mock CRM API', () => {
         id: 'TOOL-001',
         accountId: 'ACC-002',
         siteId: 'SITE-003',
-        site: '演示员工25',
+        site: '武汉一厂',
         serial: 'AX9-CN-260018',
         engineerOwner: 'person053@crm.example.invalid',
         sourceOpportunityId: 'OPP-003',
@@ -2464,7 +2464,7 @@ describe('mock CRM API', () => {
       data: {
         id: 'TOOL-003',
         accountId: 'ACC-005',
-        site: '演示员工12',
+        site: '南通工厂',
         engineerOwner: 'person077@crm.example.invalid',
       },
     })

@@ -91,7 +91,7 @@ const PROCESS_DIMENSION_LABELS: Record<ProcessDimension, Record<string, [string,
   budget: { Confirmed: ['已确认', 'Confirmed'], 'In Review': ['审核中', 'In review'], Unknown: ['未知', 'Unknown'] },
   actions: {
     Requirement: ['需求', 'Requirement'], Visit: ['拜访', 'Visit'], Deal: ['商机', 'Deal'], 'Demo Request': ['Demo Request', 'Demo request'],
-    Evaluation: ['评估', 'Evaluation'], Contract: ['演示员工116', 'Contract'],
+    Evaluation: ['评估', 'Evaluation'], Contract: ['合同', 'Contract'],
   },
   timeliness: { '已逾期': ['已逾期', 'Overdue'], '未逾期': ['未逾期', 'On time'] },
   demo: {

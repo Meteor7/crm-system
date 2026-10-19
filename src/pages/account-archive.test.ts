@@ -807,7 +807,7 @@ describe('Account archive', () => {
     const original = api.getContact.bind(api)
     vi.spyOn(api, 'getContact').mockImplementation(async (id) => {
       const result = await original(id)
-      return { ...result, data: { ...result.data, accountArchived: true, accountOwner: 'owner@example.invalid', contact: { ...result.data.contact, siteId: '', siteName: '' } } }
+      return { ...result, data: { ...result.data, accountArchived: true, accountOwner: 'person041@example.invalid', contact: { ...result.data.contact, siteId: '', siteName: '' } } }
     })
     hideFromPickers(api, (await original('CON-001')).data.contact.accountId)
     const wrapper = mount(ContactDetailPage, { props: { apiClient: api }, global: { plugins: [pinia, router] } })

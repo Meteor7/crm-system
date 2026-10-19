@@ -85,7 +85,7 @@ class TestOpportunityQuerySharing(FrappeTestCase):
         self.assertIn("savedQuery", query)  # service normalization does not mutate caller input
 
     def test_recipients_require_current_enabled_single_crm_role_and_cas(self):
-        for recipients in ([self.manager], ["missing@example.invalid"], [True], {}, [self.sales] * 101):
+        for recipients in ([self.manager], ["person035@example.invalid"], [True], {}, [self.sales] * 101):
             with self.subTest(recipients=recipients), self.assertRaises(CrmApiException):
                 self._as(self.manager, lambda: service.share_opportunity_query(self.saved["id"], recipients, self.saved["modified"]))
         frappe.db.set_value("User", self.sales, "enabled", 0)

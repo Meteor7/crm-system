@@ -116,7 +116,7 @@ function startsCompletedBlock(item: DemoWorkflowDto, index: number): boolean {
           <option value="all">{{ copy('All', '全部') }}</option>
           <option value="critical">{{ copy('Red · Critical', '红色 · 紧迫') }}</option>
           <option value="stalled">{{ copy('Orange · Stalled', '橙色 · 停滞') }}</option>
-          <option value="healthy">{{ copy('Green · Healthy', '绿色 · 演示员工152') }}</option>
+          <option value="healthy">{{ copy('Green · Healthy', '绿色 · 正常') }}</option>
         </select>
       </label>
       <label class="toolbar-filter">

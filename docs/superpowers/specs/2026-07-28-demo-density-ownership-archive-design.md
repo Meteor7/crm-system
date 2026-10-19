@@ -133,7 +133,7 @@ Demo 档案视图只收录已经形成 Evaluation 且状态为：
 - 创建 Demo Request 时，`salesOwner = formData.salesContact`。
 - 创建 Demo Request 时，`engineerOwner = formData.demoOwner`。
 - 两个字段均为必填；现有表单校验已经要求 Sales Contact 和 Demo Owner 非空。
-- FAE Review 可以将 Engineer Owner 重新指派为演示员工114具体工程师，但同一时刻只能有一个 Engineer Owner。
+- FAE Review 可以将 Engineer Owner 重新指派为另一个具体工程师，但同一时刻只能有一个 Engineer Owner。
 - Boss Approval 创建 Evaluation 时，`evaluation.owner = request.engineerOwner`，不再使用 `FAE Team` 兜底。
 - 工程师变更通过 Request history 留痕。
 

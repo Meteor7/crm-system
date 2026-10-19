@@ -46,7 +46,7 @@ class TestDemoHealth(unittest.TestCase):
             "level": "stalled", "reason": "已连续 5 天无有效进展", "daysSinceProgress": 5, "daysToCustomerExpected": 23,
         })
         four = health(last_progress_at="2026-07-24T08:00:00+08:00", customer_expected_date="2026-08-20")
-        self.assertEqual((four["level"], four["reason"], four["daysSinceProgress"]), ("healthy", "演示员工152推进", 4))
+        self.assertEqual((four["level"], four["reason"], four["daysSinceProgress"]), ("healthy", "正常推进", 4))
 
     def test_days_are_counted_in_shanghai_time(self):
         # 16:30 UTC on the 27th is 00:30 on the 28th in Shanghai: progress today, not yesterday.
@@ -65,7 +65,7 @@ class TestDemoHealth(unittest.TestCase):
 
     def test_missing_or_unreadable_values_claim_nothing(self):
         self.assertEqual(health(last_progress_at=None, customer_expected_date=None, test_run_deadline=None), {
-            "level": "healthy", "reason": "演示员工152推进", "daysSinceProgress": 0, "daysToCustomerExpected": None,
+            "level": "healthy", "reason": "正常推进", "daysSinceProgress": 0, "daysToCustomerExpected": None,
         })
         self.assertEqual(health(last_progress_at="not a date", customer_expected_date="2026-13-40")["level"], "healthy")
         with self.assertRaises(ValueError):

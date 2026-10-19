@@ -25,7 +25,7 @@ class TestEventIdentityConcurrency(FrappeTestCase):
         self.manager = self._user(f"event-race-{token}-manager@example.invalid", "CRM Manager")
         self.source = self._user(f"event-race-{token}-a@example.invalid", "CRM Sales")
         self.target = f"event-race-{token}-b@example.invalid"
-        self.other = self._user(f"event-race-{token}-other@example.invalid", "CRM Sales")
+        self.other = self._user(f"event-race-{token}-person040@example.invalid", "CRM Sales")
         self.payload = {"title": "Identity reassignment", "owner": self.source, "startDate": "2030-09-02",
                         "endDate": "2030-09-03", "status": "Planned"}
         # The source is the immutable creator, but the current assignee is

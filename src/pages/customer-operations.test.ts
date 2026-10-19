@@ -15,7 +15,7 @@ function globals() {
   setActivePinia(pinia)
   const app = useAppStore(pinia)
   app.bootstrap = {
-    user: { id: 'admin', name: '演示员工170', initials: 'AD', role: 'Manager', team: 'CRM' },
+    user: { id: 'admin', name: '管理员', initials: 'AD', role: 'Manager', team: 'CRM' },
     capabilities: ROLE_PROFILES['Manager'].capabilities,
     version: 'test',
   }

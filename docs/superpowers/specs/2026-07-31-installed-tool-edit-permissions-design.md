@@ -7,7 +7,7 @@
 ## 权限
 
 - CRM Administrator：可编辑全部 Installed Tool。
-- Management Viewer（Boss）：授予与演示员工170相同的 Installed Tool 编辑权限，可编辑全部客户设备。
+- Management Viewer（Boss）：授予与管理员相同的 Installed Tool 编辑权限，可编辑全部客户设备。
 - FAE / Applied Engineer、Equipment Engineer：仅可编辑 `engineerOwner` 为自己的设备。
 - Sales Manager、Sales User：保留查看和 Booking 转入权限，不可编辑 Installed Tool。
 - 新增独立 capability：`installed_tool:write`，不复用 `deal:write` 或 `service:write`。
@@ -27,7 +27,7 @@
 - Sales Order
 - Contract
 
-来源 Booking、来源 Opportunity、客户、Sales Owner 和设备 ID 只读。工程师不可更改负责工程师；演示员工170与 Boss 可以重新指派。
+来源 Booking、来源 Opportunity、客户、Sales Owner 和设备 ID 只读。工程师不可更改负责工程师；管理员与 Boss 可以重新指派。
 
 ## 数据边界
 
@@ -37,7 +37,7 @@
 
 ## 验收
 
-- 演示员工170和 Boss 在所有设备详情看到编辑入口并可保存。
+- 管理员和 Boss 在所有设备详情看到编辑入口并可保存。
 - 演示员工14只能编辑分配给演示员工14的设备；演示员工15只能编辑分配给演示员工15的设备。
 - Sales 不显示编辑入口，直接调用接口也被拒绝。
 - 重复 Serial、跨客户厂区、工程师越权和无权限更新均被拒绝。

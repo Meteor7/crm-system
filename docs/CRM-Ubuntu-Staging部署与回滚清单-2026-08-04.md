@@ -60,9 +60,9 @@ docker compose --env-file backend/.env.staging -f backend/compose.yaml up -d --n
 docker compose --env-file backend/.env.staging -f backend/compose.yaml ps
 ```
 
-Compose 会幂等创建独立 site、安装 `rayher_crm`、设置 `ALLOW_TESTS=false` 并执行 migrate。不得从本地环境复制数据库 volume、`local-secrets` volume 或演示员工170会话。
+Compose 会幂等创建独立 site、安装 `rayher_crm`、设置 `ALLOW_TESTS=false` 并执行 migrate。不得从本地环境复制数据库 volume、`local-secrets` volume 或管理员会话。
 
-随后在 Frappe 中创建/核验获批人员 User 与 CRM 角色；禁止为了让表单通过而启用共享账号、弱密码或客户端身份演示员工106。
+随后在 Frappe 中创建/核验获批人员 User 与 CRM 角色；禁止为了让表单通过而启用共享账号、弱密码或客户端身份伪造。
 
 ## 6. 反向代理与 TLS Gate
 

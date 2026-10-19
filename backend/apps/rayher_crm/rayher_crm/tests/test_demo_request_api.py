@@ -497,7 +497,7 @@ class TestDemoRequestApi(FrappeTestCase):
             add_demo_comment(request["id"], {"body": "  "})
         self.assertEqual(empty.exception.code, "VALIDATION_ERROR")
         with self.assertRaises(CrmApiException) as invalid_user:
-            add_demo_comment(request["id"], {"body": "ping", "mentionedPersonIds": ["missing@example.invalid"]})
+            add_demo_comment(request["id"], {"body": "ping", "mentionedPersonIds": ["person035@example.invalid"]})
         self.assertEqual(invalid_user.exception.code, "VALIDATION_ERROR")
         with self.assertRaises(CrmApiException) as inaccessible_user:
             add_demo_comment(request["id"], {"body": "ping", "mentionedPersonIds": [self.other_sales]})

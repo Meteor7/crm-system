@@ -53,7 +53,7 @@ describe('Boss dashboard subscription groups', () => {
 
   it('uses a v2 user-scoped key', () => {
     expect(bossDashboardSubscriptionGroupsKey('person006@crm.example.invalid'))
-      .toBe('semiconductor-crm:boss-dashboard-subscriptions:v2:boss.lin%40crm.example.invalid')
+      .toBe('semiconductor-crm:boss-dashboard-subscriptions:v2:person006%40crm.example.invalid')
   })
 
   it('migrates a valid legacy v1 selection into the first row when v2 is absent', () => {

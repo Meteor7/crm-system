@@ -28,7 +28,7 @@
 - `CRM Opportunity Stakeholder.contact` Link 指向 Contact；
 - `(opportunity, contact)` 唯一约束防止同一联系人重复进入同一商机。
 
-本次不把 Mock 成功描述为正式 Frappe 后端完成。若当前后端没有 Contacts 写接口，Frappe Adapter 必须返回明确的 `NOT_IMPLEMENTED`，不能静默保存到浏览器或演示员工106成功。
+本次不把 Mock 成功描述为正式 Frappe 后端完成。若当前后端没有 Contacts 写接口，Frappe Adapter 必须返回明确的 `NOT_IMPLEMENTED`，不能静默保存到浏览器或伪造成功。
 
 首版不包含 Campaign、群发邮件、标签管理、Cases、文件上传和联系人 CSV 导入。这些 Salesforce 能力不属于当前销售闭环的必要范围。
 
@@ -298,7 +298,7 @@ deleteOpportunityContact(opportunityId: string, linkId: string): Promise<ApiResp
 
 - 联系人与业务对象客户不一致：拒绝保存，返回 `CONTACT_ACCOUNT_MISMATCH`。
 - 联系人不存在：返回 `CONTACT_NOT_FOUND`。
-- 联系人已演示员工166或归档：拒绝新增关联，返回 `CONTACT_INACTIVE`。
+- 联系人已离职或归档：拒绝新增关联，返回 `CONTACT_INACTIVE`。
 - Opportunity 重复关联：返回 `DUPLICATE_OPPORTUNITY_CONTACT`。
 - 自我或循环汇报：返回 `INVALID_REPORTING_LINE`。
 - 目标路由无权限：显示 denied 状态，不泄露联系人或客户摘要。
@@ -307,7 +307,7 @@ deleteOpportunityContact(opportunityId: string, linkId: string): Promise<ApiResp
 
 ## 11. 并发修改策略
 
-实施前重新读取工作树和目标文件修改时间。若演示员工114 subagent 正在修改同一文件：
+实施前重新读取工作树和目标文件修改时间。若另一个 subagent 正在修改同一文件：
 
 1. 不覆盖未完成内容；
 2. 先实施不重叠的领域模型、测试或新增组件；
@@ -326,7 +326,7 @@ deleteOpportunityContact(opportunityId: string, linkId: string): Promise<ApiResp
 - 拜访多人、唯一主要联系人；
 - Booking / Demo Request 主要联系人写入；
 - 快速新增联系人后自动选择；
-- 演示员工166与归档联系人保留历史但不能新增关联；
+- 离职与归档联系人保留历史但不能新增关联；
 - 汇报关系自我与循环保护；
 - 角色权限和客户范围；
 - 联系人详情聚合与关联计数。

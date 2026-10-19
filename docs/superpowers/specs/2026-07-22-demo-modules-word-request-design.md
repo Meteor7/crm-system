@@ -45,7 +45,7 @@ flowchart LR
     Save --> Word["生成并下载 Word"]
     Save --> Overview["Demo 流程总览"]
     Save --> Test["Demo Test"]
-    Overview --> Boss["Boss / 演示员工170查看完整详情"]
+    Overview --> Boss["Boss / 管理员查看完整详情"]
     Overview --> Staff["其他身份查看业务摘要"]
     Word --> Engineer["FAE / 设备工程师查看技术申请"]
 ```

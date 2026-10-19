@@ -34,8 +34,8 @@
 | CRM Administrator | 全部客户、全部团队 | 全部 CRM 业务读写、角色/字典/权限配置；不自动获得服务器管理权限 |
 | Management Viewer（管理者权限） | 跨团队全局数据 | 只读经营决策中心和全部业务摘要，可导出全部客户报告，不执行任何审批或写操作 |
 | Sales Manager | 自己负责的团队 | 维护团队客户和销售数据、审核拜访、经理审批 Demo、查看团队报表和客户报告 |
-| Sales User | 自己负责的客户 | 维护客户、关键人、需求、商机和拜访，创建/修改/提交自己的 Demo Request，查看相关验证、演示员工116和客户报告 |
-| FAE / Applied Engineer | 被分配的 Demo 和关联客户 | 工程评估、退回 Demo、维护 Evaluation/Wafer Test/Test Run；不能修改商业金额、Booking、演示员工116或客户关系 |
+| Sales User | 自己负责的客户 | 维护客户、关键人、需求、商机和拜访，创建/修改/提交自己的 Demo Request，查看相关验证、合同和客户报告 |
+| FAE / Applied Engineer | 被分配的 Demo 和关联客户 | 工程评估、退回 Demo、维护 Evaluation/Wafer Test/Test Run；不能修改商业金额、Booking、合同或客户关系 |
 
 - 原架构中的 Intelligence Analyst 随客户情报模块撤下，本轮不保留。
 - `capabilities` 只用于界面体验控制；生产环境最终权限必须由 Frappe Role、User Permission、DocType 权限和写接口再次裁决。
@@ -54,7 +54,7 @@
 - 客户等级、地区、业务领域、风险、完整度：`AccountSummaryDto[]`
 - 采购需求：`RequirementDto[]`
 - 行动项：`ActionDto[]`
-- Demo Request、Evaluation/Test Run、演示员工116：各自明细集合
+- Demo Request、Evaluation/Test Run、合同：各自明细集合
 - 拜访：本轮新增的 `VisitDto[]`
 
 `AccountSummaryDto.pipelineAmount` 仅为列表摘要，不作为管理指标事实来源；当前它与商机明细合计不一致。所有管理指标统一从商机明细重新汇总。
@@ -78,7 +78,7 @@
 1. **核心指标：** 开放 Pipeline、加权 Pipeline、Confirmed Booking、累计 Closed Won。
 2. **管线分析：** 阶段漏斗、各阶段金额与加权金额、负责人排行。
 3. **客户贡献：** Top 客户、业务领域、地区、客户等级、风险等级、档案完整度。
-4. **经营流程：** 采购需求状态与预算状态、行动项和逾期分布、Demo Request 状态与优先级、Evaluation/Wafer Test 状态与运行结果、演示员工116类型/状态/金额/到期风险、拜访状态与负责人。
+4. **经营流程：** 采购需求状态与预算状态、行动项和逾期分布、Demo Request 状态与优先级、Evaluation/Wafer Test 状态与运行结果、合同类型/状态/金额/到期风险、拜访状态与负责人。
 
 每个图表显示统计口径或数据来源说明。页面保留更新时间和 stale 提示。当前数据不支持统一的月/季/年筛选，因此不对当前快照指标提供伪时间筛选；只有 Booking 图表使用真实日期。
 
@@ -94,7 +94,7 @@
 - 小屏：客户列表和详情上下排列。
 - 默认选中第一个筛选结果；切换客户不丢失列表上下文。
 - 右侧顶部展示客户等级、负责人、地区、业务领域、Pipeline、购买意愿和档案完整度。
-- 详情按经营摘要、Site、关键人、需求、商机、Demo/Wafer Test、演示员工116、拜访和下一步行动组织。
+- 详情按经营摘要、Site、关键人、需求、商机、Demo/Wafer Test、合同、拜访和下一步行动组织。
 - 当前表格加抽屉的 Account 360 交互被替换，但已有字段和状态组件尽量复用。
 
 ### 4.2 数据一致性
@@ -113,7 +113,7 @@
 2. `商机 Opportunities`
 3. `需求与行动 Actions`
 4. `关键人与拜访 People`
-5. `Demo与演示员工116 Demo`
+5. `Demo与合同 Demo`
 
 保留中英文标题、标题带、合理列宽、冻结标题行、金额/日期/百分比数字格式和各区块的层级样式。文件名为 `<客户简称>_Customer_360_<YYYY-MM-DD>.xlsx`。
 
@@ -125,8 +125,8 @@
 - `probability`、Capture、FP 在写入 Excel 时换算为 Excel 百分比数值并应用百分比格式。
 - 完成 Runs、平均 Capture、平均 FP 等只做确定性聚合。
 - 综合行动队列可从 Action、Requirement、Opportunity、Demo Request、Visit 的下一步行动合并，并按客户、标题、负责人和截止日期去重。
-- 缺失的英文行动、付款节点、付款账期、PO/Shipment/FAT 日期、需求优先级/预计采购日期/决策人等显示“—”，不自动翻译或演示员工106。
-- 风险只使用明确记录或透明规则，例如退回的 Demo Request、逾期行动、未签署/到期演示员工116；规则生成项要保留来源记录 ID。
+- 缺失的英文行动、付款节点、付款账期、PO/Shipment/FAT 日期、需求优先级/预计采购日期/决策人等显示“—”，不自动翻译或伪造。
+- 风险只使用明确记录或透明规则，例如退回的 Demo Request、逾期行动、未签署/到期合同；规则生成项要保留来源记录 ID。
 
 ### 5.3 实现方式
 

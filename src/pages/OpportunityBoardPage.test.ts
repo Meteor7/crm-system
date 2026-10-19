@@ -41,7 +41,7 @@ async function settle() { await new Promise(resolve => setTimeout(resolve, 340))
 describe('Opportunities board', () => {
   it('runs a shared query with its version and permits only saving an independent copy', async () => {
     const item = { ...savedQueryFixture(), owner: 'author@example.invalid', readOnly: true, recipients: [] }
-    item.definition.scope.sales = ['alice@example.invalid', 'bob@example.invalid']
+    item.definition.scope.sales = ['person003@example.invalid', 'bob@example.invalid']
     const { wrapper, api } = await setup('Sales', api => { api.listOpportunityQueries = vi.fn(async () => response({ items: [item] })) })
     await wrapper.get('[data-saved-select]').setValue(item.id); await settle()
     expect(wrapper.get('[data-shared-readonly]').text()).toContain(item.owner)

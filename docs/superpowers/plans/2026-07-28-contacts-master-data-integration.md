@@ -63,14 +63,14 @@ import type { LegacyStrategyOpportunityDto } from '@/types/workspaces'
 describe('contact master migration', () => {
   it('reuses a unique same-account contact and creates an id-based relationship', () => {
     const contacts: ContactDto[] = [{
-      id: 'CT-001', accountId: 'ACC-001', name: '王志远', title: '设备演示员工113经理',
+      id: 'CT-001', accountId: 'ACC-001', name: '王志远', title: '设备副总经理',
       department: '制造运营', relationship: 'Strong', owner: 'Demo Staff 01',
       status: 'Active', dataQuality: 'Complete', updatedAt: '2026-07-28',
     }]
     const opportunities = [{
       id: 'OPP-001', accountId: 'ACC-001',
       stakeholders: [{
-        id: 'STK-001', name: '王志远', title: '设备演示员工113经理',
+        id: 'STK-001', name: '王志远', title: '设备副总经理',
         role: 'Economic Buyer', influence: 'High', stance: 'Neutral',
         coverage: 'Manager relationship',
       }],
@@ -353,7 +353,7 @@ it('merges a duplicate by rewriting every Contact-ID reference', async () => {
   const duplicate = await api.saveContact({
     accountId: 'ACC-001',
     name: '王志远（重复）',
-    title: '设备演示员工113经理',
+    title: '设备副总经理',
     department: '制造运营',
     relationship: 'Developing',
     owner: 'Demo Staff 01',
@@ -1008,7 +1008,7 @@ function assertActiveContactForAccount(contactId: string, accountId: string) {
     throw new CrmApiError('CONTACT_ACCOUNT_MISMATCH', '联系人不属于当前客户', requestId(), false)
   }
   if (contact.status !== 'Active') {
-    throw new CrmApiError('CONTACT_INACTIVE', '演示员工166或归档联系人不能新增业务关联', requestId(), false)
+    throw new CrmApiError('CONTACT_INACTIVE', '离职或归档联系人不能新增业务关联', requestId(), false)
   }
   return contact
 }

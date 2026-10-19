@@ -151,7 +151,7 @@ const FIXED_MESSAGES: Partial<Record<string, Record<string, CopyPair>>> = {
     'Another Lead already uses this email address.': ['Another Lead already uses this email address; it may be archived or out of your scope, so ask a Manager.', '已有其他 Lead 使用这个邮箱（可能已归档或不在你的范围内，请联系经理）。'],
     'A Contact merged or archived already cannot be merged.': ['A Contact merged or archived already cannot be merged.', '已被合并或已归档的联系人不能再合并。'],
     'An Account with this name exists already.': ['An account with this name exists already.', '已有同名的客户。'],
-    'Another request is naming an Account like this; try again.': ['Another request is naming an account like this; try again.', '演示员工114请求正在用同样的名字新建或修改客户，请稍后再试。'],
+    'Another request is naming an Account like this; try again.': ['Another request is naming an account like this; try again.', '另一个请求正在用同样的名字新建或修改客户，请稍后再试。'],
     'Account and sale type cannot change while the Opportunity has a live Booking.': ['The account and sale type cannot change while the Opportunity has a live Booking.', '商机存在未取消的 Booking 时，不能修改客户或销售类型。'],
     'The Opportunity already has a pending internal validation.': ['The Opportunity already has a pending internal validation.', '该商机已有待审批的内部生产审批申请。'],
     'No other active Manager can review this internal validation.': ['No other active Manager can review this internal validation.', '没有其他在职 Manager 可以审批该内部生产审批申请。'],
@@ -229,7 +229,7 @@ const UNAVAILABLE_ACTIONS: Record<string, CopyPair> = {
 // "<label> is too long: at most <n> characters." names the field by the label of its column. The fields
 // users reach most are given the names their forms use; any other keeps its label.
 const TOO_LONG_FIELDS: Record<string, CopyPair> = {
-  'Customer Name': ['The customer name', '演示员工125'],
+  'Customer Name': ['The customer name', '客户全称'],
   'CRM Short Name': ['The short name', '客户简称'],
   'CRM City': ['The city', '城市'],
   'CRM Region': ['The region', '区域'],

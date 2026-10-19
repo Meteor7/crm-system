@@ -1103,7 +1103,7 @@ export function createMockApi(options: {
       throw new CrmApiError('CONTACT_ACCOUNT_MISMATCH', '联系人不属于当前客户', requestId(), false)
     }
     if (contact.status !== 'Active') {
-      throw new CrmApiError('CONTACT_INACTIVE', '演示员工166或归档联系人不能新增业务关联', requestId(), false)
+      throw new CrmApiError('CONTACT_INACTIVE', '离职或归档联系人不能新增业务关联', requestId(), false)
     }
     return contact
   }
@@ -2176,7 +2176,7 @@ export function createMockApi(options: {
       const lead = assertLead(id)
       if (lead.status === 'Converted') {
         if (!lead.convertedAccountId || !lead.convertedContactId || !lead.convertedOpportunityId) {
-          throw new CrmApiError('LEAD_CONVERSION_INCOMPLETE', 'Lead 转换记录不完整，请联系演示员工170', requestId(), false)
+          throw new CrmApiError('LEAD_CONVERSION_INCOMPLETE', 'Lead 转换记录不完整，请联系管理员', requestId(), false)
         }
         const existingResult: LeadConversionResult = {
           lead,
@@ -2860,7 +2860,7 @@ export function createMockApi(options: {
       await wait()
       return repository.transact((snapshot) => {
       if ((command.type === 'manager_reject' || command.type === 'manager_approve') && role !== 'Manager') {
-        throw new CrmApiError('PERMISSION_DENIED', '只有 Boss 或 Demo 演示员工170可以执行审批', requestId(), false)
+        throw new CrmApiError('PERMISSION_DENIED', '只有 Boss 或 Demo 管理员可以执行审批', requestId(), false)
       }
       if (command.type === 'engineer_return' || command.type === 'engineer_approve') assertCapability(capabilities, 'demo_request:engineering_review')
       else if (command.type === 'manager_reject' || command.type === 'manager_approve') assertCapability(capabilities, 'demo_request:manager_approve')

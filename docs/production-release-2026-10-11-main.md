@@ -57,7 +57,7 @@ staging 的 `rayher-crm-rehearsal` 栈（10-07 生产备份升级到 3088723 的
 | 迁移 | 10 秒，4 个补丁；无 traceback |
 | verify-migration | stage/region ok；territories 8，groups Asia/China/World；redFlagRecordsMissing 0；ownerIdentitiesUnresolved 0；archived 0；CNY {0,0,0} |
 | 数据验收 | 57 客户、21 联系人、64 站点、23 商机、3 Demo、1 Evaluation、5 Visit、4 File 与冻结快照一致；阶段、区域、scheduler、site_config 一致；uploads_paused=True |
-| API 验收 | 门控钩子生效并拒绝；bootstrap/cockpit 演示员工152；两名 Sales 看板可读、经理 Review 被拒 |
+| API 验收 | 门控钩子生效并拒绝；bootstrap/cockpit 正常；两名 Sales 看板可读、经理 Review 被拒 |
 | HTTP 验收 | ping 200；/crm 301→200；guest 经理 API 401；5 个前端资源 200；guest multipart 403 + 门控文案 |
 | 升级后冒烟 | `LAUNCH-SMOKE-20261011072343fcc0`：57 项通过，临时用户/数据清理，快照一致；结果存于运行目录 `post-upgrade-smoke-result.json` |
 | 外部核对 | `https://crm.example.invalid/api/method/ping` 200，`sid` Secure/HttpOnly，HSTS；HTTP 308 跳转 HTTPS |

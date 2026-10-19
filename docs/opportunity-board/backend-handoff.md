@@ -149,7 +149,7 @@ SavedQuery = {
 
 POST `export_opportunities` 接收同一规范化查询，一次返回全部匹配行、汇总、分组和 asOf。前端不再逐页拼接，数据来自同一请求事务。共享查询额外传 `savedQuery: {id, modified}`，列表和导出均重新校验当前访问与版本。
 
-Excel 保留所选列和分组，并增加 Summary 元数据页。人民币以百万元输出，15 位有效数字以内为数值，超出 Excel 精度时使用精确文本，汇总遵守相同规则。日期使用上海业务日历的 Excel 日期，未知值留空；文本不执行公式。完整演示员工116见 [PR10](../superpowers/plans/2026-10-05-philippe-pr10-sharing.md)。
+Excel 保留所选列和分组，并增加 Summary 元数据页。人民币以百万元输出，15 位有效数字以内为数值，超出 Excel 精度时使用精确文本，汇总遵守相同规则。日期使用上海业务日历的 Excel 日期，未知值留空；文本不执行公式。完整合同见 [PR10](../superpowers/plans/2026-10-05-philippe-pr10-sharing.md)。
 
 ## 联调重点
 
@@ -187,7 +187,7 @@ Excel 保留所选列和分组，并增加 Summary 元数据页。人民币以�
 
 新增 createdAt、lastActivityAt、poDate 日期条件（before／after／between）和 status 条件（in／not_in；open／won／lost），也可显示及排序这些列。lastActivityIncomplete 表示关联完成活动中存在未知业务日期，该行最后活动日期不参与筛选／排序；已有证据日期仍可显示。业务事实和实质历史沿用 Review 公共读模型，范围先受商机权限约束。
 
-periodFilter 可省略，省略表示没有期间限制。选定字段后，期间与全局范围、根条件组取交集；规范化 anchor 为期间首日，采用上海日期的半开期间。页面显示业务字段与实际日期范围，不把跨页携带的 Review 期间隐含应用到查询。完整演示员工116见 [PR09](../superpowers/plans/2026-10-05-philippe-pr09-queries.md)。
+periodFilter 可省略，省略表示没有期间限制。选定字段后，期间与全局范围、根条件组取交集；规范化 anchor 为期间首日，采用上海日期的半开期间。页面显示业务字段与实际日期范围，不把跨页携带的 Review 期间隐含应用到查询。完整合同见 [PR09](../superpowers/plans/2026-10-05-philippe-pr09-queries.md)。
 
 
 ## PR10 共享接口（2026-10-05）

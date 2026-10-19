@@ -13,7 +13,7 @@
 - 不创建 ERP Project、Task、Quality Inspection、Company、Asset 或库存/会计单据。
 - 前端 adapter 保持 Mock；本阶段不接入文件字节、报告 PDF 或客户端通知 Proxy。
 - Demo Request ID `CRM-DR-{#####}`、Evaluation `CRM-EVAL-{#####}`、Test Run `CRM-RUN-{#####}` 均由服务端生成；History/Comment 使用 hash。
-- 身份只取 `frappe.session.user`；Sales owner/createdBy、Engineer owner、Manager approvedBy 不接受客户端演示员工106。
+- 身份只取 `frappe.session.user`；Sales owner/createdBy、Engineer owner、Manager approvedBy 不接受客户端伪造。
 - Sales 仅写自己的 Draft/Returned/Rejected Request；Engineer 仅审查分配给自己的 Request/Evaluation；Manager 全局。
 - 状态机严格匹配冻结 `DemoRequestCommand`；非法角色或非法起始状态先拒绝，不产生部分写入。
 - Manager approve 在同一 savepoint 内：锁 Request → 校验 → 创建 Evaluation → 更新 Request → 写 History；重复 approve 返回 `EVALUATION_EXISTS`，注入失败整体回滚。

@@ -61,7 +61,7 @@ function stageItems(stage: DemoLifecycleStage) {
           <option value="all">{{ locale === 'en-US' ? 'All' : '全部' }}</option>
           <option value="critical">{{ locale === 'en-US' ? 'Red · Critical' : '红色 · 紧迫' }}</option>
           <option value="stalled">{{ locale === 'en-US' ? 'Orange · Stalled' : '橙色 · 停滞' }}</option>
-          <option value="healthy">{{ locale === 'en-US' ? 'Green · Healthy' : '绿色 · 演示员工152' }}</option>
+          <option value="healthy">{{ locale === 'en-US' ? 'Green · Healthy' : '绿色 · 正常' }}</option>
         </select>
       </label>
       <label class="owner-filter">
@@ -91,7 +91,7 @@ function stageItems(stage: DemoLifecycleStage) {
     <div class="health-legend" :aria-label="locale === 'en-US' ? 'Health rules' : '健康状态规则'">
       <span class="critical"><i></i>{{ locale === 'en-US' ? 'Red: customer expected ≤ 7 days' : '红：客户预期 ≤ 7 天' }}</span>
       <span class="stalled"><i></i>{{ locale === 'en-US' ? 'Orange: no effective progress for 5 days' : '橙：5 天无有效进展' }}</span>
-      <span class="healthy"><i></i>{{ locale === 'en-US' ? 'Green: progressing normally' : '绿：演示员工152推进' }}</span>
+      <span class="healthy"><i></i>{{ locale === 'en-US' ? 'Green: progressing normally' : '绿：正常推进' }}</span>
     </div>
 
     <PipelineBoard :stages="boardStages" :columns="6" :aria-label="locale === 'en-US' ? 'Demo lifecycle' : 'Demo 全生命周期'">

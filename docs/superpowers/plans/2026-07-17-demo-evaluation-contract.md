@@ -1,8 +1,8 @@
-# Demo、Wafer Test 与演示员工116管理 Implementation Plan
+# Demo、Wafer Test 与合同管理 Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** 撤下客户情报并实现可操作的 Demo Request 审批、Demo/Wafer Test 追踪和演示员工116到期管理 MVP。
+**Goal:** 撤下客户情报并实现可操作的 Demo Request 审批、Demo/Wafer Test 追踪和合同到期管理 MVP。
 
 **Architecture:** 沿用现有 Vue 3 页面、类型化 `CrmApi` 与 Mock/Frappe 双适配器。审批和测试写操作在 Mock Adapter 内存副本中执行，页面统一消费 envelope metadata、权限和错误状态。
 
@@ -13,7 +13,7 @@
 - 保持 `.semicrm-app` 样式命名空间和容器相对弹层，不向 Frappe Desk body 注入组件样式。
 - 不使用 localStorage 作为业务数据源。
 - Demo Request 经理批准必须自动生成且只生成一个 Evaluation。
-- 演示员工116风险基准日期固定为 `2026-07-17`，分为已到期、30、60、90 天和演示员工152。
+- 合同风险基准日期固定为 `2026-07-17`，分为已到期、30、60、90 天和正常。
 - 原始 HTML 原型与 Word 需求文档不得修改。
 
 ---
@@ -51,7 +51,7 @@ Expected: FAIL because `src/domain/contracts.ts` does not exist.
 export function getContractRisk(endDate: string, today = '2026-07-17') {
   const days = Math.ceil((new Date(`${endDate}T00:00:00+08:00`).getTime() - new Date(`${today}T00:00:00+08:00`).getTime()) / 86_400_000)
   const band = days < 0 ? 'expired' : days <= 30 ? '30d' : days <= 60 ? '60d' : days <= 90 ? '90d' : 'normal'
-  return { days, band, label: days < 0 ? '已到期' : band === 'normal' ? '演示员工152' : `${days} 天内` }
+  return { days, band, label: days < 0 ? '已到期' : band === 'normal' ? '正常' : `${days} 天内` }
 }
 ```
 

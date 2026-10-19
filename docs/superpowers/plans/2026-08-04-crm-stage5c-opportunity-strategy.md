@@ -4,7 +4,7 @@
 
 **Goal:** 在独立 Frappe CRM 数据库中完成 `CRM Opportunity` 策略主记录、Stakeholder、Action 与不可变历史的真实后端/API 垂直切片。
 
-**Architecture:** 延续已批准的轻量 `CRM Opportunity`，不使用 ERPNext 标准 Opportunity/Company。Account 复用 Customer、Site 复用 Address、Contact 复用标准 Contact；Opportunity 关系使用 `rayher_crm` 自有 DocType，DTO 通过 join 派生 Account/Site/Contact 显示名。所有写入从 `frappe.session.user` 解析身份，Sales owner 不可演示员工106，更新使用行锁 + `expectedModified`，关系删除为软归档，历史只追加。
+**Architecture:** 延续已批准的轻量 `CRM Opportunity`，不使用 ERPNext 标准 Opportunity/Company。Account 复用 Customer、Site 复用 Address、Contact 复用标准 Contact；Opportunity 关系使用 `rayher_crm` 自有 DocType，DTO 通过 join 派生 Account/Site/Contact 显示名。所有写入从 `frappe.session.user` 解析身份，Sales owner 不可伪造，更新使用行锁 + `expectedModified`，关系删除为软归档，历史只追加。
 
 **Tech Stack:** Frappe Framework 15.116.1、ERPNext 15.118.3、MariaDB 10.6、Python 3.11 runtime、Docker Compose、FrappeTestCase、PowerShell HTTP acceptance。
 

@@ -3,7 +3,7 @@
 import frappe
 
 
-MESSAGE = "上线初期暂不开放附件上传，请联系演示员工170；已有附件仍可按权限查看。"
+MESSAGE = "上线初期暂不开放附件上传，请联系管理员；已有附件仍可按权限查看。"
 
 
 def uploads_paused():

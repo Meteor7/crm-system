@@ -28,15 +28,15 @@ export const sites: Record<string, SiteDto[]> = {
     { id: 'SITE-002', name: '上海研发中心', city: '上海', type: '研发', process: '先进制程', status: '量产' },
   ],
   'ACC-002': [
-    { id: 'SITE-003', name: '演示员工25', city: '武汉', type: '存储晶圆制造', process: '3D NAND', status: '量产' },
-    { id: 'SITE-004', name: '演示员工26', city: '武汉', type: '扩产项目', process: '3D NAND', status: '建设中' },
+    { id: 'SITE-003', name: '武汉一厂', city: '武汉', type: '存储晶圆制造', process: '3D NAND', status: '量产' },
+    { id: 'SITE-004', name: '武汉二期', city: '武汉', type: '扩产项目', process: '3D NAND', status: '建设中' },
   ],
   'ACC-003': [
     { id: 'SITE-007', name: '上海 Fab 7', city: '上海', type: '晶圆制造', process: '90/55nm', status: '量产' },
     { id: 'SITE-008', name: '无锡研发中心', city: '无锡', type: '研发', process: '量测验证', status: '量产' },
   ],
   'ACC-005': [
-    { id: 'SITE-005', name: '演示员工12', city: '南通', type: '先进封装', process: '2.5D/3D', status: '量产' },
+    { id: 'SITE-005', name: '南通工厂', city: '南通', type: '先进封装', process: '2.5D/3D', status: '量产' },
   ],
   'ACC-006': [
     { id: 'SITE-006', name: '演示员工27', city: '江阴', type: '先进封装', process: '高速 AOI', status: '量产' },
@@ -47,7 +47,7 @@ const legacyContacts = {
   'ACC-001': [
     { id: 'CON-001', name: '演示员工36', title: '设备采购总监', department: '采购中心', role: 'Economic Buyer', influence: 'High', relationship: 'Strong' },
     { id: 'CON-002', name: '演示员工22', title: '良率提升负责人', department: '制程整合', role: 'Technical Champion', influence: 'High', relationship: 'Developing' },
-    { id: 'CON-003', name: '演示员工14', title: '厂务演示员工113经理', department: '制造运营', role: 'Decision Maker', influence: 'High', relationship: 'Developing' },
+    { id: 'CON-003', name: '演示员工14', title: '厂务副总经理', department: '制造运营', role: 'Decision Maker', influence: 'High', relationship: 'Developing' },
   ],
   'ACC-002': [
     { id: 'CON-004', name: '演示员工31', title: '采购经理', department: '采购部', role: 'Economic Buyer', influence: 'High', relationship: 'Strong' },
@@ -86,10 +86,10 @@ export const contacts: ContactDto[] = Object.entries(legacyContacts).flatMap(([a
 export const requirements: RequirementDto[] = [
   { id: 'REQ-001', accountId: 'ACC-001', accountName: '示例企业014有限公司', title: '晶圆表面缺陷检测扩容', category: '检测设备', equipment: 'Macro Inspection X8', application: '晶圆表面缺陷检测', site: '南京 12-inch Fab', quantity: 2, budgetAmount: 16800000, budgetStatus: 'Confirmed', status: 'Demo验证', completeness: 96, owner: 'person002@crm.example.invalid', nextAction: '确认 Demo wafer 与验收阈值', due: '2026-07-18', linkedDealId: 'OPP-001', linkedEvaluationId: 'EVAL-101' },
   { id: 'REQ-002', accountId: 'ACC-001', accountName: '示例企业014有限公司', title: '良率分析软件升级', category: '软件与升级', equipment: 'YieldMind 4.0', application: '缺陷归因与良率分析', site: '上海研发中心', quantity: 1, budgetAmount: 4200000, budgetStatus: 'In Review', status: '技术确认', completeness: 84, owner: 'person002@crm.example.invalid', nextAction: '完成数据接口清单', due: '2026-07-25', linkedDealId: 'OPP-002' },
-  { id: 'REQ-003', accountId: 'ACC-002', accountName: '示例企业044有限公司', title: '存储晶圆缺陷检测新线', category: '检测设备', equipment: 'NanoScan Pro', application: '3D NAND 缺陷检测', site: '演示员工26', quantity: 3, budgetAmount: 32500000, budgetStatus: 'In Review', status: '预算审批', completeness: 89, owner: 'person002@crm.example.invalid', nextAction: '补充 ROI 与产能提升说明', due: '2026-07-16', linkedDealId: 'OPP-003' },
+  { id: 'REQ-003', accountId: 'ACC-002', accountName: '示例企业044有限公司', title: '存储晶圆缺陷检测新线', category: '检测设备', equipment: 'NanoScan Pro', application: '3D NAND 缺陷检测', site: '武汉二期', quantity: 3, budgetAmount: 32500000, budgetStatus: 'In Review', status: '预算审批', completeness: 89, owner: 'person002@crm.example.invalid', nextAction: '补充 ROI 与产能提升说明', due: '2026-07-16', linkedDealId: 'OPP-003' },
   { id: 'REQ-004', accountId: 'ACC-003', accountName: '示例企业003有限公司', title: '关键尺寸量测替换', category: '量测设备', equipment: 'CD Metrology M5', application: '90/55nm CD 量测', site: '无锡 Fab 7', quantity: 1, budgetAmount: 11200000, budgetStatus: 'Unknown', status: '技术确认', completeness: 74, owner: 'person005@crm.example.invalid', nextAction: '澄清 GR&R 指标', due: '2026-07-22', linkedDealId: 'OPP-004' },
   { id: 'REQ-005', accountId: 'ACC-004', accountName: '示例企业045有限公司', title: '新厂 AOI 导入计划', category: '检测设备', equipment: 'AOI Matrix 900', application: '先进存储封装检测', site: '合肥二厂', quantity: 2, budgetAmount: 24800000, budgetStatus: 'In Review', status: '采购计划', completeness: 78, owner: 'person002@crm.example.invalid', nextAction: '确认入场窗口与厂务条件', due: '2026-07-20', linkedDealId: 'OPP-005' },
-  { id: 'REQ-006', accountId: 'ACC-005', accountName: '示例企业040有限公司', title: '先进封装外观检测', category: '检测设备', equipment: 'PackageVision P7', application: '2.5D/3D 封装外观检测', site: '演示员工12', quantity: 1, budgetAmount: 7600000, budgetStatus: 'Unknown', status: '需求识别', completeness: 62, owner: 'person005@crm.example.invalid', nextAction: '补齐预算与采购时间', due: '2026-07-19' },
+  { id: 'REQ-006', accountId: 'ACC-005', accountName: '示例企业040有限公司', title: '先进封装外观检测', category: '检测设备', equipment: 'PackageVision P7', application: '2.5D/3D 封装外观检测', site: '南通工厂', quantity: 1, budgetAmount: 7600000, budgetStatus: 'Unknown', status: '需求识别', completeness: 62, owner: 'person005@crm.example.invalid', nextAction: '补齐预算与采购时间', due: '2026-07-19' },
   { id: 'REQ-007', accountId: 'ACC-006', accountName: '示例企业027有限公司', title: '高速 AOI 产能升级', category: '检测设备', equipment: 'FastScan 1200', application: '高密度封装在线检测', site: '演示员工27', quantity: 2, budgetAmount: 18800000, budgetStatus: 'Confirmed', status: '已确认', completeness: 93, owner: 'person005@crm.example.invalid', nextAction: '安排交付启动会', due: '2026-07-21', linkedDealId: 'OPP-006' },
   { id: 'REQ-008', accountId: 'ACC-007', accountName: '示例企业018有限公司', title: '测试设备升级评估', category: '软件与升级', equipment: 'TestFlow Suite', application: '测试数据闭环', site: '天水基地', quantity: 1, budgetAmount: 3600000, budgetStatus: 'Unknown', status: '需求识别', completeness: 55, owner: 'person005@crm.example.invalid', nextAction: '重新确认项目优先级', due: '2026-07-15' },
 ]
@@ -97,9 +97,9 @@ export const requirements: RequirementDto[] = [
 export const opportunities: OpportunityDto[] = [
   { id: 'OPP-001', accountId: 'ACC-001', accountName: '示例企业014有限公司', title: '南京缺陷检测设备 2 台', segment: 'Frontend', amount: '16800000.00', currency: 'CNY', stage: 'qualified_opportunity', probabilityLevel: 'upside', intentScore: 88, budgetStatus: 'Confirmed', owner: 'Demo Staff 01', nextAction: '确认 Demo wafer 与指标', due: '2026-07-18', sourceRequirementId: 'REQ-001' },
   { id: 'OPP-002', accountId: 'ACC-001', accountName: '示例企业014有限公司', title: 'YieldMind 软件升级', segment: 'Frontend', amount: '4200000.00', currency: 'CNY', stage: 'qualified_opportunity', probabilityLevel: '', intentScore: 74, budgetStatus: 'In Review', owner: 'Demo Staff 01', nextAction: '确认数据接口', due: '2026-07-25', sourceRequirementId: 'REQ-002' },
-  { id: 'OPP-003', accountId: 'ACC-002', accountName: '示例企业044有限公司', title: '演示员工26缺陷检测新线', segment: 'Frontend', amount: '32500000.00', currency: 'CNY', stage: 'demo_done', probabilityLevel: 'committed', intentScore: 92, budgetStatus: 'In Review', owner: 'Demo Staff 01', nextAction: '推进预算评审', due: '2026-07-16', sourceRequirementId: 'REQ-003' },
+  { id: 'OPP-003', accountId: 'ACC-002', accountName: '示例企业044有限公司', title: '武汉二期缺陷检测新线', segment: 'Frontend', amount: '32500000.00', currency: 'CNY', stage: 'demo_done', probabilityLevel: 'committed', intentScore: 92, budgetStatus: 'In Review', owner: 'Demo Staff 01', nextAction: '推进预算评审', due: '2026-07-16', sourceRequirementId: 'REQ-003' },
   { id: 'OPP-004', accountId: 'ACC-003', accountName: '示例企业003有限公司', title: '关键尺寸量测替换', segment: 'Frontend', amount: '11200000.00', currency: 'CNY', stage: 'qualified_opportunity', probabilityLevel: '', intentScore: 72, budgetStatus: 'Unknown', owner: 'Demo Staff 02', nextAction: '提交 GR&R 测试方案', due: '2026-07-22', sourceRequirementId: 'REQ-004' },
-  { id: 'OPP-005', accountId: 'ACC-004', accountName: '示例企业045有限公司', title: '合肥二厂 AOI 项目', segment: 'Frontend', amount: '24800000.00', currency: 'CNY', stage: 'quotation_sent', probabilityLevel: 'pipeline', intentScore: 84, budgetStatus: 'Confirmed', owner: 'Demo Staff 01', nextAction: '确认演示员工116条款', due: '2026-07-20', sourceRequirementId: 'REQ-005' },
+  { id: 'OPP-005', accountId: 'ACC-004', accountName: '示例企业045有限公司', title: '合肥二厂 AOI 项目', segment: 'Frontend', amount: '24800000.00', currency: 'CNY', stage: 'quotation_sent', probabilityLevel: 'pipeline', intentScore: 84, budgetStatus: 'Confirmed', owner: 'Demo Staff 01', nextAction: '确认合同条款', due: '2026-07-20', sourceRequirementId: 'REQ-005' },
   { id: 'OPP-006', accountId: 'ACC-006', accountName: '示例企业027有限公司', title: '高速 AOI 产能升级', segment: 'Advanced Packaging', amount: '18800000.00', currency: 'CNY', stage: 'po_received', probabilityLevel: '', intentScore: 86, budgetStatus: 'Confirmed', owner: 'Demo Staff 02', nextAction: '交付启动', due: '2026-07-21', sourceRequirementId: 'REQ-007' },
   { id: 'OPP-007', accountId: 'ACC-005', accountName: '示例企业040有限公司', title: '先进封装外观检测', segment: 'Advanced Packaging', amount: '7600000.00', currency: 'CNY', stage: 'qualified_opportunity', probabilityLevel: '', intentScore: 67, budgetStatus: 'Unknown', owner: 'Demo Staff 02', nextAction: '补齐预算信息', due: '2026-07-19', sourceRequirementId: 'REQ-006' },
 ]
@@ -375,7 +375,7 @@ export const contracts: ContractDto[] = [
 ]
 
 export const actions: ActionDto[] = [
-  { id: 'ACT-001', accountId: 'ACC-002', opportunityId: 'OPP-003', title: '补充演示员工26项目 ROI 说明', owner: 'Demo Staff 01', due: '2026-07-16', status: 'Open', sourceType: 'Requirement' },
+  { id: 'ACT-001', accountId: 'ACC-002', opportunityId: 'OPP-003', title: '补充武汉二期项目 ROI 说明', owner: 'Demo Staff 01', due: '2026-07-16', status: 'Open', sourceType: 'Requirement' },
   { id: 'ACT-002', accountId: 'ACC-001', opportunityId: 'OPP-001', title: '确认 Demo wafer 与验收阈值', owner: 'Demo Staff 01', due: '2026-07-18', status: 'Open', sourceType: 'Deal' },
   { id: 'ACT-003', accountId: 'ACC-005', opportunityId: 'OPP-007', title: '补齐先进封装项目预算信息', owner: 'Demo Staff 02', due: '2026-07-19', status: 'Open', sourceType: 'Requirement' },
   { id: 'ACT-004', accountId: 'ACC-007', title: '重估测试设备升级优先级', owner: 'Demo Staff 02', due: '2026-07-15', status: 'Open', sourceType: 'Visit' },

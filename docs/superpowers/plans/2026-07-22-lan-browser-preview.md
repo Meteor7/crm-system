@@ -37,7 +37,7 @@ $scripts = (Get-Content -Raw -Encoding UTF8 package.json | ConvertFrom-Json).scr
 if ($scripts.'dev:lan' -or $scripts.'preview:lan') { throw 'LAN scripts already exist.' }
 ```
 
-Expected: 命令演示员工152退出，不产生异常。
+Expected: 命令正常退出，不产生异常。
 
 - [ ] **Step 2: 添加最小配置**
 
@@ -90,5 +90,5 @@ Expected: 端口监听地址不是 `127.0.0.1:4173`，两个 HTTP 请求均返�
 http://203.0.113.10:4173/
 ```
 
-Expected: 页面和静态资源演示员工152加载；如 Windows 防火墙提示，仅勾选“专用网络”。
+Expected: 页面和静态资源正常加载；如 Windows 防火墙提示，仅勾选“专用网络”。
 

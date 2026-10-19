@@ -12,7 +12,7 @@ describe('customer report model', () => {
     const spec = buildCustomerReportModel(detail, '2026-07-17')
 
     expect(spec.sheets.map((sheet) => sheet.name)).toEqual([
-      '客户全貌 Overview', '商机 Opportunities', '需求与行动 Actions', '关键人与拜访 People', 'Demo与演示员工116 Demo',
+      '客户全貌 Overview', '商机 Opportunities', '需求与行动 Actions', '关键人与拜访 People', 'Demo与合同 Demo',
     ])
     expect(spec.fileName).toMatch(/^CUSTOMER06_Customer_360_2026-07-17\.xlsx$/)
     expect(values(spec, '客户全貌 Overview')).toContain('Confirmed Booking')

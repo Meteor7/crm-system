@@ -149,30 +149,30 @@ describe('Plan business interface', () => {
     const plan = planFixture(), details = planDetailsFixture()
     plan.sales[0] = { ...plan.sales[0], id: null, name: '' }
     const action = details.items.find(row => row.id === 'action-1')!
-    action.salesOwner = null; action.actionOwner = 'engineer@example.invalid'
+    action.salesOwner = null; action.actionOwner = 'person011@example.invalid'
     const { wrapper } = await setup('Manager', plan, details)
     expect(wrapper.get('.sales-panel tbody th').text()).toBe('未分配')
     const actionRow = wrapper.findAll('.agenda-item.actions').find(row => row.text().includes(action.title))!
     expect(actionRow.text()).toContain('未分配')
-    expect(actionRow.text()).toContain('执行人 · engineer@example.invalid')
+    expect(actionRow.text()).toContain('执行人 · person011@example.invalid')
     setLocale('en-US'); await flushPromises()
     expect(wrapper.get('.sales-panel tbody th').text()).toBe('Unassigned')
-    expect(actionRow.text()).toContain('Assigned to · engineer@example.invalid')
+    expect(actionRow.text()).toContain('Assigned to · person011@example.invalid')
     wrapper.unmount()
   })
   it('prefers an engineer name supplied by the API and falls back for an empty name', async () => {
     const details = planDetailsFixture()
     const action = details.items.find(row => row.id === 'action-1')!
-    action.actionOwner = 'engineer@example.invalid'; action.actionOwnerName = '王工程师'
+    action.actionOwner = 'person011@example.invalid'; action.actionOwnerName = '王工程师'
     const { wrapper, api } = await setup('Manager', planFixture(), details)
     const actionRow = () => wrapper.findAll('.agenda-item.actions').find(row => row.text().includes(action.title))!
     expect(actionRow().text()).toContain('执行人 · 王工程师')
-    expect(actionRow().text()).not.toContain('engineer@example.invalid')
+    expect(actionRow().text()).not.toContain('person011@example.invalid')
     setLocale('en-US'); await flushPromises()
     expect(actionRow().text()).toContain('Assigned to · 王工程师')
     api.getPlanDetails = vi.fn(async () => response({ ...details, items: [{ ...action, actionOwnerName: '  ' }] }))
     await wrapper.get('.kpi.actions').trigger('click'); await flushPromises()
-    expect(actionRow().text()).toContain('Assigned to · engineer@example.invalid')
+    expect(actionRow().text()).toContain('Assigned to · person011@example.invalid')
     wrapper.unmount()
   })
   it('explains missing dates across Plan metrics in both languages without exposing unknown reason codes', async () => {

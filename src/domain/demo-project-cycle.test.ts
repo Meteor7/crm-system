@@ -28,7 +28,7 @@ function workflow(overrides: Partial<DemoWorkflowDto>): DemoWorkflowDto {
     stage: 'Engineer Review',
     health: {
       level: 'healthy',
-      reason: '演示员工152推进',
+      reason: '正常推进',
       daysSinceProgress: 1,
       daysToCustomerExpected: 12,
     },
@@ -71,7 +71,7 @@ describe('Demo project-cycle mapping', () => {
     expect(isCustomerExpectedRisk(workflow({
       health: {
         level: 'healthy',
-        reason: '演示员工152推进',
+        reason: '正常推进',
         daysSinceProgress: 1,
         daysToCustomerExpected: 8,
       },

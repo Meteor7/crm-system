@@ -66,7 +66,7 @@ function submit() {
       <label><span>{{ t('installed.model') }}<RequiredMark /></span><input v-model="form.model" :aria-label="t('installed.model')" required /></label>
       <label><span>{{ t('installed.siteLocation') }}</span><input v-model="form.location" :aria-label="t('installed.siteLocation')" :placeholder="t('bookingEditor.pendingPlaceholder')" /></label>
       <label><span>{{ locale === 'en-US' ? 'Sales order' : '销售订单' }}</span><input v-model="form.salesOrder" :aria-label="locale === 'en-US' ? 'Sales order' : '销售订单'" :placeholder="t('bookingEditor.pendingPlaceholder')" /></label>
-      <label><span>{{ locale === 'en-US' ? 'Contract' : '演示员工116' }}</span><input v-model="form.contract" :aria-label="locale === 'en-US' ? 'Contract' : '演示员工116'" :placeholder="t('bookingEditor.pendingPlaceholder')" /></label>
+      <label><span>{{ locale === 'en-US' ? 'Contract' : '合同' }}</span><input v-model="form.contract" :aria-label="locale === 'en-US' ? 'Contract' : '合同'" :placeholder="t('bookingEditor.pendingPlaceholder')" /></label>
       <label><span>{{ salesEnumLabel('Software', locale) }}</span><input v-model="form.software" :aria-label="salesEnumLabel('Software', locale)" :placeholder="t('bookingEditor.pendingPlaceholder')" /></label>
       <label><span>{{ salesEnumLabel('Firmware', locale) }}</span><input v-model="form.firmware" :aria-label="salesEnumLabel('Firmware', locale)" :placeholder="t('bookingEditor.pendingPlaceholder')" /></label>
       <label><span>{{ salesEnumLabel('Configuration', locale) }}</span><input v-model="form.configuration" :aria-label="salesEnumLabel('Configuration', locale)" :placeholder="t('bookingEditor.pendingPlaceholder')" /></label>

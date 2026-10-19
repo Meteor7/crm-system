@@ -289,13 +289,13 @@ describe('Leads pages', () => {
     expect(wrapper.get('[data-duplicate-accounts]').text()).toContain('ACC-003')
     expect(wrapper.text()).toContain('已有同名的客户。')
     // Another new-Account name takes the offer away; the name asked about brings it back.
-    await wrapper.get('[aria-label="演示员工125"]').setValue('另一家公司')
+    await wrapper.get('[aria-label="客户全称"]').setValue('另一家公司')
     expect(wrapper.find('[data-duplicate-accounts]').exists()).toBe(false)
-    await wrapper.get('[aria-label="演示员工125"]').setValue(lead.company)
+    await wrapper.get('[aria-label="客户全称"]').setValue(lead.company)
     expect(wrapper.find('[data-duplicate-accounts]').exists()).toBe(true)
     // A submission the dialog's own checks stop asks about no name: the offer does not come back for a name the
     // server was never asked about, and that name goes without a confirmation when it is sent.
-    await wrapper.get('[aria-label="演示员工125"]').setValue('另一家公司')
+    await wrapper.get('[aria-label="客户全称"]').setValue('另一家公司')
     await wrapper.get('[data-testid="qualification-confirmed"]').setValue(false)
     await wrapper.get('[data-modal-submit]').trigger('submit')
     await flushPromises()

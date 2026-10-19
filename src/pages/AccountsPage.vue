@@ -246,7 +246,7 @@ function openDetail(account: AccountSummaryDto) { void router.push({ name: 'acco
       <p v-if="modalError" class="form-error">{{ modalError }}</p>
       <p v-if="duplicateAccounts && accountForm.name === askedName" class="form-error duplicate-accounts" data-duplicate-accounts>{{ t('accounts.duplicateHint', { names: duplicateAccounts }) }} <button type="button" class="secondary-button" data-create-anyway :disabled="busy" @click="createAnyway">{{ t('accounts.createAnyway') }}</button></p>
       <div class="account-form-grid">
-        <label><span>{{ locale === 'en-US' ? 'Account name' : '演示员工125' }}<RequiredMark /></span><input v-model="accountForm.name" :aria-label="locale === 'en-US' ? 'Account name' : '演示员工125'" required /></label>
+        <label><span>{{ locale === 'en-US' ? 'Account name' : '客户全称' }}<RequiredMark /></span><input v-model="accountForm.name" :aria-label="locale === 'en-US' ? 'Account name' : '客户全称'" required /></label>
         <label><span>{{ locale === 'en-US' ? 'Short name' : '客户简称' }}<RequiredMark /></span><input v-model="accountForm.shortName" :aria-label="locale === 'en-US' ? 'Short name' : '客户简称'" required /></label>
         <label><span>{{ locale === 'en-US' ? 'Business area' : '业务领域' }}<RequiredMark /></span><AccountSegmentSelect v-model="accountForm.segment" :segments="segments" :label="locale === 'en-US' ? 'Account business area' : '客户业务领域'" required /></label>
         <label><span>{{ locale === 'en-US' ? 'Account tier' : '客户等级' }}<RequiredMark /></span><select v-model="accountForm.tier" :aria-label="locale === 'en-US' ? 'Account tier' : '客户等级'" required><option>S</option><option>A</option><option>B</option></select></label>

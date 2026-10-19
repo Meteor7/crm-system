@@ -61,7 +61,7 @@ describe('DashboardPage', () => {
     expect(wrapper.get('[data-dashboard-subscriptions]').text()).toContain('我的订阅看板')
     expect(wrapper.findAll('[data-subscribed-dashboard]')).toHaveLength(3)
     expect(wrapper.find('[data-testid="manage-dashboard-subscriptions"]').exists()).toBe(true)
-    expect(wrapper.text()).not.toContain('验证与演示员工116提醒')
+    expect(wrapper.text()).not.toContain('验证与合同提醒')
     expect(wrapper.text()).not.toContain('数据完整度')
     expect(wrapper.text()).not.toContain('看板时间范围')
     expect(wrapper.text()).not.toContain('客户情报')
@@ -238,7 +238,7 @@ describe('DashboardPage', () => {
 
   it('keeps the first row, discards cancelled deletion, and can delete a later row', async () => {
     localStorage.setItem(
-      'semiconductor-crm:boss-dashboard-subscriptions:v2:zhao.jing%40crm.example.invalid',
+      'semiconductor-crm:boss-dashboard-subscriptions:v2:person073%40crm.example.invalid',
       JSON.stringify([
         ['evaluation-status', 'booking-month', 'top-accounts'],
         ['region', 'tier', 'risk'],

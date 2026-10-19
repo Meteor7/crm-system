@@ -60,14 +60,14 @@ describe('AccountProfile request identity', () => {
     await flushPromises()
     expect(wrapper.text()).toContain('示例企业014')
     expect(wrapper.text()).toContain('Demo / 晶圆测试')
-    expect(wrapper.text()).toContain('演示员工116')
+    expect(wrapper.text()).toContain('合同')
     expect(wrapper.text()).not.toContain('采购需求与行动')
     expect(wrapper.findAll('.profile-grid > .profile-section > header strong').map((item) => item.text())).toEqual([
       'Site / 厂区',
       '关键人与组织关系',
     ])
     expect(wrapper.findAll('.project-section > header strong').map((item) => item.text())).toEqual([
-      '商机与 Booking', '演示员工116', '拜访与下一步', 'Demo / 晶圆测试',
+      '商机与 Booking', '合同', '拜访与下一步', 'Demo / 晶圆测试',
     ])
     const projectFilter = wrapper.get('[data-testid="account-project-filter"]')
     expect(projectFilter.findAll('option').map((option) => option.attributes('value'))).toEqual([

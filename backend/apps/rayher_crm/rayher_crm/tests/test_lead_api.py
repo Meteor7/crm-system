@@ -449,11 +449,11 @@ class TestLeadApi(FrappeTestCase):
         # The refusal's own message (ERPNext's) is cleared from the answer.
         self.assertFalse(frappe.local.message_log)
         self.assertEqual(frappe.db.count("Lead"), before)
-        other = create_lead(self._input("Email Other Lead", email="other@example.invalid"))
+        other = create_lead(self._input("Email Other Lead", email="person040@example.invalid"))
         with self.assertRaises(CrmApiException) as retaken:
             update_lead(other["id"], self._input("Email Other Lead", email="keeper@example.invalid"), other["modified"])
         self.assertEqual(retaken.exception.code, "CONFLICT")
-        self.assertEqual(frappe.db.get_value("Lead", other["id"], "email_id"), "other@example.invalid")
+        self.assertEqual(frappe.db.get_value("Lead", other["id"], "email_id"), "person040@example.invalid")
 
     def test_a_converted_lead_is_its_accounts_history_and_is_not_archived(self):
         frappe.set_user(self.sales)

@@ -27,7 +27,7 @@
 
 | 优先级 | 编号 | 问题 | 本轮证据 | 修复建议 |
 |---|---|---|---|---|
-| 🔴 **P0** | R5-B1 | **括号缺陷已进 git 历史（QA-P0-1 升级为已提交状态）**：`51fe8dd` 在后端 97 错误全红时提交；scope.py 三个 Sales 分支 4 开 3 关，Sales 视角 Opportunity/Booking/Installed Tool 查询全部 SQL 1064；工作树未修（内容==HEAD，仅 CRLF） | 重建镜像重跑：6 失败 + 97 错误，错误日志仍现 `…'Public'))) AND account=%s` 不平衡 SQL；`git show 51fe8dd` diff 确认演示员工122以 `+` 入库 | 三处各补 1 个 `)` → 重跑后端门禁（97 错误应归零）→ 单独提交修复 |
+| 🔴 **P0** | R5-B1 | **括号缺陷已进 git 历史（QA-P0-1 升级为已提交状态）**：`51fe8dd` 在后端 97 错误全红时提交；scope.py 三个 Sales 分支 4 开 3 关，Sales 视角 Opportunity/Booking/Installed Tool 查询全部 SQL 1064；工作树未修（内容==HEAD，仅 CRLF） | 重建镜像重跑：6 失败 + 97 错误，错误日志仍现 `…'Public'))) AND account=%s` 不平衡 SQL；`git show 51fe8dd` diff 确认坏行以 `+` 入库 | 三处各补 1 个 `)` → 重跑后端门禁（97 错误应归零）→ 单独提交修复 |
 | 🔴 **P0** | R5-B2 | **红灯提交流程失控**：`51fe8dd` 提交时后端门禁为红（97+6），提交者只验了前端 | 提交时间 19:02；QA 于 ~18:45 已实测该内容 103 红；提交不含 test_scope/test_api_foundation/test_stage5b_schema 任何 re-baseline | 建立「后端门禁绿 = 提交前置条件（且必须来自重建镜像）」；补 pre-commit 钩子 |
 | 🔴 **P0** | R5-B3 | **TipRay 第五轮活跃，范围扩大到权限核心**：`scope.py`、`test_api_foundation.py` 新入加密集；连同 `document_access.py`、`document_uploads.py`、2 个测试文件共 6 个文本文件 git 视角为密文（node 视图==HEAD，纯加密态旋转） | `git diff --numstat` 6 个 `.py` 为 `-`；跨进程 md5：git≠node、node==HEAD | IT 白名单化 → 验证恢复文本 diff → 加密态 pre-commit 闸门（连续第五轮要求） |
 | 🟠 **P1** | R5-N1 | **后端 6 失败全部未修**：① bootstrap 越权测试（已提交回归，`@api_endpoint` 吞 PermissionError）② 4 个 test_scope 仍断言「Sales 全员共享」旧语义 ③ schema 冻结契约未纳入 `custom_crm_visibility` | 隔离复跑 bootstrap 仍失败；三者均不在 51fe8dd 变更集 | re-baseline 6 个测试（bootstrap 改断言 PERMISSION_DENIED 信封；scope 4 例改 owner+Public 语义；schema 契约加新字段） |

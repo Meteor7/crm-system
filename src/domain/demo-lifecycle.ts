@@ -86,7 +86,7 @@ export function deriveDemoHealth(input: {
       ? '今天有进展'
       : daysSinceProgress <= 2
         ? `${daysSinceProgress} 天内有进展`
-        : '演示员工152推进',
+        : '正常推进',
     daysSinceProgress,
     daysToCustomerExpected,
   }

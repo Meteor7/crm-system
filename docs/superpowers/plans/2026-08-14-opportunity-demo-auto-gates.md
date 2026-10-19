@@ -12,7 +12,7 @@
 
 - 使用当前 `codex/crm-consolidated-update` 工作区，不覆盖或清理既有未提交改动。
 - 所有行为变更严格执行 Red → Green → Refactor；每个测试必须先因缺失行为稳定失败。
-- 不处理需要主动演示员工106 Frappe 通用 REST 请求的鉴权绕过。
+- 不处理需要主动伪造 Frappe 通用 REST 请求的鉴权绕过。
 - 不在 Opportunity 页面新增 Demo Request/Test 展示板块。
 - 所有写入后检查 TipRay 文件头、NUL 字节和 UTF-8 可读性。
 
