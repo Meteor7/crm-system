@@ -299,7 +299,7 @@ onBeforeUnmount(() => {
           class="brand-logo"
           data-testid="brand-logo"
           :src="brandLogoUrl"
-          alt="栖衡 CRM"
+          :alt="locale === 'en-US' ? 'QIHENG CRM' : '栖衡 CRM'"
         >
         <button
           v-if="!desktopSidebarCollapsed"
@@ -342,7 +342,7 @@ onBeforeUnmount(() => {
     <div class="app-main">
       <header class="topbar">
         <div class="topbar-start">
-          <span class="qh-workspace-title"><strong>栖衡 CRM</strong><span>{{ locale === 'en-US' ? 'Customer workspace' : '客户与销售协同' }}</span></span>
+          <span class="qh-workspace-title"><strong>{{ locale === 'en-US' ? 'QIHENG CRM' : '栖衡 CRM' }}</strong><span>{{ locale === 'en-US' ? 'Customer workspace' : '客户与销售协同' }}</span></span>
           <button
             v-if="desktopSidebarCollapsed"
             class="icon-button desktop-sidebar-expand"

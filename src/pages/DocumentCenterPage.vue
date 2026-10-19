@@ -925,7 +925,7 @@ onBeforeUnmount(() => {
                   </div>
                   <div class="pdf-stage">
                   <article class="pdf-sheet">
-                    <div class="pdf-brand">QIHENG <small>栖衡科技</small></div>
+                    <div class="pdf-brand">QIHENG <small>{{ locale === 'en-US' ? 'Qiheng' : '栖衡科技' }}</small></div>
                     <span>{{ selected.type.toUpperCase() }}</span>
                     <h3>{{ selected.title }}</h3>
                     <p>{{ selected.product }} · Version {{ selected.version }} / {{ selected.revision }}</p>
