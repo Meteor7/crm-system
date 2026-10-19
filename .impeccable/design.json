@@ -1,0 +1,448 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-10-19T05:09:12.514217+00:00",
+  "title": "Design System: 栖衡 QIHENG CRM",
+  "extensions": {
+    "colorMeta": {
+      "primary": {
+        "role": "primary",
+        "displayName": "索引靛蓝",
+        "canonical": "#3159CE",
+        "tonalRamp": [
+          "oklch(15% 0.18683 265.66)",
+          "oklch(26% 0.18683 265.66)",
+          "oklch(38% 0.18683 265.66)",
+          "oklch(49% 0.18683 265.66)",
+          "oklch(61% 0.18683 265.66)",
+          "oklch(72% 0.18683 265.66)",
+          "oklch(84% 0.18683 265.66)",
+          "oklch(95% 0.18683 265.66)"
+        ]
+      },
+      "primary-hover": {
+        "role": "primary",
+        "displayName": "深靛蓝",
+        "canonical": "#2448B0",
+        "tonalRamp": [
+          "oklch(15% 0.17099 265.30)",
+          "oklch(26% 0.17099 265.30)",
+          "oklch(38% 0.17099 265.30)",
+          "oklch(49% 0.17099 265.30)",
+          "oklch(61% 0.17099 265.30)",
+          "oklch(72% 0.17099 265.30)",
+          "oklch(84% 0.17099 265.30)",
+          "oklch(95% 0.17099 265.30)"
+        ]
+      },
+      "primary-soft": {
+        "role": "primary",
+        "displayName": "浅靛蓝",
+        "canonical": "#EAF0FF",
+        "tonalRamp": [
+          "oklch(15% 0.02117 268.43)",
+          "oklch(26% 0.02117 268.43)",
+          "oklch(38% 0.02117 268.43)",
+          "oklch(49% 0.02117 268.43)",
+          "oklch(61% 0.02117 268.43)",
+          "oklch(72% 0.02117 268.43)",
+          "oklch(84% 0.02117 268.43)",
+          "oklch(95% 0.02117 268.43)"
+        ]
+      },
+      "page": {
+        "role": "neutral",
+        "displayName": "page",
+        "canonical": "#F3F5FA",
+        "tonalRamp": [
+          "oklch(15% 0.00700 268.55)",
+          "oklch(26% 0.00700 268.55)",
+          "oklch(38% 0.00700 268.55)",
+          "oklch(49% 0.00700 268.55)",
+          "oklch(61% 0.00700 268.55)",
+          "oklch(72% 0.00700 268.55)",
+          "oklch(84% 0.00700 268.55)",
+          "oklch(95% 0.00700 268.55)"
+        ]
+      },
+      "surface": {
+        "role": "neutral",
+        "displayName": "surface",
+        "canonical": "#ffffff",
+        "tonalRamp": [
+          "oklch(15% 0.00000 89.88)",
+          "oklch(26% 0.00000 89.88)",
+          "oklch(38% 0.00000 89.88)",
+          "oklch(49% 0.00000 89.88)",
+          "oklch(61% 0.00000 89.88)",
+          "oklch(72% 0.00000 89.88)",
+          "oklch(84% 0.00000 89.88)",
+          "oklch(95% 0.00000 89.88)"
+        ]
+      },
+      "surface-muted": {
+        "role": "neutral",
+        "displayName": "surface-muted",
+        "canonical": "#E9EDF5",
+        "tonalRamp": [
+          "oklch(15% 0.01159 264.51)",
+          "oklch(26% 0.01159 264.51)",
+          "oklch(38% 0.01159 264.51)",
+          "oklch(49% 0.01159 264.51)",
+          "oklch(61% 0.01159 264.51)",
+          "oklch(72% 0.01159 264.51)",
+          "oklch(84% 0.01159 264.51)",
+          "oklch(95% 0.01159 264.51)"
+        ]
+      },
+      "heading": {
+        "role": "neutral",
+        "displayName": "heading",
+        "canonical": "#20324C",
+        "tonalRamp": [
+          "oklch(15% 0.05260 257.55)",
+          "oklch(26% 0.05260 257.55)",
+          "oklch(38% 0.05260 257.55)",
+          "oklch(49% 0.05260 257.55)",
+          "oklch(61% 0.05260 257.55)",
+          "oklch(72% 0.05260 257.55)",
+          "oklch(84% 0.05260 257.55)",
+          "oklch(95% 0.05260 257.55)"
+        ]
+      },
+      "text": {
+        "role": "neutral",
+        "displayName": "text",
+        "canonical": "#26364E",
+        "tonalRamp": [
+          "oklch(15% 0.04778 258.29)",
+          "oklch(26% 0.04778 258.29)",
+          "oklch(38% 0.04778 258.29)",
+          "oklch(49% 0.04778 258.29)",
+          "oklch(61% 0.04778 258.29)",
+          "oklch(72% 0.04778 258.29)",
+          "oklch(84% 0.04778 258.29)",
+          "oklch(95% 0.04778 258.29)"
+        ]
+      },
+      "text-muted": {
+        "role": "neutral",
+        "displayName": "text-muted",
+        "canonical": "#59677D",
+        "tonalRamp": [
+          "oklch(15% 0.03905 259.36)",
+          "oklch(26% 0.03905 259.36)",
+          "oklch(38% 0.03905 259.36)",
+          "oklch(49% 0.03905 259.36)",
+          "oklch(61% 0.03905 259.36)",
+          "oklch(72% 0.03905 259.36)",
+          "oklch(84% 0.03905 259.36)",
+          "oklch(95% 0.03905 259.36)"
+        ]
+      },
+      "line": {
+        "role": "neutral",
+        "displayName": "line",
+        "canonical": "#DEE4EE",
+        "tonalRamp": [
+          "oklch(15% 0.01506 260.73)",
+          "oklch(26% 0.01506 260.73)",
+          "oklch(38% 0.01506 260.73)",
+          "oklch(49% 0.01506 260.73)",
+          "oklch(61% 0.01506 260.73)",
+          "oklch(72% 0.01506 260.73)",
+          "oklch(84% 0.01506 260.73)",
+          "oklch(95% 0.01506 260.73)"
+        ]
+      },
+      "line-strong": {
+        "role": "neutral",
+        "displayName": "line-strong",
+        "canonical": "#C6D0DF",
+        "tonalRamp": [
+          "oklch(15% 0.02353 258.36)",
+          "oklch(26% 0.02353 258.36)",
+          "oklch(38% 0.02353 258.36)",
+          "oklch(49% 0.02353 258.36)",
+          "oklch(61% 0.02353 258.36)",
+          "oklch(72% 0.02353 258.36)",
+          "oklch(84% 0.02353 258.36)",
+          "oklch(95% 0.02353 258.36)"
+        ]
+      },
+      "table-head": {
+        "role": "neutral",
+        "displayName": "table-head",
+        "canonical": "#f5f7fb",
+        "tonalRamp": [
+          "oklch(15% 0.00574 264.53)",
+          "oklch(26% 0.00574 264.53)",
+          "oklch(38% 0.00574 264.53)",
+          "oklch(49% 0.00574 264.53)",
+          "oklch(61% 0.00574 264.53)",
+          "oklch(72% 0.00574 264.53)",
+          "oklch(84% 0.00574 264.53)",
+          "oklch(95% 0.00574 264.53)"
+        ]
+      },
+      "nav-text": {
+        "role": "neutral",
+        "displayName": "nav-text",
+        "canonical": "#52617a",
+        "tonalRamp": [
+          "oklch(15% 0.04438 260.55)",
+          "oklch(26% 0.04438 260.55)",
+          "oklch(38% 0.04438 260.55)",
+          "oklch(49% 0.04438 260.55)",
+          "oklch(61% 0.04438 260.55)",
+          "oklch(72% 0.04438 260.55)",
+          "oklch(84% 0.04438 260.55)",
+          "oklch(95% 0.04438 260.55)"
+        ]
+      },
+      "positive": {
+        "role": "secondary",
+        "displayName": "成功绿",
+        "canonical": "#3B9B64",
+        "tonalRamp": [
+          "oklch(15% 0.12318 154.99)",
+          "oklch(26% 0.12318 154.99)",
+          "oklch(38% 0.12318 154.99)",
+          "oklch(49% 0.12318 154.99)",
+          "oklch(61% 0.12318 154.99)",
+          "oklch(72% 0.12318 154.99)",
+          "oklch(84% 0.12318 154.99)",
+          "oklch(95% 0.12318 154.99)"
+        ]
+      },
+      "warning": {
+        "role": "secondary",
+        "displayName": "警告金",
+        "canonical": "#C58A18",
+        "tonalRamp": [
+          "oklch(15% 0.13543 76.93)",
+          "oklch(26% 0.13543 76.93)",
+          "oklch(38% 0.13543 76.93)",
+          "oklch(49% 0.13543 76.93)",
+          "oklch(61% 0.13543 76.93)",
+          "oklch(72% 0.13543 76.93)",
+          "oklch(84% 0.13543 76.93)",
+          "oklch(95% 0.13543 76.93)"
+        ]
+      },
+      "danger": {
+        "role": "secondary",
+        "displayName": "风险红",
+        "canonical": "#C84E4E",
+        "tonalRamp": [
+          "oklch(15% 0.15624 23.21)",
+          "oklch(26% 0.15624 23.21)",
+          "oklch(38% 0.15624 23.21)",
+          "oklch(49% 0.15624 23.21)",
+          "oklch(61% 0.15624 23.21)",
+          "oklch(72% 0.15624 23.21)",
+          "oklch(84% 0.15624 23.21)",
+          "oklch(95% 0.15624 23.21)"
+        ]
+      },
+      "danger-soft": {
+        "role": "secondary",
+        "displayName": "浅风险红",
+        "canonical": "#FFF0EF",
+        "tonalRamp": [
+          "oklch(15% 0.01632 22.08)",
+          "oklch(26% 0.01632 22.08)",
+          "oklch(38% 0.01632 22.08)",
+          "oklch(49% 0.01632 22.08)",
+          "oklch(61% 0.01632 22.08)",
+          "oklch(72% 0.01632 22.08)",
+          "oklch(84% 0.01632 22.08)",
+          "oklch(95% 0.01632 22.08)"
+        ]
+      },
+      "badge-danger-ink": {
+        "role": "secondary",
+        "displayName": "风险徽标深字",
+        "canonical": "#a63c3c",
+        "tonalRamp": [
+          "oklch(15% 0.14031 23.57)",
+          "oklch(26% 0.14031 23.57)",
+          "oklch(38% 0.14031 23.57)",
+          "oklch(49% 0.14031 23.57)",
+          "oklch(61% 0.14031 23.57)",
+          "oklch(72% 0.14031 23.57)",
+          "oklch(84% 0.14031 23.57)",
+          "oklch(95% 0.14031 23.57)"
+        ]
+      },
+      "badge-danger-fill": {
+        "role": "secondary",
+        "displayName": "风险徽标浅底",
+        "canonical": "#fff0ef",
+        "tonalRamp": [
+          "oklch(15% 0.01632 22.08)",
+          "oklch(26% 0.01632 22.08)",
+          "oklch(38% 0.01632 22.08)",
+          "oklch(49% 0.01632 22.08)",
+          "oklch(61% 0.01632 22.08)",
+          "oklch(72% 0.01632 22.08)",
+          "oklch(84% 0.01632 22.08)",
+          "oklch(95% 0.01632 22.08)"
+        ]
+      }
+    },
+    "typographyMeta": {
+      "headline": {
+        "displayName": "headline",
+        "purpose": "对应页面标题、导航或原生登录的独立层级。"
+      },
+      "title": {
+        "displayName": "title",
+        "purpose": "标准内容区层级；排除 Demo 三个路由。"
+      },
+      "body": {
+        "displayName": "body",
+        "purpose": "标准内容区层级；排除 Demo 三个路由。"
+      },
+      "secondary": {
+        "displayName": "secondary",
+        "purpose": "标准内容区层级；排除 Demo 三个路由。"
+      },
+      "label": {
+        "displayName": "label",
+        "purpose": "标准内容区层级；排除 Demo 三个路由。"
+      },
+      "emphasis": {
+        "displayName": "emphasis",
+        "purpose": "标准内容区层级；排除 Demo 三个路由。"
+      },
+      "button": {
+        "displayName": "button",
+        "purpose": "标准内容区层级；排除 Demo 三个路由。"
+      },
+      "navigation": {
+        "displayName": "navigation",
+        "purpose": "对应页面标题、导航或原生登录的独立层级。"
+      },
+      "login-title": {
+        "displayName": "login-title",
+        "purpose": "对应页面标题、导航或原生登录的独立层级。"
+      }
+    },
+    "shadows": [
+      {
+        "name": "section-card",
+        "value": "0 1px 1px rgba(31,35,41,.02)",
+        "purpose": "SectionCard 静态细微分层。"
+      },
+      {
+        "name": "notification",
+        "value": "0 18px 48px rgba(25, 43, 52, .16)",
+        "purpose": "通知浮层。"
+      }
+    ],
+    "motion": [
+      {
+        "name": "state",
+        "value": "180ms ease",
+        "purpose": "按钮及导航状态。"
+      },
+      {
+        "name": "sidebar",
+        "value": "220ms ease",
+        "purpose": "侧栏展开收起。"
+      },
+      {
+        "name": "reduced-motion",
+        "value": "0.01ms",
+        "purpose": "减少动态效果时的过渡和动画时长。"
+      }
+    ],
+    "breakpoints": [
+      {
+        "name": "navigation-max",
+        "value": "839px"
+      },
+      {
+        "name": "page-header-max",
+        "value": "700px"
+      },
+      {
+        "name": "login-compact-max",
+        "value": "480px"
+      }
+    ]
+  },
+  "components": [
+    {
+      "name": "主要操作",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "标准内容区的主按钮；base.css + qiheng.css + typography.css。",
+      "html": "<button class=\"ds-primary\">新增客户</button>",
+      "css": ".ds-primary{display:inline-flex;align-items:center;justify-content:center;min-height:36px;padding:0 13px;border:1px solid var(--crm-brand,#3159CE);border-radius:8px;background:var(--crm-brand,#3159CE);color:#fff;font:700 13px \"Segoe UI\", \"Microsoft YaHei\", \"PingFang SC\", sans-serif;cursor:pointer;transition:background-color .18s ease;}.ds-primary:not(:disabled):hover{background:#2448B0;border-color:#2448B0;}.ds-primary:focus-visible{outline:2px solid #3159ce;outline-offset:3px;}.ds-primary:disabled{color:#819092;background:#e8eeed;border-color:#d9e3e1;cursor:not-allowed;}@media(prefers-reduced-motion:reduce){.ds-primary{transition-duration:.01ms;}}"
+    },
+    {
+      "name": "筛选字段",
+      "kind": "input",
+      "refersTo": "input-filter",
+      "description": "通用筛选控件；标准内容区字号。",
+      "html": "<input class=\"ds-filter\" aria-label=\"筛选客户\" placeholder=\"搜索客户\" />",
+      "css": ".ds-filter{height:34px;padding:0 28px 0 10px;border:1px solid var(--crm-line,#DEE4EE);border-radius:8px;background:#fff;color:var(--crm-text,#26364E);font:13px \"Segoe UI\", \"Microsoft YaHei\", \"PingFang SC\", sans-serif;caret-color:var(--crm-brand,#3159CE);}.ds-filter::placeholder{color:#69788c;}.ds-filter:focus-visible{outline:2px solid #3159ce;outline-offset:3px;}"
+    },
+    {
+      "name": "选中导航",
+      "kind": "nav",
+      "refersTo": "nav-active",
+      "description": "AppShell 侧栏中的活动模块。",
+      "html": "<nav class=\"ds-nav\"><a class=\"ds-nav-link\" href=\"#customers\" aria-current=\"page\">客户档案</a><a class=\"ds-nav-link\" href=\"#contacts\">联系人</a></nav>",
+      "css": ".ds-nav{width:212px;background:#fff;}.ds-nav-link{display:flex;align-items:center;min-height:40px;margin:2px 0;padding:0 12px;border-radius:8px;color:#52617a;text-decoration:none;font:500 12px \"Segoe UI\", \"Microsoft YaHei\", \"PingFang SC\", sans-serif;transition:.18s ease;}.ds-nav-link:hover{color:#2448b0;background:#f1f4fb;}.ds-nav-link[aria-current=\"page\"]{background:#eaf0ff;color:#2448b0;font-weight:700;}.ds-nav-link:focus-visible{outline:2px solid #3159ce;outline-offset:3px;}@media(prefers-reduced-motion:reduce){.ds-nav-link{transition-duration:.01ms;}}"
+    },
+    {
+      "name": "风险徽标",
+      "kind": "chip",
+      "refersTo": "badge-danger",
+      "description": "StatusBadge 的危险状态，示例无交互。",
+      "html": "<span class=\"ds-badge\"><i></i>高风险</span>",
+      "css": ".ds-badge{display:inline-flex;align-items:center;gap:5px;padding:4px 8px;border:1px solid #f2cfcc;border-radius:999px;background:#fff0ef;color:#a63c3c;font:700 11px/1 \"Segoe UI\", \"Microsoft YaHei\", \"PingFang SC\", sans-serif;white-space:nowrap;}.ds-badge i{width:5px;height:5px;border-radius:50%;background:currentColor;}"
+    },
+    {
+      "name": "业务分区面板",
+      "kind": "card",
+      "refersTo": "section-card",
+      "description": "SectionCard 的非交互容器，标准内容区层级。",
+      "html": "<section class=\"ds-card\"><header><h2>客户资料</h2><p>关联业务记录</p></header><div class=\"ds-card-body\">记录内容</div></section>",
+      "css": ".ds-card{background:var(--crm-surface-raised,#ffffff);border:1px solid var(--crm-line,#DEE4EE);border-radius:var(--crm-radius-md,14px);box-shadow:0 1px 1px rgba(31,35,41,.02);color:var(--crm-text,#26364E);font:13px \"Segoe UI\", \"Microsoft YaHei\", \"PingFang SC\", sans-serif;}.ds-card header{padding:19px 20px 14px;}.ds-card h2{margin:3px 0 0;color:var(--crm-navy,#20324C);font-size:16px;letter-spacing:-.01em;}.ds-card p{margin:5px 0 0;color:var(--crm-text-muted,#59677D);font-size:13px;}.ds-card-body{padding:6px 20px 20px;}"
+    }
+  ],
+  "narrative": {
+    "northStar": "研发记录册 / The R&D Notebook",
+    "overview": "栖衡 QIHENG 是本次重塑选定的虚构品牌。研发记录册的索引、对齐与信息密度转译为浅色侧栏、分组导航、清晰标题和可扫描的业务记录；隐喻不画成纸张、工具或其他装饰物。\n\n本规范记录已实现的界面，延续真实业务流程、权限与路由。颜色、排版和组件以源码及桌面、移动、登录截图为依据；方向种子为 41963e97。",
+    "keyCharacteristics": [
+      "浅色导航与冷纸白工作区。",
+      "靛蓝识别当前模块、链接与主要操作。",
+      "细边框分区，数字等宽对齐，业务表格保持密度。"
+    ],
+    "rules": [
+      {
+        "name": "The Scope Rule",
+        "body": "先确认组件所在作用域，再应用令牌；品牌样式不意味着每个局部尺寸都被覆盖。",
+        "section": "typography"
+      },
+      {
+        "name": "The Record Rule",
+        "body": "颜色用于定位、状态与操作，状态同时保留文字。",
+        "section": "colors"
+      }
+    ],
+    "dos": [
+      "Do 复用栖衡 SVG 字标与图标，保持其比例和应用入口一致。",
+      "Do 在标准内容区采用正文、次要文字与说明标签的现有层级；客户 KPI 辅助说明使用 text-muted。",
+      "Do 保留移动菜单、键盘焦点、表格独立滚动和减少动态效果偏好。"
+    ],
+    "donts": [
+      "Don't 将方向稿中的圆角概念覆盖到所有组件；以本文件与实际局部样式为准。",
+      "Don't 把研发记录册画成装饰性物件，或恢复旧品牌字标与页头装饰。",
+      "Don't 用统一强调色取代风险、成功和警告的文字语义，或为视觉重塑改动业务流程。"
+    ]
+  }
+}
