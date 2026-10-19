@@ -54,7 +54,7 @@ const copy = (english: string, chinese: string) => locale.value === 'en-US' ? en
 <style scoped>
 .evaluation-workspace-nav{display:grid;grid-template-columns:minmax(170px,220px) 1px auto minmax(0,1fr);align-items:center;gap:20px;margin-bottom:16px;padding:14px 0;border-top:1px solid var(--crm-line);border-bottom:1px solid var(--crm-line)}
 button{min-height:42px;padding:0 18px;color:var(--crm-text);background:#fff;border:1px solid var(--crm-line-strong);border-radius:9px;font:inherit;font-size:12px;font-weight:700;cursor:pointer}
-button:hover{border-color:#F3C173}.active{color:var(--crm-brand-ink);background:var(--crm-teal);border-color:var(--crm-teal);box-shadow:0 7px 18px rgba(254,153,0,.14)}
+button:hover{border-color:#A8BAEF}.active{color:var(--crm-on-brand);background:var(--crm-teal);border-color:var(--crm-teal);box-shadow:0 7px 18px rgba(49, 89, 206,.14)}
 .nav-divider{width:1px;height:42px;background:var(--crm-line-strong)}.flow-label{color:var(--crm-text-muted);font-size:11px;font-weight:800;white-space:nowrap}
 .flow-nodes{display:flex;min-width:0;flex-wrap:wrap;align-items:center;gap:9px}.flow-node{display:flex;min-width:0;flex:1 1 118px;align-items:center;gap:9px}.flow-node button{min-width:118px;flex:1 1 auto}.flow-nodes svg{flex:none;color:var(--crm-text-muted)}
 @media(max-width:1280px){.evaluation-workspace-nav{grid-template-columns:minmax(170px,220px) 1px auto}.flow-nodes{grid-column:1/-1}}

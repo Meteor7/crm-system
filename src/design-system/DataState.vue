@@ -30,7 +30,7 @@ const { t } = useI18n()
 strong { color: var(--crm-navy); font-size: 14px; }
 p { max-width: 420px; margin: 0; font-size: 11px; line-height: 1.6; }
 small { font-family: ui-monospace, monospace; font-size: 9px; }
-button { display: flex; align-items: center; gap: 6px; margin-top: 5px; padding: 8px 12px; color: var(--crm-brand-ink); background: var(--crm-teal); border: 0; border-radius: 8px; cursor: pointer; }
+button { display: flex; align-items: center; gap: 6px; margin-top: 5px; padding: 8px 12px; color:var(--crm-on-brand); background: var(--crm-teal); border: 0; border-radius: 8px; cursor: pointer; }
 .spin { animation: spin 1s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 </style>

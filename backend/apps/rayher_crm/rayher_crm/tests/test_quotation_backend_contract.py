@@ -87,7 +87,7 @@ class TestQuotationBackendContract(unittest.TestCase):
         for token in (
             "page-header", "Ref. No.:", "ATTN", "items", "deviceGroups",
             "Payment Terms:", "FOB上海", "Installation &amp; Training",
-            "示例企业032有限公司",
+            "栖衡科技（演示）",
         ):
             self.assertIn(token, template)
         self.assertIn("position: absolute; right: 0;", template)
@@ -100,7 +100,7 @@ class TestQuotationBackendContract(unittest.TestCase):
     def test_pdf_template_matches_retained_word_contract(self):
         template = (ROOT / "templates" / "quotation" / "quotation.html").read_text(encoding="utf-8")
         for token in (
-            "quotation-planck-logo.png", "Ref. No.: {{ refNo | e }}", "Items", "Description",
+            "quotation-qiheng-logo.png", "Ref. No.: {{ refNo | e }}", "Items", "Description",
             "QTY", "Unit price", "单台配置价（含税）（RMB）", "总价（折扣后）（RMB）",
         ):
             self.assertIn(token, template)

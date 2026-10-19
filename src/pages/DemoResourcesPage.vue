@@ -161,8 +161,8 @@ onBeforeUnmount(() => { revision++; intervalRevision++ })
 .resource-list{display:grid;gap:10px}
 .resource-row{display:grid;justify-items:start;gap:6px;width:100%;padding:12px;text-align:left;color:var(--crm-text);background:#fff;border:1px solid var(--crm-line);border-radius:10px;cursor:pointer;transition:border-color .18s ease,background-color .18s ease}
 .resource-row .resource-platform{color:var(--crm-text-muted);font-size:11px}
-.resource-row:not(:disabled):hover{background:#FFFBF5;border-color:#F3C173}
-.resource-row.selected{background:#FFFBF5;border-color:var(--crm-brand)}
+.resource-row:not(:disabled):hover{background:#F5F7FF;border-color:#A8BAEF}
+.resource-row.selected{background:#F5F7FF;border-color:var(--crm-brand)}
 .resource-row:disabled{cursor:default;opacity:.7}
 .resource-detail{display:grid;gap:14px}
 .interval-header{padding-top:14px;border-top:1px solid var(--crm-line)}

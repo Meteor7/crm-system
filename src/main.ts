@@ -8,3 +8,5 @@ import './design-system/workspace.css'
 import './design-system/typography.css'
 
 createApp(App).use(createPinia()).use(router).mount('#app')
+
+import './design-system/qiheng.css'

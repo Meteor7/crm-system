@@ -23,7 +23,7 @@ Assert-FrontendContract (Test-Path -LiteralPath $entryPath -PathType Leaf) 'auth
 
 $indexText = Get-Content -LiteralPath $indexPath -Raw -Encoding UTF8
 $entryText = Get-Content -LiteralPath $entryPath -Raw -Encoding UTF8
-Assert-FrontendContract ($indexText -match '<title>PLANCK CRM</title>') 'browser title is not PLANCK CRM'
+Assert-FrontendContract ($indexText -match '<title>栖衡 CRM · QIHENG</title>') 'browser title is not QIHENG CRM'
 Assert-FrontendContract ($indexText -match '/assets/rayher_crm/crm/assets/.+\.js') 'built index does not use the deploy-safe Frappe asset prefix'
 Assert-FrontendContract ($entryText -match '/assets/rayher_crm/crm/index\.html') '/crm does not target the packaged frontend entry'
 Assert-FrontendContract ($entryText -match '\?v=\{build_token\}#/dashboard') '/crm does not version the packaged hash-router entry'

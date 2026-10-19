@@ -70,7 +70,7 @@ const notificationBusy = ref(false)
 const notificationError = useLocaleMessage()
 let notificationTimer: number | undefined
 const isEmbedded = computed(() => props.embedded ?? (Boolean((window as FrappeWindow).frappe) || import.meta.env.VITE_EMBEDDED === 'true'))
-const brandLogoUrl = `${import.meta.env.BASE_URL}brand/planck-logo-standard.png`
+const brandLogoUrl = `${import.meta.env.BASE_URL}brand/qiheng-logo.svg`
 const DEMO_TYPOGRAPHY_EXCLUDED_PATHS = new Set(['/demo-workflow', '/demo-requests', '/evaluations'])
 const usesStandardTypography = computed(() => !DEMO_TYPOGRAPHY_EXCLUDED_PATHS.has(route.path))
 const activeNavigationPath = computed(() => {
@@ -278,7 +278,7 @@ onBeforeUnmount(() => {
 
 <template>
   <div v-if="sessionEnded" class="semicrm-app session-ended" data-testid="session-ended" />
-  <div v-else class="semicrm-app" :class="{ 'is-embedded': isEmbedded, 'is-sidebar-collapsed': desktopSidebarCollapsed }" data-testid="app-shell">
+  <div v-else class="semicrm-app qh-crm" :class="{ 'is-embedded': isEmbedded, 'is-sidebar-collapsed': desktopSidebarCollapsed }" data-testid="app-shell">
     <button
       v-if="mobileOpen"
       class="nav-scrim"
@@ -297,9 +297,9 @@ onBeforeUnmount(() => {
       <div class="brand-block">
         <img
           class="brand-logo"
-          data-testid="planck-logo"
+          data-testid="brand-logo"
           :src="brandLogoUrl"
-          alt="PLANCK CRM"
+          alt="栖衡 CRM"
         >
         <button
           v-if="!desktopSidebarCollapsed"
@@ -342,6 +342,7 @@ onBeforeUnmount(() => {
     <div class="app-main">
       <header class="topbar">
         <div class="topbar-start">
+          <span class="qh-workspace-title"><strong>栖衡 CRM</strong><span>{{ locale === 'en-US' ? 'Customer workspace' : '客户与销售协同' }}</span></span>
           <button
             v-if="desktopSidebarCollapsed"
             class="icon-button desktop-sidebar-expand"
@@ -487,7 +488,7 @@ onBeforeUnmount(() => {
 .nav-link span { flex: 1; font-size: 10px; font-weight: 600; }
 .nav-link b { min-width: 22px; padding: 2px 6px; color: rgba(255,255,255,.52); background: rgba(255,255,255,.07); border-radius: 999px; font-size: 10px; text-align: center; }
 .nav-link:hover { color: #fff; background: rgba(255,255,255,.06); }
-.nav-link.active { color: var(--crm-brand-ink); background: var(--crm-teal); box-shadow: 0 7px 18px rgba(254,153,0,.16); }
+.nav-link.active { color:var(--crm-on-brand); background: var(--crm-teal); box-shadow: 0 7px 18px rgba(49, 89, 206,.16); }
 .nav-link.active b { color: var(--crm-brand-ink); background: rgba(255,255,255,.5); }
 .app-main { width: calc(100% - 260px); min-width: 0; margin-left: 260px; transition: width .22s ease, margin-left .22s ease; }
 .semicrm-app.is-sidebar-collapsed .app-sidebar { transform: translateX(-100%); }
@@ -503,7 +504,7 @@ onBeforeUnmount(() => {
 .icon-button { position: relative; display: grid; width: 38px; height: 38px; place-items: center; color: var(--crm-text-muted); background: #fff; border: 1px solid var(--crm-line); border-radius: 10px; cursor: pointer; }
 .menu-button { display: none; }
 .global-search { display: flex; width: min(390px, 32vw); height: 40px; align-items: center; gap: 9px; padding: 0 11px; color: var(--crm-text-muted); background: #fff; border: 1px solid var(--crm-line); border-radius: 11px; }
-.global-search:focus-within { border-color: rgba(254,153,0,.72); box-shadow: 0 0 0 3px rgba(254,153,0,.11); }
+.global-search:focus-within { border-color: rgba(49, 89, 206,.72); box-shadow: 0 0 0 3px rgba(49, 89, 206,.11); }
 .global-search input { min-width: 0; flex: 1; color: var(--crm-text); background: transparent; border: 0; outline: 0; }
 .global-search input::placeholder { color: #9ba9ac; }
 .global-search kbd { padding: 2px 6px; color: #879699; background: var(--crm-surface-muted); border: 1px solid var(--crm-line); border-radius: 5px; font-size: 10px; }
@@ -537,11 +538,11 @@ onBeforeUnmount(() => {
 .account-center-title { display: grid; gap: 2px; }
 .account-center > header strong { color: var(--crm-navy); font-size: 12px; }
 .account-center > header small { color: var(--crm-text-muted); font-size: 7px; font-weight: 800; letter-spacing: .12em; }
-.account-center-icon { display: grid; width: 34px; height: 34px; place-items: center; color: var(--crm-brand-ink); background: var(--crm-teal); border-radius: 9px; }
+.account-center-icon { display: grid; width: 34px; height: 34px; place-items: center; color:var(--crm-on-brand); background: var(--crm-teal); border-radius: 9px; }
 .account-profile { display: grid; gap: 3px; padding: 14px 16px; border-bottom: 1px solid var(--crm-line); }
 .account-center-close { display: grid; margin-left: auto; width: 30px; height: 30px; flex: 0 0 auto; place-items: center; padding: 0; color: var(--crm-text-muted); background: transparent; border: 1px solid transparent; border-radius: 8px; cursor: pointer; }
 .account-center-close:hover { color: var(--crm-navy); background: var(--crm-teal-soft); border-color: var(--crm-line); }
-.account-center-close:focus-visible { outline: 2px solid rgba(254,153,0,.72); outline-offset: 2px; }
+.account-center-close:focus-visible { outline: 2px solid rgba(49, 89, 206,.72); outline-offset: 2px; }
 .account-sign-out { display: grid; gap: 8px; padding: 0 16px 14px; }
 .account-sign-out .secondary-button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; width: 100%; }
 .account-profile strong { color: var(--crm-navy); font-size: 12px; }
@@ -551,7 +552,7 @@ onBeforeUnmount(() => {
 .password-setting h3 { display: flex; align-items: center; gap: 7px; margin: 0; color: var(--crm-navy); font-size: 11px; }
 .password-setting label { display: grid; gap: 5px; color: var(--crm-text-muted); font-size: 8px; font-weight: 700; }
 .password-setting input { width: 100%; min-height: 36px; padding: 0 10px; color: var(--crm-text); background: #fff; border: 1px solid var(--crm-line); border-radius: 8px; outline: 0; }
-.password-setting input:focus { border-color: rgba(254,153,0,.72); box-shadow: 0 0 0 3px rgba(254,153,0,.11); }
+.password-setting input:focus { border-color: rgba(49, 89, 206,.72); box-shadow: 0 0 0 3px rgba(49, 89, 206,.11); }
 .password-setting > small { margin: 0; color: var(--crm-text-muted); font-size: 8px; line-height: 1.5; }
 .account-error,.account-success { margin: 0; padding: 8px 9px; border-radius: 7px; font-size: 8px; font-weight: 700; }
 .account-error { color: var(--crm-danger); background: #fff1f0; }
@@ -568,7 +569,7 @@ onBeforeUnmount(() => {
 .user-menu > span:not(.avatar) { display: grid; gap: 1px; }
 .user-menu strong { font-size: 12px; }
 .user-menu small { color: var(--crm-text-muted); font-size: 10px; }
-.avatar { display: grid; width: 34px; height: 34px; place-items: center; color: var(--crm-brand-ink); background: var(--crm-teal); border-radius: 10px; font-size: 11px; font-weight: 800; }
+.avatar { display: grid; width: 34px; height: 34px; place-items: center; color:var(--crm-on-brand); background: var(--crm-teal); border-radius: 10px; font-size: 11px; font-weight: 800; }
 .route-content { width: 100%; max-width: 1600px; min-height: calc(100vh - 70px); margin: 0 auto; padding: 28px; }
 .nav-scrim { position: fixed; inset: 0; z-index: 25; background: rgba(7,29,37,.55); border: 0; }
 .route-placeholder { display: grid; min-height: 400px; place-items: center; color: var(--crm-text-muted); }

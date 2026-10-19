@@ -53,7 +53,7 @@ function moveText(row: OpportunityStageHistoryDto) {
 
 <style scoped>
 .stage-history-card{overflow:hidden;background:#fff;border:1px solid var(--crm-line);border-radius:12px;box-shadow:0 8px 24px rgba(31,35,41,.035)}
-.stage-history-card>header{display:flex;min-height:50px;align-items:center;gap:8px;padding:0 14px;color:var(--crm-teal);background:#faf9f7;border-bottom:1px solid var(--crm-line)}
+.stage-history-card>header{display:flex;min-height:50px;align-items:center;gap:8px;padding:0 14px;color:var(--crm-teal);background:#F6F8FB;border-bottom:1px solid var(--crm-line)}
 .stage-history-card>header h2{margin:0;color:var(--crm-navy);font-size:12px}.stage-history-card>header>span{margin-left:auto;color:var(--crm-text-muted);font-size:9px}
 .stage-history-list{display:grid;margin:0;padding:2px 14px 10px;list-style:none}
 .stage-history-list li{display:grid;gap:4px;padding:10px 0;border-bottom:1px solid var(--crm-line)}.stage-history-list li:last-child{border-bottom:0}

@@ -92,7 +92,7 @@ export function buildFunnelOption(data: DashboardDto['funnel'], locale: Locale =
         return `<strong>${escapeHtml(opportunityStageLabel(row.stage, locale))}</strong><br/>${copy.stageAmount} ${compactMoney(numericValue(row.amount), locale)}<br/>${copy.opportunityCount} ${escapeHtml(count)} ${copy.opportunityCountUnit}`
       },
     },
-    xAxis: { type: 'value', axisLabel: { formatter: (value: number) => compactMillions(value, locale), color: '#858991', fontSize: 10 }, splitLine: { lineStyle: { color: '#EEEAE4' } } },
+    xAxis: { type: 'value', axisLabel: { formatter: (value: number) => compactMillions(value, locale), color: '#858991', fontSize: 10 }, splitLine: { lineStyle: { color: '#E9EDF5' } } },
     // Funnel rows keep the stage value; the axis shows its label in the current language.
     yAxis: { type: 'category', inverse: true, axisTick: { show: false }, axisLine: { show: false }, axisLabel: { color: '#4B4F56', fontSize: 10, fontWeight: 600, formatter: (value: string) => opportunityStageLabel(value, locale) } },
     series: [{ name: copy.pipeline, type: 'bar', encode: { x: 'amount', y: 'stage' }, barWidth: 16, itemStyle: { color: DASHBOARD_SERIES_COLORS.pipeline, borderRadius: [0, 6, 6, 0] }, label: { show: true, position: 'right', color: '#6C7179', fontSize: 10, formatter: (params) => compactMoney(numericValue((params.data as DashboardDto['funnel'][number]).amount), locale) } }],
@@ -104,9 +104,9 @@ export function buildOwnerPerformanceOption(data: DashboardDto['ownerPerformance
   return {
     animationDuration: 500,
     grid: { top: 38, right: 18, bottom: 24, left: 82 },
-    legend: { top: 0, right: 0, icon: 'roundRect', itemWidth: 12, itemHeight: 4, textStyle: { color: '#72777F', fontSize: 10 } },
+    legend: { top: 0, right: 0, icon: 'roundRect', itemWidth: 12, itemHeight: 4, textStyle: { color: '#59677D', fontSize: 10 } },
     tooltip: { trigger: 'axis', valueFormatter: (value) => compactMoney(numericValue(value), locale) },
-    xAxis: { type: 'value', axisLabel: { formatter: (value: number) => compactMillions(value, locale), color: '#858991', fontSize: 10 }, splitLine: { lineStyle: { color: '#EEEAE4' } } },
+    xAxis: { type: 'value', axisLabel: { formatter: (value: number) => compactMillions(value, locale), color: '#858991', fontSize: 10 }, splitLine: { lineStyle: { color: '#E9EDF5' } } },
     yAxis: { type: 'category', data: data.map((item) => item.owner), axisTick: { show: false }, axisLine: { show: false }, axisLabel: { color: '#4B4F56', fontSize: 10, fontWeight: 600 } },
     series: [
       { name: copy.pipeline, type: 'bar', data: data.map((item) => item.pipeline), barMaxWidth: 14, itemStyle: { color: DASHBOARD_SERIES_COLORS.pipeline, borderRadius: [0, 4, 4, 0] } },
@@ -121,8 +121,8 @@ export function buildBookingOption(data: Array<{ label: string; amount: number; 
     animationDuration: 500,
     grid: { top: 24, right: 18, bottom: 28, left: 52 },
     tooltip: { trigger: 'axis', valueFormatter: (value) => compactMoney(numericValue(value), locale) },
-    xAxis: { type: 'category', data: data.map((item) => item.label), axisTick: { show: false }, axisLine: { lineStyle: { color: '#E1DDD6' } }, axisLabel: { color: '#858991', fontSize: 10 } },
-    yAxis: { type: 'value', axisLabel: { formatter: (value: number) => compactMillions(value, locale), color: '#858991', fontSize: 10 }, splitLine: { lineStyle: { color: '#EEEAE4' } } },
+    xAxis: { type: 'category', data: data.map((item) => item.label), axisTick: { show: false }, axisLine: { lineStyle: { color: '#DEE4EE' } }, axisLabel: { color: '#858991', fontSize: 10 } },
+    yAxis: { type: 'value', axisLabel: { formatter: (value: number) => compactMillions(value, locale), color: '#858991', fontSize: 10 }, splitLine: { lineStyle: { color: '#E9EDF5' } } },
     series: [{ name: copy.amount, type: 'bar', data: data.map((item) => item.amount), barMaxWidth: 34, itemStyle: { color: DASHBOARD_SERIES_COLORS.booking, borderRadius: [6, 6, 0, 0] } }],
   }
 }
@@ -132,10 +132,10 @@ export function buildValueDistributionOption(data: Array<{ label: string; pipeli
   return {
     animationDuration: 500,
     grid: { top: 38, right: 16, bottom: 30, left: 52 },
-    legend: { top: 0, right: 0, icon: 'roundRect', itemWidth: 12, itemHeight: 4, textStyle: { color: '#72777F', fontSize: 10 } },
+    legend: { top: 0, right: 0, icon: 'roundRect', itemWidth: 12, itemHeight: 4, textStyle: { color: '#59677D', fontSize: 10 } },
     tooltip: { trigger: 'axis', valueFormatter: (value) => compactMoney(numericValue(value), locale) },
-    xAxis: { type: 'category', data: data.map((item) => item.label), axisTick: { show: false }, axisLine: { lineStyle: { color: '#E1DDD6' } }, axisLabel: { color: '#858991', fontSize: 10, interval: 0 } },
-    yAxis: { type: 'value', axisLabel: { formatter: (value: number) => compactMillions(value, locale), color: '#858991', fontSize: 10 }, splitLine: { lineStyle: { color: '#EEEAE4' } } },
+    xAxis: { type: 'category', data: data.map((item) => item.label), axisTick: { show: false }, axisLine: { lineStyle: { color: '#DEE4EE' } }, axisLabel: { color: '#858991', fontSize: 10, interval: 0 } },
+    yAxis: { type: 'value', axisLabel: { formatter: (value: number) => compactMillions(value, locale), color: '#858991', fontSize: 10 }, splitLine: { lineStyle: { color: '#E9EDF5' } } },
     series: [
       { name: copy.pipeline, type: 'bar', data: data.map((item) => item.pipeline), barMaxWidth: 22, itemStyle: { color: DASHBOARD_SERIES_COLORS.pipeline, borderRadius: [4, 4, 0, 0] } },
       { name: copy.booking, type: 'bar', data: data.map((item) => item.booking), barMaxWidth: 22, itemStyle: { color: DASHBOARD_SERIES_COLORS.booking, borderRadius: [4, 4, 0, 0] } },
@@ -148,9 +148,9 @@ export function buildAccountContributionOption(data: Array<{ label: string; pipe
   return {
     animationDuration: 500,
     grid: { top: 38, right: 18, bottom: 18, left: 112 },
-    legend: { top: 0, right: 0, icon: 'roundRect', itemWidth: 12, itemHeight: 4, textStyle: { color: '#72777F', fontSize: 10 } },
+    legend: { top: 0, right: 0, icon: 'roundRect', itemWidth: 12, itemHeight: 4, textStyle: { color: '#59677D', fontSize: 10 } },
     tooltip: { trigger: 'axis', valueFormatter: (value) => compactMoney(numericValue(value), locale) },
-    xAxis: { type: 'value', axisLabel: { formatter: (value: number) => compactMillions(value, locale), color: '#858991', fontSize: 10 }, splitLine: { lineStyle: { color: '#EEEAE4' } } },
+    xAxis: { type: 'value', axisLabel: { formatter: (value: number) => compactMillions(value, locale), color: '#858991', fontSize: 10 }, splitLine: { lineStyle: { color: '#E9EDF5' } } },
     yAxis: {
       type: 'category',
       data: data.map((item) => item.label),
@@ -178,11 +178,11 @@ export function buildPipelineMixOption(data: DashboardDto['segmentDistribution']
       subtext: copy.openPipeline,
       left: 'center',
       top: '37%',
-      textStyle: { color: '#24272D', fontSize: 18, fontWeight: 800 },
+      textStyle: { color: '#20324C', fontSize: 18, fontWeight: 800 },
       subtextStyle: { color: '#858991', fontSize: 10, fontWeight: 600 },
     },
     tooltip: { trigger: 'item', valueFormatter: (value) => compactMoney(numericValue(value), locale) },
-    legend: { bottom: 0, left: 'center', icon: 'circle', itemWidth: 8, itemHeight: 8, textStyle: { color: '#72777F', fontSize: 10 } },
+    legend: { bottom: 0, left: 'center', icon: 'circle', itemWidth: 8, itemHeight: 8, textStyle: { color: '#59677D', fontSize: 10 } },
     series: [{
       name: copy.openPipeline,
       type: 'pie',
@@ -203,7 +203,7 @@ export function buildCountBreakdownOption(data: Array<{ label: string; count: nu
     animationDuration: 500,
     grid: { top: 10, right: 22, bottom: 20, left: 104 },
     tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
-    xAxis: { type: 'value', minInterval: 1, axisLabel: { color: '#858991', fontSize: 10 }, splitLine: { lineStyle: { color: '#EEEAE4' } } },
+    xAxis: { type: 'value', minInterval: 1, axisLabel: { color: '#858991', fontSize: 10 }, splitLine: { lineStyle: { color: '#E9EDF5' } } },
     yAxis: { type: 'category', data: data.map((item) => item.label), inverse: true, axisTick: { show: false }, axisLine: { show: false }, axisLabel: { color: '#4B4F56', fontSize: 10 } },
     series: [{ name: copy.count, type: 'bar', data: data.map((item) => item.count), barMaxWidth: 15, itemStyle: { color: DASHBOARD_SERIES_COLORS.pipeline, borderRadius: [0, 5, 5, 0] }, label: { show: true, position: 'right', color: '#6C7179', fontSize: 10 } }],
   }

@@ -8,7 +8,7 @@
 .opportunity-board-page :is(button,input,select,summary,a):focus-visible{outline:2px solid var(--crm-brand);outline-offset:3px}
 .opportunity-board-page :is(input:not([type=checkbox]),select){min-width:0;min-height:34px;padding:6px 9px;background:#fff;border:1px solid var(--crm-line);border-radius:var(--crm-radius-sm);color:var(--crm-text)}
 .opportunity-board-page input[type=checkbox]{width:15px;height:15px;accent-color:var(--crm-brand)}
-.board-hero{position:relative;isolation:isolate;z-index:5;padding:20px;background:linear-gradient(120deg,#fff3df 0%,#fffaf3 48%,var(--crm-surface) 100%);border:1px solid var(--crm-line);border-top:3px solid var(--crm-brand);border-radius:var(--crm-radius-md)}
+.board-hero{position:relative;isolation:isolate;z-index:5;padding:20px;background:linear-gradient(120deg,#fff3df 0%,#F4F7FF 48%,var(--crm-surface) 100%);border:1px solid var(--crm-line);border-top:3px solid var(--crm-brand);border-radius:var(--crm-radius-md)}
 .board-brand-art{position:absolute;z-index:-1;right:12px;top:0;width:300px;height:100%;object-fit:contain;object-position:right center;opacity:.12;pointer-events:none;mask-image:linear-gradient(90deg,transparent,#000 65%)}
 /* Same masthead heading height as Review, Plan and Warnings. */
 .board-heading{display:flex;align-items:flex-start;justify-content:space-between;gap:20px;min-height:88px;margin-bottom:16px}
@@ -42,7 +42,7 @@
 .board-segmented button{border:0;border-radius:0;padding:6px 10px;font-weight:600}
 .board-segmented button:first-child{border-radius:0}
 .board-segmented button:last-child{border-radius:0}
-.board-segmented button.active{color:var(--crm-brand-ink);background:var(--crm-brand)}
+.board-segmented button.active{color:var(--crm-on-brand);background:var(--crm-brand)}
 .board-presets{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:0 22px 10px}
 .board-presets>span{color:var(--crm-text-muted);font-size:11px;margin-right:2px}
 .board-presets button{min-height:28px;padding:4px 10px;border-radius:var(--crm-radius-sm);background:white;font-size:11px}
@@ -77,7 +77,7 @@
 .probability-chip small{font-size:10px}
 .probability-chip.committed,.probability-badge.committed{background:#e3f0e9;color:#2e8064}
 .probability-chip.upside,.probability-badge.upside{background:#e2edf8;color:#2866a1}
-.probability-chip.pipeline,.probability-badge.pipeline{background:#fff0d8;color:#a76910}
+.probability-chip.pipeline,.probability-badge.pipeline{background:#EAF0FF;color:#a76910}
 .probability-chip.pending,.probability-badge.pending{background:#f0eef5;color:#746485}
 .board-quality{display:flex;gap:18px;flex-wrap:wrap;grid-column:1/-1;font-size:11px;color:var(--crm-text-muted)}
 .stage-warning{color:var(--crm-danger)!important;font-weight:700}
@@ -89,7 +89,7 @@
 .board-columns summary{padding:8px 12px;border:1px solid var(--crm-line);border-radius:var(--crm-radius-sm);list-style:none}
 .board-columns>div{position:absolute;z-index:20;right:0;top:calc(100% + 5px);width:200px;display:grid;gap:8px;padding:14px;background:#fff;border:1px solid var(--crm-line);border-radius:8px;box-shadow:0 8px 25px #1e354820}
 .board-columns label{display:flex;align-items:center;gap:8px}
-.opportunity-board-page .board-export{background:var(--crm-brand);border-color:var(--crm-brand);color:var(--crm-brand-ink);font-weight:650}
+.opportunity-board-page .board-export{background:var(--crm-brand);border-color:var(--crm-brand);color:var(--crm-on-brand);font-weight:650}
 .board-table-scroll{overflow:auto;max-height:610px;padding:0 18px}
 .board-table{width:100%;min-width:1150px;border-collapse:separate;border-spacing:0;font-size:12px}
 .board-table thead th{position:sticky;top:0;z-index:2;padding:13px 7px;text-align:left;background:white;border-bottom:1px solid var(--crm-line);white-space:nowrap}
@@ -116,7 +116,7 @@
 .board-dialog p{font-size:13px;line-height:1.7}
 .board-dialog label{display:grid;gap:8px}
 .board-dialog footer{margin-top:24px;justify-content:flex-end}
-.opportunity-board-page .board-primary{color:var(--crm-brand-ink);background:var(--crm-brand);border-color:var(--crm-brand)}
+.opportunity-board-page .board-primary{color:var(--crm-on-brand);background:var(--crm-brand);border-color:var(--crm-brand)}
 .opportunity-board-page .board-danger{color:#fff;background:#ad3834;border-color:#ad3834}
 
 .board-controls{display:flex;align-items:center;flex-wrap:wrap;gap:8px}

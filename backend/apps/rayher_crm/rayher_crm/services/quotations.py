@@ -962,7 +962,7 @@ def _pdf_context(master, version) -> dict[str, Any]:
         template_items.append(row)
     if device_count <= 0:
         raise CrmApiException("VALIDATION_ERROR", "At least one device is required.")
-    logo_path = Path(frappe.get_app_path("rayher_crm", "public", "images", "quotation-planck-logo.png"))
+    logo_path = Path(frappe.get_app_path("rayher_crm", "public", "images", "quotation-qiheng-logo.png"))
     data.update({
         "items": template_items, "deviceGroups": device_groups, "deviceCount": device_count,
         "deviceCountLabel": f"{device_count}台总价（RMB）",

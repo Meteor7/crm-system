@@ -16,7 +16,7 @@ beforeEach(() => {
 })
 
 describe('AppShell', () => {
-  it('uses the approved PLANCK CRM brand without the retired RAYHER label', async () => {
+  it('uses the QIHENG portfolio identity', async () => {
     const router = createAppRouter()
     router.addRoute({ path: '/app-shell-brand-test', component: { template: '<div />' } })
     await router.push('/app-shell-brand-test')
@@ -25,9 +25,9 @@ describe('AppShell', () => {
     useAppStore(pinia).bootstrap = (await createMockApi({ latency: 0, role: 'Manager' }).getBootstrap()).data
     const wrapper = mount(AppShell, { global: { plugins: [pinia, router], stubs: { RouterView: true, CrmChart: { template: '<div />' } } } })
 
-    const logo = wrapper.get('[data-testid="planck-logo"]')
-    expect(logo.attributes('src')).toBe('/brand/planck-logo-standard.png')
-    expect(logo.attributes('alt')).toBe('PLANCK CRM')
+    const logo = wrapper.get('[data-testid="brand-logo"]')
+    expect(logo.attributes('src')).toBe('/brand/qiheng-logo.svg')
+    expect(logo.attributes('alt')).toBe('栖衡 CRM')
     expect(wrapper.text()).not.toContain('RAYHER')
     expect(wrapper.text()).not.toContain('客户经营系统')
     expect(wrapper.text()).not.toContain('SEMICORE')

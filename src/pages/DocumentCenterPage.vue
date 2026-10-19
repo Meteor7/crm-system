@@ -925,7 +925,7 @@ onBeforeUnmount(() => {
                   </div>
                   <div class="pdf-stage">
                   <article class="pdf-sheet">
-                    <div class="pdf-brand">PLANCK <small>SEMICONDUCTOR</small></div>
+                    <div class="pdf-brand">QIHENG <small>栖衡科技</small></div>
                     <span>{{ selected.type.toUpperCase() }}</span>
                     <h3>{{ selected.title }}</h3>
                     <p>{{ selected.product }} · Version {{ selected.version }} / {{ selected.revision }}</p>
@@ -1261,7 +1261,7 @@ onBeforeUnmount(() => {
 
 .approval-queue .workspace-panel-body {
   padding: 14px;
-  background: #faf9f7;
+  background: #F6F8FB;
 }
 
 .document-list-body .crm-search-control,
@@ -1647,7 +1647,7 @@ onBeforeUnmount(() => {
 
 .reason-field textarea:focus {
   border-color: var(--crm-teal);
-  box-shadow: 0 0 0 3px rgba(254, 153, 0, .12);
+  box-shadow: 0 0 0 3px rgba(49, 89, 206, .12);
 }
 
 .inline-error { color: var(--crm-danger) !important; }

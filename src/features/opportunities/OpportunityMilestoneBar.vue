@@ -35,12 +35,12 @@ const segments = computed(() => opportunityMilestoneSegments(props.opportunity))
 
 <style scoped>
 .milestone-bar{display:grid;min-width:720px;grid-template-columns:repeat(7,minmax(94px,1fr));gap:6px;margin:0;padding:0;list-style:none}
-.milestone-bar li{display:flex;min-height:44px;box-sizing:border-box;align-items:center;gap:7px;padding:6px 9px;color:var(--crm-text-muted);background:#eeeae4;border:1px solid transparent;border-radius:9px;font-size:9px;font-weight:800}
+.milestone-bar li{display:flex;min-height:44px;box-sizing:border-box;align-items:center;gap:7px;padding:6px 9px;color:var(--crm-text-muted);background:#E9EDF5;border:1px solid transparent;border-radius:9px;font-size:9px;font-weight:800}
 .milestone-index{display:grid;width:20px;height:20px;flex:0 0 auto;place-items:center;color:inherit;background:rgba(255,255,255,.75);border-radius:50%;font-size:8px}
 .milestone-copy{display:grid;min-width:0;gap:2px}.milestone-copy strong{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .milestone-markers{display:flex;flex-wrap:wrap;gap:4px}.milestone-markers small{font-size:7px;font-weight:700}
 .milestone-bar li.is-complete{color:#24633f;background:#dff3e8}
-.milestone-bar li.is-current{color:var(--crm-brand-ink);background:var(--crm-brand)}
+.milestone-bar li.is-current{color:var(--crm-on-brand);background:var(--crm-brand)}
 .milestone-bar li.is-optional{background:#f7f5f1;border:1px dashed #b9b2a8}
 .milestone-bar li.is-optional.is-complete{background:#eef8f2;border-color:#8cc5a4}
 .milestone-bar li.is-optional.is-current{background:var(--crm-brand);border-color:var(--crm-brand-ink)}

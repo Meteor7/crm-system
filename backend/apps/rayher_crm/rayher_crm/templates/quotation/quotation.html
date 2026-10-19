@@ -58,14 +58,14 @@ h1 { margin: 4mm 0 9mm; text-align: center; font-size: 22pt; line-height: 1; }
 </head>
 <body>
 <header id="header-html" class="page-header hidden-pdf" style="position:relative;width:176mm;height:29mm;">
-  <img class="logo" style="position:absolute;left:0;top:0;width:43mm;" data-source="quotation-planck-logo.png" src="{{ logoDataUri | e }}" alt="QIHENG DEMO">
+  <img class="logo" style="position:absolute;left:0;top:0;width:43mm;" data-source="quotation-qiheng-logo.png" src="{{ logoDataUri | e }}" alt="QIHENG">
   <div class="ref-cell" style="position:absolute;right:0;top:0;text-align:right;font-weight:700;white-space:nowrap;">Ref. No.: {{ refNo | e }}</div>
   <div class="header-rule" style="position:absolute;left:0;top:16mm;width:176mm;border-top:1px solid #111;"></div>
 </header>
 
 <h1>Quotation</h1>
 <table class="party">
-<tr><td class="label">To:</td><td class="customer">{{ customerName | e }}</td><td class="from-label">From:</td><td class="company">示例企业032有限公司&nbsp; Qiheng Demo</td></tr>
+<tr><td class="label">To:</td><td class="customer">{{ customerName | e }}</td><td class="from-label">From:</td><td class="company">栖衡科技（演示）&nbsp; QIHENG</td></tr>
 <tr><td class="label">客户地址</td><td class="customer">{{ addressText | e }}</td><td></td><td class="company company-address">深圳市宝安区宝安中心龙光世纪大厦 B 座<br>Room 1106B, Bao'an Center, Bao'an District, Shenzhen</td></tr>
 <tr><td class="label">ATTN:</td><td class="customer">{{ attentionName | e }}{% if attentionTitle %} / {{ attentionTitle | e }}{% endif %}{% if attentionPhone %}<br>{{ attentionPhone | e }}{% endif %}</td><td></td><td></td></tr>
 </table>
@@ -112,6 +112,6 @@ h1 { margin: 4mm 0 9mm; text-align: center; font-size: 22pt; line-height: 1; }
 <tr><td>6.Packing in stretched foil, alupack film and wooden crates</td><td class="included">included</td></tr>
 </table>
 </section>
-<footer class="signature"><strong>示例企业032有限公司</strong><span>{{ quoteDateDisplay | e }}</span></footer>
+<footer class="signature"><strong>栖衡科技（演示）</strong><span>{{ quoteDateDisplay | e }}</span></footer>
 </body>
 </html>

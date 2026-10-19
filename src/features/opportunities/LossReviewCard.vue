@@ -47,7 +47,7 @@ function status(review: LossReviewDto) {
 
 <style scoped>
 .loss-review-card{min-width:0;overflow:hidden;border:1px solid var(--crm-line);border-radius:12px;background:#fff}
-header{display:flex;align-items:center;justify-content:space-between;padding:14px;background:#faf9f7;border-bottom:1px solid var(--crm-line)}
+header{display:flex;align-items:center;justify-content:space-between;padding:14px;background:#F6F8FB;border-bottom:1px solid var(--crm-line)}
 h2{margin:0;font-size:12px;color:var(--crm-navy)}
 header span,.meta{font-size:10px;color:var(--crm-text-muted)}
 article{padding:14px;border-bottom:1px solid var(--crm-line);font-size:11px;overflow-wrap:anywhere}

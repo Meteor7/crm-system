@@ -67,7 +67,7 @@ function review(decision: 'approved' | 'rejected') {
 
 <style scoped>
 .validation-card{overflow:hidden;background:#fff;border:1px solid var(--crm-line);border-radius:12px;box-shadow:0 8px 24px rgba(31,35,41,.035)}
-.validation-card>header{display:flex;min-height:50px;align-items:center;gap:8px;padding:0 14px;color:var(--crm-teal);background:#faf9f7;border-bottom:1px solid var(--crm-line)}
+.validation-card>header{display:flex;min-height:50px;align-items:center;gap:8px;padding:0 14px;color:var(--crm-teal);background:#F6F8FB;border-bottom:1px solid var(--crm-line)}
 .validation-card>header h2{flex:1;margin:0;color:var(--crm-navy);font-size:12px}
 .validation-fields{display:grid;margin:0;padding:2px 14px 10px}.validation-fields>div{display:grid;gap:4px;padding:9px 0;border-bottom:1px solid var(--crm-line)}.validation-fields>div:last-child{border-bottom:0}
 .validation-fields dt{color:var(--crm-text-muted);font-size:8px;font-weight:700}.validation-fields dd{display:grid;gap:3px;margin:0;color:var(--crm-text);font-size:10px;line-height:1.45}.validation-fields dd a{color:var(--crm-link)}.validation-fields small{color:var(--crm-text-muted);font-size:8px}

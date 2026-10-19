@@ -1,5 +1,5 @@
 app_name = "rayher_crm"
-app_title = "Rayher CRM"
+app_title = "栖衡 CRM"
 app_publisher = "Rayher Semiconductor"
 app_description = "Independent CRM application for Frappe and ERPNext"
 app_email = "person023@crm.example.invalid"
@@ -200,3 +200,8 @@ scheduler_events = {
         "rayher_crm.services.demo_resources.capture_impacts",
     ],
 }
+
+# Portfolio identity for the native Frappe sign-in page.
+app_logo_url = "/assets/rayher_crm/images/qiheng-logo.svg"
+web_include_css = ["/assets/rayher_crm/css/qiheng-login.css"]
+update_website_context = "rayher_crm.branding.update_website_context"

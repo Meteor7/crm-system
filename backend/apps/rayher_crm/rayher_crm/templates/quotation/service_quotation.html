@@ -23,7 +23,7 @@ h1 { margin: 4mm 0 8mm; text-align: center; font-size: 21pt; }
 </style>
 </head>
 <body>
-<header id="header-html" class="page-header hidden-pdf"><img class="logo" data-source="quotation-planck-logo.png" src="{{ logoDataUri | e }}" alt="QIHENG DEMO"><div class="ref-cell">Ref. No.: {{ refNo | e }}</div><div class="header-rule"></div></header>
+<header id="header-html" class="page-header hidden-pdf"><img class="logo" data-source="quotation-qiheng-logo.png" src="{{ logoDataUri | e }}" alt="QIHENG"><div class="ref-cell">Ref. No.: {{ refNo | e }}</div><div class="header-rule"></div></header>
 <h1>Service Quotation</h1>
 <table class="meta">
 <tr><td class="label">Customer:</td><td>{{ customerName | e }}</td><td class="label">Date:</td><td>{{ quoteDateDisplay | e }}</td></tr>
@@ -35,6 +35,6 @@ h1 { margin: 4mm 0 8mm; text-align: center; font-size: 21pt; }
 </tbody></table>
 <table class="totals"><tr><td>Subtotal</td><td>{{ subtotal }}</td></tr><tr><td>Discount</td><td>- {{ discountAmount }}</td></tr><tr class="final"><td>Total (RMB)</td><td>{{ total }}</td></tr></table>
 <section class="terms"><h2>Payment Terms</h2>{% for term in paymentTerms %}<div class="payment"><strong>{{ term.triggerCondition | e }}:</strong><span>{{ term.description | e }}</span></div>{% endfor %}<p><strong>Validity:</strong> {{ validityMonths }} month(s)</p></section>
-<footer class="signature"><strong>示例企业032有限公司 / Qiheng Demo</strong></footer>
+<footer class="signature"><strong>栖衡科技（演示） / QIHENG</strong></footer>
 </body>
 </html>

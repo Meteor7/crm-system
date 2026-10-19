@@ -20,7 +20,7 @@ const props = withDefaults(defineProps<{ apiClient?: CrmApi }>(), { apiClient: (
 const app = useAppStore()
 const { locale } = useI18n()
 const copy = (english: string, chinese: string) => locale.value === 'en-US' ? english : chinese
-const brandIconUrl = `${import.meta.env.BASE_URL}brand/planck-icon.png`
+const brandIconUrl = `${import.meta.env.BASE_URL}brand/qiheng-icon.svg`
 const canView = computed(() => app.can('deal:view'))
 const manager = computed(() => app.bootstrap?.user.role === 'Manager')
 const route = useRoute()
