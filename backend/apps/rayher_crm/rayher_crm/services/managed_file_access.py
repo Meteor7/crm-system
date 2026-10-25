@@ -47,7 +47,7 @@ WHERE %s IS NOT NULL AND content_hash=%s FOR UPDATE"""
 
 def _crm_target(doctype) -> bool:
     # ERPNext also has names starting with CRM (for example CRM Note).
-    return bool(doctype and frappe.db.get_value("DocType", doctype, "module") == "QIHENG Demo CRM")
+    return bool(doctype and frappe.db.get_value("DocType", doctype, "module") == "Rayher CRM")
 
 
 def _origin(value: str) -> tuple[str, str, int | None]:
@@ -1012,7 +1012,7 @@ def file_query(user=None) -> str:
         "(COALESCE(`tabFile`.`custom_crm_service_upload`,0)=1 OR EXISTS "
         "(SELECT 1 FROM `tabDocType` AS `crm_file_doctype` "
         "WHERE `crm_file_doctype`.`name`=`tabFile`.`attached_to_doctype` "
-        "AND `crm_file_doctype`.`module`='QIHENG Demo CRM')) "
+        "AND `crm_file_doctype`.`module`='Rayher CRM')) "
         f"AND COALESCE(`tabFile`.`attached_to_doctype`,'') NOT IN ({native_scoped})"
     )
     alias_restricted = (
@@ -1022,7 +1022,7 @@ def file_query(user=None) -> str:
         "(COALESCE(`crm_managed_alias`.`custom_crm_service_upload`,0)=1 OR EXISTS "
         "(SELECT 1 FROM `tabDocType` AS `crm_alias_doctype` "
         "WHERE `crm_alias_doctype`.`name`=`crm_managed_alias`.`attached_to_doctype` "
-        "AND `crm_alias_doctype`.`module`='QIHENG Demo CRM')) "
+        "AND `crm_alias_doctype`.`module`='Rayher CRM')) "
         f"AND COALESCE(`crm_managed_alias`.`attached_to_doctype`,'') NOT IN ({native_scoped}))"
     )
     return (f"NOT (`tabFile`.`is_private`=1 AND ({ordinary_crm_parent})) AND "

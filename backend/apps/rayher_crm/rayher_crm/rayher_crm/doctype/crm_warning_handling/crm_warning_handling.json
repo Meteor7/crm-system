@@ -1,7 +1,7 @@
 {
   "doctype": "DocType",
   "name": "CRM Warning Handling",
-  "module": "QIHENG Demo CRM",
+  "module": "Rayher CRM",
   "engine": "InnoDB",
   "autoname": "prompt",
   "naming_rule": "Set by user",

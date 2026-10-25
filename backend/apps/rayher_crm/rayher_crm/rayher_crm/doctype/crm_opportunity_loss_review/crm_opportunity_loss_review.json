@@ -1,7 +1,7 @@
 {
   "doctype": "DocType",
   "name": "CRM Opportunity Loss Review",
-  "module": "QIHENG Demo CRM",
+  "module": "Rayher CRM",
   "engine": "InnoDB",
   "autoname": "hash",
   "naming_rule": "Random",

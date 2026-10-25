@@ -194,7 +194,7 @@ INSTALLED_TOOL_SCOPED_CHILD_DOCTYPES = (
     "CRM Installed Tool Version History",
 )
 # Frappe applies DocShare after controller permission hooks. Every DocType in
-# the QIHENG Demo CRM module is service-owned, including configuration, audit and
+# the Rayher CRM module is service-owned, including configuration, audit and
 # upload workflow types that are intentionally outside SCOPED_DOCTYPES. Runtime
 # and install cleanup therefore use the DocType module registry, not a list that
 # can silently miss a new custom type.
@@ -390,7 +390,7 @@ def install_crm_doc_permissions() -> None:
         "DELETE `crm_share` FROM `tabDocShare` AS `crm_share` "
         "INNER JOIN `tabDocType` AS `crm_doctype` "
         "ON `crm_doctype`.`name` = `crm_share`.`share_doctype` "
-        "WHERE `crm_doctype`.`module` = 'QIHENG Demo CRM'",
+        "WHERE `crm_doctype`.`module` = 'Rayher CRM'",
     )
     # Address is a shared ERPNext DocType. Delete shares only for sites linked to
     # CRM Customers; ordinary ERP Address shares keep their existing semantics.
@@ -872,7 +872,7 @@ def revoke_shares_when_user_enters_crm(doc, method: str | None = None) -> None:
         "ON `crm_doctype`.`name` = `crm_share`.`share_doctype` "
         "WHERE `crm_share`.`user` = %s AND ("
         "`crm_share`.`share_doctype` IN ('Customer', 'Contact', 'Lead') "
-        "OR `crm_doctype`.`module` = 'QIHENG Demo CRM')",
+        "OR `crm_doctype`.`module` = 'Rayher CRM')",
         (doc.name,),
     )
     # A user who already held a CRM role had these Lead shares revoked on entry,
@@ -1007,7 +1007,7 @@ def reconcile_shares_after_user_rename(doc, method, old, new, merge) -> None:
 def _is_rayher_crm_doctype(doctype: str | None) -> bool:
     return bool(
         doctype
-        and frappe.db.get_value("DocType", doctype, "module") == "QIHENG Demo CRM"
+        and frappe.db.get_value("DocType", doctype, "module") == "Rayher CRM"
     )
 
 

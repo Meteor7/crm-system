@@ -1,5 +1,5 @@
 {
-  "doctype": "DocType", "name": "CRM Query Recipient", "module": "QIHENG Demo CRM", "engine": "InnoDB",
+  "doctype": "DocType", "name": "CRM Query Recipient", "module": "Rayher CRM", "engine": "InnoDB",
   "istable": 1, "autoname": "hash", "naming_rule": "Random",
   "creation": "2026-10-05 00:00:00.000000", "modified": "2026-10-05 00:00:00.000000",
   "owner": "Administrator", "modified_by": "Administrator", "field_order": ["user"],

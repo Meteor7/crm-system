@@ -14,7 +14,7 @@
     {"fieldname": "planned_send_date", "fieldtype": "Date", "label": "Planned Send Date", "read_only": 1},
     {"fieldname": "follow_ups", "fieldtype": "Table", "options": "CRM Quotation Follow Up", "label": "Follow Ups", "read_only": 1}
   ],
-  "track_changes": 1, "index_web_pages_for_search": 0, "modified": "2026-10-05 12:00:00.000000", "modified_by": "Administrator", "module": "QIHENG Demo CRM", "name": "CRM Quotation", "naming_rule": "Expression", "owner": "Administrator",
+  "track_changes": 1, "index_web_pages_for_search": 0, "modified": "2026-10-05 12:00:00.000000", "modified_by": "Administrator", "module": "Rayher CRM", "name": "CRM Quotation", "naming_rule": "Expression", "owner": "Administrator",
   "permissions": [
     {"read": 1, "role": "CRM Manager"},
     {"read": 1, "role": "CRM Sales"}

@@ -6,6 +6,6 @@
     {"fieldname": "task_key", "fieldtype": "Data", "label": "Task Key", "reqd": 1},
     {"fieldname": "viewed_at", "fieldtype": "Datetime", "label": "Viewed At", "reqd": 1}
   ],
-  "index_web_pages_for_search": 0, "modified": "2026-10-14 00:00:00.000000", "modified_by": "Administrator", "module": "QIHENG Demo CRM", "name": "CRM Approval View", "naming_rule": "Set by user", "owner": "Administrator",
+  "index_web_pages_for_search": 0, "modified": "2026-10-14 00:00:00.000000", "modified_by": "Administrator", "module": "Rayher CRM", "name": "CRM Approval View", "naming_rule": "Set by user", "owner": "Administrator",
   "permissions": [], "sort_field": "viewed_at", "sort_order": "DESC", "states": []
 }

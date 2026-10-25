@@ -44,7 +44,7 @@
     {"fieldname": "pdf_file", "fieldtype": "Attach", "label": "Published PDF", "read_only": 1},
     {"fieldname": "published_at", "fieldtype": "Datetime", "label": "Published At", "read_only": 1}
   ],
-  "index_web_pages_for_search": 0, "modified": "2026-08-10 00:00:00.000000", "modified_by": "Administrator", "module": "QIHENG Demo CRM", "name": "CRM Quotation Version", "naming_rule": "Expression", "owner": "Administrator",
+  "index_web_pages_for_search": 0, "modified": "2026-08-10 00:00:00.000000", "modified_by": "Administrator", "module": "Rayher CRM", "name": "CRM Quotation Version", "naming_rule": "Expression", "owner": "Administrator",
   "permissions": [
     {"read": 1, "role": "CRM Manager"},
     {"read": 1, "role": "CRM Sales"}

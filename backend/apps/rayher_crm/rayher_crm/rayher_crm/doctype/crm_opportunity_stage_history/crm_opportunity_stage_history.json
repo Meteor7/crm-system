@@ -15,7 +15,7 @@
     {"fieldname": "reached_at", "fieldtype": "Datetime", "label": "Reached At"},
     {"fieldname": "reached_at_basis", "fieldtype": "Select", "label": "Reached At Basis", "options": "recorded\ndeclared\nevidence\nupper_bound\nunknown", "reqd": 1}
   ],
-  "index_web_pages_for_search": 0, "modified": "2026-09-15 00:00:00.000000", "modified_by": "Administrator", "module": "QIHENG Demo CRM", "name": "CRM Opportunity Stage History", "naming_rule": "Random", "owner": "Administrator",
+  "index_web_pages_for_search": 0, "modified": "2026-09-15 00:00:00.000000", "modified_by": "Administrator", "module": "Rayher CRM", "name": "CRM Opportunity Stage History", "naming_rule": "Random", "owner": "Administrator",
   "permissions": [
     {"read": 1, "role": "CRM Manager"},
     {"read": 1, "role": "CRM Sales"},

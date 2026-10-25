@@ -4,6 +4,8 @@ function Checked([string]$Script, [string[]]$Arguments = @()) {
     & (Join-Path $PSHOME 'pwsh') -NoProfile -File $Script @Arguments
     if ($LASTEXITCODE -ne 0) { throw "$Script failed with exit code $LASTEXITCODE." }
 }
+& python backend/tests/module-contract.py
+if ($LASTEXITCODE -ne 0) { throw "Frappe module contract failed." }
 Checked backend/tests/compose-contract.ps1
 Checked backend/tests/https-proxy-contract.ps1
 Checked backend/tests/frappe-frontend-contract.ps1

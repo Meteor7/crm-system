@@ -11,7 +11,7 @@
     {"fieldname": "remark", "fieldtype": "Text", "label": "Remark"},
     {"default": "0", "fieldname": "archived", "fieldtype": "Check", "label": "Archived", "read_only": 1}
   ],
-  "index_web_pages_for_search": 0, "modified": "2026-10-05 12:00:00.000000", "modified_by": "Administrator", "module": "QIHENG Demo CRM", "name": "CRM Opportunity Action", "naming_rule": "Random", "owner": "Administrator",
+  "index_web_pages_for_search": 0, "modified": "2026-10-05 12:00:00.000000", "modified_by": "Administrator", "module": "Rayher CRM", "name": "CRM Opportunity Action", "naming_rule": "Random", "owner": "Administrator",
   "permissions": [
     {"read": 1, "role": "CRM Manager"},
     {"read": 1, "role": "CRM Sales"},

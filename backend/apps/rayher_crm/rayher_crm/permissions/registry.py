@@ -14,7 +14,7 @@ from pathlib import Path
 
 
 APP_ROOT = Path(__file__).parents[1]
-APP_MODULE = "QIHENG Demo CRM"
+APP_MODULE = "Rayher CRM"
 CRM_ROLES = ("CRM Manager", "CRM Sales", "CRM Engineer")
 PERMISSIONS = (
     "select", "read", "write", "create", "delete", "submit", "cancel", "amend", "import",
@@ -238,6 +238,10 @@ def validate_source_registry(*, documents=None, query_hooks=None, detail_hooks=N
             f"rayher_crm must keep its single {APP_MODULE} module; the DocType inventory "
             f"and the module-keyed DocShare guards in scope.py cover only that module: {modules}",
         )
+    for module in modules:
+        package = module.lower().replace(" ", "_").replace("-", "_")
+        if not (APP_ROOT / package / "doctype" / "__init__.py").is_file():
+            raise ValueError(f"Registered Frappe module has no controller package: {module}")
     # Every registered object other than the shared Frappe/ERPNext DocTypes ships here.
     expected = {
         name

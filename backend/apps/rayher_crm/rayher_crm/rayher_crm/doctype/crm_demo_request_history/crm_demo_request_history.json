@@ -9,6 +9,6 @@
     {"fieldname":"to_status","fieldtype":"Data","label":"To","reqd":1},
     {"fieldname":"comment","fieldtype":"Small Text","label":"Comment","reqd":1}
   ],
-  "index_web_pages_for_search":0,"modified":"2026-08-04 00:00:00.000000","modified_by":"Administrator","module":"QIHENG Demo CRM","name":"CRM Demo Request History","naming_rule":"Random","owner":"Administrator",
+  "index_web_pages_for_search":0,"modified":"2026-08-04 00:00:00.000000","modified_by":"Administrator","module":"Rayher CRM","name":"CRM Demo Request History","naming_rule":"Random","owner":"Administrator",
   "permissions":[{"read":1,"role":"CRM Manager"},{"read":1,"role":"CRM Sales"},{"read":1,"role":"CRM Engineer"}],"sort_field":"at","sort_order":"DESC","states":[]
 }

@@ -1,7 +1,7 @@
 {
   "doctype": "DocType",
   "name": "CRM Cockpit Settings",
-  "module": "QIHENG Demo CRM",
+  "module": "Rayher CRM",
   "engine": "InnoDB",
   "issingle": 1,
   "track_changes": 1,
